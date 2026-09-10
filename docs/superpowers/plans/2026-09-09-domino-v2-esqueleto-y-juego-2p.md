@@ -868,6 +868,65 @@ git commit -m "feat: env.ts con validación zod como única lectura de process.e
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
+- [ ] **Step 6: El guardarraíl — hacer cumplir "el único lector"**
+
+El título de esta tarea afirma una invariante y hasta acá **nada la hace cumplir**: ni un test, ni una
+regla de depcruise, ni el lint. Se cumple por casualidad, y el día que una feature meta un
+`process.env` suelto la afirmación pasa a ser falsa sin que nadie se entere. Es la misma forma de bug
+que las dos reglas muertas de la Tarea 2 — una garantía declarada sin nada detrás.
+
+Va en **su propio archivo**, `src/env-single-reader.test.ts`, y no en `architecture.test.ts`: ese
+escanea texto del sistema de archivos y no invoca depcruise nunca, así que compartirían archivo solo
+por reusar el helper de fixtures. Eso es casualidad, no parentesco.
+
+```ts
+// src/env-single-reader.test.ts
+const ENV_MODULE_PATH = "src/env.ts";
+// Este archivo se excluye también: su fuente contiene literalmente "process.env" (en el
+// patrón y en los fixtures). Excluirlo por ruta es más simple y legible que ofuscar esas
+// apariciones, y no abre un hueco real — no lee configuración, solo texto sobre cómo detectarla.
+const THIS_FILE_PATH = "src/env-single-reader.test.ts";
+const EXCLUDED_PATHS = new Set([ENV_MODULE_PATH, THIS_FILE_PATH]);
+
+// Detecta la substring `process.env` Y los imports de `process`/`node:process`.
+const IMPORTS_PROCESS_MODULE = /from\s+["'](?:node:)?process["']/;
+
+function readsProcessEnv(source: string): boolean {
+  return source.includes("process.env") || IMPORTS_PROCESS_MODULE.test(source);
+}
+```
+
+Más un recorrido recursivo real de `src/` (no `git ls-files`: así el fixture del test dispara sin
+tener que pasar por el índice), el filtro por exclusiones, y tres tests — el codebase limpio, un
+`process.env` suelto, y un `import { env } from "node:process"`.
+
+> **Ese segundo detector es la mitad del valor, y la primera versión no lo tenía.**
+> `import { env } from "node:process"` es la vía idiomática para leer la configuración **sin que la
+> substring `process.env` aparezca nunca en el archivo**. Con solo el escaneo de substring, el
+> guardarraíl decía proteger algo que no protegía. Que sea un patrón normal y no un rebusque es
+> justamente lo que lo hacía grave.
+>
+> **Y los blind spots que quedan se documentan, no se resuelven**: `process["env"]`, acceso
+> computado, `globalThis.process.env`, reexportar `process.env` desde otro módulo, o desestructurar
+> `process` en un alias. Un hueco documentado es honesto; uno sin documentar es el bug. Resolverlos
+> pediría escanear el AST, y eso no se paga para lo que este test cuida.
+
+**La forma de verificar este test es rompiéndolo**, igual que en la Tarea 2: escribir un archivo bajo
+`src/` que lea la configuración por cada una de las dos vías, ver el test rojo **nombrando el
+archivo**, y borrarlo. Un guardarraíl que nadie vio fallar no es un guardarraíl.
+
+- [ ] **Step 7: Documentar el acoplamiento de import-time, en las dos direcciones**
+
+`export const env = parseEnv(process.env)` corre **al importar**. O sea que importar `env.ts` con un
+entorno inválido revienta antes de que corra una línea del que importa — deseable (falla temprano),
+pero hay que decirlo:
+
+- En la cabecera de `src/env.ts`: importar este módulo valida el entorno y lanza si falta algo.
+- En `vitest.setup.ts`: por qué existen esas tres líneas `??=`, referenciando lo de arriba.
+
+Sin esos dos comentarios, el próximo que escriba un script que importe `env.ts` va a perder media hora
+con un stack trace en el import.
+
 ---
 
 ## Tarea 4: El árbol de estado con la API builder de schema 5
@@ -1038,6 +1097,7 @@ export type Hand = SchemaType<typeof Hand>;
 // los dos compañeros el total idéntico (por eso el v1 leía un "capitán"). Tenerlo en los
 // dos lados era doble contabilidad del mismo dinero, con un solo escritor que actualizaba
 // ambos —justo la desincronización que spec §7.1 quiere evitar—. Truco tampoco lo tiene.
+//
 // `hasSeenTiles`: ¿ya levantó sus fichas? Se marca UNA vez por partida, con el verbo
 // `REVEAL_TILES`, y NO se resetea entre rondas —la ventana de reparto es solo la de la
 // ronda 1—. Es **público** a propósito: el front tiene que poder decir *a quién se está
