@@ -25,7 +25,7 @@ El v2 nace **autocontenido**: la Tarea 1 copia los tres documentos —reglas, sp
 | **0 · Documento de reglas** | 0 | `reglas-de-juego-v1.md`: la fuente de verdad del dominó, con las divergencias 2P/4P/torneo anotadas. **Bloquea todo lo demás** |
 | **1 · Esqueleto de conexión** | 1–13 | Servidor que arranca, una sala con child container, wire validado, un verbo de ida y vuelta, visibilidad por asiento, log correlacionado por partida, endpoint de config, arnés E2E |
 | **2 · Repartir y jugar 2P** | 14–21 | Partida 2P completa: reparto determinista, jugada legal, pozo, pase, tranca, conteo, rondas, `pointsToWin`, fases con plazo, replay |
-| **3 · Endurecimiento** | 22 | Los dos criterios de "hecho" del spec que no caen en ninguna tarea anterior: el test del semáforo y los tres caminos de reconexión |
+| **3 · Endurecimiento** | 22–23 | Los criterios de "hecho" del spec que no caen en ninguna tarea anterior: el test del semáforo, los tres caminos de reconexión, y la ventana de reparto de punta a punta (el único camino del motor donde nadie gana) |
 
 **Fuera de este plan**, cada uno replanificado con lo aprendido acá: 4P, multiplicador de apuesta, identidad multi-operador (feature `operator/`, `auth` multi-issuer, `operator_players`, `MatchProfiles`), economía y admisión, matchmaking completo, torneos, revancha, bots.
 
@@ -63,12 +63,12 @@ Qué archivo es responsable de qué. Esto fija la decomposición; las tareas la 
 | `config.ts` | `GlobalDominoConfig`, `DominoMatchConfig` (con el `seed`), `DEFAULT_GLOBAL_CONFIG` |
 | `command.ts` | `CommandPayloads` (el mapa de verbos) + `Command<N, TEvent>` |
 | `events.ts` | `MatchEvent` (unión discriminada) + `DeadlineKind` |
-| `state/tile.ts` | `Tile`, `PlacedTile` |
-| `state/player.ts` | `PlayerState`, `Hand` (nodo mixto: `tileCount` público, `tiles` gated) |
-| `state/board.ts` | `BoardState`: la cadena jugada y sus dos extremos |
-| `state/boneyard.ts` | `BoneyardState`: `count` público, `tiles` sin audiencia |
-| `state/round.ts` | `RoundState`, `Turn`, `RoundSummary`, `RoundPhase` |
-| `state/match.ts` | `MatchState`, `Scoreboard`, `MatchPhase` |
+| `state/tile.ts` | `Tile`, `PlacedTile` (sin `lockedNumber`: es derivable de datos públicos) |
+| `state/player.ts` | `PlayerState` (sin `score`: el marcador es del equipo), `Hand` (nodo mixto: `tileCount` público, `tiles` gated) |
+| `state/board.ts` | `BoardState`: la cadena jugada. Los extremos se derivan |
+| `state/boneyard.ts` | `BoneyardState`: `count` público, `tiles` sin audiencia. **Rama nula**: ausente en 4P |
+| `state/round.ts` | `RoundState` (con `starterId`), `Turn`, `RoundSummary`, `RoundPhase` |
+| `state/match.ts` | `MatchState`, `Scoreboard` (único acumulador), `MatchPhase` |
 | `engine/clock.ts` | puerto `Clock` (`now()`, write-only para el negocio) |
 | `engine/timeout-scheduler.ts` | puerto `TimeoutScheduler` (`schedule`/`cancel`) |
 | `engine/visibility.ts` | puerto `SchemaVisibilityController` + `Audience` |
@@ -76,7 +76,7 @@ Qué archivo es responsable de qué. Esto fija la decomposición; las tareas la 
 | `engine/driver.ts` | interfaz `Driver` + `TransitionResult` |
 | `engine/tile-set.ts` | las 28 fichas y el valor nominal. Derivación pura |
 | `engine/genesis.ts` | `createMatchState(seats, config)`: el árbol inicial. El orden de `seats` asigna equipos |
-| `engine/state-projections.ts` | proyecciones puras: `currentRoundOf`, `teamOf`, `isRoundActive`, `handOf` |
+| `engine/state-projections.ts` | proyecciones puras: `currentRoundOf`, `teamOf`, `isRoundActive`, `handOf`, `boneyardCountOf`/`boneyardOf` (la rama nula del pozo) y el narrowing de los ejes (`sideOf`, `roundPhaseOf`, `matchPhaseOf`) |
 | `engine/deadline-kind.ts` | `deadlineKindOf(match)`: a qué ventana sirve el plazo vigente |
 | `engine/dealer.ts` | SERVICIO: reparte por `(seed, roundNumber)`. `orderedTiles()` es `protected` — el seam de test |
 | `engine/scorer.ts` | SERVICIO: tarifa mano→puntos **y** asienta. Único escritor del marcador |
@@ -113,7 +113,7 @@ Qué archivo es responsable de qué. Esto fija la decomposición; las tareas la 
 | `colyseus/commands/decoders.ts` | `MessageDecoder`: valida e **inyecta el `playerId` autenticado** |
 | `colyseus/commands/catalog.ts` | `CommandCatalog`: la frontera anti-trampa (`Object.hasOwn`) |
 | `colyseus/commands/di-wiring.ts` | tokens, `registerIndividualCommands`, `buildCatalog`, `buildPieces` |
-| `http/register-http.ts` | `GET /config/:roomId` (sin `seed`) |
+| `http/register-http.ts` | `GET /config/:roomId` (sin `seed`, con `serverNow` para corregir el desfase de reloj del front) |
 
 ### Tests
 
@@ -163,13 +163,25 @@ Llenar esta tabla leyendo los archivos. Las rutas y líneas son el punto de part
 | Timeout de turno | `two-players/commands/on-timeout.ts` | `four-players/commands/on-timeout.ts` | `tournaments/game/commands/` |
 | Revelado de fichas | `commands/on-reveal-tiles.ts`, `on-timeout-reveal.ts` | idem 4P | idem |
 
-- [ ] **Step 2: Resolver las tres decisiones abiertas**
+- [ ] **Step 2: Resolver las decisiones abiertas**
 
 Estas no se deducen del código porque el código hace cosas distintas en cada modo. Elegir y escribir la elección con su razón:
 
 1. **Qué hace el sistema al vencer el turno.** Hoy `on-timeout.ts` **expulsa al jugador**. La alternativa (modelo de truco) es ejecutar el verbo del que calló —jugar una ficha legal, o robar, o pasar— y retirar solo tras agotar un tiempo extra. Decidir cuál, porque cambia cuántas partidas mueren por una desconexión.
 2. **`pointsToWin` por defecto.** El schema de Mongo dice 25, el state dice 15. Uno de los dos está muerto: averiguar cuál se usa de verdad y escribir el número.
 3. **Empate de ronda.** `:352-370` maneja un caso de empate. Escribir qué pasa exactamente con los puntos cuando dos manos empatan en pips tras una tranca.
+
+> **Al cerrarse, la lista quedó en OCHO decisiones y no en tres.** Las cinco que aparecieron
+> auditando el documento están en `docs/reglas-de-juego-v1.md` §7: el reloj al robar (4), el primer
+> turno sin doble-seis (5), 4P con bots deshabilitados (6), el tiempo extra como **reserva de partida**
+> en vez de gracia por turno (7), y qué significa "partida válida" más quién cobra (8). Las tres de
+> arriba se conservan tal como se escribieron porque son el punto de partida real; la lista completa
+> manda.
+>
+> Y dos secciones que este step no pedía y el documento terminó necesitando: **§9 el catálogo del
+> historial** (la tabla cerrada que reemplaza los booleanos `isPassed`/`isLoaded` del v1) y **§10 los
+> tres consumidores** (tablero / cliente / auditoría, y de dónde lee cada uno). Sin ellas, el defecto
+> que más incomodó en producción no quedaba escrito en ningún lado.
 
 - [ ] **Step 3: Escribir `docs/reglas-de-juego-v1.md`**
 
@@ -860,14 +872,23 @@ import { type SchemaType, schema, t } from "@colyseus/schema";
 export const Tile = schema({ left: t.number(), right: t.number() }, "Tile");
 export type Tile = SchemaType<typeof Tile>;
 
-// Una ficha ya puesta en la mesa. `lockedNumber` es el número por el que enganchó,
-// y `side` de qué extremo del tablero se colgó.
+// Una ficha ya puesta en la mesa: qué ficha, quién la puso, y de qué extremo se colgó.
+//
+// NO lleva `lockedNumber`. El número por el que enganchó es DERIVABLE de la cadena
+// (`board.tiles` + `side`), con el mismo recorrido que hace `boardEndsOf`, y `board.tiles`
+// es PÚBLICO — así que el cliente puede derivarlo. Guardarlo sería el campo derivado que
+// spec §7.1 prohíbe, y de paso arrastraba el centinela `-1` del v1 a un campo donde 0 es
+// un valor legítimo (la blanca).
+//
+// El criterio, escrito una vez: un campo derivado se guarda SOLO cuando el cliente no
+// puede derivarlo —porque su fuente está gateada (`Hand.tileCount`, `BoneyardState.count`)
+// o porque derivarlo exigiría reimplementar una regla del juego—. `lockedNumber` no
+// califica por ninguna de las dos.
 export const PlacedTile = schema(
   {
     tile: t.ref(Tile),
     playedBy: t.string(),
-    lockedNumber: t.number(),
-    side: t.string(), // "LEFT" | "RIGHT"
+    side: t.string(), // BoardSide — narrowing vía sideOf() en state-projections.ts
   },
   "PlacedTile",
 );
@@ -884,8 +905,18 @@ import { Tile } from "./tile.js";
 // NODO MIXTO, y es la pieza que cierra el agujero de trampa del v1 (spec §7.1):
 // `tileCount` es público —el front tiene que saber cuántas fichas le quedan al rival—
 // y `tiles` es de VISTA, así que solo llega al dueño del asiento.
-// `isRevealed` es la decisión CON MEMORIA del cierre de ronda: vive en el estado
-// para que el árbol sea autocontenido para el front y para el replay.
+//
+// `isRevealed` es la decisión CON MEMORIA del cierre de ronda: la mano se hace pública a
+// TODOS para contar los pips, y eso vive en el estado para que el árbol sea autocontenido
+// para el front y para el replay.
+//
+// ⚠ NO CONFUNDIR con `PlayerState.hasSeenTiles`. Son dos ejes distintos y el v1 los
+// habría metido en un booleano:
+//   · `hasSeenTiles`  → el DUEÑO levantó sus fichas. Audiencia: él. Pasa una vez por
+//                       partida, en la ventana de reparto.
+//   · `Hand.isRevealed` → la mano es pública para TODOS. Pasa al cerrar cada ronda.
+// Que el dueño las haya visto no las hace públicas, y hacerlas públicas al final no dice
+// nada sobre si las levantó al principio.
 export const Hand = schema(
   {
     tileCount: t.number().default(0),
@@ -896,6 +927,21 @@ export const Hand = schema(
 );
 export type Hand = SchemaType<typeof Hand>;
 
+// `extraTimeRemainingMs` es la RESERVA de tiempo extra para TODA la partida, y solo
+// decrece (modelo de truco, `PlayerState.extraTimeRemainingMs`). Es un cambio DELIBERADO
+// respecto del v1, que reseteaba los 30 s de gracia en cada turno: acá el que la gasta se
+// queda sin colchón. Va en el jugador y no en config porque es un saldo con memoria —lo
+// único que el motor le resta— y va acá y no en `Turn` porque cruza los turnos y las rondas.
+//
+// NO lleva `score`. El marcador vive SOLO en `MatchState.scoreboard`: el puntaje de un
+// jugador es `scoreboard[teamOf(player)]`, incluso en 4P, donde la regla del v1 le da a
+// los dos compañeros el total idéntico (por eso el v1 leía un "capitán"). Tenerlo en los
+// dos lados era doble contabilidad del mismo dinero, con un solo escritor que actualizaba
+// ambos —justo la desincronización que spec §7.1 quiere evitar—. Truco tampoco lo tiene.
+// `hasSeenTiles`: ¿ya levantó sus fichas? Se marca UNA vez por partida, con el verbo
+// `REVEAL_TILES`, y NO se resetea entre rondas —la ventana de reparto es solo la de la
+// ronda 1—. Es **público** a propósito: el front tiene que poder decir *a quién se está
+// esperando*, que es la mitad del valor de la ventana.
 export const PlayerState = schema(
   {
     playerId: t.string(),
@@ -903,7 +949,8 @@ export const PlayerState = schema(
     seatIndex: t.number(),
     connected: t.boolean().default(true),
     hasAbandoned: t.boolean().default(false),
-    score: t.number().default(0),
+    hasSeenTiles: t.boolean().default(false),
+    extraTimeRemainingMs: t.number().default(0),
     hand: t.ref(Hand),
   },
   "PlayerState",
@@ -913,6 +960,13 @@ export type PlayerState = SchemaType<typeof PlayerState>;
 
 Lo que **no** está en `PlayerState`, y es deliberado (spec §4.1): `name`, `lastname`, `username`,
 `currency`, `profilePicture`. Nickname y avatar viven fuera del estado, en `network/profiles.ts`.
+
+Y lo que **sí** está aunque truco no lo tenga: `connected`. Truco no lleva ningún campo de conexión
+—`grep -rn "connected" src/` da cero— porque la conexión es plataforma y la cuenta con
+`PLAYER_DISCONNECTED`/`PLAYER_RECONNECTED`. Acá se conserva el campo del v1 **a propósito**: un
+evento es un delta y el estado es el acumulado, así que un cliente que reconecta a mitad de partida
+tiene que poder ver que su rival está caído sin que nadie le reenvíe un evento pasado. Los eventos
+de plataforma siguen existiendo para quien quiera el instante; el campo es para quien llega tarde.
 
 ```ts
 // src/features/match/core/state/board.ts
@@ -930,7 +984,11 @@ export type BoardState = SchemaType<typeof BoardState>;
 import { type SchemaType, schema, t } from "@colyseus/schema";
 import { Tile } from "./tile.js";
 
-// El pozo. `count` es público (el front lo muestra); `tiles` es de vista y
+// El pozo. Este nodo solo se INSTANCIA en los modos que tienen pozo: en 4P la rama
+// `RoundState.boneyard` queda ausente (ver el comentario de `RoundState`).
+// `count` es un campo derivado PERMITIDO por el criterio de `PlacedTile`: su fuente
+// (`tiles`) está gateada, así que el cliente no tiene de dónde contarla.
+// `count` es público (el front lo muestra); `tiles` es de vista y
 // NUNCA se le agrega a ninguna audiencia, así que el dominio las tiene y
 // nadie las ve. Es la forma de dejar la fuente de verdad en el árbol
 // sin sincronizarla (spec §7.1).
@@ -949,11 +1007,37 @@ import { BoneyardState } from "./boneyard.js";
 
 // UN EJE, UN CAMPO (spec §7.1): la fase reemplaza los booleanos del v1
 // (isRoundFinished + bloqueo derivado + roundEndReason codificaban lo mismo tres veces).
-export type RoundPhase = "DEALING" | "PLAYING" | "RESOLVING_ROUND";
+//
+// UNA FASE ES UN ESTADO QUE ESPERA ALGO —input, o el vencimiento de su plazo—.
+//
+// `DEALING` es la VENTANA DE REPARTO (reglas §3.1): al empezar la partida las fichas se
+// reparten pero NO se hacen públicas, y cada jugador levanta las suyas con `REVEAL_TILES`
+// dentro de 15 s. Mientras falte alguien la ronda no arranca; al vencer, el que no las
+// levantó se retira. Es de la RONDA 1 nada más: de la 2 en adelante el reparto revela
+// solo. Portado de truco (negocio v27 §12.7).
+//
+// Es la fase que hace que esperar sea observable, así que existe de verdad: repartir sí
+// es síncrono, pero *esperar a que los dos estén ahí* no.
+export type RoundPhase = "DEALING" | "PLAYING" | "PRESENTING_ROUND";
 export type RoundEndReason = "DOMINO" | "BLOCKED";
 
+// El turno: de quién es, y en qué tramo del plazo va. El instante de vencimiento vive
+// UNIFICADO en `MatchState.activeDeadline` —no acá—, así que no hay `startedAt`: sería
+// un segundo timestamp del mismo turno y nadie lo leería.
+//
+// `isConsumingExtendedTime` es el DISCRIMINADOR del front: los dos tramos (el normal y
+// el de la reserva extra) ocurren con la misma `phase`, así que sin este campo el cliente
+// ve una cuenta atrás y no sabe cuál de los dos está mirando.
+//
+// `consecutivePasses` es la ÚNICA huella que un pase deja en el estado: pasar no pone
+// ficha en el tablero ni saca del pozo, así que sin este contador el rival no tiene de
+// dónde enterarse (el historial de Mongo NO se sincroniza — spec §5.1).
 export const Turn = schema(
-  { playerId: t.string(), startedAt: t.number(), consecutivePasses: t.number().default(0) },
+  {
+    playerId: t.string(),
+    isConsumingExtendedTime: t.boolean().default(false),
+    consecutivePasses: t.number().default(0),
+  },
   "Turn",
 );
 export type Turn = SchemaType<typeof Turn>;
@@ -970,10 +1054,21 @@ export const RoundSummary = schema(
 );
 export type RoundSummary = SchemaType<typeof RoundSummary>;
 
+// `starterId` es quién abrió ESTA ronda. No es adorno: la regla de secuencia
+// (reglas §4.1) es que la ronda siguiente la abre el rival de quien abrió la anterior,
+// así que sin este campo no hay de dónde sacar la alternancia una vez que el turno se
+// movió. El v1 lo tenía (`currentRoundStarterId`); el doble-seis solo decide la RONDA 1.
+//
+// `boneyard` es una RAMA NULA (doctrina de truco, negocio §4.1: "ramas nulas para flujos
+// condicionales; su ausencia codifica el caso"). AUSENTE = este modo no tiene pozo, que
+// es exactamente 4P (4×7 = 28 = el set entero). Si estuviera siempre presente, un 4P
+// arrancaría con `count: 0` y "modo sin pozo" sería indistinguible de "pozo agotado" —
+// y esos dos casos son justo donde la tranca se calcula distinto (reglas §3.7).
 export const RoundState = schema(
   {
     roundNumber: t.number(),
     phase: t.string().default("DEALING"),
+    starterId: t.string(),
     board: t.ref(BoardState),
     boneyard: t.ref(BoneyardState),
     currentTurn: t.ref(Turn),
@@ -989,7 +1084,21 @@ import { type SchemaType, schema, t } from "@colyseus/schema";
 import { PlayerState } from "./player.js";
 import { RoundState, RoundSummary } from "./round.js";
 
-export type MatchPhase = "NOT_STARTED" | "IN_PROGRESS" | "RESOLVING_MATCH" | "RESOLVED";
+// DOS PALABRAS, DOS HECHOS (truco negocio v26, changelog "Revancha" §3). `RESOLVED` es el
+// VEREDICTO —el juego dictaminó— y por eso vive SOLO en eventos (`ROUND_RESOLVED`,
+// `MATCH_RESOLVED`); `FINISHED` es el terminal de ESTA MÁQUINA —no queda nada por hacer en
+// esta mesa— y por eso vive SOLO en fases. Coinciden mientras la partida se apaga al
+// dictaminarse; la REVANCHA los separa, y ahí el nombre repetido pasa a mentir. Truco lo
+// pagó y lo renombró: acá se nace con la separación hecha.
+//
+// `FINISHED` es el ÚNICO terminal, y NO hay un `ABORTED` que lo acompañe: una partida que
+// muere sin veredicto no es una transición del juego, es la sala que se muere. Eso lo
+// cuenta `MATCH_ABORTED`, que es evento de PLATAFORMA (network/events.ts).
+//
+// Las dos fases de la REVANCHA (`REMATCH_WINDOW`, `REMATCH_NEGOTIATION`) van DESPUÉS del
+// veredicto y ANTES del terminal. NO entran en esta rebanada, pero el enum está ordenado
+// para recibirlas sin renombrar nada: es la razón entera de haber separado las palabras.
+export type MatchPhase = "NOT_STARTED" | "PLAYING" | "PRESENTING_MATCH" | "FINISHED";
 
 export const Scoreboard = schema(
   { teamA: t.number().default(0), teamB: t.number().default(0) },
@@ -1000,8 +1109,15 @@ export type Scoreboard = SchemaType<typeof Scoreboard>;
 // Raíz persistente de la partida. `currentRound` se REEMPLAZA entera cada ronda;
 // de las pasadas solo sobrevive el resumen. El detalle completo vive en el
 // historial de Mongo (spec §5).
-// `activeDeadline` es UN SOLO campo: un solo plazo temporizado a la vez.
 // El `seed` NO está acá — vive en DominoMatchConfig, inyectado (spec §7.1).
+//
+// `activeDeadline` es UN SOLO campo: un solo plazo temporizado a la vez. Es un instante
+// ABSOLUTO en **epoch ms del servidor**, no un resto que baje. Dos consecuencias:
+//   · El servidor no lo re-emite nunca: se estampa una vez por transición. Ahí muere el
+//     patch por segundo del v1.
+//   · El front tiene que restarle "ahora", y su propio reloj puede estar corrido. Por eso
+//     `GET /config/:roomId` devuelve `serverNow`: con eso calcula el offset una vez.
+// Es epoch y no la timeline de la sala a propósito — ver spec §7.4.
 export const MatchState = schema(
   {
     phase: t.string().default("NOT_STARTED"),
@@ -1118,6 +1234,10 @@ export type RuleViolationCode =
   | "MUST_PLAY_INSTEAD_OF_DRAWING"
   | "MUST_DRAW_INSTEAD_OF_PASSING"
   | "BONEYARD_EMPTY"
+  // Los dos de la ventana de reparto (reglas §3.1): levantar fichas fuera de la ventana,
+  // y levantarlas dos veces.
+  | "NOT_DEALING"
+  | "TILES_ALREADY_SEEN"
   | "MATCH_NOT_IN_PROGRESS";
 
 export class RuleViolationError extends DominoError {
@@ -1157,14 +1277,20 @@ export interface TimeoutScheduler {
 ```ts
 // src/features/match/core/engine/visibility.ts
 import type { Schema } from "@colyseus/schema";
-import type { PlayerId, TeamId } from "../ids.js";
+import type { PlayerId } from "../ids.js";
 
-// La audiencia es de DOMINIO: un JUGADOR o un EQUIPO, nunca una conexión.
-// Eso es lo que permite que la vista sea del ASIENTO y no del socket (spec §7.3).
-export type Audience =
-  | { kind: "PLAYER"; playerId: PlayerId }
-  | { kind: "TEAM"; teamId: TeamId }
-  | { kind: "ALL" };
+// La audiencia es de DOMINIO: un JUGADOR o la mesa, nunca una conexión. Eso es lo que
+// permite que la vista sea del ASIENTO y no del socket (spec §7.3).
+//
+// SON DOS Y NO TRES: no hay audiencia de EQUIPO, porque en dominó no existe ninguna
+// mecánica que le muestre algo a tu compañero y no a la mesa. Truco tiene tres —el
+// intercambio de carta entre compañeros, la flor, el pegado—, y de ahí venía la tercera
+// rama en la primera redacción de este plan: una `case "TEAM"` inalcanzable, con un test
+// afirmando que lanzaba. Estado especulativo con test propio.
+//
+// Si algún día apareciera un modo de dominó con señas legales entre compañeros, la rama
+// se agrega acá y el compilador señala los dos sitios que la tienen que resolver.
+export type Audience = { kind: "PLAYER"; playerId: PlayerId } | { kind: "ALL" };
 
 // El dominio ordena "hacé público este nodo a esta audiencia"; el puerto hace el view.add.
 // El dominio nunca toca client.view.
@@ -1190,7 +1316,11 @@ export interface TransitionResult {
 // tranca. `ABANDONED` reconcilia igual que `PASSED` —el que se va tiene fichas, así
 // que no cierra por dominó— pero se nombra aparte para que el conductor no tenga
 // que mentir sobre qué pasó.
-export type RoundAction = "PLAYED" | "DREW" | "PASSED" | "ABANDONED";
+// `REVEALED` no es una jugada: es la salida de la ventana de reparto (reglas §3.1). Está
+// en la misma unión porque entra por el mismo `advance`, pero se reconcilia ANTES que
+// todo lo demás y no llega a la guarda de `PLAYING` —es la única fase, además de esa, en
+// la que un verbo de jugador es legal—.
+export type RoundAction = "PLAYED" | "DREW" | "PASSED" | "ABANDONED" | "REVEALED";
 
 // La superficie pública de un conductor son estos tres verbos y nada más.
 // `advance` recibe QUIÉN actuó y QUÉ hizo: sin lo primero no puede saber si el
@@ -1209,7 +1339,11 @@ import type { PlayerId, TeamId } from "./ids.js";
 
 // A qué ventana sirve el único plazo del juego. Un solo campo en el estado
 // ⇒ un solo evento de vencimiento y un solo eje que lo discrimine.
-export type DeadlineKind = "TURN" | "RESOLVING_ROUND" | "RESOLVING_MATCH";
+//
+// `DEALING` es la ventana de reparto (reglas §3.1). Es de nivel RONDA como el turno, pero
+// a diferencia del turno **no es de nadie en particular**: corre para todos a la vez, y
+// eso es exactamente para lo que existe —el reloj del turno solo mira al que le toca—.
+export type DeadlineKind = "DEALING" | "TURN" | "PRESENTING_ROUND" | "PRESENTING_MATCH";
 
 // EL CRITERIO (spec §5.1): un evento existe SOLO si ocurre un hecho que no se puede
 // reconstruir del comando ni del estado resultante. Si el payload del evento solo
@@ -1249,39 +1383,76 @@ export interface DominoMatchConfig {
   readonly seats: readonly string[];
   readonly pointsToWin: number;
   readonly teamAssignment: TeamAssignmentMode;
+  /**
+   * ¿La mano se reparte tapada y hay que pedirla? (reglas §3.1). A diferencia de
+   * `teamAssignment` **no depende del modo ni de los asientos**: va en toda mesa, porque
+   * es el control de presencia del arranque. Es config igual, por dos razones: producto
+   * tiene que poder apagarla sin deploy, y los tests de integración del motor —que
+   * prueban la tranca o el conteo, no esto— no tienen por qué pagar la ceremonia.
+   */
+  readonly isDealWindowEnabled: boolean;
 }
 
 export interface GlobalDominoConfig {
-  /** El plazo normal del turno. */
+  /** El plazo normal del turno. Se reinicia en cada turno. */
   readonly turnTimeoutMs: number;
-  /** El tiempo extra que corre DESPUÉS del turno, antes de que el sistema actúe. */
-  readonly extraTimeMs: number;
-  readonly resolvingRoundMs: number;
-  readonly resolvingMatchMs: number;
+  /**
+   * La RESERVA de tiempo extra con la que cada jugador arranca la partida. NO es una
+   * gracia por turno: es un saldo que solo decrece durante toda la partida (reglas §5.1,
+   * decisión 7). El arranque lo siembra en `PlayerState.extraTimeRemainingMs`.
+   */
+  readonly extraTimeReserveMs: number;
+  /**
+   * La VENTANA DE REPARTO (reglas §3.1): cuánto tiene cada uno para levantar sus fichas
+   * al empezar la partida. Es el plazo más corto de la mesa y el único que controla a
+   * TODOS a la vez —el del turno solo mira al que le toca jugar—, y por eso es el que
+   * agarra al que se sentó, vio lo que le tocó y se fue.
+   */
+  readonly dealingTimeoutMs: number;
+  readonly presentingRoundMs: number;
+  readonly presentingMatchMs: number;
   readonly seatingTimeoutMs: number;
   readonly tilesPerPlayer: number;
 }
 
-// Los plazos son los del v1, verificados en docs/reglas-de-juego-v1.md §5.1:
-// 60 s de turno + 30 s de gracia, idénticos en 2P, 4P y torneo.
+// Los plazos son los del v1, verificados en docs/reglas-de-juego-v1.md §5.1: 60 s de
+// turno, idénticos en 2P, 4P y torneo. Los 30 s de gracia del v1 se conservan como
+// CANTIDAD pero cambian de MODELO —de gracia por turno a reserva por partida—, que es
+// un cambio deliberado escrito en el documento de reglas (decisión 7).
 export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   turnTimeoutMs: 60_000,
-  extraTimeMs: 30_000,
-  resolvingRoundMs: 6_000,
-  resolvingMatchMs: 6_000,
+  extraTimeReserveMs: 30_000,
+  // El número del v1 (`initialTilesTimeRemaining`).
+  dealingTimeoutMs: 15_000,
+  presentingRoundMs: 6_000,
+  presentingMatchMs: 6_000,
   seatingTimeoutMs: 30_000,
   tilesPerPlayer: 7,
 };
 ```
 
-`resolvingRoundMs` y `resolvingMatchMs` son los `sleep(6000)` del v1, convertidos en **config de una
+`presentingRoundMs` y `presentingMatchMs` son los `sleep(6000)` del v1, convertidos en **config de una
 fase con plazo**. El motor no espera: estampa el instante y sigue.
 
+> **La reserva de tiempo extra no es la gracia del v1, y el cambio es a propósito.** El v1 reinicia
+> los 30 s en cada turno, así que un jugador que se cuelga en los diez turnos se lleva 300 s gratis.
+> Acá los 30 s son el saldo de **toda** la partida: se consumen una vez y no vuelven. Es el modelo de
+> truco (`PlayerState.extraTimeRemainingMs`, "solo decrece"), y es lo que hace que el campo tenga que
+> vivir en el estado y no en config — un saldo con memoria no es un parámetro.
+
+- [ ] **Step 3b: Los dos campos que el tiempo extra necesita en el estado**
+
+Ya están declarados en la Tarea 4: `PlayerState.extraTimeRemainingMs` (el saldo) y
+`Turn.isConsumingExtendedTime` (el discriminador para el front). El segundo existe porque los dos
+tramos del plazo ocurren con la misma `phase`: sin él, el cliente ve una cuenta atrás en
+`activeDeadline` y no sabe si está mirando los 60 s del turno o lo que queda de la reserva.
+
 > **`teamAssignment` es obligatorio y sin default, a propósito.** Las tareas siguientes construyen
-> `DominoMatchConfig` en unos quince lugares (fixtures de test, `configOf`, el meta del replay). Todos
-> necesitan el campo, y **el compilador los va a señalar uno por uno** — es la misma garantía que da
-> `satisfies` en el catálogo de verbos. Para las mesas de dos asientos el valor da igual (las dos
-> políticas dan `["A", "B"]`); usá `"SHUFFLED"`, que es el de producción.
+> `DominoMatchConfig` en trece lugares (fixtures de test, `configOf`, `DominoRoomOptions`, el meta del
+> replay y el golden). Todos necesitan el campo, y **el compilador los señalaría uno por uno** — es la
+> misma garantía que da `satisfies` en el catálogo de verbos. Para las mesas de dos asientos el valor
+> da igual (las dos políticas dan `["A", "B"]`); el de producción es `"SHUFFLED"`, y **los trece
+> bloques de este plan ya lo traen**, así que copiarlos no deja el typecheck en rojo.
 
 - [ ] **Step 4: Correr el test hasta que pase**
 
@@ -1469,6 +1640,7 @@ const config = (
   seats,
   pointsToWin: 100,
   teamAssignment: "SHUFFLED",
+  isDealWindowEnabled: false,
   ...overrides,
 });
 
@@ -1521,6 +1693,18 @@ describe("createMatchState", () => {
       expect(player.hand.isRevealed).toBe(false);
       expect(player.connected).toBe(true);
       expect(player.hasAbandoned).toBe(false);
+    }
+  });
+
+  // La reserva de tiempo extra nace en 0 y la SIEMBRA el arranque de la partida
+  // (`MatchDriver.begin`), que es quien tiene el `GlobalDominoConfig`. La génesis
+  // recibe solo el config por partida, y no se le agrega un segundo parámetro para
+  // esto: la reserva empieza a existir cuando la partida empieza, no cuando se
+  // arma la mesa.
+  it("la reserva de tiempo extra nace vacía; la siembra el arranque", () => {
+    const match = createMatchState(config(["u1", "u2"]));
+    for (const player of match.players) {
+      expect(player.extraTimeRemainingMs).toBe(0);
     }
   });
 
@@ -1579,7 +1763,7 @@ preguntarse de qué equipo es nadie: lo lee de `PlayerState.teamId`.
 - [ ] **Step 4: Correr el test hasta que pase**
 
 Run: `npx vitest run src/features/match/core/engine/tests/genesis.test.ts`
-Expected: los 6 tests PASAN.
+Expected: los 7 tests PASAN.
 
 - [ ] **Step 5: Escribir el test de las proyecciones**
 
@@ -1606,6 +1790,8 @@ const build = (seats = ["u1", "u2"]) =>
     seed: "s",
     seats,
     pointsToWin: 100,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: false,
   });
 
 describe("proyecciones puras del estado", () => {
@@ -1674,7 +1860,17 @@ Expected: FAIL con `Failed to resolve import "../state-projections.js"`.
 // Convención: el SUJETO va primero y el match al final, salvo cuando el match ES
 // el sujeto. Así `teamOf(playerId, match)` se lee "el equipo de playerId en esta partida".
 import type { PlayerId, TeamId } from "../ids.js";
-import type { Hand, MatchState, PlayerState, RoundState } from "../state/index.js";
+import type {
+  BoneyardState,
+  Hand,
+  MatchState,
+  MatchPhase,
+  PlacedTile,
+  PlayerState,
+  RoundPhase,
+  RoundState,
+} from "../state/index.js";
+import type { BoardSide } from "../state/tile.js";
 import { InvariantViolationError } from "./errors.js";
 
 export function playerOf(playerId: PlayerId, match: MatchState): PlayerState {
@@ -1696,6 +1892,39 @@ export function handOf(playerId: PlayerId, match: MatchState): Hand {
 export function currentRoundOf(match: MatchState): RoundState {
   if (!match.currentRound) throw new InvariantViolationError("no hay ronda en curso");
   return match.currentRound;
+}
+
+// EL POZO ES UNA RAMA NULA, y estas dos proyecciones son la única forma de tocarlo.
+//
+// `boneyardCountOf` es para PREGUNTAR: ausente y agotado dan 0, que es lo correcto para
+// toda regla que quiera saber "¿queda de dónde robar?" — la tranca, el veto de pasar.
+// `boneyardOf` es para MUTAR: si no hay rama, robar es un bug, no una jugada ilegal, así
+// que revienta la invariante en vez de devolver un vacío que el mutador tendría que mirar.
+export function boneyardCountOf(round: RoundState): number {
+  return round.boneyard?.count ?? 0;
+}
+
+export function boneyardOf(round: RoundState): BoneyardState {
+  if (!round.boneyard) throw new InvariantViolationError("esta mesa no tiene pozo");
+  return round.boneyard;
+}
+
+// NARROWING. Colyseus no sincroniza uniones discriminadas, así que en el árbol los ejes
+// son `t.string()` (es lo que truco documenta en negocio §4.1, "schema ancho"). Pero eso
+// NO tiene por qué llegar a las reglas: el cast vive acá, en un solo archivo, y de este
+// lado todo el motor compara contra uniones cerradas. Sin esto, un `side === "Left"` en
+// `boardEndsOf` compila, deriva la cadena por el lado equivocado, y como los extremos son
+// derivados el tablero entero queda mal sin que nada reviente.
+export function sideOf(placed: PlacedTile): BoardSide {
+  return placed.side as BoardSide;
+}
+
+export function roundPhaseOf(round: RoundState): RoundPhase {
+  return round.phase as RoundPhase;
+}
+
+export function matchPhaseOf(match: MatchState): MatchPhase {
+  return match.phase as MatchPhase;
 }
 
 export function isRoundActive(player: PlayerState): boolean {
@@ -1829,6 +2058,8 @@ export function buildEngine(
     seed: "seed-test",
     seats,
     pointsToWin: 100,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: false,
   };
   const match = createMatchState(config);
 
@@ -1903,34 +2134,38 @@ describe("ABANDON", () => {
     expect(() => command.execute({ playerId: "u1" })).toThrow(RuleViolationError);
   });
 
-  it("marca al jugador y abre la pausa de cierre con su plazo", () => {
+  // EL VEREDICTO SALE AL ENTRAR A LA PRESENTACIÓN, NO AL VENCERLA. El listener que paga
+  // cuelga de `MATCH_RESOLVED`, así que si el evento saliera al final de la pausa el
+  // premio esperaría los 6 s enteros —y con las fases de revancha, mucho más—. Este test
+  // es el que fija esa latencia: el forfeit paga en el acto.
+  it("marca al jugador, abre la pausa de cierre, y dictamina YA", () => {
     const e = engine();
     e.matchDriver.begin();
-    expect(e.match.phase).toBe("IN_PROGRESS");
+    expect(e.match.phase).toBe("PLAYING");
 
     const events = e.command.execute({ playerId: "u1" });
 
     expect(playerOf("u1", e.match).hasAbandoned).toBe(true);
-    expect(e.match.phase).toBe("RESOLVING_MATCH");
+    expect(e.match.phase).toBe("PRESENTING_MATCH");
     // El plazo se estampa en el estado Y se programa por el puerto.
     expect(e.match.activeDeadline).toBe(e.clockBox.now + 6_000);
     expect(e.scheduled).toEqual([e.clockBox.now + 6_000]);
-    // El verbo dicho por el JUGADOR no emite evento: el comando ya es el registro.
-    expect(events).toEqual([]);
+    // El verbo dicho por el JUGADOR no emite evento —el comando ya es el registro—,
+    // pero el VEREDICTO no es el verbo: es consecuencia computada, y sale acá.
+    expect(events).toEqual([
+      { type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" },
+    ]);
   });
 
-  it("al vencer la pausa, el rival gana por forfeit", () => {
+  it("al vencer la pausa solo se cierra la máquina; el veredicto ya salió", () => {
     const e = engine();
     e.matchDriver.begin();
     e.command.execute({ playerId: "u1" });
 
     const events = e.fireTimeout();
 
-    expect(e.match.phase).toBe("RESOLVED");
-    expect(events).toEqual([
-      { type: "DEADLINE_EXPIRED", kind: "RESOLVING_MATCH" },
-      { type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" },
-    ]);
+    expect(e.match.phase).toBe("FINISHED");
+    expect(events).toEqual([{ type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" }]);
   });
 
   it("abandonar dos veces es ilegal la segunda", () => {
@@ -1969,9 +2204,18 @@ import { InvariantViolationError } from "./errors.js";
 // de vencimiento y un solo eje que lo discrimine. La usan los conductores para
 // despachar al vencer Y el registro para explicar el hueco donde el reloj decidió,
 // así que la rama tomada y lo que queda escrito no pueden discrepar.
+//
+// `TURN` cubre los DOS tramos del turno —el plazo normal y el consumo de la reserva—
+// porque los dos ocurren en `phase === "PLAYING"`. Eso es correcto acá: para el
+// despacho da igual cuál de los dos venció, la rama es la misma. Quién los distingue
+// es `Turn.isConsumingExtendedTime`, y existe para el FRONT (que si no muestra una
+// cuenta atrás sin saber de qué) y para que el conductor sepa que ya no hay más colchón.
 export function deadlineKindOf(match: MatchState): DeadlineKind {
-  if (match.phase === "RESOLVING_MATCH") return "RESOLVING_MATCH";
-  if (match.currentRound?.phase === "RESOLVING_ROUND") return "RESOLVING_ROUND";
+  if (match.phase === "PRESENTING_MATCH") return "PRESENTING_MATCH";
+  if (match.currentRound?.phase === "PRESENTING_ROUND") return "PRESENTING_ROUND";
+  // La ventana de reparto tiene plazo PROPIO, distinto del turno: cuando vence no se
+  // retira a uno, se retira a todos los que no levantaron sus fichas (reglas §3.1).
+  if (match.currentRound?.phase === "DEALING") return "DEALING";
   if (match.currentRound?.phase === "PLAYING") return "TURN";
   throw new InvariantViolationError(`sin ventana temporizada en fase ${match.phase}`);
 }
@@ -2016,7 +2260,7 @@ export class MatchReferee {
   // Va delante de TODA acción de jugador. Repetida y no envuelta en un genérico,
   // a propósito: así se ve de un vistazo cuáles la tienen, y es grepeable.
   assertIsPlaying(playerId: PlayerId): void {
-    if (this.match.phase !== "IN_PROGRESS") {
+    if (this.match.phase !== "PLAYING") {
       throw new RuleViolationError("MATCH_NOT_IN_PROGRESS");
     }
     if (!isRoundActive(playerOf(playerId, this.match))) {
@@ -2029,6 +2273,19 @@ export class MatchReferee {
   }
 
   outcome(): MatchOutcome | undefined {
+    // SI SE FUERON LOS DOS, NO GANÓ NADIE — y hay que decirlo ANTES que nada. Preguntando
+    // por un equipo primero, el orden de evaluación coronaría al otro, y esa partida
+    // —que nadie jugó— **pagaría premio**. En un juego con dinero eso no es un detalle
+    // de estilo: es plata que sale por un `for` que no miró el caso.
+    //
+    // Era inalcanzable hasta la ventana de reparto (reglas §3.1): el primer forfeit
+    // resolvía la partida y ya no quedaba a quién retirar. El vencimiento de la ventana
+    // puede retirar a varios de una, así que ahora se alcanza. Truco lo descubrió al
+    // implementar la ventana; acá nace cubierto.
+    if (hasTeamAbandoned("A", this.match) && hasTeamAbandoned("B", this.match)) {
+      return undefined;
+    }
+
     for (const teamId of ["A", "B"] as const) {
       if (hasTeamAbandoned(teamId, this.match)) {
         return { winnerTeamId: opponentTeam(teamId), reason: "ABANDONMENT" };
@@ -2075,15 +2332,20 @@ export class MatchDriver implements Driver {
   // completar la mesa. Arrancar dos veces no puede repartir de nuevo.
   begin(): void {
     if (this.match.phase !== "NOT_STARTED") return;
-    this.match.phase = "IN_PROGRESS";
+    this.match.phase = "PLAYING";
     this.match.startedAt = this.clock.now();
+    // La reserva de tiempo extra empieza a existir cuando la partida empieza. Es el
+    // único lugar que la siembra: de acá en adelante SOLO decrece (reglas §5.1,
+    // decisión 7). La génesis no puede hacerlo porque no recibe el config global.
+    for (const player of this.match.players) {
+      player.extraTimeRemainingMs = this.config.extraTimeReserveMs;
+    }
   }
 
   advance(_actorId: PlayerId): TransitionResult {
-    if (this.match.phase !== "IN_PROGRESS") return { events: [], finished: false };
+    if (this.match.phase !== "PLAYING") return { events: [], finished: false };
     if (this.referee.outcome()) {
-      this.enterResolvingMatch();
-      return { events: [], finished: false };
+      return { events: this.enterPresentingMatch(), finished: false };
     }
     return { events: [], finished: false };
   }
@@ -2092,22 +2354,36 @@ export class MatchDriver implements Driver {
     const kind = deadlineKindOf(this.match);
     const events: MatchEvent[] = [{ type: "DEADLINE_EXPIRED", kind }];
 
-    if (kind === "RESOLVING_MATCH") {
-      const outcome = this.referee.outcome();
-      if (!outcome) throw new InvariantViolationError("RESOLVING_MATCH sin veredicto");
-      this.match.phase = "RESOLVED";
+    // La presentación terminó. El VEREDICTO ya salió al ENTRAR a esta fase, así que
+    // acá no se dictamina nada: solo se cierra la máquina. Ver `enterPresentingMatch`.
+    if (kind === "PRESENTING_MATCH") {
+      this.match.phase = "FINISHED";
       this.match.activeDeadline = 0;
       this.scheduler.cancel();
-      events.push({ type: "MATCH_RESOLVED", ...outcome });
       return { events, finished: true };
     }
 
     throw new InvariantViolationError(`el conductor de PARTIDA no maneja ${kind}`);
   }
 
-  private enterResolvingMatch(): void {
-    this.match.phase = "RESOLVING_MATCH";
-    this.stampDeadline(this.config.resolvingMatchMs);
+  // `MATCH_RESOLVED` sale al ENTRAR a la presentación, NO al vencerla.
+  //
+  // Es la corrección que truco documentó en su changelog de revancha (negocio v26 §2):
+  // con el evento al vencer, el premio esperaba toda la pausa —y con las fases de
+  // revancha del otro lado, hasta 40 segundos—. La regla de producto es la contraria:
+  // en lo que finaliza una partida se paga al ganador, haya revancha o no. El listener
+  // que paga cuelga de este evento, así que de dónde se emite ES la latencia del pago.
+  //
+  // Consecuencia que hay que ver antes de escribirla: cualquier guarda de reembolso en
+  // `onDispose` NO puede comparar contra la fase terminal, porque con fases después del
+  // veredicto reembolsaría una partida ya pagada. Se pregunta por el veredicto
+  // (`referee.outcome()`), no por `phase === "FINISHED"`.
+  private enterPresentingMatch(): readonly MatchEvent[] {
+    const outcome = this.referee.outcome();
+    if (!outcome) throw new InvariantViolationError("presentación de partida sin veredicto");
+    this.match.phase = "PRESENTING_MATCH";
+    this.stampDeadline(this.config.presentingMatchMs);
+    return [{ type: "MATCH_RESOLVED", ...outcome }];
   }
 
   // Estampa el instante en el estado Y arma el timer por el puerto. Las dos cosas
@@ -2232,8 +2508,11 @@ git add src/features/match/core
 git commit -m "feat(engine): el trío de PARTIDA, las dos facades y el verbo ABANDON
 
 Un solo verbo, pero atraviesa el espinazo completo: juez valida, player muta,
-conductor transiciona, estampa el plazo en el estado y lo arma por el puerto, y
-al vencer emite DEADLINE_EXPIRED + MATCH_RESOLVED.
+conductor transiciona, emite MATCH_RESOLVED al ENTRAR a la presentación, estampa
+el plazo en el estado y lo arma por el puerto, y al vencer solo cierra la máquina.
+
+El veredicto sale al entrar y no al vencer porque el listener que paga cuelga de
+ese evento: de dónde se emite es la latencia del premio (truco negocio v26 §2).
 
 MatchPlayer es el único escritor de hasAbandoned, verificable con grep.
 begin() es idempotente porque la sala lo llama en cada conexión.
@@ -2512,6 +2791,8 @@ function build() {
     seed: "s",
     seats: ["u1", "u2"],
     pointsToWin: 100,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: false,
   });
   const round = new RoundState();
   round.roundNumber = 3;
@@ -2526,9 +2807,9 @@ describe("MatchHistory", () => {
   // entre sí. Un registro de solo eventos tendría los desenlaces y ninguna jugada.
   it("intercala comandos y eventos con un solo seq monótono", () => {
     const { history, recorded } = build();
-    history.command("PLAY_TILE", { playerId: "u1", left: 6, right: 4, side: "LEFT" });
+    history.command("PLAYER", "PLAY_TILE", { playerId: "u1", left: 6, right: 4, side: "LEFT" });
     history.events([{ type: "DEADLINE_EXPIRED", kind: "TURN" }]);
-    history.command("PASS", { playerId: "u2" });
+    history.command("PLAYER", "PASS", { playerId: "u2" });
 
     expect(recorded.map((e) => [e.seq, e.source, e.type])).toEqual([
       [1, "PLAYER", "PLAY_TILE"],
@@ -2541,7 +2822,7 @@ describe("MatchHistory", () => {
   // bocas, y para un reclamo —"yo nunca pasé"— esa es toda la pregunta.
   it("distingue el verbo del jugador del mismo verbo dicho por el sistema", () => {
     const { history, recorded } = build();
-    history.command("PASS", { playerId: "u1" });
+    history.command("PLAYER", "PASS", { playerId: "u1" });
     history.events([{ type: "PASS", playerId: "u2" }]);
 
     expect(recorded[0]).toMatchObject({ type: "PASS", source: "PLAYER", kind: "COMMAND" });
@@ -2551,7 +2832,7 @@ describe("MatchHistory", () => {
   it("envuelve cada entrada con matchId, timestamp del Clock y roundNumber", () => {
     const { history, recorded, clockBox } = build();
     clockBox.now = 7_777;
-    history.command("PASS", { playerId: "u1" });
+    history.command("PLAYER", "PASS", { playerId: "u1" });
 
     expect(recorded[0]).toMatchObject({ matchId: "m1", at: 7_777, roundNumber: 3 });
   });
@@ -2564,7 +2845,7 @@ describe("MatchHistory", () => {
     const tile = new Tile();
     tile.left = 6;
     tile.right = 4;
-    history.command("PLAY_TILE", { playerId: "u1", tile });
+    history.command("PLAYER", "PLAY_TILE", { playerId: "u1", tile });
 
     expect(recorded[0]?.payload).toEqual({ playerId: "u1", tile: { left: 6, right: 4 } });
   });
@@ -2577,7 +2858,7 @@ describe("MatchHistory", () => {
     const b = new Tile();
     b.left = 2;
     b.right = 3;
-    history.command("PLAY_TILE", { playerId: "u1", tiles: [a, b] });
+    history.command("PLAYER", "PLAY_TILE", { playerId: "u1", tiles: [a, b] });
 
     expect(recorded[0]?.payload).toEqual({
       playerId: "u1",
@@ -2588,7 +2869,7 @@ describe("MatchHistory", () => {
   it("un lote de eventos consume un seq por evento", () => {
     const { history, recorded } = build();
     history.events([
-      { type: "DEADLINE_EXPIRED", kind: "RESOLVING_MATCH" },
+      { type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" },
       { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "ABANDONMENT" },
     ]);
     expect(recorded.map((e) => e.seq)).toEqual([1, 2]);
@@ -2610,7 +2891,15 @@ import type { PlayerId } from "../core/ids.js";
 
 // Lo que solo la SALA sabe: que un socket se cayó, que volvió, y que esta partida
 // se murió sin veredicto. El dominio no tiene un final sin veredicto.
-export type AbortReason = "NEVER_STARTED" | "INTERRUPTED";
+//
+// Los tres motivos son tres momentos distintos, y la diferencia es plata: los tres
+// reembolsan, pero soporte tiene que poder decir CUÁL fue.
+//   · NEVER_STARTED — la mesa nunca se llenó (venció el plazo de ocupación).
+//   · NEVER_PLAYED  — se llenó y se repartió, pero NADIE levantó sus fichas: venció la
+//                     ventana de reparto con los dos ausentes (reglas §3.1). Es el
+//                     hermano tardío del anterior: allá nunca se llenó, acá nunca arrancó.
+//   · INTERRUPTED   — se estaba jugando y la sala se murió sin veredicto.
+export type AbortReason = "NEVER_STARTED" | "NEVER_PLAYED" | "INTERRUPTED";
 
 export type PlatformMatchEvent =
   | { type: "PLAYER_DISCONNECTED"; playerId: PlayerId }
@@ -2630,9 +2919,20 @@ export type NetworkMatchEvent = MatchEvent | PlatformMatchEvent;
 // Se graban las DOS cosas —el ACTO y el HECHO— intercaladas en el orden en que
 // pasaron, porque por el criterio de MatchEvent la mayoría de los verbos no emite
 // nada: un historial de solo eventos tendría los desenlaces y ninguna jugada.
+import type { CommandPayloads } from "../core/command.js";
 import type { Clock } from "../core/engine/clock.js";
 import type { MatchState } from "../core/state/index.js";
 import type { NetworkMatchEvent } from "./events.js";
+
+// EL VOCABULARIO DEL HISTORIAL ES CERRADO, y eso es el punto entero de la corrección
+// del v1. Ahí una entrada era un tipo único discriminado por dos booleanos
+// (`isPassed`/`isLoaded`), así que `isPassed && isLoaded` typechequeaba y no significaba
+// nada. Acá el discriminante es `type`, y su dominio es la unión de los verbos del
+// catálogo con los tipos de evento — no `string`.
+//
+// Si esto fuera `string`, un `type: "LOAD_TILE"` (el nombre del v1) se grabaría sin que
+// nada chille, y el replay lo descubriría en runtime rebobinando una partida real.
+export type HistoryEntryType = keyof CommandPayloads | NetworkMatchEvent["type"];
 
 export interface HistoryEntry {
   readonly matchId: string;
@@ -2642,7 +2942,7 @@ export interface HistoryEntry {
   readonly roundNumber: number;
   readonly source: "PLAYER" | "SYSTEM";
   readonly kind: "COMMAND" | "EVENT";
-  readonly type: string;
+  readonly type: HistoryEntryType;
   readonly payload: Record<string, unknown>;
 }
 
@@ -2664,15 +2964,25 @@ export class MatchHistory {
     private readonly port: HistoryPort,
   ) {}
 
-  command(type: string, payload: object): void {
-    this.port.record([this.wrap("PLAYER", "COMMAND", type, payload)]);
+  // `source` es PARÁMETRO y no una constante `"PLAYER"`. Hoy todos los comandos los dice
+  // un jugador, así que la sala pasa siempre `"PLAYER"` — pero el spec §5.1 dice que el
+  // MISMO verbo dicho por el sistema se graba con el nombre del verbo y `source: SYSTEM`,
+  // y que "el mecanismo del historial no depende de esa elección". Con la firma fijada en
+  // PLAYER, sí dependía: cambiar la decisión de qué hace el reloj al vencer el turno
+  // habría exigido tocar esta clase. Ahora es un argumento.
+  command(
+    source: HistoryEntry["source"],
+    type: keyof CommandPayloads,
+    payload: object,
+  ): void {
+    this.port.record([this.wrap(source, "COMMAND", type, payload)]);
   }
 
   events(events: readonly NetworkMatchEvent[]): void {
     if (events.length === 0) return;
     this.port.record(
       events.map((event) => {
-        const { type, ...rest } = event as { type: string } & Record<string, unknown>;
+        const { type, ...rest } = event as NetworkMatchEvent & Record<string, unknown>;
         return this.wrap("SYSTEM", "EVENT", type, rest);
       }),
     );
@@ -2681,7 +2991,7 @@ export class MatchHistory {
   private wrap(
     source: HistoryEntry["source"],
     kind: HistoryEntry["kind"],
-    type: string,
+    type: HistoryEntryType,
     payload: object,
   ): HistoryEntry {
     this.seq += 1;
@@ -2991,10 +3301,6 @@ describe("StateViewVisibilityController", () => {
     expect(views.get("u1")?.has(tile)).toBe(true);
   });
 
-  it("una audiencia de EQUIPO no se resuelve todavía, y lo dice", () => {
-    const { controller } = build();
-    expect(() => controller.makePublic(new Tile(), { kind: "TEAM", teamId: "A" })).toThrow();
-  });
 });
 ```
 
@@ -3045,11 +3351,6 @@ export class StateViewVisibilityController implements SchemaVisibilityController
         }
         return [view];
       }
-      case "TEAM":
-        // No hace falta todavía: en dominó no hay nada que se revele a un equipo y no
-        // a la mesa. Lanza en vez de devolver vacío para que el día que haga falta se
-        // vea acá y no en un revelado que silenciosamente no llega a nadie.
-        throw new InvariantViolationError("audiencia de EQUIPO no implementada");
     }
   }
 }
@@ -3089,7 +3390,7 @@ export class RoomTimeoutScheduler implements TimeoutScheduler {
 - [ ] **Step 4: Correr el test hasta que pase**
 
 Run: `npx vitest run src/features/match/transports/colyseus/visibility.test.ts`
-Expected: los 6 tests PASAN.
+Expected: los 5 tests PASAN.
 
 Si `StateView` no expone `has()`, cambiar las aserciones por lo que sí exponga (comprobado en la
 referencia del Step 1 de la Tarea 4). Lo que no se negocia es que el test demuestre que un asiento
@@ -3108,6 +3409,8 @@ const config = {
   seed: "secreto-que-no-sale",
   seats: ["u1", "u2"],
   pointsToWin: 100,
+  teamAssignment: "SHUFFLED",
+  isDealWindowEnabled: true,
 };
 
 describe("MatchRegistry", () => {
@@ -3170,6 +3473,7 @@ export type DominoRoomOptions = {
   readonly seats: readonly string[];
   readonly seed: string;
   readonly pointsToWin: number;
+  readonly teamAssignment: TeamAssignmentMode;
 };
 
 // Lo que onAuth produce y queda en client.auth.
@@ -3186,6 +3490,13 @@ export function configOf(options: DominoRoomOptions): DominoMatchConfig {
     seed: options.seed,
     seats: options.seats,
     pointsToWin: options.pointsToWin,
+    teamAssignment: options.teamAssignment,
+    // NO viaja en las opciones de la sala, y es deliberado: la ventana de reparto es el
+    // control de presencia del arranque (reglas §3.1) y **va en toda mesa**. Si fuera un
+    // campo de `DominoRoomOptions`, quien cree salas —hoy los tests, mañana matchmaking—
+    // podría olvidarlo, y olvidarlo apaga un control antifraude en silencio. Acá está
+    // fijo y sigue siendo un solo lugar para que producto lo apague.
+    isDealWindowEnabled: true,
   };
 }
 ```
@@ -3201,6 +3512,42 @@ export interface PublicMatchConfig {
   readonly seats: readonly string[];
   readonly pointsToWin: number;
 }
+
+// Lo que DEVUELVE el endpoint: el config inmutable más UNA muestra del reloj del
+// servidor. `serverNow` no es config —cambia en cada request— y por eso es un tipo
+// aparte y no un campo de `PublicMatchConfig`: nadie lo puede cachear por error junto
+// con el resto, y `publicConfigOf` sigue siendo puro.
+//
+// PARA QUÉ. `MatchState.activeDeadline` es un instante ABSOLUTO en epoch del servidor
+// (§7.1 del spec explica por qué epoch y no la timeline de la sala). El front dibuja la
+// cuenta atrás restándole "ahora", y si le resta su propio `Date.now()` un dispositivo
+// con el reloj corrido —móvil sin NTP, zona mal configurada, emulador— muestra el turno
+// ya vencido o con minutos de sobra. Con esta muestra el cliente calcula
+// `offset = serverNow - Date.now()` UNA vez y dibuja
+// `activeDeadline - (Date.now() + offset)`.
+//
+// El error residual es medio round-trip: decenas de ms contra una ventana de 60.000 ms.
+// Colyseus tiene maquinaria fina para esto (`room.clock.serverNow()`), pero su estimador
+// solo existe en salas que llaman `defineInput()` —el camino de predicción, con timestep
+// fijo y `step()`—; una sala por turnos se queda con un stub que lee el reloj local. La
+// propia doc bendice la salida: "¿traés tu propio algoritmo de sync? `room.clock = new
+// MyClock()`". Esto es ese algoritmo, en su versión más simple.
+export interface MatchConfigResponse extends PublicMatchConfig {
+  /** Muestra de `Date.now()` del servidor al momento del request. NO cachear. */
+  readonly serverNow: number;
+}
+
+// LO QUE NO ENTRA EN EL DTO, y es una decisión: `isDealWindowEnabled` y su duración.
+//
+// Truco los pone en el suyo para que el front dibuje el botón y su cuenta atrás. Acá no
+// hacen falta, y agregarlos sería duplicar estado derivable:
+//   · ¿hay ventana? → `currentRound.phase === "DEALING"`.
+//   · ¿me toca a mí? → `!player.hasSeenTiles`.
+//   · ¿cuánto queda? → `activeDeadline` (se estampa también para esta fase) menos
+//     `Date.now() + offset`.
+// El único caso que el DTO cubriría es pintar una barra de progreso que necesite el TOTAL
+// además del resto. Cuando aparezca ese requerimiento se agrega el campo; hoy sería
+// especulación, y un campo de config que contradice al estado es el peor de los dos.
 
 // Las partidas VIVAS del proceso. De acá salen dos respuestas: el config público
 // por roomId, y "¿este jugador ya está jugando?" —la sesión única—.
@@ -3786,8 +4133,14 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   override onDispose(): void {
     // El hecho es de la SALA: el juego no tiene un final sin veredicto. Sin este
     // aviso, el anillo nunca se entera y una entrada cobrada se queda sin reembolsar.
-    if (this.notifier && this.state.phase !== "RESOLVED") {
-      const reason = this.state.startedAt === 0 ? "NEVER_STARTED" : "INTERRUPTED";
+    //
+    // ⚠ LA GUARDA NO PUEDE PREGUNTAR SOLO POR EL TERMINAL. Hoy `phase !== "FINISHED"`
+    // alcanza, pero en cuanto entren las fases de revancha —que van DESPUÉS del
+    // veredicto— una partida ya PAGADA caería en esta rama y se reembolsaría encima. Lo
+    // correcto entonces es preguntar por el VEREDICTO, no por la fase. Truco lo pagó y
+    // lo documentó (negocio v27 §12.6); acá queda anotado antes de que pase.
+    if (this.notifier && this.state.phase !== "FINISHED") {
+      const reason = this.abortReason();
       this.notifier.notify([{ type: "MATCH_ABORTED", reason }]);
       this.log.warn("partida abortada sin veredicto", { reason });
     }
@@ -3796,6 +4149,17 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // Determinista, en vez de esperar al GC.
     for (const view of this.views.values()) view.dispose();
     rootContainer.resolve(MatchRegistry).remove(this.roomId);
+  }
+
+  // Los tres momentos en que una partida puede morir sin veredicto, del más temprano al
+  // más tardío. Los tres reembolsan; la diferencia es lo que soporte puede contestar.
+  private abortReason(): AbortReason {
+    if (this.state.startedAt === 0) return "NEVER_STARTED";
+    // Se repartió y NADIE levantó sus fichas: venció la ventana de reparto con todos
+    // ausentes (reglas §3.1). Se reconoce sin campo nuevo — nadie vio nada y nadie sigue
+    // en pie— y es la razón por la que `outcome()` devuelve `undefined` en ese caso.
+    if (this.state.players.every((player) => !player.hasSeenTiles)) return "NEVER_PLAYED";
+    return "INTERRUPTED";
   }
 
   // UNA sola política, con lista blanca EXPLÍCITA de lo que no es bug. Sin esa lista,
@@ -3827,7 +4191,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       const events = this.catalog.command(type).execute(payload);
       // ANTES de notificar: primero el acto, después los hechos que provocó.
       // Y solo se registra lo que EJECUTÓ.
-      this.history.command(type, payload);
+      this.history.command("PLAYER", type, payload);
       this.notifier.notify(events);
     } catch (error) {
       // Nunca `throw` desde acá: en 0.18 los handlers de onMessage no están envueltos.
@@ -3880,10 +4244,17 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 // src/features/match/transports/http/register-http.ts
 import type { Express } from "express";
 import { rootContainer } from "../../../../di-container.js";
+import type { Clock } from "../../core/engine/clock.js";
 import { MatchRegistry } from "../match-registry.js";
+import type { MatchConfigResponse } from "../match-registry.js";
 
 // El config es inmutable y el seed no debe salir NUNCA, así que el front lo consume
 // una sola vez por HTTP en vez de por estado sincronizado.
+//
+// Y de paso viaja `serverNow`, que es lo que le permite al front corregir el desfase de
+// su propio reloj antes de dibujar la primera cuenta atrás (ver `MatchConfigResponse`).
+// Va acá y no en un endpoint aparte porque el front YA pega este request antes de
+// unirse: un campo más no cuesta un round-trip, y un endpoint `/time` sí.
 export function registerMatchHttp(app: Express): void {
   app.get("/config/:roomId", (request, response) => {
     const config = rootContainer.resolve(MatchRegistry).publicConfigOf(request.params.roomId);
@@ -3891,7 +4262,11 @@ export function registerMatchHttp(app: Express): void {
       response.status(404).json({ error: "NOT_FOUND" });
       return;
     }
-    response.json(config);
+    // Por el puerto `Clock` y no con `Date.now()` directo: así el test puede congelarlo
+    // y afirmar el valor exacto en vez de un rango.
+    const clock = rootContainer.resolve<Clock>("Clock");
+    const body: MatchConfigResponse = { ...config, serverNow: clock.now() };
+    response.json(body);
   });
 }
 ```
@@ -3904,7 +4279,7 @@ export { registerMatchHttp } from "./transports/http/register-http.js";
 export { configOf } from "./transports/match-contract.js";
 export type { DominoRoomOptions, SeatCredentials } from "./transports/match-contract.js";
 export { MatchRegistry } from "./transports/match-registry.js";
-export type { PublicMatchConfig } from "./transports/match-registry.js";
+export type { MatchConfigResponse, PublicMatchConfig } from "./transports/match-registry.js";
 ```
 
 ```ts
@@ -3999,25 +4374,28 @@ En `src/env.ts`, añadir al schema de zod y a la interfaz:
 
 ```ts
 // dentro de `const schema = z.object({ … })`
-  TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
-  RESOLVING_ROUND_MS: z.coerce.number().int().positive().default(6_000),
-  RESOLVING_MATCH_MS: z.coerce.number().int().positive().default(6_000),
+  TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  EXTRA_TIME_RESERVE_MS: z.coerce.number().int().positive().default(30_000),
+  PRESENTING_ROUND_MS: z.coerce.number().int().positive().default(6_000),
+  PRESENTING_MATCH_MS: z.coerce.number().int().positive().default(6_000),
   SEATING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 ```
 
 ```ts
 // añadir a la interfaz Env
   readonly turnTimeoutMs: number;
-  readonly resolvingRoundMs: number;
-  readonly resolvingMatchMs: number;
+  readonly extraTimeReserveMs: number;
+  readonly presentingRoundMs: number;
+  readonly presentingMatchMs: number;
   readonly seatingTimeoutMs: number;
 ```
 
 ```ts
 // añadir al objeto que devuelve parseEnv
     turnTimeoutMs: parsed.TURN_TIMEOUT_MS,
-    resolvingRoundMs: parsed.RESOLVING_ROUND_MS,
-    resolvingMatchMs: parsed.RESOLVING_MATCH_MS,
+    extraTimeReserveMs: parsed.EXTRA_TIME_RESERVE_MS,
+    presentingRoundMs: parsed.PRESENTING_ROUND_MS,
+    presentingMatchMs: parsed.PRESENTING_MATCH_MS,
     seatingTimeoutMs: parsed.SEATING_TIMEOUT_MS,
 ```
 
@@ -4025,15 +4403,14 @@ En `src/features/match/core/config.ts`, reemplazar la constante por una función
 puede leer `env` (Regla 1), así que **recibe los valores por parámetro** y quien los pasa es el root:
 
 ```ts
-// reemplaza DEFAULT_GLOBAL_CONFIG
-export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
-  turnTimeoutMs: 30_000,
-  resolvingRoundMs: 6_000,
-  resolvingMatchMs: 6_000,
-  seatingTimeoutMs: 30_000,
-  tilesPerPlayer: 7,
-};
-
+// NO se reemplaza DEFAULT_GLOBAL_CONFIG: se le suma la función. La constante de la
+// Tarea 5 ya tiene los valores de las reglas (60 s de turno, 30 s de reserva) y es
+// el default que un test sin env usa; `globalConfigWith` es el hueco por donde el
+// root le mete lo que vino de env.
+//
+// Ojo con la tentación de re-declarar la constante acá con otros números: perdería
+// `extraTimeReserveMs` (dejaría de satisfacer la interfaz) y bajaría el plazo de turno
+// sin que ninguna regla lo pida.
 export function globalConfigWith(overrides: Partial<GlobalDominoConfig>): GlobalDominoConfig {
   return { ...DEFAULT_GLOBAL_CONFIG, ...overrides };
 }
@@ -4045,8 +4422,9 @@ En `src/di-container.ts`, cambiar el registro:
 rootContainer.register("GlobalDominoConfig", {
   useValue: globalConfigWith({
     turnTimeoutMs: env.turnTimeoutMs,
-    resolvingRoundMs: env.resolvingRoundMs,
-    resolvingMatchMs: env.resolvingMatchMs,
+    extraTimeReserveMs: env.extraTimeReserveMs,
+    presentingRoundMs: env.presentingRoundMs,
+    presentingMatchMs: env.presentingMatchMs,
     seatingTimeoutMs: env.seatingTimeoutMs,
   }),
 });
@@ -4057,9 +4435,12 @@ En `vitest.setup.ts`, añadir:
 ```ts
 // Plazos cortos: los tests no esperan 6 s reales, y el determinismo lo dan los
 // seams del engine, no el reloj de pared.
-process.env.RESOLVING_MATCH_MS ??= "120";
-process.env.RESOLVING_ROUND_MS ??= "120";
+process.env.PRESENTING_MATCH_MS ??= "120";
+process.env.PRESENTING_ROUND_MS ??= "120";
 process.env.TURN_TIMEOUT_MS ??= "600";
+// La reserva también se acorta: si no, un test de timeout tendría que agotar 30 s
+// reales antes de que el sistema actúe.
+process.env.EXTRA_TIME_RESERVE_MS ??= "300";
 process.env.SEATING_TIMEOUT_MS ??= "3000";
 ```
 
@@ -4110,6 +4491,7 @@ export function casualTable(seats: string[], seed = "seed-e2e"): DominoRoomOptio
     seats,
     seed,
     pointsToWin: 100,
+    teamAssignment: "SHUFFLED",
   };
 }
 
@@ -4135,6 +4517,11 @@ export async function waitUntil(
 // TRAMPA: si un verbo no cambia ninguna de estas claves, act() cuelga. Cuando se
 // sume un verbo que sea un overlay del turno (una negociación de apuesta, por
 // ejemplo), hay que sumar su rama acá.
+//
+// `hasSeenTiles` está en la lista por esa trampa exacta: el PRIMER `REVEAL_TILES` de la
+// ventana de reparto no mueve ninguna otra clave —no pone ficha, no toca el pozo, no
+// cambia el turno ni la fase, porque todavía falta el otro—. Sin este campo, `act` se
+// cuelga esperando un cambio que ocurrió pero no estaba mirando.
 export function signatureOf(state: MatchState): string {
   return JSON.stringify([
     state.phase,
@@ -4143,10 +4530,15 @@ export function signatureOf(state: MatchState): string {
     state.currentRound?.roundNumber ?? null,
     state.currentRound?.currentTurn?.playerId ?? null,
     state.currentRound?.board.tiles.length ?? null,
-    state.currentRound?.boneyard.count ?? null,
+    state.currentRound?.boneyard?.count ?? null,
     state.scoreboard.teamA,
     state.scoreboard.teamB,
-    state.players.map((player) => [player.hand.tileCount, player.hasAbandoned, player.connected]),
+    state.players.map((player) => [
+      player.hand.tileCount,
+      player.hasAbandoned,
+      player.hasSeenTiles,
+      player.connected,
+    ]),
   ]);
 }
 
@@ -4157,10 +4549,16 @@ export interface SeatedMatch {
 }
 
 // La sala nace LLENA: se crea con todos sus asientos y después se conectan.
+// Sienta a los dos y, por defecto, LEVANTA LAS FICHAS de los dos: en producción la
+// ventana de reparto está encendida en toda mesa (`configOf`), así que un e2e que la
+// saltee estaría probando un camino que no existe.
+//
+// `skipDealWindow: true` es para el único test que necesita la ventana ABIERTA: el suyo.
 export async function seatPair(
   server: ColyseusTestServer,
   seats: [string, string],
   seed?: string,
+  options: { skipDealWindow?: boolean } = {},
 ): Promise<SeatedMatch> {
   const room = await server.createRoom("domino", casualTable([...seats], seed));
   const clients: SeatedMatch["clients"] = {};
@@ -4168,7 +4566,19 @@ export async function seatPair(
     server.sdk.auth.token = mintToken(userId);
     clients[userId] = await server.connectTo(room);
   }
-  return { roomId: room.roomId, serverState: room.state as MatchState, clients };
+  const match = { roomId: room.roomId, serverState: room.state as MatchState, clients };
+  if (!options.skipDealWindow) await revealAll(match);
+  return match;
+}
+
+// Los dos levantan sus fichas y la ronda arranca. Un `act` por jugador, así cada uno
+// espera a que el servidor lo procesó: el último cierra la ventana y la fase pasa a
+// `PLAYING`, que es el cambio de firma que `act` está esperando.
+export async function revealAll(match: SeatedMatch): Promise<void> {
+  for (const userId of Object.keys(match.clients)) {
+    await act(match, userId, "REVEAL_TILES");
+  }
+  await waitUntil(() => match.serverState.currentRound?.phase === "PLAYING");
 }
 
 // Manda y espera a que la firma del estado cambie.
@@ -4214,7 +4624,7 @@ afterAll(async () => {
 describe("ciclo de vida de una partida", () => {
   it("la partida arranca sola al ocuparse el último asiento", async () => {
     const match = await seatPair(server, ["u1", "u2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     expect(match.serverState.startedAt).toBeGreaterThan(0);
     expect(match.serverState.players.map((p) => p.playerId)).toEqual(["u1", "u2"]);
@@ -4223,30 +4633,34 @@ describe("ciclo de vida de una partida", () => {
 
   it("abandonar cierra la partida por forfeit, y el historial queda intercalado", async () => {
     const match = await seatPair(server, ["a1", "a2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     await act(match, "a1", "ABANDON");
-    expect(match.serverState.phase).toBe("RESOLVING_MATCH");
+    expect(match.serverState.phase).toBe("PRESENTING_MATCH");
 
-    await waitUntil(() => match.serverState.phase === "RESOLVED", 3_000);
+    await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
     // El ACTO del jugador entró como comando; los HECHOS que provocó, como eventos
     // del sistema. Un registro de solo eventos no tendría la primera línea.
+    //
+    // Y el ORDEN importa: el veredicto va ANTES del vencimiento, porque sale al ENTRAR
+    // a la presentación. Si algún día estas dos líneas aparecen al revés, el pago se
+    // atrasó una pausa entera (ver `MatchDriver.enterPresentingMatch`).
     expect(linesOf("m-a1-a2")).toEqual([
       "PLAYER ABANDON",
-      "SYSTEM DEADLINE_EXPIRED",
       "SYSTEM MATCH_RESOLVED",
+      "SYSTEM DEADLINE_EXPIRED",
     ]);
 
-    const resolved = historyOf("m-a1-a2").at(-1);
+    const resolved = historyOf("m-a1-a2").find((entry) => entry.type === "MATCH_RESOLVED");
     expect(resolved?.payload).toEqual({ winnerTeamId: "B", reason: "ABANDONMENT" });
   });
 
   it("el seq no tiene huecos y es estrictamente creciente", async () => {
     const match = await seatPair(server, ["s1", "s2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
     await act(match, "s1", "ABANDON");
-    await waitUntil(() => match.serverState.phase === "RESOLVED", 3_000);
+    await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
     const seqs = historyOf("m-s1-s2").map((entry) => entry.seq);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
@@ -4256,7 +4670,7 @@ describe("ciclo de vida de una partida", () => {
   // Un mensaje rechazado es rastro antifraude, no historia de la partida.
   it("un verbo desconocido se rechaza y NO entra al historial", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     const illegal: unknown[] = [];
     match.clients.r1?.onMessage("illegal", (payload) => illegal.push(payload));
@@ -4266,13 +4680,13 @@ describe("ciclo de vida de una partida", () => {
     expect(illegal[0]).toEqual({ code: "UNKNOWN_COMMAND" });
     expect(historyOf("m-r1-r2")).toHaveLength(0);
     // Y la partida sigue viva: un mensaje basura no mata la mesa.
-    expect(match.serverState.phase).toBe("IN_PROGRESS");
+    expect(match.serverState.phase).toBe("PLAYING");
   });
 
   // El caso del prototipo. Con `in` en vez de Object.hasOwn esto cerraba la partida.
   it("un mensaje llamado toString no mata la mesa", async () => {
     const match = await seatPair(server, ["p1", "p2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     const illegal: unknown[] = [];
     match.clients.p1?.onMessage("illegal", (payload) => illegal.push(payload));
@@ -4280,12 +4694,12 @@ describe("ciclo de vida de una partida", () => {
 
     await waitUntil(() => illegal.length > 0);
     expect(illegal[0]).toEqual({ code: "UNKNOWN_COMMAND" });
-    expect(match.serverState.phase).toBe("IN_PROGRESS");
+    expect(match.serverState.phase).toBe("PLAYING");
   });
 
   it("una segunda conexión del mismo asiento desplaza a la primera", async () => {
     const match = await seatPair(server, ["d1", "d2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     server.sdk.auth.token = mintToken("d1");
     const second = await server.sdk.joinById(match.roomId);
@@ -4323,7 +4737,28 @@ describe("ciclo de vida de una partida", () => {
       gameModeId: "clasica-2p",
       seats: ["c1", "c2"],
       pointsToWin: 100,
+      serverNow: expect.any(Number),
     });
+  });
+
+  // LA MUESTRA DEL RELOJ ES LO QUE HACE DIBUJABLE EL `activeDeadline`. Sin ella el front
+  // le resta su propio `Date.now()` a un instante estampado por el servidor, y un
+  // dispositivo con el reloj corrido muestra el turno vencido. El test afirma las dos
+  // cosas que el front necesita: que el campo viene, y que es de la misma escala que el
+  // deadline (epoch ms), porque compararlos es exactamente lo que va a hacer.
+  it("el config trae una muestra del reloj del servidor, en la escala del deadline", async () => {
+    const match = await seatPair(server, ["t1", "t2"]);
+    await waitUntil(() => match.serverState.activeDeadline > 0);
+
+    const body = (await (
+      await fetch(`http://localhost:2585/config/${match.roomId}`)
+    ).json()) as { serverNow: number };
+
+    // Mismo origen de tiempo: el deadline vigente cae DESPUÉS de la muestra, y no a
+    // cincuenta años de distancia. Si alguien pasa el deadline a la timeline de la sala
+    // (ms desde el arranque), esta aserción es la que lo caza.
+    expect(body.serverNow).toBeGreaterThan(1_700_000_000_000);
+    expect(match.serverState.activeDeadline).toBeGreaterThan(body.serverNow);
   });
 });
 ```
@@ -4331,13 +4766,13 @@ describe("ciclo de vida de una partida", () => {
 - [ ] **Step 5: Correr el test hasta que pase**
 
 Run: `npx vitest run src/features/match/tests/lifecycle-e2e.test.ts`
-Expected: los 9 tests PASAN.
+Expected: los 10 tests PASAN.
 
 Tres fallos probables y qué significan:
 
 | Síntoma | Causa | Arreglo |
 |---|---|---|
-| `waitUntil: se agotó el plazo` esperando `IN_PROGRESS` | `startIfSeated` no dispara: `seated` no se llenó | Comprobar que `onJoin` corre para los dos clientes y que `maxClients` no los rechaza |
+| `waitUntil: se agotó el plazo` esperando `PLAYING` | `startIfSeated` no dispara: `seated` no se llenó | Comprobar que `onJoin` corre para los dos clientes y que `maxClients` no los rechaza |
 | El test del asiento ajeno cierra la sala | `onUncaughtException` trata `SeatNotReservedError` como bug | Verificar la lista blanca de `onUncaughtException` |
 | El historial sale vacío | `HistoryPort` se resolvió de un child y no del root | El grabador se arma en `buildPieces` resolviendo `"HistoryPort"`, que está registrado en el root |
 
@@ -4622,14 +5057,13 @@ Expected: los 7 tests PASAN.
 
 ```ts
 // src/features/match/core/engine/tests/dealer.test.ts
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG, type DominoMatchConfig } from "../../config.js";
 import { BoardState, BoneyardState, RoundState, Tile } from "../../state/index.js";
 import { Dealer } from "../dealer.js";
 import { createMatchState } from "../genesis.js";
 import { handOf } from "../state-projections.js";
 import { DOMINO_SET_SIZE, handValue, sameTile } from "../tile-set.js";
-import type { SchemaVisibilityController } from "../visibility.js";
 
 function build(seed = "seed-1") {
   const config: DominoMatchConfig = {
@@ -4638,6 +5072,8 @@ function build(seed = "seed-1") {
     seed,
     seats: ["u1", "u2"],
     pointsToWin: 100,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: false,
   };
   const match = createMatchState(config);
   const round = new RoundState();
@@ -4646,12 +5082,7 @@ function build(seed = "seed-1") {
   round.boneyard = new BoneyardState();
   match.currentRound = round;
 
-  const visibility: SchemaVisibilityController = { makePublic: vi.fn(), hide: vi.fn() };
-  return {
-    match,
-    visibility,
-    dealer: new Dealer(match, config, DEFAULT_GLOBAL_CONFIG, visibility),
-  };
+  return { match, dealer: new Dealer(match, config, DEFAULT_GLOBAL_CONFIG) };
 }
 
 const tilesOf = (match: ReturnType<typeof build>["match"], playerId: string) =>
@@ -4664,8 +5095,8 @@ describe("Dealer", () => {
 
     expect(tilesOf(match, "u1")).toHaveLength(7);
     expect(tilesOf(match, "u2")).toHaveLength(7);
-    expect(match.currentRound?.boneyard.tiles.length).toBe(DOMINO_SET_SIZE - 14);
-    expect(match.currentRound?.boneyard.count).toBe(DOMINO_SET_SIZE - 14);
+    expect(match.currentRound?.boneyard?.tiles.length).toBe(DOMINO_SET_SIZE - 14);
+    expect(match.currentRound?.boneyard?.count).toBe(DOMINO_SET_SIZE - 14);
   });
 
   it("mantiene tileCount al día, que es el campo que ve el rival", () => {
@@ -4680,7 +5111,7 @@ describe("Dealer", () => {
     const all = [
       ...tilesOf(match, "u1"),
       ...tilesOf(match, "u2"),
-      ...(match.currentRound?.boneyard.tiles ?? []),
+      ...(match.currentRound?.boneyard?.tiles ?? []),
     ];
     expect(all).toHaveLength(DOMINO_SET_SIZE);
     for (const tile of all) {
@@ -4720,29 +5151,23 @@ describe("Dealer", () => {
     );
   });
 
-  it("revela cada mano SOLO a su dueño", () => {
-    const { match, dealer, visibility } = build();
+  // REPARTIR NO REVELA (reglas §3.1). Antes esto eran dos tests con un spy sobre el
+  // puerto de visibilidad —uno afirmando que la mano se revelaba a su dueño, otro que el
+  // pozo no se revelaba a nadie—. Ahora el `Dealer` no tiene el puerto, así que las dos
+  // cosas son ciertas por construcción y lo único que queda por afirmar es que las
+  // fichas quedaron REPARTIDAS y todavía NO vistas.
+  //
+  // Dónde vive ahora cada mitad: que la mano llegue a su dueño lo prueba
+  // `round/tests/player.test.ts` (`revealTiles`), y que nunca llegue a un rival lo
+  // prueba el smoke de visibilidad de punta a punta.
+  it("reparte sin revelar: nadie levantó nada todavía", () => {
+    const { match, dealer } = build();
     dealer.deal(1);
 
-    const calls = (visibility.makePublic as ReturnType<typeof vi.fn>).mock.calls;
     for (const player of match.players) {
-      expect(calls).toEqual(
-        expect.arrayContaining([
-          [player.hand.tiles, { kind: "PLAYER", playerId: player.playerId }],
-        ]),
-      );
+      expect(player.hand.tiles.length).toBe(7);
+      expect(player.hasSeenTiles).toBe(false);
     }
-  });
-
-  // El pozo lo necesita el dominio y NO lo ve nadie: queda en el árbol pero fuera
-  // de toda audiencia. Si esto se rompe, el pozo se filtra a los clientes.
-  it("NUNCA revela el pozo", () => {
-    const { match, dealer, visibility } = build();
-    dealer.deal(1);
-
-    const calls = (visibility.makePublic as ReturnType<typeof vi.fn>).mock.calls;
-    const boneyard = match.currentRound?.boneyard.tiles;
-    expect(calls.some(([node]) => node === boneyard)).toBe(false);
   });
 
   it("repartir dos veces reemplaza la mano, no la acumula", () => {
@@ -4753,10 +5178,6 @@ describe("Dealer", () => {
   });
 
   it("el seam de test permite forzar el orden del mazo", () => {
-    const { match, config, visibility } = { ...build(), config: undefined as never };
-    void match;
-    void visibility;
-    void config;
     // El uso real del seam está en tests posteriores con FixedDealer; acá solo se
     // afirma que orderedTiles es sobreescribible desde una subclase.
     class Fixed extends Dealer {
@@ -4778,8 +5199,9 @@ Run: `npx vitest run src/features/match/core/engine/tests/dealer.test.ts` → FA
 
 ```ts
 // src/features/match/core/engine/dealer.ts
-// SERVICIO: reparte y revela. No es Player (nadie lo "hace" como verbo) ni Referee
-// (no juzga nada), así que va suelto al lado del Scorer.
+// SERVICIO: reparte, y NADA MÁS. No es Player (nadie lo "hace" como verbo) ni Referee
+// (no juzga nada), así que va suelto al lado del Scorer. Revelar dejó de ser suyo con
+// la ventana de reparto (reglas §3.1): ahora es del `RoundPlayer`, que es el actor.
 //
 // Es la ÚNICA fuente de no-determinismo del negocio, y está encapsulada: deriva de
 // (seed, roundNumber) sin estado mutable, así que el replay no depende del orden de
@@ -4788,16 +5210,17 @@ import { hashSeed, mulberry32, shuffled } from "../../../../shared/rng.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../config.js";
 import { Tile } from "../state/index.js";
 import type { MatchState } from "../state/index.js";
-import { currentRoundOf, playerOf } from "./state-projections.js";
+import { boneyardOf, currentRoundOf, playerOf } from "./state-projections.js";
 import { orderedTileSet } from "./tile-set.js";
-import type { SchemaVisibilityController } from "./visibility.js";
 
+// NO recibe el puerto de visibilidad, y eso es una garantía y no un olvido: desde la
+// ventana de reparto (reglas §3.1) repartir no revela nada, así que "repartir no puede
+// filtrar una ficha" es cierto por la FORMA de esta clase. Antes era un test con un spy.
 export class Dealer {
   constructor(
     private readonly match: MatchState,
     private readonly config: DominoMatchConfig,
     private readonly globalConfig: GlobalDominoConfig,
-    private readonly visibility: SchemaVisibilityController,
   ) {}
 
   deal(roundNumber: number): void {
@@ -4816,14 +5239,29 @@ export class Dealer {
       }
       hand.tileCount = hand.tiles.length;
       hand.isRevealed = false;
-      // Las dos líneas del invariante de visibilidad: la verdad de negocio ya está
-      // en el árbol (la ficha está en SU mano) y acá va el efecto de infra.
-      this.visibility.makePublic(hand.tiles, { kind: "PLAYER", playerId });
+      // REPARTIR YA NO REVELA (reglas §3.1). Antes acá iba un `makePublic` a su dueño;
+      // ahora la mano nace sin hacerse pública a nadie y la levanta el propio jugador
+      // con `REVEAL_TILES` (`RoundPlayer.revealTiles`).
+      //
+      // Ojo con la diferencia, que es la que hace que la ventana de reparto sea una
+      // línea MENOS y no un mecanismo nuevo: la ficha **no se esconde** —no hay nada que
+      // esconder—, simplemente todavía no se hizo pública, que es el estado natural de
+      // cualquier nodo gateado.
+      //
+      // ⚠ Y OJO CON LO QUE LA RONDA ANTERIOR DEJÓ PÚBLICO: quien des-revela es el
+      // `RoundDriver` antes de llamar acá (`hideAllHands`), no este servicio. Ver el
+      // comentario de `RoundPlayer.hideTiles`.
     }
 
-    round.boneyard.tiles.clear();
-    for (const tile of deck.slice(cursor)) round.boneyard.tiles.push(tile);
-    round.boneyard.count = round.boneyard.tiles.length;
+    // El pozo puede no existir (4P reparte el set entero). Si existe, lo que sobró del
+    // mazo ES el pozo; si no existe, `deck.slice(cursor)` está vacío de todos modos, así
+    // que la rama ausente y el resto vacío no se contradicen nunca.
+    if (round.boneyard) {
+      const boneyard = boneyardOf(round);
+      boneyard.tiles.clear();
+      for (const tile of deck.slice(cursor)) boneyard.tiles.push(tile);
+      boneyard.count = boneyard.tiles.length;
+    }
     // El pozo NO se revela a nadie, nunca. Está en el árbol porque el dominio lo
     // necesita, y fuera de toda audiencia porque nadie lo debe ver.
   }
@@ -4895,7 +5333,6 @@ function board(placements: [number, number, "LEFT" | "RIGHT"][]): BoardState {
     placed.tile = tile;
     placed.playedBy = "u1";
     placed.side = side;
-    placed.lockedNumber = 0;
     state.tiles.push(placed);
   }
   return state;
@@ -4953,7 +5390,7 @@ describe("boardEndsOf", () => {
 ```ts
 // src/features/match/core/engine/round/tests/playable.test.ts
 import { describe, expect, it } from "vitest";
-import { hasPlayableTile, lockedNumberFor, playableSides } from "../playable.js";
+import { hasPlayableTile, playableSides } from "../playable.js";
 
 const empty = { left: undefined, right: undefined };
 const ends = { left: 6, right: 2 };
@@ -5003,20 +5440,6 @@ describe("hasPlayableTile", () => {
   });
 });
 
-describe("lockedNumberFor", () => {
-  it("devuelve el número por el que la ficha engancha", () => {
-    expect(lockedNumberFor({ left: 6, right: 5 }, ends, "LEFT")).toBe(6);
-    expect(lockedNumberFor({ left: 5, right: 2 }, ends, "RIGHT")).toBe(2);
-  });
-
-  it("con el tablero vacío no hay número de engarce", () => {
-    expect(lockedNumberFor({ left: 6, right: 5 }, empty, "RIGHT")).toBeUndefined();
-  });
-
-  it("devuelve undefined si la ficha no engancha de ese lado", () => {
-    expect(lockedNumberFor({ left: 5, right: 4 }, ends, "LEFT")).toBeUndefined();
-  });
-});
 ```
 
 - [ ] **Step 3: Correr los dos tests para verificar que fallan**
@@ -5029,6 +5452,7 @@ Expected: FAIL — no existen `board-ends.js` ni `playable.js`.
 ```ts
 // src/features/match/core/engine/round/board-ends.ts
 import type { BoardState } from "../../state/index.js";
+import { sideOf } from "../state-projections.js";
 
 // Los extremos NO son campos del estado: se DERIVAN de la cadena jugada.
 // Almacenarlos invitaría a la desincronización (spec §7.1).
@@ -5048,7 +5472,9 @@ export function boardEndsOf(board: BoardState): BoardEnds {
     const placed = board.tiles[index];
     if (!placed) continue;
     const { left: a, right: b } = placed.tile;
-    if (placed.side === "LEFT") {
+    // `sideOf` y no `placed.side`: el campo del schema es `string`, así que comparar
+    // contra el literal a pelo deja pasar un typo que rompería la derivación entera.
+    if (sideOf(placed) === "LEFT") {
       // El número que engancha es el que coincide con el extremo; queda el otro.
       // Con una doble, `a === b === left`, así que el extremo no cambia — correcto.
       left = a === left ? b : a;
@@ -5085,19 +5511,9 @@ export function hasPlayableTile(tiles: readonly TileLike[], ends: BoardEnds): bo
   return tiles.some((tile) => playableSides(tile, ends).length > 0);
 }
 
-// El número por el que la ficha se cuelga. Va al estado (`PlacedTile.lockedNumber`)
-// porque el front lo necesita para orientar la ficha, y derivarlo de nuevo del lado
-// del cliente sería duplicar la regla.
-export function lockedNumberFor(
-  tile: TileLike,
-  ends: BoardEnds,
-  side: BoardSide,
-): number | undefined {
-  const end = side === "LEFT" ? ends.left : ends.right;
-  if (end === undefined) return undefined;
-  if (tile.left === end || tile.right === end) return end;
-  return undefined;
-}
+// No hay `lockedNumberFor`: el número de engarce no se guarda (ver el comentario de
+// `PlacedTile`), así que nadie del lado del servidor lo necesita. El front lo deriva
+// recorriendo `board.tiles` con `side`, exactamente como `boardEndsOf`.
 ```
 
 - [ ] **Step 5: Re-exportar `TileLike` desde `state/tile.ts`**
@@ -5111,7 +5527,7 @@ export type { TileLike } from "../engine/tile-set.js";
 - [ ] **Step 6: Correr los tests hasta que pasen**
 
 Run: `npx vitest run src/features/match/core/engine/round/tests/`
-Expected: 8 + 13 = 21 tests PASAN.
+Expected: 8 + 10 = 18 tests PASAN.
 
 - [ ] **Step 7: Commit**
 
@@ -5222,12 +5638,17 @@ function build(handsBySeat: Record<string, [number, number][]>, boneyard: [numbe
     seed: "s",
     seats,
     pointsToWin: 100,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: false,
   });
   const round = new RoundState();
   round.roundNumber = 1;
   round.phase = "PLAYING";
   round.board = new BoardState();
-  round.boneyard = new BoneyardState();
+  // La rama del pozo se instancia porque estos fixtures son de MESA DE DOS, que sí lo
+  // tiene. Un fixture de 4P la deja ausente, y ahí `isBlocked` ya da la tranca correcta.
+  const boneyardState = new BoneyardState();
+  round.boneyard = boneyardState;
 
   // Una ficha en la mesa para que haya extremos: 6|4.
   const placedTile = new Tile();
@@ -5237,16 +5658,15 @@ function build(handsBySeat: Record<string, [number, number][]>, boneyard: [numbe
   placed.tile = placedTile;
   placed.playedBy = seats[0] ?? "";
   placed.side = "RIGHT";
-  placed.lockedNumber = 0;
   round.board.tiles.push(placed);
 
   for (const [left, right] of boneyard) {
     const tile = new Tile();
     tile.left = left;
     tile.right = right;
-    round.boneyard.tiles.push(tile);
+    boneyardState.tiles.push(tile);
   }
-  round.boneyard.count = round.boneyard.tiles.length;
+  boneyardState.count = boneyardState.tiles.length;
   match.currentRound = round;
 
   for (const [playerId, tiles] of Object.entries(handsBySeat)) {
@@ -5361,16 +5781,21 @@ function maxTileValueOf(hand: SeatHand): number {
 // src/features/match/core/engine/round/block.ts
 import type { PlayerId } from "../../ids.js";
 import type { MatchState } from "../../state/index.js";
-import { currentRoundOf, roundActivePlayers } from "../state-projections.js";
+import { boneyardCountOf, currentRoundOf, roundActivePlayers } from "../state-projections.js";
 import { handValue } from "../tile-set.js";
 import { boardEndsOf } from "./board-ends.js";
 import { hasPlayableTile } from "./playable.js";
 
 // TRANCA: nadie puede jugar Y no queda de dónde robar. Mientras haya pozo, quien no
 // puede jugar roba, así que la ronda no está cerrada.
+//
+// `boneyardCountOf` y no `round.boneyard.count`: en 4P la rama no existe, y ahí "no
+// queda de dónde robar" es cierto DESDE EL PRIMER TURNO. Es la razón entera de que los
+// dos modos compartan esta función en vez de tener un `isGameBlockedFourPlayers` como
+// el v1 (reglas §3.7 y el hallazgo de duplicación de §6).
 export function isBlocked(match: MatchState): boolean {
   const round = currentRoundOf(match);
-  if (round.boneyard.count > 0) return false;
+  if (boneyardCountOf(round) > 0) return false;
 
   const active = roundActivePlayers(match);
   // Una mano vacía cierra por DOMINÓ, no por tranca: no es este camino.
@@ -5391,6 +5816,17 @@ export interface BlockVerdict {
 // manos ajenas. El empate lo declara y no lo resuelve: qué hacer con los puntos
 // cuando dos manos empatan es decisión de §3.7 del documento de reglas, y la
 // ejecuta el Scorer.
+//
+// ⚠ ESTO ES LA REGLA DE 2P, Y EN 4P NO ES LA MISMA. Acá se compara jugador contra
+// jugador; en 4P la tranca se resuelve comparando el **total del EQUIPO** —la suma de
+// los pips de los dos compañeros— y empata si los dos totales coinciden (reglas §7,
+// decisión 3). Con cuatro asientos, esta función coronaría al jugador de mano más liviana
+// aunque su equipo tenga más pips que el rival.
+//
+// No se generaliza ahora porque la rebanada es de 2P y una implementación de 4P sin sus
+// tests sería adivinar. Pero el riesgo es REAL y silencioso: el motor es uno solo, así
+// que 4P heredaría esta versión sin que nada chille. Cuando entre 4P, esta función se
+// parte en dos o toma la agrupación como parámetro.
 export function blockVerdictOf(match: MatchState): BlockVerdict {
   const active = roundActivePlayers(match);
   const totals = active.map((player) => ({
@@ -5448,9 +5884,9 @@ llegan en la Tarea 19. Así esta tarea no depende de nada que no exista todavía
 
 ```ts
 // src/features/match/core/engine/round/tests/round-fixture.ts
-import { BoardState, BoneyardState, PlacedTile, RoundState, Tile } from "../../../state/index.js";
+import { BoardState, BoneyardState, PlacedTile, RoundState, Tile, Turn } from "../../../state/index.js";
 import type { BoardSide } from "../../../state/tile.js";
-import type { MatchState } from "../../../state/index.js";
+import type { MatchState, RoundPhase } from "../../../state/index.js";
 import { createMatchState } from "../../genesis.js";
 import { handOf } from "../../state-projections.js";
 
@@ -5460,7 +5896,7 @@ export interface RoundSetup {
   board?: [number, number, BoardSide][];
   boneyard?: [number, number][];
   turn?: string;
-  phase?: "DEALING" | "PLAYING" | "RESOLVING_ROUND";
+  phase?: RoundPhase;
 }
 
 function tileOf([left, right]: [number, number]): Tile {
@@ -5478,29 +5914,32 @@ export function roundState(setup: RoundSetup): MatchState {
     seed: "s",
     seats,
     pointsToWin: 100,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: false,
   });
-  match.phase = "IN_PROGRESS";
+  match.phase = "PLAYING";
 
   const round = new RoundState();
   round.roundNumber = 1;
   round.phase = setup.phase ?? "PLAYING";
   round.board = new BoardState();
-  round.boneyard = new BoneyardState();
+  const boneyardState = new BoneyardState();
+  round.boneyard = boneyardState;
+  round.starterId = setup.turn ?? seats[0] ?? "";
 
   for (const [left, right, side] of setup.board ?? []) {
     const placed = new PlacedTile();
     placed.tile = tileOf([left, right]);
     placed.playedBy = seats[0] ?? "";
     placed.side = side;
-    placed.lockedNumber = 0;
     round.board.tiles.push(placed);
   }
-  for (const pair of setup.boneyard ?? []) round.boneyard.tiles.push(tileOf(pair));
-  round.boneyard.count = round.boneyard.tiles.length;
+  for (const pair of setup.boneyard ?? []) boneyardState.tiles.push(tileOf(pair));
+  boneyardState.count = boneyardState.tiles.length;
 
   const turn = new Turn();
   turn.playerId = setup.turn ?? seats[0] ?? "";
-  turn.startedAt = 1_000;
+  turn.isConsumingExtendedTime = false;
   turn.consecutivePasses = 0;
   round.currentTurn = turn;
 
@@ -5560,7 +5999,7 @@ describe("RoundReferee.assertCanPlay", () => {
 
   it("rechaza cualquier jugada si la ronda no está en PLAYING", () => {
     expect(() =>
-      refereeFor({ ...base, phase: "RESOLVING_ROUND" }).assertCanPlay(
+      refereeFor({ ...base, phase: "PRESENTING_ROUND" }).assertCanPlay(
         "u1",
         { left: 6, right: 1 },
         "LEFT",
@@ -5651,7 +6090,6 @@ describe("RoundPlayer.playTile", () => {
     const placed = match.currentRound?.board.tiles.at(-1);
     expect(placed?.playedBy).toBe("u1");
     expect(placed?.side).toBe("LEFT");
-    expect(placed?.lockedNumber).toBe(6);
   });
 
   // El array del tablero es el orden de JUEGO, no el orden espacial de la cadena:
@@ -5689,8 +6127,8 @@ describe("RoundPlayer.drawTile", () => {
 
     expect(handOf("u1", match).tiles.length).toBe(2);
     expect(handOf("u1", match).tileCount).toBe(2);
-    expect(match.currentRound?.boneyard.tiles.length).toBe(1);
-    expect(match.currentRound?.boneyard.count).toBe(1);
+    expect(match.currentRound?.boneyard?.tiles.length).toBe(1);
+    expect(match.currentRound?.boneyard?.count).toBe(1);
   });
 
   it("roba del frente del pozo, así que el orden es determinista", () => {
@@ -5718,7 +6156,13 @@ import type { PlayerId } from "../../ids.js";
 import type { BoardSide, TileLike } from "../../state/tile.js";
 import type { MatchState } from "../../state/index.js";
 import { RuleViolationError } from "../errors.js";
-import { currentRoundOf, handOf } from "../state-projections.js";
+import {
+  boneyardCountOf,
+  currentRoundOf,
+  handOf,
+  playerOf,
+  roundActivePlayers,
+} from "../state-projections.js";
 import { sameTile } from "../tile-set.js";
 import { boardEndsOf } from "./board-ends.js";
 import { hasPlayableTile, playableSides } from "./playable.js";
@@ -5742,15 +6186,40 @@ export class RoundReferee {
     const round = currentRoundOf(this.match);
     // No se roba pudiendo jugar: robar es el recurso de quien NO puede.
     if (this.hasPlayable(playerId)) throw new RuleViolationError("MUST_PLAY_INSTEAD_OF_DRAWING");
-    if (round.boneyard.count === 0) throw new RuleViolationError("BONEYARD_EMPTY");
+    // Vale tanto para "el pozo se agotó" como para "esta mesa no tiene pozo" (4P): las
+    // dos son la misma respuesta al jugador, y el código de regla ya lo dice.
+    if (boneyardCountOf(round) === 0) throw new RuleViolationError("BONEYARD_EMPTY");
   }
 
   assertCanPass(playerId: PlayerId): void {
     this.assertIsTurn(playerId);
     const round = currentRoundOf(this.match);
     if (this.hasPlayable(playerId)) throw new RuleViolationError("MUST_PLAY_INSTEAD_OF_DRAWING");
-    // Mientras haya pozo, no se pasa: se roba.
-    if (round.boneyard.count > 0) throw new RuleViolationError("MUST_DRAW_INSTEAD_OF_PASSING");
+    // Mientras haya pozo, no se pasa: se roba. En 4P nunca hay, así que pasar es legal
+    // en cuanto no hay jugada — sin una rama por modo.
+    if (boneyardCountOf(round) > 0) throw new RuleViolationError("MUST_DRAW_INSTEAD_OF_PASSING");
+  }
+
+  // Levantar la propia mano (`REVEAL_TILES`, reglas §3.1): solo durante la ventana de
+  // reparto y una sola vez. **No pide turno** —los dos miran a la vez, que es todo el
+  // punto de la ventana—, y por eso es el único verbo de jugador que no pasa por
+  // `assertIsTurn`.
+  assertCanRevealTiles(playerId: PlayerId): void {
+    if (currentRoundOf(this.match).phase !== "DEALING") {
+      throw new RuleViolationError("NOT_DEALING");
+    }
+    if (playerOf(playerId, this.match).hasSeenTiles) {
+      throw new RuleViolationError("TILES_ALREADY_SEEN");
+    }
+  }
+
+  // ¿Quiénes de los que siguen en la partida NO levantaron sus fichas? Vacío = ya se
+  // puede jugar. Lo consulta el conductor en las DOS salidas de la ventana: el verbo
+  // (¿falta alguien?) y el vencimiento (¿a quién se retira?).
+  playersWithoutTilesSeen(): readonly PlayerId[] {
+    return roundActivePlayers(this.match)
+      .filter((player) => !player.hasSeenTiles)
+      .map((player) => player.playerId);
   }
 
   hasPlayable(playerId: PlayerId): boolean {
@@ -5777,17 +6246,56 @@ import { PlacedTile, Tile } from "../../state/index.js";
 import type { BoardSide, TileLike } from "../../state/tile.js";
 import type { MatchState } from "../../state/index.js";
 import { InvariantViolationError } from "../errors.js";
-import { currentRoundOf, handOf } from "../state-projections.js";
+import { boneyardOf, currentRoundOf, handOf, playerOf } from "../state-projections.js";
 import { sameTile } from "../tile-set.js";
-import { boardEndsOf } from "./board-ends.js";
-import { lockedNumberFor } from "./playable.js";
+import type { SchemaVisibilityController } from "../visibility.js";
 
 // Solo MUTA. Referee-free: la legalidad ya la comprobó el juez.
+//
+// Sostiene el puerto de VISIBILIDAD porque es el actor que revela: el `Dealer` reparte
+// tapado y el jugador levanta lo suyo (reglas §3.1).
 export class RoundPlayer {
   constructor(
     private readonly playerId: PlayerId,
     private readonly match: MatchState,
+    private readonly visibility: SchemaVisibilityController,
   ) {}
+
+  // LEVANTA la mano: la hace pública a su dueño y deja anotado que ya la vio. Es el verbo
+  // con el que se sale de la ventana de reparto, y el único revelado del juego que **no le
+  // muestra nada a nadie más** — de ahí que no haya nada que decidir sobre la audiencia.
+  //
+  // Lo que la ventana viene a buscar no es información (el dueño ya sabe qué le tocó en
+  // cuanto lo ve): es una PRUEBA DE QUE ESTÁ AHÍ. Eso es lo que el reloj del turno no
+  // puede dar, porque solo mira al que le toca jugar.
+  //
+  // `hasSeenTiles` NO se resetea entre rondas: la ventana es solo la de la ronda 1, y de
+  // ahí en adelante el reparto revela solo (`RoundDriver.revealAllHands`).
+  revealTiles(): void {
+    const player = playerOf(this.playerId, this.match);
+    player.hasSeenTiles = true;
+    this.visibility.makePublic(player.hand.tiles, {
+      kind: "PLAYER",
+      playerId: this.playerId,
+    });
+  }
+
+  // DES-REVELA la mano de todas las audiencias. Es el gemelo de `revealTiles`, y la
+  // ÚNICA razón por la que el puerto de visibilidad tiene un `hide`.
+  //
+  // POR QUÉ HACE FALTA, que no es obvio: al cerrar una ronda las manos se muestran a
+  // TODOS para contar los pips (`Hand.isRevealed`), y `hand.tiles` es **el mismo nodo**
+  // ronda a ronda —`clear()` + `push()` vacía el array pero NO lo saca de ninguna
+  // `StateView`—. Sin des-revelar antes de repartir, a partir de la segunda ronda cada
+  // mano nace pública para la mesa entera: el agujero de trampa del v1, reabierto por la
+  // puerta de atrás y sin que ningún test de la ronda 1 lo note.
+  //
+  // Se llama SIEMPRE, aunque el revelado del cierre todavía no esté implementado en esta
+  // rebanada. En la ronda 1 es un no-op; el día que el conteo revele, ya está cubierto.
+  // Si esto se borra por "no lo usa nadie", vuelve el agujero.
+  hideTiles(): void {
+    this.visibility.hide(playerOf(this.playerId, this.match).hand.tiles, { kind: "ALL" });
+  }
 
   playTile(tile: TileLike, side: BoardSide): void {
     const round = currentRoundOf(this.match);
@@ -5795,7 +6303,6 @@ export class RoundPlayer {
     const index = [...hand.tiles].findIndex((held) => sameTile(held, tile));
     if (index < 0) throw new InvariantViolationError("la ficha no está en la mano");
 
-    const ends = boardEndsOf(round.board);
     const [removed] = hand.tiles.splice(index, 1);
     if (!removed) throw new InvariantViolationError("splice no devolvió la ficha");
     hand.tileCount = hand.tiles.length;
@@ -5804,20 +6311,22 @@ export class RoundPlayer {
     placed.tile = removed;
     placed.playedBy = this.playerId;
     placed.side = side;
-    placed.lockedNumber = lockedNumberFor(removed, ends, side) ?? -1;
     // SIEMPRE al final, incluso jugando a la izquierda. El array es el orden de
     // JUEGO, no el orden espacial de la cadena: `boardEndsOf` recorre asumiendo que
     // el primer elemento fijó los dos extremos y que cada siguiente se colgó del
     // lado que dice su `side`, así que insertar al frente rompería esa derivación.
-    // El front reconstruye la disposición visual con `side` y `lockedNumber`.
+    // El front reconstruye la disposición visual con `side`, con ese mismo recorrido.
     round.board.tiles.push(placed);
   }
 
   drawTile(): void {
-    const round = currentRoundOf(this.match);
-    const [tile] = round.boneyard.tiles.splice(0, 1);
+    // `boneyardOf` y no `round.boneyard?`: robar en una mesa SIN pozo no es una jugada
+    // ilegal —eso ya lo cortó `assertCanDraw`—, es un bug del motor. Revienta como
+    // invariante, que es la clase de error que corresponde.
+    const boneyard = boneyardOf(currentRoundOf(this.match));
+    const [tile] = boneyard.tiles.splice(0, 1);
     if (!tile) throw new InvariantViolationError("el pozo está vacío");
-    round.boneyard.count = round.boneyard.tiles.length;
+    boneyard.count = boneyard.tiles.length;
 
     const hand = handOf(this.playerId, this.match);
     hand.tiles.push(tile);
@@ -5854,8 +6363,9 @@ de violación, así que el front puede explicar por qué.
 
 El array del tablero es el orden de JUEGO y no el orden espacial de la cadena, y
 por eso el mutador siempre añade al final: insertar al frente rompería la
-derivación de boardEndsOf. El front reconstruye la disposición con side y
-lockedNumber.
+derivación de boardEndsOf. El front reconstruye la disposición con side, con el
+mismo recorrido: el número de engarce no se guarda porque es derivable de datos
+públicos.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
@@ -5902,6 +6412,9 @@ export interface CommandPayloads {
   PLAY_TILE: { playerId: PlayerId; left: number; right: number; side: BoardSide };
   DRAW_TILE: { playerId: PlayerId };
   PASS: { playerId: PlayerId };
+  // Levantar la propia mano en la ventana de reparto (reglas §3.1). No lleva nada: el
+  // verbo ES el acto, y qué fichas son ya lo sabe el motor desde que repartió.
+  REVEAL_TILES: { playerId: PlayerId };
 }
 ```
 
@@ -5925,6 +6438,8 @@ const build = (pointsToWin = 100) =>
     seed: "s",
     seats: ["u1", "u2"],
     pointsToWin,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: false,
   });
 
 describe("Scorer", () => {
@@ -5936,12 +6451,16 @@ describe("Scorer", () => {
     expect(match.scoreboard.teamB).toBe(0);
   });
 
-  it("también los acredita al jugador, que es lo que el front muestra en su ficha", () => {
+  // El marcador es del EQUIPO y solo del equipo: no hay `PlayerState.score` que
+  // mantener en paralelo. Lo que el front muestra en la ficha del jugador es
+  // `scoreboard[teamOf(player)]`, que en 4P es además la regla correcta (los dos
+  // compañeros comparten el total; el v1 lo lograba duplicándolo en los dos).
+  it("acredita al equipo del ganador y a nadie más", () => {
     const match = build();
     new Scorer(match).credit({ roundNumber: 1, winnerId: "u2", points: 9, reason: "BLOCKED" });
 
-    expect(match.players.find((p) => p.playerId === "u2")?.score).toBe(9);
     expect(match.scoreboard.teamB).toBe(9);
+    expect(match.scoreboard.teamA).toBe(0);
   });
 
   it("acumula entre rondas", () => {
@@ -6011,7 +6530,8 @@ export class Scorer {
 
     if (verdict.winnerId) {
       const winner = playerOf(verdict.winnerId, this.match);
-      winner.score += verdict.points;
+      // UN SOLO acumulador. El puntaje del jugador no se guarda: es
+      // `scoreboard[teamOf(player)]` (ver el comentario de `PlayerState`).
       if (winner.teamId === "A") this.match.scoreboard.teamA += verdict.points;
       else this.match.scoreboard.teamB += verdict.points;
       summary.winnerId = verdict.winnerId;
@@ -6034,7 +6554,7 @@ Expected: los 5 tests PASAN.
 
 ```ts
 // src/features/match/core/engine/round/driver.ts
-import type { GlobalDominoConfig } from "../../config.js";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
 import type { MatchEvent } from "../../events.js";
 import type { PlayerId } from "../../ids.js";
 import { BoardState, BoneyardState, RoundState, Turn } from "../../state/index.js";
@@ -6047,7 +6567,7 @@ import { InvariantViolationError } from "../errors.js";
 import type { RoundVerdict, Scorer } from "../scorer.js";
 import { currentRoundOf, handOf, playerOf, roundActivePlayers, turnOrderFrom } from "../state-projections.js";
 import type { TimeoutScheduler } from "../timeout-scheduler.js";
-import { tileValue } from "../tile-set.js";
+import { DOMINO_SET_SIZE, tileValue } from "../tile-set.js";
 import { blockVerdictOf, isBlocked } from "./block.js";
 import { boardEndsOf } from "./board-ends.js";
 import { firstPlayerOf } from "./first-turn.js";
@@ -6059,7 +6579,7 @@ import type { RoundReferee } from "./referee.js";
 // TODOS los plazos de esta altura, y del cierre.
 //
 // Acá mueren los sleep(3000) y sleep(6000) del v1: la pausa de presentación es una
-// FASE con plazo (RESOLVING_ROUND), no una espera dentro de la mutación. El motor
+// FASE con plazo (PRESENTING_ROUND), no una espera dentro de la mutación. El motor
 // estampa el instante y devuelve; nadie bloquea el event loop.
 export class RoundDriver implements Driver {
   constructor(
@@ -6067,6 +6587,10 @@ export class RoundDriver implements Driver {
     private readonly clock: Clock,
     private readonly scheduler: TimeoutScheduler,
     private readonly config: GlobalDominoConfig,
+    // Del config per-partida lo único que este conductor pregunta es si la mesa reparte
+    // con ventana. Es un booleano compuesto AFUERA: acá no se sabe qué es "casual" ni
+    // qué pidió producto.
+    private readonly matchConfig: DominoMatchConfig,
     private readonly referee: RoundReferee,
     private readonly dealer: Dealer,
     private readonly scorer: Scorer,
@@ -6074,27 +6598,79 @@ export class RoundDriver implements Driver {
   ) {}
 
   begin(): void {
+    const previous = this.match.currentRound;
     const roundNumber = this.match.pastRounds.length + 1;
 
     // La ronda se REEMPLAZA entera: no hay que resetear campo por campo.
     const round = new RoundState();
     round.roundNumber = roundNumber;
-    round.phase = "DEALING";
+    // Nace en DEALING (el default del schema). Quién la pasa a PLAYING es
+    // `continueAfterDeal`, y por eso hay tres caminos y no una asignación acá.
     round.board = new BoardState();
-    round.boneyard = new BoneyardState();
     round.currentTurn = new Turn();
+    // RAMA NULA: el pozo solo se instancia en los modos que lo tienen. 4P reparte el set
+    // entero (4×7 = 28), así que su rama queda AUSENTE — no un pozo vacío, que sería
+    // indistinguible de un pozo agotado justo donde la tranca se calcula distinto.
+    if (this.hasBoneyard()) round.boneyard = new BoneyardState();
     this.match.currentRound = round;
 
+    // ANTES DE REPARTIR: des-revelar lo que la ronda pasada hizo público. El nodo
+    // `hand.tiles` sobrevive a la ronda, así que lo que quedó en una `StateView` sigue
+    // ahí aunque el array se vacíe. Ver `RoundPlayer.hideTiles`.
+    this.hideAllHands();
     this.dealer.deal(roundNumber);
 
-    const first = firstPlayerOf(
-      roundActivePlayers(this.match).map((player) => ({
-        playerId: player.playerId,
-        tiles: [...player.hand.tiles],
-      })),
-    );
+    // QUIÉN ABRE. La ronda 1 la abre el doble-seis (reglas §3.2). De la 2 en adelante
+    // NO se vuelve a mirar la mano: la regla es alternancia estricta —abre el siguiente
+    // al que abrió la anterior (reglas §4.1)—, y de ahí sale que `starterId` tenga que
+    // estar en el estado: sin él, una vez que el turno se movió no hay de dónde sacarlo.
+    round.starterId = previous?.starterId
+      ? this.nextPlayerAfter(previous.starterId)
+      : firstPlayerOf(
+          roundActivePlayers(this.match).map((player) => ({
+            playerId: player.playerId,
+            tiles: [...player.hand.tiles],
+          })),
+        );
+
+    // LA VENTANA DE REPARTO (reglas §3.1), y solo en la ronda 1: repartir ya no revela,
+    // así que la fase deja de ser un paso instantáneo y pasa a ESPERAR a que cada uno
+    // levante lo suyo. Es lo que controla que los dos estén ahí antes de que empiece a
+    // correr el reloj del turno, que solo mira al que le toca jugar.
+    //
+    // De la ronda 2 en adelante no hay ceremonia: ya se demostró que están, así que el
+    // reparto revela solo.
+    if (this.matchConfig.isDealWindowEnabled && round.roundNumber === 1) {
+      this.stampDeadline(this.config.dealingTimeoutMs);
+      return;
+    }
+    this.revealAllHands();
+    this.continueAfterDeal();
+  }
+
+  // Sale de la fase de reparto hacia el juego. Lo llaman los TRES caminos que la cierran:
+  // el reparto sin ventana, el último que levanta sus fichas, y el vencimiento que retira
+  // a los que no lo hicieron.
+  private continueAfterDeal(): void {
+    const round = currentRoundOf(this.match);
     round.phase = "PLAYING";
-    this.startTurn(first);
+    this.startTurn(round.starterId);
+  }
+
+  // El revelado que antes hacía el reparto, para las rondas que no tienen ventana. Cada
+  // mano a su dueño y a nadie más.
+  private revealAllHands(): void {
+    for (const player of this.match.players) this.playerAt(player.playerId).revealTiles();
+  }
+
+  private hideAllHands(): void {
+    for (const player of this.match.players) this.playerAt(player.playerId).hideTiles();
+  }
+
+  // Hay pozo si el reparto no consume el set entero. Se DERIVA de la mesa y del
+  // reparto, así que no hace falta un flag de config que pueda contradecirlos.
+  private hasBoneyard(): boolean {
+    return this.match.players.length * this.config.tilesPerPlayer < DOMINO_SET_SIZE;
   }
 
   // Reconcilia después de una acción. Recibe QUIÉN actuó y QUÉ hizo: sin lo primero
@@ -6102,6 +6678,15 @@ export class RoundDriver implements Driver {
   // la reconciliación comparando el estado contra sí mismo.
   advance(actorId: PlayerId, action: RoundAction): TransitionResult {
     const round = currentRoundOf(this.match);
+
+    // LA VENTANA DE REPARTO se reconcilia antes que nada y NO llega a la guarda de
+    // `PLAYING` de abajo: es la única fase, además de esa, en la que un verbo de jugador
+    // es legal (reglas §3.1). Cuando ya no falta nadie, la ronda arranca.
+    if (round.phase === "DEALING") {
+      if (this.referee.playersWithoutTilesSeen().length === 0) this.continueAfterDeal();
+      return { events: [], finished: false };
+    }
+
     if (round.phase !== "PLAYING") return { events: [], finished: false };
 
     // ROBAR conserva el turno pero REINICIA el plazo (reglas §7 decisión 4).
@@ -6111,6 +6696,15 @@ export class RoundDriver implements Driver {
       this.startTurn(actorId);
       return { events: [], finished: false };
     }
+
+    // PASAR es la única acción que no deja rastro en el tablero ni en el pozo, así que
+    // el contador ES su rastro: sin esto, el rival no tiene de dónde enterarse de que
+    // alguien pasó (el historial de Mongo no se sincroniza — spec §5.1). Jugar lo
+    // resetea, porque lo que el front dibuja es la racha, no el total de la ronda.
+    round.currentTurn.consecutivePasses =
+      action === "PASSED" || action === "ABANDONED"
+        ? round.currentTurn.consecutivePasses + 1
+        : 0;
 
     // ¿DOMINÓ? El que se quedó sin fichas cierra y cobra las manos ajenas.
     if (handOf(actorId, this.match).tiles.length === 0) {
@@ -6142,12 +6736,28 @@ export class RoundDriver implements Driver {
   // (`MatchPlayer.abandon` es el único escritor de `hasAbandoned`).
   timeout(): TransitionResult {
     const round = currentRoundOf(this.match);
-    if (round.phase === "RESOLVING_ROUND") {
+    if (round.phase === "PRESENTING_ROUND") {
       // La pausa de presentación terminó. Quien decide si sigue otra ronda o cierra
       // la partida es el conductor de PARTIDA: acá solo se declara terminada la mano.
       return { events: [], finished: true };
     }
+    // La ventana de reparto la vence el conductor de PARTIDA: su consecuencia es RETIRAR
+    // gente, y `hasAbandoned` lo escribe solo `MatchPlayer`. Acá arriba queda lo que sí es
+    // de esta altura —revelar y arrancar la mano—, en `resumeAfterDealWindow`.
     throw new InvariantViolationError(`el conductor de RONDA no maneja la fase ${round.phase}`);
+  }
+
+  /** Quiénes siguen en la partida y NO levantaron sus fichas. Lo lee el conductor de PARTIDA. */
+  playersMissingTiles(): readonly PlayerId[] {
+    return this.referee.playersWithoutTilesSeen();
+  }
+
+  // Cierra la ventana de reparto DESPUÉS de que el conductor de PARTIDA retiró a los
+  // ausentes. A los que sí miraron se les revela igual: si la ronda sigue (4P con uno
+  // menos), no van a jugar a ciegas por culpa del que se fue.
+  resumeAfterDealWindow(): void {
+    this.revealAllHands();
+    this.continueAfterDeal();
   }
 
   /** De quién es el turno. Lo lee el conductor de PARTIDA para saber a quién retirar. */
@@ -6158,8 +6768,8 @@ export class RoundDriver implements Driver {
   private closeRound(verdict: RoundVerdict): TransitionResult {
     const round = currentRoundOf(this.match);
     this.scorer.credit(verdict);
-    round.phase = "RESOLVING_ROUND";
-    this.stampDeadline(this.config.resolvingRoundMs);
+    round.phase = "PRESENTING_ROUND";
+    this.stampDeadline(this.config.presentingRoundMs);
 
     const winner = verdict.winnerId ? playerOf(verdict.winnerId, this.match) : undefined;
     return {
@@ -6177,6 +6787,13 @@ export class RoundDriver implements Driver {
     };
   }
 
+  // Lo que cobra el que cerró por dominó: los pips que quedaron en las manos ajenas.
+  //
+  // ⚠ MISMA ADVERTENCIA QUE `blockVerdictOf`: esto es 2P. Filtra al ganador y suma a
+  // TODOS los demás, y en 4P eso incluiría a su propio COMPAÑERO — que no es lo que
+  // dicen las reglas (§3.8: el equipo ganador cobra los pips de los DOS jugadores del
+  // equipo perdedor, no los de tres asientos). En una mesa de dos el filtro por jugador
+  // y el filtro por equipo dan lo mismo; en una de cuatro, no.
   private opposingHandsValue(winnerId: PlayerId): number {
     return roundActivePlayers(this.match)
       .filter((player) => player.playerId !== winnerId)
@@ -6197,15 +6814,38 @@ export class RoundDriver implements Driver {
 
   private startTurn(playerId: PlayerId): void {
     const round = currentRoundOf(this.match);
+    this.settleExtraTime();
     round.currentTurn.playerId = playerId;
-    round.currentTurn.startedAt = this.clock.now();
+    round.currentTurn.isConsumingExtendedTime = false;
     this.stampDeadline(this.config.turnTimeoutMs);
+  }
+
+  // El turno normal venció y el jugador todavía tiene reserva: se extiende con lo que le
+  // queda, en vez de retirarlo. Devuelve si pudo. Lo pregunta el conductor de PARTIDA
+  // antes de retirar a nadie, porque retirar es verbo de esa altura pero el saldo es de
+  // este nivel (es el turno el que se estira).
+  extendWithReserve(playerId: PlayerId): boolean {
+    const remaining = playerOf(playerId, this.match).extraTimeRemainingMs;
+    if (remaining <= 0) return false;
+    currentRoundOf(this.match).currentTurn.isConsumingExtendedTime = true;
+    this.stampDeadline(remaining);
+    return true;
+  }
+
+  // Si el turno que se va estaba consumiendo la reserva, le devuelve lo que NO gastó.
+  // Sin esto, tocar la reserva la quemaría entera —y la regla es que solo decrece por
+  // lo consumido, no por haberla usado (reglas §5.1, decisión 7)—.
+  private settleExtraTime(): void {
+    const turn = currentRoundOf(this.match).currentTurn;
+    if (!turn.isConsumingExtendedTime || !turn.playerId) return;
+    const unused = this.match.activeDeadline - this.clock.now();
+    playerOf(turn.playerId, this.match).extraTimeRemainingMs = Math.max(0, unused);
   }
 
   private stampDeadline(durationMs: number): void {
     const at = this.clock.now() + durationMs;
     this.match.activeDeadline = at;
-    this.scheduler.schedule(at, () => this.match.currentRound?.phase === "RESOLVING_ROUND"
+    this.scheduler.schedule(at, () => this.match.currentRound?.phase === "PRESENTING_ROUND"
       ? this.onRoundPauseExpired()
       : this.timeout().events);
   }
@@ -6239,8 +6879,11 @@ dependencia del `RoundDriver`:
 ```ts
   begin(): void {
     if (this.match.phase !== "NOT_STARTED") return;
-    this.match.phase = "IN_PROGRESS";
+    this.match.phase = "PLAYING";
     this.match.startedAt = this.clock.now();
+    for (const player of this.match.players) {
+      player.extraTimeRemainingMs = this.config.extraTimeReserveMs;
+    }
     // El conductor de RONDA nos avisa cuando su pausa vence, y de ahí sale la
     // decisión de esta altura: otra ronda, o cerrar la partida.
     this.roundDriver.onRoundFinished = () => this.afterRound();
@@ -6257,34 +6900,82 @@ dependencia del `RoundDriver`:
     //
     // Se EMITE `ABANDON` porque no hubo comando detrás: es lo que distingue
     // "se fue" de "lo sacamos", y para un reclamo esa es toda la pregunta.
+    // VENCIÓ LA VENTANA DE REPARTO (reglas §3.1). El que no levantó sus fichas no está, y
+    // se lo retira por el MISMO camino que al que no juega su turno: `players.abandon()`,
+    // el verbo del jugador ejecutado por el sistema. Un `ABANDON` por cada uno, que es lo
+    // que distingue "se fue" de "lo sacaron".
+    //
+    // Vive acá y no en el conductor de RONDA aunque el plazo sea de ese nivel, porque su
+    // consecuencia es retirar gente y `hasAbandoned` lo escribe solo `MatchPlayer`. El
+    // conductor de ronda hace su mitad después, en `resumeAfterDealWindow`.
+    if (kind === "DEALING") {
+      const missing = this.roundDriver.playersMissingTiles();
+      for (const playerId of missing) this.players.abandon(playerId);
+      events.push(...missing.map((playerId) => ({ type: "ABANDON", playerId }) as const));
+
+      // Tres desenlaces, en orden de gravedad.
+      //
+      // 1) NO QUEDÓ NADIE: nadie levantó nada, así que nadie jugó. No hay veredicto que
+      //    dar —`outcome()` devuelve `undefined` con los dos equipos retirados, y eso es
+      //    deliberado (ver `MatchReferee`)—, la mesa se muere sin ganador y la sala
+      //    reembolsa con `MATCH_ABORTED { reason: "NEVER_PLAYED" }`.
+      //
+      //    Y HAY QUE APAGAR EL PLAZO. No es prolijidad: el instante ya venció, así que
+      //    cualquier cosa que vuelva a mirar `activeDeadline` lo encuentra vencido,
+      //    despierta en el acto, encuentra la misma fase muerta y se vuelve a programar —
+      //    un bucle mudo que no termina nunca. Es el bug que en truco encontró su propio
+      //    test, y el plan lo hereda gratis por haberlo leído.
+      if (roundActivePlayers(this.match).length === 0) {
+        this.match.activeDeadline = 0;
+        this.scheduler.cancel();
+        return { events, finished: false };
+      }
+
+      // 2) UN LADO SE VACIÓ: forfeit. El juez ya sabe leerlo, y el veredicto sale al
+      //    entrar a la presentación como en cualquier otro cierre.
+      if (this.referee.outcome()) {
+        return { events: [...events, ...this.enterPresentingMatch()], finished: false };
+      }
+
+      // 3) QUEDÓ GENTE DE LOS DOS LADOS: la ronda arranca, con uno menos si hace falta.
+      this.roundDriver.resumeAfterDealWindow();
+      return { events, finished: false };
+    }
+
     if (kind === "TURN") {
       const playerId = this.roundDriver.currentTurnPlayerId();
+
+      // PRIMERO la reserva. El plazo normal venció, pero si al jugador le queda saldo
+      // de tiempo extra el turno se ESTIRA en vez de retirarlo (reglas §5.1, decisión 7).
+      // Solo cuando la reserva está en cero se lo retira. El evento del vencimiento sale
+      // igual: venció un plazo de verdad, y para soporte esa línea es la que explica por
+      // qué el turno duró 90 s.
+      if (this.roundDriver.extendWithReserve(playerId)) {
+        return { events, finished: false };
+      }
+
       this.players.abandon(playerId);
       events.push({ type: "ABANDON", playerId });
-      const transition = this.advance(playerId, "PLAYED");
+      const transition = this.advance(playerId, "ABANDONED");
       return { events: [...events, ...transition.events], finished: transition.finished };
     }
 
-    if (kind === "RESOLVING_ROUND") {
+    if (kind === "PRESENTING_ROUND") {
       const inner = this.roundDriver.timeout();
       return { events: [...events, ...inner.events, ...this.afterRound()], finished: false };
     }
 
-    const outcome = this.referee.outcome();
-    if (!outcome) throw new InvariantViolationError("RESOLVING_MATCH sin veredicto");
-    this.match.phase = "RESOLVED";
+    // Vencida la presentación solo queda cerrar la máquina: el veredicto ya salió
+    // al ENTRAR (ver `enterPresentingMatch`).
+    this.match.phase = "FINISHED";
     this.match.activeDeadline = 0;
     this.scheduler.cancel();
-    events.push({ type: "MATCH_RESOLVED", ...outcome });
     return { events, finished: true };
   }
 
   // ¿Se alcanzó el objetivo? Se cierra la partida. Si no, otra ronda.
   private afterRound(): readonly MatchEvent[] {
-    if (this.referee.outcome()) {
-      this.enterResolvingMatch();
-      return [];
-    }
+    if (this.referee.outcome()) return this.enterPresentingMatch();
     this.roundDriver.begin();
     return [];
   }
@@ -6294,18 +6985,18 @@ Y `advance` pasa a delegar en la ronda:
 
 ```ts
   advance(actorId: PlayerId, action: RoundAction): TransitionResult {
-    if (this.match.phase !== "IN_PROGRESS") return { events: [], finished: false };
+    if (this.match.phase !== "PLAYING") return { events: [], finished: false };
     // Un abandono se resuelve a esta altura; todo lo demás es de la ronda.
     if (this.referee.outcome()) {
-      this.enterResolvingMatch();
-      return { events: [], finished: false };
+      return { events: this.enterPresentingMatch(), finished: false };
     }
     return this.roundDriver.advance(actorId, action);
   }
 ```
 
-Con `import type { RoundDriver } from "../round/driver.js";` arriba, y el `Player` facade en el
-constructor —el conductor de PARTIDA necesita retirar al que dejó vencer el turno—:
+Con `import type { RoundDriver } from "../round/driver.js";` y `roundActivePlayers` de
+`state-projections.js` arriba, y el `Player` facade en el constructor —el conductor de PARTIDA
+necesita retirar al que dejó vencer el turno, y al que no levantó sus fichas—:
 
 ```ts
     private readonly players: Player,
@@ -6393,6 +7084,36 @@ export * from "./abandon.js";
 export * from "./draw-tile.js";
 export * from "./pass.js";
 export * from "./play-tile.js";
+export * from "./reveal-tiles.js";
+```
+
+```ts
+// src/features/match/core/commands/reveal-tiles.ts
+import type { Command, CommandPayload } from "../command.js";
+import type { MatchEvent } from "../events.js";
+import type { MatchDriver } from "../engine/match/driver.js";
+import type { Player } from "../engine/player-facade.js";
+import type { Referee } from "../engine/referee-facade.js";
+
+// LEVANTAR LAS FICHAS (reglas §3.1). El verbo con el que se sale de la ventana de
+// reparto, y el más delgado de todos: juez valida, player revela, conductor reconcilia.
+//
+// La reconciliación es la parte que importa: `advance` con `"REVEALED"` es lo que hace
+// que la mano arranque cuando ya no falta nadie. Sin pasar por el conductor, el último
+// en levantar sus fichas quedaría esperando para siempre.
+export class RevealTilesCommand implements Command<"REVEAL_TILES", MatchEvent> {
+  constructor(
+    private readonly referee: Referee,
+    private readonly players: Player,
+    private readonly matchDriver: MatchDriver,
+  ) {}
+
+  execute({ playerId }: CommandPayload<"REVEAL_TILES">): readonly MatchEvent[] {
+    this.referee.assertCanRevealTiles(playerId);
+    this.players.revealTiles(playerId);
+    return this.matchDriver.advance(playerId, "REVEALED").events;
+  }
+}
 ```
 
 Ampliar `player-facade.ts`:
@@ -6406,6 +7127,36 @@ import type { BoardSide, TileLike } from "../state/tile.js";
 
   drawTile(playerId: PlayerId): void {
     this.repository.round(playerId).drawTile();
+  }
+
+  revealTiles(playerId: PlayerId): void {
+    this.repository.round(playerId).revealTiles();
+  }
+```
+
+Ampliar `referee-facade.ts`. Las cuatro abren con la guarda de partida; `assertCanRevealTiles`
+también, y por una razón que conviene no adivinar: durante el reparto la **PARTIDA** sí está en
+`PLAYING` —lo que espera es la **RONDA**—.
+
+```ts
+  assertCanPlay(playerId: PlayerId, tile: TileLike, side: BoardSide): void {
+    this.matchReferee.assertIsPlaying(playerId);
+    this.roundReferee.assertCanPlay(playerId, tile, side);
+  }
+
+  assertCanDraw(playerId: PlayerId): void {
+    this.matchReferee.assertIsPlaying(playerId);
+    this.roundReferee.assertCanDraw(playerId);
+  }
+
+  assertCanPass(playerId: PlayerId): void {
+    this.matchReferee.assertIsPlaying(playerId);
+    this.roundReferee.assertCanPass(playerId);
+  }
+
+  assertCanRevealTiles(playerId: PlayerId): void {
+    this.matchReferee.assertIsPlaying(playerId);
+    this.roundReferee.assertCanRevealTiles(playerId);
   }
 ```
 
@@ -6484,6 +7235,7 @@ export const COMMAND_PAYLOADS = {
     .strict(),
   DRAW_TILE: z.object({}).strict(),
   PASS: z.object({}).strict(),
+  REVEAL_TILES: z.object({}).strict(),
 } satisfies Record<CommandName, z.ZodType>;
 ```
 
@@ -6494,14 +7246,17 @@ En `di-wiring.ts`, dentro de `registerIndividualCommands`, reemplazar el bloque 
   const matchReferee = new MatchReferee(match);
   const roundReferee = new RoundReferee(match);
   const scorer = new Scorer(match);
-  const dealer = new Dealer(match, config, globalConfig, visibility);
+  // El `Dealer` NO recibe el puerto de visibilidad: desde la ventana de reparto no
+  // revela nada, así que la invariante "repartir no filtra" es estructural y no un test.
+  // Quien revela es el `RoundPlayer`, que es el actor del verbo.
+  const dealer = new Dealer(match, config, globalConfig);
   const repository = new PlayerRepository(
     config.seats,
     (playerId) => new MatchPlayer(playerId, match),
-    (playerId) => new RoundPlayer(playerId, match),
+    (playerId) => new RoundPlayer(playerId, match, visibility),
   );
   const roundDriver = new RoundDriver(
-    match, clock, scheduler, globalConfig, roundReferee, dealer, scorer,
+    match, clock, scheduler, globalConfig, config, roundReferee, dealer, scorer,
     (playerId) => repository.round(playerId),
   );
   const matchDriver = new MatchDriver(match, clock, scheduler, globalConfig, matchReferee, roundDriver);
@@ -6515,6 +7270,9 @@ En `di-wiring.ts`, dentro de `registerIndividualCommands`, reemplazar el bloque 
   child.register("Command:PLAY_TILE", { useValue: new PlayTileCommand(referee, players, matchDriver) });
   child.register("Command:DRAW_TILE", { useValue: new DrawTileCommand(referee, players, matchDriver) });
   child.register("Command:PASS", { useValue: new PassCommand(referee, matchDriver) });
+  child.register("Command:REVEAL_TILES", {
+    useValue: new RevealTilesCommand(referee, players, matchDriver),
+  });
 ```
 
 Y `buildCatalog`:
@@ -6591,11 +7349,11 @@ export function engineWithHands(
     ...DEFAULT_GLOBAL_CONFIG,
     tilesPerPlayer,
     turnTimeoutMs: 600,
-    resolvingRoundMs: 120,
-    resolvingMatchMs: 120,
+    presentingRoundMs: 120,
+    presentingMatchMs: 120,
   };
   const config: DominoMatchConfig = {
-    matchId: "m-test", gameModeId: "test", seed: "seed-test", seats, pointsToWin: 100,
+    matchId: "m-test", gameModeId: "test", seed: "seed-test", seats, pointsToWin: 100, teamAssignment: "SHUFFLED", isDealWindowEnabled: false,
   };
   const match = createMatchState(config);
 
@@ -6720,7 +7478,7 @@ describe("flujo de la ronda", () => {
     e.start();
     const events = e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
 
-    expect(e.round().phase).toBe("RESOLVING_ROUND");
+    expect(e.round().phase).toBe("PRESENTING_ROUND");
     expect(events).toEqual([
       { type: "ROUND_RESOLVED", roundNumber: 1, winnerId: "u1", winnerTeamId: "A", points: 9, reason: "DOMINO" },
     ]);
@@ -6771,12 +7529,12 @@ describe("flujo de la ronda", () => {
     e.start();
     e.fireTimeout(); // vence el turno de u1 → se lo retira
 
-    expect(e.match.phase).toBe("RESOLVING_MATCH");
+    expect(e.match.phase).toBe("PRESENTING_MATCH");
 
     const events = e.fireTimeout(); // vence la pausa de cierre
-    expect(e.match.phase).toBe("RESOLVED");
+    expect(e.match.phase).toBe("FINISHED");
     expect(events).toEqual([
-      { type: "DEADLINE_EXPIRED", kind: "RESOLVING_MATCH" },
+      { type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" },
       { type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" },
     ]);
   });
@@ -6789,7 +7547,7 @@ describe("flujo de la ronda", () => {
     e.pass("u2");
     const events = e.pass("u1");
 
-    expect(e.round().phase).toBe("RESOLVING_ROUND");
+    expect(e.round().phase).toBe("PRESENTING_ROUND");
     expect(events).toEqual([
       // u2 tiene 3+2+1+0 = 6; u1 tiene 5+5 = 10. Gana u2 y cobra 10.
       { type: "ROUND_RESOLVED", roundNumber: 1, winnerId: "u2", winnerTeamId: "B", points: 10, reason: "BLOCKED" },
@@ -6803,12 +7561,12 @@ describe("flujo de la ronda", () => {
     e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
     e.fireTimeout(); // vence la pausa de la mano
 
-    expect(e.match.phase).toBe("RESOLVING_MATCH");
+    expect(e.match.phase).toBe("PRESENTING_MATCH");
 
     const events = e.fireTimeout(); // vence la pausa de la partida
-    expect(e.match.phase).toBe("RESOLVED");
+    expect(e.match.phase).toBe("FINISHED");
     expect(events).toEqual([
-      { type: "DEADLINE_EXPIRED", kind: "RESOLVING_MATCH" },
+      { type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" },
       { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
     ]);
   });
@@ -6828,7 +7586,7 @@ git add src
 git commit -m "feat(round): conductor de la ronda, Scorer y los tres verbos de juego
 
 Acá mueren los sleep() del v1: la pausa de presentación es una FASE con plazo
-(RESOLVING_ROUND), no una espera dentro de la mutación del estado. El motor
+(PRESENTING_ROUND), no una espera dentro de la mutación del estado. El motor
 estampa el instante y devuelve, así que no hay ventana en la que otro mensaje
 corra sobre estado a medio mutar.
 
@@ -6884,7 +7642,7 @@ const handTilesSeenBy = (match: Awaited<ReturnType<typeof seatPair>>, viewer: st
 describe("visibilidad — el rival no ve fichas ajenas", () => {
   it("cada jugador ve SU mano completa", async () => {
     const match = await seatPair(server, ["v1", "v2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
     await waitUntil(() => handTilesSeenBy(match, "v1", "v1").length === 7);
 
     expect(handTilesSeenBy(match, "v1", "v1")).toHaveLength(7);
@@ -6895,7 +7653,7 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   // reales, así que cualquier cliente leía la mano exacta de su rival en cada patch.
   it("NINGÚN jugador ve las fichas del rival", async () => {
     const match = await seatPair(server, ["w1", "w2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
     await waitUntil(() => handTilesSeenBy(match, "w1", "w1").length === 7);
 
     expect(handTilesSeenBy(match, "w1", "w2")).toHaveLength(0);
@@ -6904,7 +7662,7 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
 
   it("pero SÍ ve cuántas le quedan: tileCount es público", async () => {
     const match = await seatPair(server, ["x1", "x2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
     await waitUntil(() => handTilesSeenBy(match, "x1", "x1").length === 7);
 
     const rival = clientState(match, "x1").players.find((p) => p.playerId === "x2");
@@ -6913,19 +7671,19 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
 
   it("NADIE ve el pozo", async () => {
     const match = await seatPair(server, ["y1", "y2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
     await waitUntil(() => handTilesSeenBy(match, "y1", "y1").length === 7);
 
     for (const viewer of ["y1", "y2"]) {
-      expect([...(clientState(match, viewer).currentRound?.boneyard.tiles ?? [])]).toHaveLength(0);
+      expect([...(clientState(match, viewer).currentRound?.boneyard?.tiles ?? [])]).toHaveLength(0);
       // El conteo sí, que es lo que el front muestra.
-      expect(clientState(match, viewer).currentRound?.boneyard.count).toBe(14);
+      expect(clientState(match, viewer).currentRound?.boneyard?.count).toBe(14);
     }
   });
 
   it("una ficha jugada pasa a ser pública para los dos", async () => {
     const match = await seatPair(server, ["z1", "z2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
     await waitUntil(() => handTilesSeenBy(match, "z1", "z1").length === 7);
 
     const turnHolder = match.serverState.currentRound?.currentTurn.playerId as string;
@@ -6954,7 +7712,7 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   // vista y volvería CIEGO — sin su propia mano de la ronda nueva.
   it("lo revelado mientras estaba fuera le espera al volver", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
     await waitUntil(() => handTilesSeenBy(match, "r1", "r1").length === 7);
 
     await match.clients.r1?.leave(false);
@@ -7004,6 +7762,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state/index.js";
 import { boardEndsOf } from "../core/engine/round/board-ends.js";
 import { playableSides } from "../core/engine/round/playable.js";
+import { boneyardCountOf } from "../core/engine/state-projections.js";
 import { bootServer, historyOf, seatPair, waitUntil } from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
@@ -7032,14 +7791,14 @@ async function playOneTurn(match: Awaited<ReturnType<typeof seatPair>>): Promise
     .map((tile) => ({ tile, sides: playableSides(tile, ends) }))
     .find((entry) => entry.sides.length > 0);
 
-  const before = round.board.tiles.length + hand.tiles.length + round.boneyard.count;
+  const before = round.board.tiles.length + hand.tiles.length + boneyardCountOf(round);
   if (candidate) {
     match.clients[playerId]?.send("PLAY_TILE", {
       left: candidate.tile.left,
       right: candidate.tile.right,
       side: candidate.sides[0],
     });
-  } else if (round.boneyard.count > 0) {
+  } else if (boneyardCountOf(round) > 0) {
     match.clients[playerId]?.send("DRAW_TILE", {});
   } else {
     match.clients[playerId]?.send("PASS", {});
@@ -7060,12 +7819,12 @@ async function playOneTurn(match: Awaited<ReturnType<typeof seatPair>>): Promise
 describe("partida 2P completa", () => {
   it("se juega de punta a punta hasta que hay veredicto", async () => {
     const match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     // Tope de seguridad: una partida a 100 puntos no debería pasar de esto, y si
     // lo pasa es un bucle y hay que verlo como fallo, no como cuelgue.
     for (let turns = 0; turns < 3_000; turns += 1) {
-      if (match.serverState.phase === "RESOLVED") break;
+      if (match.serverState.phase === "FINISHED") break;
       const played = await playOneTurn(match);
       if (!played) {
         // Fuera de PLAYING: o es la pausa de la mano, o la de la partida. Los dos
@@ -7073,13 +7832,13 @@ describe("partida 2P completa", () => {
         await waitUntil(
           () =>
             match.serverState.currentRound?.phase === "PLAYING" ||
-            match.serverState.phase === "RESOLVED",
+            match.serverState.phase === "FINISHED",
           3_000,
         );
       }
     }
 
-    expect(match.serverState.phase).toBe("RESOLVED");
+    expect(match.serverState.phase).toBe("FINISHED");
     const { teamA, teamB } = match.serverState.scoreboard;
     expect(Math.max(teamA, teamB)).toBeGreaterThanOrEqual(match.serverState.pointsToWin);
     expect(match.serverState.pastRounds.length).toBeGreaterThan(0);
@@ -7118,7 +7877,7 @@ describe("partida 2P completa", () => {
 Run: `npx vitest run src/features/match/tests/game-2p-e2e.test.ts`
 Expected: los 4 tests PASAN.
 
-Si el bucle se agota sin llegar a `RESOLVED`, casi siempre es una de dos: la pausa de la mano no
+Si el bucle se agota sin llegar a `FINISHED`, casi siempre es una de dos: la pausa de la mano no
 re-arranca la ronda siguiente (revisar `MatchDriver.afterRound`), o `nextPlayerAfter` devuelve
 siempre el mismo asiento (revisar `turnOrderFrom`).
 
@@ -7206,14 +7965,14 @@ export function buildEngineGraph(
   const matchReferee = new MatchReferee(match);
   const roundReferee = new RoundReferee(match);
   const scorer = new Scorer(match);
-  const dealer = deps.dealer ?? new Dealer(match, config, globalConfig, deps.visibility);
+  const dealer = deps.dealer ?? new Dealer(match, config, globalConfig);
   const repository = new PlayerRepository(
     config.seats,
     (playerId) => new MatchPlayer(playerId, match),
-    (playerId) => new RoundPlayer(playerId, match),
+    (playerId) => new RoundPlayer(playerId, match, deps.visibility),
   );
   const roundDriver = new RoundDriver(
-    match, deps.clock, deps.scheduler, globalConfig, roundReferee, dealer, scorer,
+    match, deps.clock, deps.scheduler, globalConfig, config, roundReferee, dealer, scorer,
     (playerId) => repository.round(playerId),
   );
   const matchDriver = new MatchDriver(
@@ -7254,6 +8013,12 @@ const meta = {
   seed: "seed-replay",
   seats: ["u1", "u2"],
   pointsToWin: 100,
+  teamAssignment: "SHUFFLED",
+  // TIENE QUE ESPEJAR PRODUCCIÓN, no la comodidad del test. Con `false`, el motor del
+  // replay saltearía la ventana y arrancaría en `PLAYING`; los dos `REVEAL_TILES` que la
+  // partida grabada tiene al principio caerían con `NOT_DEALING` y el replay no
+  // reproduciría nada. El config del replay es parte del contrato, igual que el `seed`.
+  isDealWindowEnabled: true,
 };
 
 describe("replay", () => {
@@ -7412,6 +8177,8 @@ Y al final del `it("se juega de punta a punta…")` de `game-2p-e2e.test.ts`, de
         seed: "seed-partida-completa",
         seats: ["g1", "g2"],
         pointsToWin: 100,
+        teamAssignment: "SHUFFLED",
+        isDealWindowEnabled: true,
       },
       match.serverState,
     );
@@ -7425,18 +8192,30 @@ WRITE_GOLDEN=1 npx vitest run src/features/match/tests/game-2p-e2e.test.ts
 
 En PowerShell: `$env:WRITE_GOLDEN = "1"; npx vitest run src/features/match/tests/game-2p-e2e.test.ts; $env:WRITE_GOLDEN = $null`
 
-Verificar a ojo antes de commitear: `entries` con decenas de entradas, la última de tipo
-`MATCH_RESOLVED`, y `finalState.phase === "RESOLVED"`. **Ese archivo se commitea**: es el contrato de
-regresión, y aprobarlo a ojo una vez es lo que le da valor.
+Verificar a ojo antes de commitear: `entries` con decenas de entradas, un `MATCH_RESOLVED` seguido
+por el `DEADLINE_EXPIRED` de la presentación (**en ese orden** — el veredicto sale al entrar a la
+pausa, no al vencerla), y `finalState.phase === "FINISHED"`. **Ese archivo se commitea**: es el
+contrato de regresión, y aprobarlo a ojo una vez es lo que le da valor.
 
 - [ ] **Step 5: Escribir el CLI y el endpoint de soporte**
 
 ```ts
 // src/replay.ts
 // npm run replay -- <matchId>
-// Rebobina la partida y afirma que el estado final reconstruido coincide con el
-// último snapshot registrado. Es la herramienta de soporte y, apuntada a fixtures,
-// el test de regresión del motor.
+// Rebobina la partida desde el historial y IMPRIME el estado final reconstruido. Es
+// la herramienta de SOPORTE: no afirma nada, porque el historial no lleva un snapshot
+// contra el que comparar —y no lo lleva a propósito, ver abajo—.
+//
+// El que AFIRMA es `replay.test.ts`, contra los fixtures golden: ahí el estado final
+// esperado vive en el propio fixture (`finalState`), versionado en el repo y aprobado
+// a ojo una vez. Ése es el test de regresión del motor.
+//
+// Por qué el snapshot no está en `match_history`: una entrada del historial es un ACTO
+// o un HECHO, las dos cosas inmutables y de tamaño acotado. Un snapshot del árbol es
+// otra clase de cosa —un volcado, grande, y solo interesante al cierre—, así que si
+// alguna vez hace falta va en `match_meta` al cerrar la partida, no colgado de una
+// entrada. Un campo opcional que nadie escribe es peor que no tenerlo: hace creer que
+// el replay puede autoverificarse contra producción cuando no puede.
 import { rootContainer } from "./di-container.js";
 import { replay } from "./features/match/history/replay.js";
 import type { HistoryEntry } from "./features/match/network/history.js";
@@ -7464,7 +8243,7 @@ if (entries.length === 0) {
 // argumentos, porque el `seed` NO está en el historial a propósito.
 //
 // Los tres son OBLIGATORIOS y no tienen default. El `pointsToWin` sobre todo: el
-// veredicto de la partida depende de él —entrar en RESOLVING_MATCH es alcanzarlo—,
+// veredicto de la partida depende de él —entrar en PRESENTING_MATCH es alcanzarlo—,
 // así que un valor inventado no reproduce el final. Con 0, además, `teamA >= 0` es
 // verdadero desde el arranque y la partida cerraría en la primera comprobación.
 const seed = process.argv[3];
@@ -7590,7 +8369,7 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
   // primero muta el turno y los demás rebotan leyendo el estado YA mutado.
   it("N envíos de la misma jugada en el mismo tick aplican exactamente uno", async () => {
     const match = await seatPair(server, ["c1", "c2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     const playerId = match.serverState.currentRound?.currentTurn.playerId as string;
     const play = legalPlayFor(match.serverState, playerId);
@@ -7620,12 +8399,12 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
 
   it("una ráfaga durante la pausa de la mano no toca el estado", async () => {
     const match = await seatPair(server, ["k1", "k2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
-    // Abandonar abre RESOLVING_MATCH, que es una fase de pausa: nada de juego es
+    // Abandonar abre PRESENTING_MATCH, que es una fase de pausa: nada de juego es
     // legal ahí. Es el equivalente al hueco que el v1 dejaba con sleep(6000).
     match.clients.k1?.send("ABANDON", {});
-    await waitUntil(() => match.serverState.phase === "RESOLVING_MATCH");
+    await waitUntil(() => match.serverState.phase === "PRESENTING_MATCH");
 
     const illegal: { code: string }[] = [];
     match.clients.k2?.onMessage("illegal", (payload) => illegal.push(payload));
@@ -7714,7 +8493,7 @@ describe("reconexión — los tres caminos", () => {
   // con los callbacks intactos.
   it("un bache de red no cuesta la partida y dispara onDrop/onReconnect", async () => {
     const match = await seatPair(server, ["n1", "n2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     let dropped = false;
     let reconnected = false;
@@ -7727,7 +8506,7 @@ describe("reconexión — los tres caminos", () => {
     await waitUntil(() => dropped, 3_000);
     expect(connectedOf(match.serverState, "n1")).toBe(false);
     // La partida sigue viva, y el reloj del juego no se pausó.
-    expect(match.serverState.phase).toBe("IN_PROGRESS");
+    expect(match.serverState.phase).toBe("PLAYING");
     expect(match.serverState.activeDeadline).toBeGreaterThan(0);
 
     await waitUntil(() => reconnected, 5_000);
@@ -7740,7 +8519,7 @@ describe("reconexión — los tres caminos", () => {
   // matchmaker rechaza el joinById, y el jugador queda fuera de SU propia partida.
   it("quien perdió su token vuelve por roomId", async () => {
     const match = await seatPair(server, ["t1", "t2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     await match.clients.t1?.leave(false);
     await waitUntil(() => connectedOf(match.serverState, "t1") === false, 3_000);
@@ -7759,7 +8538,7 @@ describe("reconexión — los tres caminos", () => {
   // retira el motor por timeout, no el transporte.
   it("al vencer la ventana el jugador sigue en la partida", async () => {
     const match = await seatPair(server, ["e1", "e2"]);
-    await waitUntil(() => match.serverState.phase === "IN_PROGRESS");
+    await waitUntil(() => match.serverState.phase === "PLAYING");
 
     let leaveCode: number | undefined;
     match.clients.e1?.onLeave((code) => { leaveCode = code; });
@@ -7861,9 +8640,176 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
+## Tarea 23: La ventana de reparto de punta a punta
+
+> **Por qué tiene tarea propia y no un `it` más.** Los tres desenlaces de la ventana son tres
+> desenlaces **de la partida** —sigue, forfeit, o se muere sin ganador—, y el tercero es el único
+> camino del motor en el que **nadie gana**. En un juego con dinero ese camino se prueba explícito o
+> no se prueba.
+
+**Files:**
+- Create: `src/features/match/tests/deal-window-e2e.test.ts`
+
+- [ ] **Step 1: Escribir los cuatro tests**
+
+```ts
+// src/features/match/tests/deal-window-e2e.test.ts
+import type { ColyseusTestServer } from "@colyseus/testing";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { MatchState } from "../core/state/index.js";
+import { act, bootServer, linesOf, seatPair, waitUntil } from "./e2e-harness.js";
+
+let server: ColyseusTestServer;
+
+beforeAll(async () => {
+  server = await bootServer(2588);
+});
+
+afterAll(async () => {
+  await server.shutdown();
+});
+
+const seenOf = (state: MatchState, playerId: string) =>
+  state.players.find((player) => player.playerId === playerId)?.hasSeenTiles;
+
+const tilesVisibleTo = (state: MatchState, playerId: string) =>
+  [...(state.players.find((player) => player.playerId === playerId)?.hand.tiles ?? [])];
+
+describe("la ventana de reparto", () => {
+  // EL PUNTO DE PARTIDA: se repartió, pero nadie vio nada todavía.
+  it("reparte tapado y espera: la ronda no arranca hasta que los dos levantan", async () => {
+    const match = await seatPair(server, ["d1", "d2"], undefined, { skipDealWindow: true });
+
+    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
+    expect(match.serverState.activeDeadline).toBeGreaterThan(0);
+    expect(seenOf(match.serverState, "d1")).toBe(false);
+    expect(seenOf(match.serverState, "d2")).toBe(false);
+
+    // Uno levanta: se marca, y la ronda SIGUE esperando al otro.
+    await act(match, "d1", "REVEAL_TILES");
+    expect(seenOf(match.serverState, "d1")).toBe(true);
+    expect(match.serverState.currentRound?.phase).toBe("DEALING");
+
+    // El otro levanta: recién ahí arranca el turno.
+    await act(match, "d2", "REVEAL_TILES");
+    await waitUntil(() => match.serverState.currentRound?.phase === "PLAYING");
+    expect(match.serverState.currentRound?.currentTurn.playerId).not.toBe("");
+  });
+
+  // LEVANTAR ES DEL DUEÑO Y DE NADIE MÁS. Es la mitad antifraude: si levantar revelara
+  // a la mesa, la ventana sería peor que no tenerla.
+  it("levantar revela solo al dueño", async () => {
+    const match = await seatPair(server, ["v1", "v2"], undefined, { skipDealWindow: true });
+    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
+
+    await act(match, "v1", "REVEAL_TILES");
+
+    // En el estado del SERVIDOR las fichas están (el dominio las tiene); lo que se
+    // prueba acá es que la vista del rival no las tiene. El smoke de visibilidad afirma
+    // esa mitad desde el cliente; acá basta con que el rival siga sin levantar.
+    expect(tilesVisibleTo(match.serverState, "v1")).toHaveLength(7);
+    expect(seenOf(match.serverState, "v2")).toBe(false);
+  });
+
+  // CAMINO 2: uno no está. Se lo retira y el otro gana por forfeit — sin haber jugado
+  // una ficha, que es exactamente lo que la regla quiere.
+  it("al vencer, el que no levantó se retira y el otro gana por forfeit", async () => {
+    const match = await seatPair(server, ["f1", "f2"], undefined, { skipDealWindow: true });
+    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
+
+    await act(match, "f1", "REVEAL_TILES");
+
+    await waitUntil(() => match.serverState.phase === "PRESENTING_MATCH", 20_000);
+    expect(match.serverState.players.find((p) => p.playerId === "f2")?.hasAbandoned).toBe(true);
+    expect(match.serverState.players.find((p) => p.playerId === "f1")?.hasAbandoned).toBe(false);
+
+    // El ABANDON del ausente lo dijo el SISTEMA, no él: para un reclamo esa es toda la
+    // diferencia. Y el veredicto sale al entrar a la presentación, no al vencerla.
+    const lines = linesOf("m-f1-f2");
+    expect(lines).toContain("SYSTEM ABANDON");
+    expect(lines).toContain("SYSTEM MATCH_RESOLVED");
+  });
+
+  // CAMINO 3, Y EL QUE IMPORTA: NO LA LEVANTA NADIE. Nadie jugó, así que nadie gana. Si
+  // este test se pone verde con un `MATCH_RESOLVED` en el historial, el motor está
+  // pagando el premio de una partida que no existió.
+  it("si no la levanta nadie, no gana nadie y la mesa se muere", async () => {
+    const match = await seatPair(server, ["z1", "z2"], undefined, { skipDealWindow: true });
+    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
+
+    await waitUntil(
+      () => match.serverState.players.every((player) => player.hasAbandoned),
+      20_000,
+    );
+
+    // NADIE gana: sin veredicto no hay `MATCH_RESOLVED`, y la fase no llega al terminal
+    // por la vía del juego.
+    expect(linesOf("m-z1-z2")).not.toContain("SYSTEM MATCH_RESOLVED");
+    expect(match.serverState.phase).not.toBe("FINISHED");
+
+    // Y el plazo quedó APAGADO: si siguiera vencido, el conductor despertaría en el
+    // acto, encontraría la misma fase muerta y se re-programaría para siempre.
+    expect(match.serverState.activeDeadline).toBe(0);
+
+    // La sala cierra y el motivo es auditable: no es lo mismo que nunca se llenó.
+    await server.getRoomById(match.roomId)?.disconnect();
+    await waitUntil(() => linesOf("m-z1-z2").includes("SYSTEM MATCH_ABORTED"), 5_000);
+    const aborted = historyOf("m-z1-z2").find((entry) => entry.type === "MATCH_ABORTED");
+    expect(aborted?.payload).toEqual({ reason: "NEVER_PLAYED" });
+  });
+});
+```
+
+Con `historyOf` en el import de `./e2e-harness.js`.
+
+- [ ] **Step 2: Correr y ajustar los plazos**
+
+Run: `npx vitest run src/features/match/tests/deal-window-e2e.test.ts`
+Expected: los 4 tests PASAN.
+
+Los dos tests de vencimiento esperan el plazo REAL de la ventana, así que en `vitest.setup.ts` va
+corto igual que los demás:
+
+```ts
+process.env.DEALING_TIMEOUT_MS ??= "800";
+```
+
+Y en `src/env.ts`, junto a los otros: `DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000)`,
+su campo en `Env`, su línea en `parseEnv`, y su override en el registro de `GlobalDominoConfig`.
+
+Si el camino 3 falla porque `MATCH_ABORTED` nunca llega, el sospechoso es la guarda de `onDispose`:
+con la partida en `DEALING` y `phase !== "FINISHED"`, tiene que entrar — y `abortReason()` tiene que
+devolver `NEVER_PLAYED` porque nadie tiene `hasSeenTiles`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+npm run typecheck && npm run lint && npm test
+git add src
+git commit -m "test: la ventana de reparto de punta a punta
+
+Los cuatro caminos: los dos levantan y la ronda arranca; levantar revela solo al
+dueño; uno no está y el otro gana por forfeit sin jugar una ficha; y no la
+levanta nadie.
+
+El último es el que justifica la tarea. Con los dos equipos retirados el juez
+NO dictamina —outcome() devuelve undefined a propósito—, así que no hay
+MATCH_RESOLVED y la mesa se muere sin ganador: reembolsa con
+MATCH_ABORTED { reason: NEVER_PLAYED }. Sin esa guarda, el orden de evaluación
+coronaría a uno de los dos y el motor pagaría el premio de una partida que nadie
+jugó.
+
+También afirma que el plazo queda apagado cuando no queda nadie: un instante ya
+vencido en una fase muerta es un bucle de re-programación sin fin.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Verificación final
 
-Con las 23 tareas hechas, esto tiene que valer:
+Con las 24 tareas hechas, esto tiene que valer:
 
 ```bash
 npm run typecheck      # sin errores
@@ -7877,9 +8823,10 @@ Y los cuatro criterios de "hecho" del spec, cada uno con su test nombrado:
 | Criterio | Test |
 |---|---|
 | **Trampa cerrada** | `visibility.smoke.test.ts` — el rival no recibe ninguna ficha ajena ni del pozo, en ninguna fase |
-| **Auditoría** | `game-2p-e2e.test.ts` (seq sin huecos, cierra con `MATCH_RESOLVED`, cada `DEADLINE_EXPIRED` con su verbo detrás) + `replay.test.ts` (el golden reproduce el estado final exacto) |
+| **Auditoría** | `game-2p-e2e.test.ts` (seq sin huecos, `MATCH_RESOLVED` ANTES del `DEADLINE_EXPIRED` de la presentación, cada `DEADLINE_EXPIRED` con su verbo detrás) + `replay.test.ts` (el golden reproduce el estado final exacto) |
 | **Semáforo** | `concurrency-e2e.test.ts` + la regla de arquitectura que prohíbe `await` en el core |
 | **Logs** | Manual: levantar el servidor, jugar una partida, y comprobar en Loki que `{matchId="…"}` devuelve la traza completa y solo esa, incluidos los rechazos |
 | **Reconexión** | `reconnection-e2e.test.ts` — los tres caminos |
+| **Nadie cobra sin jugar** | `deal-window-e2e.test.ts` — con los dos ausentes NO hay `MATCH_RESOLVED`, y la mesa reembolsa con `NEVER_PLAYED` |
 
 ---

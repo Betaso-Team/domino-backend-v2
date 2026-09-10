@@ -2,6 +2,19 @@
 
 > **Versión:** v1 — primera redacción. Extraída del código de `Betaso-Domino-Backend`
 > a fecha 2026-09-09, con las divergencias entre 2P, 4P y torneo anotadas.
+>
+> **Revisión 2026-09-10.** Se cerraron dos decisiones nuevas —**7** (el tiempo extra pasa a ser una
+> reserva de partida, cambio deliberado respecto del v1) y **8** (qué significa "partida válida", y que
+> el cobro sale del motor)— y se agregaron dos secciones que la primera redacción no tenía: **§9 el
+> catálogo del historial** y **§10 los tres consumidores**. Las dos existen por el mismo motivo: el
+> historial de jugadas del v1 —tres actos distintos en un tipo, discriminados por dos booleanos, y
+> sincronizado a todos con la ficha robada dentro— es el defecto que más incomodó en producción, y no
+> estaba descrito en ninguna parte.
+>
+> **Y se escribió §3.1, la VENTANA DE REPARTO**, que es paridad con el v1
+> (`initialTilesTimeRemaining` + `on-reveal-tiles.ts`) y que la primera redacción no trataba como
+> regla. Es el control que impide mirar el reparto y salirse gratis, y de ella sale la regla que más
+> vale escribir con todas las letras en un juego con dinero: **si no la levanta nadie, no gana nadie.**
 
 Convenciones: "2P" = `src/rooms/schema/domino/two-players/*`, "4P" = `src/rooms/schema/domino/four-players/*`, "torneo" = `src/tournaments/game/*`. Todas las rutas son relativas a la raíz del repo.
 
@@ -46,9 +59,82 @@ El puntaje de un equipo se lee de un solo jugador "capitán" (`playerNumber` 1 o
 
 ## 3. La ronda
 
-### 3.1 Reparto
+### 3.1 Reparto y la VENTANA DE REPARTO
 
 Ver §1.2. En los tres modos, repartir mezcla el mazo primero (`DominoUtils.createDeck()`), anuncia `SHUFFLE_TILES` al cliente y espera 3 segundos antes de asignar fichas (`two-players/domino-room-state.ts:204-217`, `four-players/domino-room-state.ts:321-332`, `tournament-game.ts:139-151` — los tres con el mismo `setTimeout(…, 3000)`).
+
+**La ventana de reparto (regla del v2, con paridad de v1).** Al empezar la partida las fichas se
+reparten pero **no se hacen públicas a nadie**: cada jugador levanta las suyas con `REVEAL_TILES`
+dentro de **15 s**. Mientras falte alguien, la ronda no arranca. Al vencer el plazo, el que no las
+levantó **se retira**. Es de la **ronda 1** nada más: de la 2 en adelante el reparto revela solo,
+porque ya se demostró que están.
+
+El v1 tiene la mecánica (`initialTilesTimeRemaining` = 15, `commands/on-reveal-tiles.ts`,
+`on-timeout-reveal.ts`) y el v2 la conserva con la forma de truco (negocio v27 §12.7).
+
+**Para qué, si el reloj del turno ya retira al ausente.** Porque el del turno mira a **UNO**: al que
+le toca jugar. En dominó eso deja un hueco grande — el que abre la ronda puede tardar sus 60 s, y
+recién ahí el rival descubre que enfrente no hay nadie. La ventana los mira a **todos a la vez**, y a
+los 15 s.
+
+**Y en dominó tiene una segunda razón que en truco pesa menos: el fraude de mirar y salirse.** Tus 7
+fichas te dicen bastante sobre si te conviene jugar esa mano. Si ver la mano fuera gratis y salirse no
+costara nada, se podría elegir con qué reparto jugar y con cuál no. Con la ventana, levantar las
+fichas **es** la prueba de presencia, y quien no la da queda retirado antes de que la mano empiece.
+
+Los tres desenlaces al vencer:
+
+| Qué quedó | Qué pasa |
+|---|---|
+| Gente de los dos lados | la mano **sigue**, con uno menos (4P) |
+| Un lado vacío | **forfeit** a favor del otro, sin que se haya jugado una ficha |
+| **Nadie** | **no gana nadie**: la mesa se muere sin veredicto y se reembolsa |
+
+**El tercero es el que hay que escribir con todas las letras: si no la levanta nadie, NO GANA NADIE.**
+No es una cortesía — es que el juez tiene que preguntar por los dos equipos retirados **antes** que
+por uno. Preguntando por uno primero, el orden de evaluación corona al otro y esa partida —que nadie
+jugó— **paga premio**. En un juego con dinero, eso es plata que sale por un bucle que no miró el caso.
+
+Levantar las fichas es el único revelado del juego que **no le muestra nada a nadie más**: las fichas
+van a su dueño y a nadie. Lo que agrega a la mesa no es información, es la prueba de que el jugador
+está ahí.
+
+> **Es config, no regla apagable a mano.** `isDealWindowEnabled` va encendido en **toda** mesa —no
+> depende del modo ni de la cantidad de asientos, a diferencia del sorteo de equipos—. Es config para
+> que producto pueda apagarla sin deploy y para que los tests del motor no paguen la ceremonia; no
+> viaja en las opciones de la sala, justamente para que nadie pueda olvidarla y apagar un control
+> antifraude en silencio.
+
+#### 3.1.1 Los únicos dos revelados que existen en dominó
+
+La ventana de reparto es el **único** revelado voluntario del juego. Vale escribir la lista completa,
+porque el v2 se porta de truco y truco tiene varios más:
+
+| Revelado | Cuándo | A quién |
+|---|---|---|
+| **Levantar las fichas** (`REVEAL_TILES`) | ventana de reparto, ronda 1 | **solo al dueño** |
+| **Las manos al cerrar la ronda** | automático, al contar los pips | a todos |
+
+Y esto **NO existe en dominó**, aunque exista en truco:
+
+- **Mostrarle una ficha a tu compañero.** No hay seña legal: la información que un jugador tiene sobre
+  su propia mano no se comparte por ningún canal del juego.
+- **Intercambiar una ficha con tu compañero** (el `SHARING_CARD` / `SELECT_SHARED_CARD` del truco de
+  4). La mano que te tocó es la que jugás.
+- **Jugar una ficha tapada**, o cualquier jugada con valor oculto (el `TAPADO` y el pegado del truco).
+  Una ficha en la mesa es pública, siempre y para todos.
+
+**Consecuencia de diseño que sale de esta lista:** la audiencia de visibilidad del motor tiene **dos**
+valores —el jugador y la mesa— y no tres. No hay audiencia de EQUIPO, porque no hay ninguna mecánica
+que le muestre algo a tu compañero y no a la mesa. La primera redacción del plan la traía de truco,
+con un `case` inalcanzable y un test que afirmaba que lanzaba.
+
+> **Y una trampa que esta lista destapa.** El revelado del cierre de ronda muestra las manos a
+> **todos**, y el nodo de la mano es el **mismo** ronda a ronda: vaciarlo no lo saca de las vistas de
+> los clientes. Así que repartir tiene que **des-revelar** primero, o desde la segunda ronda cada mano
+> nace pública para la mesa entera — el agujero del v1, reabierto por la puerta de atrás y sin que
+> ningún test de la ronda 1 lo note. Es la única razón por la que el puerto de visibilidad tiene un
+> `hide`.
 
 ### 3.2 Quién arranca
 
@@ -122,6 +208,9 @@ Empate por tranca (pips iguales): ver §7, decisión 3.
 ### 4.1 Secuencia de rondas
 
 - 2P/torneo: quien arranca la siguiente ronda es el rival de quien arrancó la ronda anterior (`startNextRound`, `two-players/domino-room-state.ts:375-387`, `tournament-game.ts:276-286`) — alternancia estricta entre los dos jugadores.
+
+  > **La regla del doble-seis (§3.2) vale SOLO para la ronda 1.** De la 2 en adelante no se vuelve a mirar la mano: manda la alternancia. Y eso obliga a que "quién abrió esta ronda" sea **estado**, no un dato de vuelo: una vez que el turno se movió, la mano de nadie dice quién abrió. El v1 lo guarda en `currentRoundStarterId` (`two-players/domino-room-state.ts:51`); el v2 lo guarda en `RoundState.starterId`. Sin ese campo, la única forma de decidir la ronda 2 es volver a correr el doble-seis — que es la regla equivocada.
+
 - 4P: el arranque de ronda rota circularmente por `playerNumber` (`four-players/domino-room-state.ts:472-500`) — no es "el rival de quien arrancó", sino "el siguiente en sentido horario". Como los equipos están intercalados por `playerNumber` impar/par (§2.2), el efecto observable es el mismo: el equipo que arranca alterna cada ronda, aunque el mecanismo interno sea distinto (jugador siguiente en la rotación, no jugador rival directo).
 - Si el jugador que debe arrancar la ronda en 4P es un bot, juega automáticamente al inicio de la ronda (`playBotTileAtRoundStart`, `four-players/domino-room-state.ts:496-499, 800-840`).
 
@@ -165,6 +254,8 @@ Los tres modos usan el mismo esquema de dos temporizadores encadenados, corriend
 1. `turnTimeRemaining` arranca en 60 y baja de a 1 (2P: `domino-two-room.ts:411-424`; 4P: `domino-four-room.ts:380-393`; torneo: `tournaments/game/room.ts:332-345`).
 2. Al llegar a 0, empieza a bajar `extraTimeRemaining` desde 30 (2P: `domino-two-room.ts:425-430`; 4P: `domino-four-room.ts:394-399`; torneo: `room.ts:346`).
 3. Cuando `extraTimeRemaining` también llega a 0 (≈ 90 s totales desde que empezó el turno), se dispara `OnTimeoutCommand` (2P: `domino-two-room.ts:431-436`; 4P: `domino-four-room.ts:400-405`; torneo: `room.ts:348-351`).
+
+**Los dos plazos se reinician enteros en cada turno**, porque `setTurnTimeouts` reescribe los tres campos del jugador y `changeTurn` lo llama en cada cambio de turno. La consecuencia: un jugador que agota los 90 s en diez turnos se lleva **300 s de gracia** a lo largo de la ronda, y no hay ningún costo por haberla usado antes. Ver §7, decisión 7 — en el v2 esto cambia.
 
 Antes de eso, durante la fase de revelar fichas al empezar cada ronda hay un plazo aparte, `initialTilesTimeRemaining`, que arranca en 15 y dispara `OnTimeoutRevealCommand` si no todos revelaron a tiempo — mismo valor y misma estructura en los tres modos (2P: `domino-two-room.ts:768-780`; 4P: `domino-four-room.ts:669-681`; torneo: `room.ts:365-377`).
 
@@ -345,6 +436,78 @@ Pero el campo existe y es configurable, así que la rama es alcanzable.
 deja el flag con un significado honesto: *"si no hay bots, un abandono cuesta la partida"*. La 3 queda
 descartada salvo que producto la pida explícitamente — no es un arreglo, es un modo de juego nuevo.
 
+### Decisión 7 — El tiempo extra es una reserva de PARTIDA ✅ DECIDIDO
+
+> **Resuelto: los 30 s de gracia pasan a ser un saldo para toda la partida, que solo decrece.** Se
+> descartó replicar la gracia por turno del v1. Es un **cambio deliberado de regla**, no un port.
+
+**Qué hace el v1** (§5.1): los 30 s se reinician en cada turno, porque `changeTurn` llama a
+`setTurnTimeouts` y ése reescribe los tres campos. Un jugador que se cuelga sistemáticamente se lleva
+30 s extra **por turno**, sin costo por haberlos usado antes.
+
+**Qué hace el v2:** cada jugador arranca la partida con una reserva (30 s, `extraTimeReserveMs`), y
+`PlayerState.extraTimeRemainingMs` **solo baja**. Al vencer el plazo normal del turno, si le queda
+saldo el turno se estira con lo que le quede; si no, se lo retira (decisión 1, sin cambios). Lo que no
+gastó de una extensión se le devuelve —decrece por lo **consumido**, no por haberla tocado—.
+
+**Por qué:**
+1. Es el modelo de truco (`PlayerState.extraTimeRemainingMs`, *"reserva de tiempo extra para TODA la
+   partida; solo decrece"*), así que los dos juegos se sienten igual.
+2. Un saldo con memoria **tiene que** ser estado. La gracia por turno era config y por eso el v1 podía
+   olvidársela: el campo del estado es lo que la hace auditable.
+3. El costo de colgarse deja de ser cero. Con la gracia por turno, el que abusa del reloj no paga
+   nada; con la reserva, la segunda vez ya tiene menos colchón que su rival.
+
+**Lo que hay que aceptar:** una partida larga puede terminar con un jugador sin reserva y otro con la
+suya intacta, y ahí el primero juega con 60 s pelados contra 90. Eso es la regla, no un defecto — pero
+es lo que producto tiene que avalar, porque cambia la experiencia respecto del v1.
+
+**Y dos consecuencias para el cliente**, que son las únicas dos cosas que el front necesita para
+dibujar el reloj y que no se derivan del `activeDeadline` a secas:
+
+1. **`Turn.isConsumingExtendedTime`** — los dos tramos del plazo ocurren en la misma fase, así que sin
+   este campo el cliente muestra una cuenta atrás sin saber si son los 60 s del turno o lo que queda de
+   la reserva. Es un campo del estado porque un jugador que reconecta a mitad de un tramo extendido
+   tiene que poder saberlo.
+2. **`serverNow`, del `GET /config/:roomId`** — el `activeDeadline` es un instante en epoch del
+   servidor, así que el front tiene que restarle "ahora"; con el reloj del dispositivo corrido, la
+   cuenta atrás miente. El cliente calcula el offset una vez contra esa muestra. No es una regla del
+   dominó, pero sin eso ninguna de las reglas de plazo de esta sección se ve bien en pantalla. Ver
+   spec §7.4.
+
+### Decisión 8 — Qué significa "partida válida", y quién cobra ✅ DECIDIDO
+
+> **Resuelto: "válida" es una propiedad de la PARTIDA, no un booleano por jugador, y el cobro sale del
+> motor.** Se descartó portar `PlayerState.isValid`.
+
+`PlayerState.isValid` (`two-players/player.state.ts:126`, igual en 4P) es un booleano que se prende con
+`markAsValid()` cuando el jugador revela fichas, y gobierna **dos cosas que no tienen nada que ver
+entre sí**:
+
+1. si un abandono en 4P termina en sustitución por bot o en forfeit inmediato (§4.3);
+2. si se le cobra la entrada y si puede ganar puntos.
+
+Eso es un eje mezclado con otro, y el nombre no dice ninguno de los dos. El reparto del v2:
+
+| Qué | Dónde vive en el v2 |
+|---|---|
+| "la partida ya arrancó de verdad" | la **ventana de reparto** se cerró con alguien que levantó sus fichas (§3.1). Observable: `phase === "PLAYING"` de la ronda, o `players.some(p => p.hasSeenTiles)` |
+| "a este jugador se le cobra" | `features/economy/`, colgado del `ROUND_RESOLVED`/`MATCH_RESOLVED`. El motor no sabe de plata |
+
+**Y la ventana de reparto es lo que hace honesta esta definición.** Sin ella, "válida" era
+`startedAt > 0` —o sea "la sala se llenó"—, que no dice nada sobre si alguien jugó. Con la ventana hay
+un hecho observable y por jugador: `hasSeenTiles`. De ahí sale también el motivo de reembolso
+`NEVER_PLAYED`, que es lo que distingue "nunca se llenó" de "se llenó, se repartió, y nadie apareció".
+
+**Consecuencia sobre la decisión 6:** "la partida ya era válida" se lee del estado y no de un booleano
+que alguien tuvo que acordarse de prender.
+
+**Hallazgo relacionado, del mismo nombre:** `PlacedTile.isValid` (`piece.ts:71`) **es otra cosa y
+además miente**. Se pone en `true` con solo pasarle una ficha al constructor (`piece.ts:78-81`), así
+que una ficha **robada del pozo** —que nunca tocó el tablero— queda registrada con `isValid: true`
+(`on-load-tile.ts:33`). No es una regla: es el tercer nombre para "acá hay una ficha", junto a
+`isPassed` e `isLoaded`. En el v2 no existe ninguno de los tres (§9).
+
 ### Otros hallazgos que no encajan en las decisiones de arriba
 
 - **§2.2**: el título "el orden de los asientos asigna los equipos" no corresponde al código — los equipos se sortean al azar al arrancar la partida (salvo revancha). Ver §2.2 para el detalle y la cita.
@@ -370,3 +533,88 @@ descartada salvo que producto la pida explícitamente — no es un arreglo, es u
 - **Bot (4P)**: sustituto automático de un jugador humano ausente; hereda su mano, equipo y posición; elige jugada con una heurística simple de "mayor valor" (`DominoUtils.chooseTile`). No existe en 2P ni en torneo.
 - **Strike / penalización de torneo**: contador de abandonos/timeouts de un jugador dentro de un torneo. La escalera real es 1→0 min, 2→10, 3→20, 4→30 (`TournamentPenaltyService`) — **no** la que dice el comentario del archivo; ver el hallazgo en §4.3. Es una capa exclusiva de torneo, no una regla del juego de dominó.
 - **Propuesta de multiplicador de apuesta**: mecánica exclusiva de 2P que permite proponer subir el monto en juego entre rondas (`OnProposeBetMultiplierCommand`/`OnRespondBetMultiplierCommand`). Fuera del alcance de este documento de reglas de dominó.
+- **Reserva de tiempo extra (v2)**: saldo de tiempo por partida que solo decrece, y que estira el turno cuando el plazo normal vence. Reemplaza la gracia por turno del v1 (§7, decisión 7).
+- **Ventana de reparto**: los 15 s del arranque en los que cada jugador tiene que levantar sus fichas (`REVEAL_TILES`) para que la mano empiece. El plazo que controla a todos a la vez, y el que impide mirar el reparto y salirse gratis (§3.1).
+- **Levantar las fichas**: hacer pública tu propia mano **para vos**, y quedar marcado con `hasSeenTiles`. No le muestra nada a nadie más.
+- **Abrir la ronda / `starterId`**: quién juega la primera ficha de una ronda. La ronda 1 la abre el doble-seis; las siguientes alternan (§4.1).
+
+## 9. El historial de jugadas
+
+Esta sección no describe el v1: **corrige** cómo el v1 lo modela. Es la parte que más incomodó en
+producción, y el defecto no es de implementación sino de forma.
+
+### 9.1 Qué hace mal el v1
+
+`HistoryMove` (`piece.ts:113-124`) es **un solo tipo de fila para tres actos distintos**, discriminado
+por dos booleanos:
+
+```ts
+@type(PlacedTile) placedTile = new PlacedTile()
+@type('boolean')  isPassed  = false
+@type('boolean')  isLoaded  = false
+```
+
+Cinco defectos concretos:
+
+| # | Defecto | Evidencia |
+|---|---|---|
+| 1 | **2 booleanos = 4 combinaciones, 3 legales.** `isPassed && isLoaded` es representable y no significa nada | `piece.ts:118-119` |
+| 2 | **Tercera codificación del mismo hecho.** `PlacedTile.isValid` ("acá hay ficha") + `PlacedTile.isLoaded` (duplica el del `HistoryMove`) | `piece.ts:71-72`, seteado en `:80` |
+| 3 | **`isValid` miente**: una ficha robada, que nunca tocó el tablero, queda `isValid: true` | `piece.ts:78-81` vs `on-load-tile.ts:33` |
+| 4 | **`lockedNumber = -1` significa tres cosas**: doble, primera ficha, y relleno de un movimiento que no colocó nada | §3.3 y `on-load-tile.ts:33` |
+| 5 | **El tablero no existe: es un `filter` sobre el log.** `getBoardMoves()` reconstruye la cadena filtrando por los booleanos | §3.3, `round.state.ts:161-165` |
+
+Y el que no es de modelado sino de integridad: `historyMoves` es `@type([HistoryMove])`
+(`round.state.ts:35`), o sea **sincronizado a todos**, y un movimiento de carga guarda la ficha robada
+con su cara real (`on-load-tile.ts:33`). **Cada ficha que robás se le difunde al rival en el patch.**
+Los booleanos no eran solo incómodos: eran el vehículo de una fuga.
+
+### 9.2 El catálogo del v2, cerrado
+
+Una entrada del historial se discrimina por `type`, cuyo dominio es **cerrado** y verificado por el
+compilador (`keyof CommandPayloads | NetworkMatchEvent["type"]`). No hay booleanos, así que no hay
+combinación ilegal que representar.
+
+| `type` | `kind` | `source` | `payload` | Existe porque |
+|---|---|---|---|---|
+| `PLAY_TILE` | COMMAND | PLAYER | `{ playerId, left, right, side }` | el acto. El `side` lo manda el cliente; el número de engarce **no** —lo deriva el servidor— |
+| `DRAW_TILE` | COMMAND | PLAYER | `{ playerId }` | qué ficha salió es reconstruible del `seed` (que vive en `match_meta`), así que no va en el payload |
+| `PASS` | COMMAND | PLAYER | `{ playerId }` | el acto |
+| `REVEAL_TILES` | COMMAND | PLAYER | `{ playerId }` | levantó sus fichas en la ventana de reparto (§3.1). Es la prueba de presencia, y para un reclamo de "me sacaron sin avisar" es la primera línea que se mira |
+| `ABANDON` | COMMAND | PLAYER | `{ playerId }` | se fue por su voluntad |
+| `ABANDON` | EVENT | SYSTEM | `{ playerId }` | **lo retiró el reloj.** Mismo nombre, distinto `source`: para un reclamo, esa es toda la diferencia |
+| `DEADLINE_EXPIRED` | EVENT | SYSTEM | `{ kind }` | explica el hueco donde el reloj decidió |
+| `ROUND_RESOLVED` | EVENT | SYSTEM | `{ roundNumber, winnerId, winnerTeamId, points, reason }` | consecuencia computada: no se reconstruye del comando |
+| `MATCH_RESOLVED` | EVENT | SYSTEM | `{ winnerTeamId, reason }` | hito terminal. Se emite al **entrar** a la pausa de cierre, no al vencerla — el pago cuelga de acá |
+
+**Fuera del historial**, a propósito: las jugadas **rechazadas** (rastro antifraude → va al log), el
+`seed`, y cualquier volcado del estado.
+
+**Agregar un caso es agregar una fila a esta tabla**, no un flag a una fila existente. Eso es todo lo
+que hay que recordar del §9.1.
+
+## 10. Los tres consumidores, y qué lee cada uno
+
+El v1 usó **una sola lista** para tres roles, y de ahí salieron los booleanos: `historyMoves` era a la
+vez la fuente del tablero, el feed de la UI y el registro de auditoría. Tres consumidores con
+necesidades distintas sobre un tipo, y cada uno filtrando distinto.
+
+| Consumidor | De dónde lee en el v2 | Qué NO es |
+|---|---|---|
+| **El tablero** | `RoundState.board.tiles` — solo fichas jugadas, sin filtro | no es un `filter` sobre un log |
+| **El cliente** | los patches del estado sincronizado | no lee el historial: el historial **no** se sincroniza |
+| **Auditoría / replay / soporte** | Mongo, append-only, por `matchId` + `seq` | no está en el `Schema` |
+
+De esta tabla salen dos preguntas que resuelven solas casi todo lo demás:
+
+1. **"¿Va al historial?"** → ¿es un acto o un hecho que no se reconstruye del comando ni del estado?
+2. **"¿Va al estado?"** → ¿un cliente que **reconecta a mitad de partida** necesita saberlo?
+
+Son criterios distintos y algo puede necesitar los dos. Por la segunda pregunta el estado lleva
+`Turn.consecutivePasses` (pasar no deja huella en el tablero ni en el pozo, así que el contador **es**
+su huella), `Turn.isConsumingExtendedTime` y `PlayerState.connected`. Por la primera, ninguno de los
+tres emite evento.
+
+Y la regla que cierra la puerta por la que el v1 se fue: **el historial no es del cliente.** La próxima
+vez que haga falta "que el front sepa X", la respuesta es un campo de estado o un evento difundido —
+nunca un booleano colgado de una entrada del historial.
