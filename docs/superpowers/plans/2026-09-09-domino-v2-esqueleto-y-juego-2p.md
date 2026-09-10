@@ -1690,8 +1690,9 @@ git commit -m "feat(engine): los tres puertos, la jerarquía de errores y el con
 Clock es write-only para el negocio: estampa now()+duración en activeDeadline y
 nunca compara el tiempo para decidir. TimeoutScheduler invierte el control (el
 engine programa, la infra solo espera y difunde). La audiencia de visibilidad es
-de dominio —un jugador o un equipo, nunca una conexión—, que es lo que permite
-que la vista sea del asiento.
+de dominio —un jugador o la mesa, nunca una conexión—, que es lo que permite que
+la vista sea del asiento. Son dos valores y no tres: en dominó no hay nada que se
+le muestre a tu compañero y no a la mesa (reglas §3.1.1).
 
 MatchEvent con el criterio de existencia escrito: el evento existe si y solo si
 no hubo comando detrás.
