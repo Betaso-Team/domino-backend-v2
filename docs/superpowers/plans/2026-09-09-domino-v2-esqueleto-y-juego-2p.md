@@ -432,14 +432,25 @@ correcto y corregir `biome.json` antes de seguir:
 npx biome explain noConsole
 ```
 
-- [ ] **Step 6: Borrar el archivo de prueba y verificar que el lint pasa en limpio**
+- [ ] **Step 6: Borrar el archivo de prueba**
 
 ```bash
 rm src/scratch-console-check.ts
 npm run lint
 ```
 
-Expected: `Checked 0 files` (o similar) sin errores.
+Expected: **falla, y con un error distinto** — `internalError/io: No files were processed in the
+specified paths`. No es un problema: biome trata "cero archivos" como error, y `src/` acaba de quedar
+vacío. Lo que importa es que **el diagnóstico de `noConsole` desapareció**, que es lo que este paso
+verifica.
+
+Lo mismo con `npm run typecheck`, que sale con `TS18003: No inputs were found in config file` por la
+misma razón. **Los dos se arreglan solos en la Tarea 2**, que es la primera que pone un `.ts` dentro
+de `src/`.
+
+> **Por qué no se tapa con un archivo placeholder.** Un `src/index.ts` de mentira ahora sería código
+> que la Tarea 12 tiene que reemplazar, y un stub que nadie ejecuta es justamente lo que este proyecto
+> viene a sacarse de encima. El hueco dura una tarea y está documentado; eso alcanza.
 
 - [ ] **Step 7: Commit**
 
@@ -5859,11 +5870,16 @@ La tarea más grande de la rebanada: acá muere el `sleep()` y nace la ronda com
 > `docs/reglas-de-juego-v1.md`:
 >
 > - **§5.2 — al vencer el turno se RETIRA al jugador.** El motor no juega por él. Se conserva el
->   comportamiento del v1. En 2P eso deja un solo jugador y la partida cae por forfeit, y se **emite**
->   `ABANDON` porque no hubo comando detrás — es lo que distingue "se fue" de "lo sacamos". La
->   consecuencia arquitectónica es que el vencimiento del turno lo resuelve el conductor de **PARTIDA**,
->   no el de ronda: retirar a alguien es un verbo de esa altura (`MatchPlayer` es el único escritor de
->   `hasAbandoned`).
+>   comportamiento del v1, y se **emite** `ABANDON` porque no hubo comando detrás — es lo que distingue
+>   "se fue" de "lo sacamos". La consecuencia arquitectónica es que el vencimiento del turno lo resuelve
+>   el conductor de **PARTIDA**, no el de ronda: retirar a alguien es un verbo de esa altura
+>   (`MatchPlayer` es el único escritor de `hasAbandoned`).
+>
+>   **En 2P eso deja un solo jugador y la partida cae por forfeit — que es lo único que implementa esta
+>   tarea.** En 4P el v1 rellena el asiento con un **bot** y la partida sigue; eso llega con el
+>   incremento de 4P y **no cambia una línea del motor**: el engine emite `ABANDON` igual, y quien
+>   engancha el bot es un listener del anillo (`network/`), que es donde vive la diferencia entre
+>   forfeit y sustitución. Ver reglas §7 decisión 1, "Cómo se modela el bot en el v2".
 > - **§7 decisión 4 — robar SIEMPRE reinicia el plazo del turno.** El v1 solo lo reiniciaba al robar
 >   una ficha inservible, lo que premiaba robar mal. Por eso `DRAW_TILE` pasa por el conductor: el
 >   reloj lo tocan las transiciones, nunca un comando por su cuenta.

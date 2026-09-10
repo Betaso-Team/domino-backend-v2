@@ -191,13 +191,45 @@ Ver §7, decisión 1, para el detalle completo y la recomendación.
 
 ### Decisión 1 — Qué hace el sistema al vencer el turno ✅ DECIDIDO
 
-> **Resuelto: se conserva el comportamiento del v1 — al vencer el plazo se RETIRA al jugador.**
-> El motor no juega por él. En 2P eso deja un solo jugador y la partida cae por forfeit. Se descartó el
-> modelo de truco de ejecutar el verbo del que calló.
+> **Resuelto: se conserva el comportamiento del v1, y el v1 hace DOS cosas distintas según el modo.**
+> Se descartó el modelo de truco de ejecutar el verbo del que calló.
 >
-> Consecuencia para el v2: el vencimiento del turno lo resuelve el conductor de **PARTIDA**, porque
-> retirar a alguien es un verbo de esa altura. Y se **emite** `ABANDON`, porque no hubo comando detrás
-> — el ABANDON voluntario no emite nada, ya que el comando es su propio registro.
+> | Modo | Al vencer el plazo |
+> |---|---|
+> | **2P** y **torneo** | Se **retira** al jugador. Como quedan dos asientos, eso deja uno solo y la partida cae por **forfeit** a favor del que queda |
+> | **4P** | Se retira al humano y **un bot ocupa su asiento**: hereda su mano, su equipo y su posición, y sigue jugando. La partida **continúa**. Solo hay forfeit si el equipo del ausente se queda sin ningún humano, o si la partida todavía no era válida |
+>
+> **El motor nunca juega por nadie en ninguno de los dos casos.** Lo que cambia no es el motor: es
+> quién ocupa el asiento después. Ver abajo.
+
+**Cómo se modela el bot en el v2, y por qué no vive en el motor**
+
+El bot **no es una regla del dominó** — es quién conduce un asiento. Meterlo en el motor obligaría al
+engine a saber que existen jugadores automáticos, y eso contamina las reglas con una decisión de
+plataforma.
+
+El reparto queda así, y cae exactamente sobre las capas que ya existen:
+
+| Capa | Qué sabe | Qué hace |
+|---|---|---|
+| **Motor** (`core/`) | que un asiento dejó de tener jugador humano | retira al jugador y emite `ABANDON`. Nada más |
+| **Anillo** (`network/`) | que en 4P, con bots habilitados y la partida ya válida, ese asiento se rellena | escucha `ABANDON`, engancha el bot por el `BotPort`, y emite `BOT_ATTACHED` |
+| **Bot** (`features/bots/`) | las reglas, como cualquier cliente | manda comandos por el **mismo camino** que un humano |
+
+Tres consecuencias que valen la pena:
+
+1. **El bot pasa por las mismas validaciones que un jugador.** No hay una puerta trasera por la que
+   pueda hacer una jugada ilegal, porque no tiene una ruta propia hacia el estado.
+2. **El historial no necesita un campo nuevo.** El `ABANDON` marca el instante; todo lo que ese asiento
+   haga a partir de ese `seq` lo hizo el bot. Para auditar una partida eso alcanza y sobra.
+3. **El motor de 2P y el de 4P son el mismo.** La diferencia entera —forfeit o bot— vive en un listener
+   del anillo, que es donde el v1 la tenía enterrada dentro de `OnTimeoutCommand`.
+
+> **⚠ Queda un hueco del v1 que NO se replica, y hay que decidir con qué se reemplaza.** Si
+> `enableBots` está en `false`, la partida ya es válida y ambos equipos conservan humanos,
+> **ninguna rama del código del v1 actúa** (§4.3): el jugador queda congelado en `quitPlayers` con su
+> mano intacta y la rotación de turnos sigue entre los que quedan. No es una regla, es un bug. Ver la
+> decisión 6.
 
 **Qué hace el código hoy:**
 - **2P**: `OnTimeoutCommand` saca al jugador de `players` (`removePlayer`, `two-players/domino-room-state.ts:90-104`) apenas se agotan los 60 s + 30 s de gracia (`two-players/commands/on-timeout.ts:32`). Como sólo quedan 2 jugadores, la partida termina de inmediato a favor del que se queda (`on-timeout.ts:38-40, 51-55`). El sistema nunca juega, roba ni pasa en nombre del jugador ausente — sólo espera el plazo y expulsa.
@@ -283,6 +315,35 @@ entre jugadores, así que arranca el primero que se unió a la sala.
 >
 > Consecuencia asumida: **el v2 no reproduce partidas del v1**, así que los fixtures golden del
 > replay se generan del v2 y se revisan a ojo una vez.
+
+### Decisión 6 — 4P con bots deshabilitados ✅ DECIDIDO
+
+> **Resuelto: forfeit del equipo del que se fue.** Es lo que el v1 ya hace en sus otras dos ramas
+> (equipo sin humanos, partida no válida), así que unifica el comportamiento en vez de sumar un cuarto
+> caso. Y deja el flag con un significado honesto: *si no hay bots, un abandono cuesta la partida*.
+> Se descartó seguir jugando a tres — eso no es un arreglo, es un modo de juego nuevo.
+
+Sale del hueco de la decisión 1. Con `enableBots: false`, partida ya válida y ambos equipos con
+humanos, el v1 **no hace nada**: ninguna rama actúa. El jugador queda en `quitPlayers` con su mano
+congelada y los tres restantes siguen rotando turnos entre ellos. Es un bug, no una regla, así que no
+se puede "conservar el v1" — hay que elegir con qué se reemplaza.
+
+Hoy el hueco casi no se dispara: `enableBots` viene en `true` por defecto para modos de cuatro
+jugadores (`game-mode.schema.ts:66-70`) y nada en el código de creación de modos lo pone en `false`.
+Pero el campo existe y es configurable, así que la rama es alcanzable.
+
+**Las opciones:**
+1. **Forfeit del equipo del que se fue.** Es lo que el v1 ya hace en las otras dos ramas (equipo sin
+   humanos, o partida no válida), así que unifica el comportamiento: sin bot que rellene, el equipo
+   incompleto pierde.
+2. **Attachear el bot igual, ignorando el flag.** Convierte `enableBots` en una mentira, pero ninguna
+   partida muere por una desconexión.
+3. **Seguir a tres jugadores.** Hay que inventar reglas que el dominó por parejas no tiene (qué pasa
+   con la mano huérfana, cómo se cuenta la tranca, quién cobra sus pips). Es diseño nuevo.
+
+**Mi recomendación:** opción 1. Es la única que no inventa reglas ni miente sobre la configuración, y
+deja el flag con un significado honesto: *"si no hay bots, un abandono cuesta la partida"*. La 3 queda
+descartada salvo que producto la pida explícitamente — no es un arreglo, es un modo de juego nuevo.
 
 ### Otros hallazgos que no encajan en las decisiones de arriba
 
