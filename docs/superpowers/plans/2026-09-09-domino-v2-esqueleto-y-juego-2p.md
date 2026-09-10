@@ -319,10 +319,16 @@ Los tres se commitean en el Step 7 junto con el tooling, así que el primer comm
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.7"
   }
 }
 ```
+
+> **`vitest` va en 3.x y no en 2.x, y no es preferencia: es lo único que resuelve.** `vitest@2`
+> arrastra `vite@5`, y `colyseus@0.18.5` declara `peerOptional vite@">=6.0.0"`. Con el 2.x, `npm
+> install` termina en `ERESOLVE` y la única salida es `--legacy-peer-deps`, o sea aceptar una
+> resolución que npm mismo llama potencialmente rota. Con 3.2.7 entra `vite@7` y el árbol resuelve
+> limpio, sin flags. Verificado al ejecutar esta tarea.
 
 **Nota sobre lo que NO está:** no hay `unplugin-swc` ni `@swc/core`, y `tsconfig` no activa
 `experimentalDecorators`. Truco los necesita porque conserva `@type` y esbuild no emite metadata de
