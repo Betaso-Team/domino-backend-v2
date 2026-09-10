@@ -1,0 +1,43 @@
+{
+  "name": "@betaso/domino-backend",
+  "version": "0.1.0",
+  "description": "Backend del Dominó Betaso",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src",
+    "format": "biome format --write src",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "depcruise": "depcruise src --config .dependency-cruiser.cjs"
+  },
+  "dependencies": {
+    "@colyseus/schema": "^5.0.27",
+    "@colyseus/tools": "^0.18.3",
+    "colyseus": "^0.18.5",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pino": "^10.1.0",
+    "reflect-metadata": "^0.2.2",
+    "tsyringe": "^4.8.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@colyseus/sdk": "^0.18.2",
+    "@colyseus/testing": "^0.18.5",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.10.1",
+    "dependency-cruiser": "^16.10.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
