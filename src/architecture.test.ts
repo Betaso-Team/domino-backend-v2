@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 // Dos features desechables usadas solo para violar reglas a propósito. Nunca se commitean:
@@ -112,5 +112,46 @@ describe("reglas de arquitectura", () => {
     const { ok, output } = depcruise();
     expect(ok).toBe(false);
     expect(output).toContain("no-circular");
+  });
+});
+
+// La variable global de Node que expone la configuración del proceso. Partida en dos piezas
+// y unida en runtime para que el patrón de búsqueda de abajo no aparezca, él mismo, como
+// substring contigua en el código fuente de este archivo — si apareciera, este archivo se
+// marcaría a sí mismo como infractor la primera vez que corriera el escaneo.
+const ENV_READ_TOKEN = ["process", "env"].join(".");
+
+// src/env.ts es el único lector permitido (ver el comentario en la cabecera de ese archivo).
+// vitest.setup.ts también toca esa variable, pero vive fuera de src/ —fuera del alcance de
+// este escaneo— y además solo escribe defaults de test (`??=`), nunca lee configuración de
+// producción: no es el caso que esta regla previene.
+const ENV_MODULE_PATH = "src/env.ts";
+
+function listTsFilesUnderSrc(dir = "src"): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) return listTsFilesUnderSrc(fullPath);
+    return entry.name.endsWith(".ts") ? [fullPath] : [];
+  });
+}
+
+function filesReadingEnvOutsideEnvModule(): string[] {
+  return listTsFilesUnderSrc()
+    .filter((file) => file !== ENV_MODULE_PATH)
+    .filter((file) => readFileSync(file, "utf8").includes(ENV_READ_TOKEN));
+}
+
+describe("invariante: env.ts es el único lector de la configuración del proceso", () => {
+  it("ningún otro archivo bajo src/ la lee directamente", () => {
+    expect(filesReadingEnvOutsideEnvModule()).toEqual([]);
+  });
+
+  it("detecta una lectura fuera de env.ts si alguien la agrega", () => {
+    // Construido en dos piezas por la misma razón que ENV_READ_TOKEN arriba: así el fixture
+    // que sí debe ser detectado no contamina, con su propio texto, el archivo que lo genera.
+    const globalName = "process";
+    const propertyName = "env";
+    writeViolation(`export const port = ${globalName}.${propertyName}.PORT;\n`);
+    expect(filesReadingEnvOutsideEnvModule()).toContain(VIOLATION_FILE);
   });
 });
