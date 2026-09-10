@@ -1,5 +1,8 @@
 // .dependency-cruiser.cjs
-// Las cuatro reglas del spec §3.2. Cada una tiene su test en src/architecture.test.ts.
+// Las cuatro reglas de imports del spec §3.2 (core-allowlist, core-no-runtime,
+// tsyringe-only-in-roots, feature-boundary) más no-circular, que no es una regla de imports
+// sino un invariante estructural del grafo (spec §3.5). Cada una tiene su test en
+// src/architecture.test.ts.
 module.exports = {
   forbidden: [
     {
@@ -22,7 +25,17 @@ module.exports = {
       severity: "error",
       from: { path: "^src/features/[^/]+/core/" },
       to: {
-        dependencyTypes: ["npm"],
+        // "npm" cubre dependencies; "npm-dev" cubre devDependencies (p.ej. @colyseus/testing,
+        // @colyseus/sdk). Sin "npm-dev" un import de un paquete de test/dev en el core pasa
+        // desapercibido: la regla estaría verde sin proteger nada.
+        dependencyTypes: ["npm", "npm-dev"],
+        // OJO: depcruise matchea "to.path" contra la ruta RESUELTA (p.ej.
+        // "node_modules/colyseus/build/index.cjs"), no contra el specifier del import. Por
+        // eso el prefijo "^node_modules/" es obligatorio: sin él, "^colyseus" nunca matchea
+        // nada y la regla queda deshabilitada en silencio (build verde, cero protección).
+        // mongoose/mongodb/pg/amqplib/axios/ioredis todavía no están instalados: son
+        // dependencias de runtime anticipadas (DB/cola/HTTP) que este core tampoco debe usar
+        // el día que se agreguen.
         path: "^node_modules/(colyseus|@colyseus/(?!schema)|mongoose|mongodb|pg|amqplib|axios|ioredis|tsyringe|express)",
       },
     },
@@ -37,7 +50,13 @@ module.exports = {
           "^src/features/match/transports/colyseus/commands/di-wiring\\.ts$",
         ],
       },
-      to: { dependencyTypes: ["npm"], path: "^node_modules/tsyringe/" },
+      to: {
+        // Mismo motivo que en core-no-runtime: "npm-dev" cierra el hueco de devDependencies.
+        dependencyTypes: ["npm", "npm-dev"],
+        // Ídem: matchea contra la ruta resuelta ("node_modules/tsyringe/..."), no contra el
+        // specifier "tsyringe". No quitar el prefijo "^node_modules/".
+        path: "^node_modules/tsyringe/",
+      },
     },
     {
       name: "feature-boundary",
