@@ -1,5 +1,10 @@
 // El ÚNICO lugar del repo que lee process.env. Todo lo demás recibe la config
-// por constructor o por el container.
+// por constructor o por el container. Enforced por src/env-single-reader.test.ts.
+//
+// Efecto secundario a nivel de módulo: importar este archivo ejecuta `parseEnv(process.env)`
+// y lanza de inmediato si el entorno es inválido (p.ej. falta JWT_SECRET) — antes de que
+// corra cualquier código propio del importador. En test, vitest.setup.ts pone defaults para
+// que esto nunca truene solo por faltar configuración de entorno.
 import { z } from "zod";
 
 const schema = z.object({
@@ -10,7 +15,7 @@ const schema = z.object({
 });
 
 export interface Env {
-  readonly nodeEnv: "development" | "test" | "production";
+  readonly nodeEnv: z.infer<typeof schema>["NODE_ENV"];
   readonly port: number;
   readonly jwtSecret: string;
   readonly logLevel: "debug" | "info";

@@ -32,4 +32,8 @@ describe("parseEnv", () => {
   it("rechaza un PORT que no es número", () => {
     expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), PORT: "abc" })).toThrow(/PORT/);
   });
+
+  it("rechaza un NODE_ENV fuera del enum", () => {
+    expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), NODE_ENV: "staging" })).toThrow(/NODE_ENV/);
+  });
 });
