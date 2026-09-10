@@ -45,7 +45,7 @@ export const RoundSummary = schema(
     winnerId: t.string(),
     winnerTeamId: t.string(),
     points: t.number(),
-    reason: t.string(),
+    reason: t.string(), // RoundEndReason — misma nota que `side` en tile.ts
   },
   "RoundSummary",
 );
@@ -55,6 +55,18 @@ export type RoundSummary = SchemaType<typeof RoundSummary>;
 // (reglas §4.1) es que la ronda siguiente la abre el rival de quien abrió la anterior,
 // así que sin este campo no hay de dónde sacar la alternancia una vez que el turno se
 // movió. El v1 lo tenía (`currentRoundStarterId`); el doble-seis solo decide la RONDA 1.
+//
+// `roundNumber` y `starterId` quedan tipados como `t.string()`/`t.number()` sin
+// `.optional()` ni `.default()`: son campos de IDENTIDAD, no de estado. No tienen un
+// valor de reposo con sentido (¿`roundNumber: 0`? ¿`starterId: ""`?), así que en vez de
+// inventarles uno se dejan sin default y la génesis (Tarea 6) los asigna ATÓMICAMENTE al
+// construir la ronda, en el mismo paso en que decide `starterId`. Antes de eso, en un
+// `RoundState` recién creado, valen `undefined` en tiempo de ejecución pese al tipo
+// declarado — que es exactamente lo que un `new RoundState()` sin `.optional()` produce
+// en @colyseus/schema 5.0.27 para un campo `t.string()`/`t.number()` que nunca fue
+// asignado. Los campos de ESTADO (`phase`, `isConsumingExtendedTime`,
+// `consecutivePasses`, etc.) sí llevan `.default()`, porque para ellos "recién creado"
+// SÍ es un valor legítimo.
 //
 // `boneyard` es una RAMA NULA (doctrina de truco, negocio §4.1: "ramas nulas para flujos
 // condicionales; su ausencia codifica el caso"). AUSENTE = este modo no tiene pozo, que
@@ -72,7 +84,7 @@ export type RoundSummary = SchemaType<typeof RoundSummary>;
 export const RoundState = schema(
   {
     roundNumber: t.number(),
-    phase: t.string().default("DEALING"),
+    phase: t.string().default("DEALING"), // RoundPhase — misma nota que `side` en tile.ts
     starterId: t.string(),
     board: t.ref(BoardState),
     boneyard: t.ref(BoneyardState).optional(),

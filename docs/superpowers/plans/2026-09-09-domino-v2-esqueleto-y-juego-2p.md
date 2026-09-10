@@ -990,6 +990,11 @@ describe("árbol de estado", () => {
 
   it("las fichas de la mano son un campo de VISTA: una StateView vacía no las tiene", () => {
     const hand = new Hand();
+    // El Encoder está SOLO para darle un Root al nodo. `StateView.add()` es un no-op
+    // silencioso si el ChangeTree del objetivo no tiene root (`StateView.ts`, `_bindRoot`),
+    // y en una sala real el Root lo attachea el Encoder de Colyseus al asignar `this.state`.
+    // Acá no se encodea nada: sin esta línea el test pasaría en verde midiendo nada.
+    new Encoder(hand);
     const view = new StateView();
     // El contrato que importa: `tiles` está marcado como vista, así que su
     // pertenencia se decide por StateView y no por estar en el árbol.
@@ -998,12 +1003,29 @@ describe("árbol de estado", () => {
     expect(view.has(hand.tiles)).toBe(true);
   });
 
-  it("ningún nodo pasa el cap de 63 campos de 0.18", () => {
-    for (const node of [new Tile(), new Hand(), new PlayerState(), new MatchState()]) {
-      expect(Object.keys(node.toJSON()).length).toBeLessThan(63);
-    }
+  // EL TEST QUE PROTEGE LA RAMA NULA, y el más valioso de esta tarea. La asimetría es
+  // deliberada: una ronda siempre tiene tablero y un jugador siempre tiene mano, pero solo
+  // algunos modos tienen pozo. Si alguien saca un `.optional()`, este test es lo único que
+  // lo ve — el resto de la suite sigue verde y el bug vuelve en silencio.
+  it("las ramas nulas arrancan ausentes; lo que siempre existe, no", () => {
+    const round = new RoundState();
+    expect(round.boneyard).toBeUndefined();
+    expect(round.currentTurn).toBeUndefined();
+    expect(round.board).toBeDefined();
+
+    const match = new MatchState();
+    expect(match.currentRound).toBeUndefined();
+    expect(match.scoreboard).toBeUndefined();
+    expect(new PlayerState().hand).toBeDefined();
   });
 });
+```
+
+El import del test suma `Encoder` y `RoundState`:
+
+```ts
+import { Encoder, StateView } from "@colyseus/schema";
+import { Hand, MatchState, PlayerState, RoundState, Tile } from "./index.js";
 ```
 
 - [ ] **Step 3: Correr el test para verificar que falla**
@@ -1229,9 +1251,14 @@ export const RoundState = schema(
     roundNumber: t.number(),
     phase: t.string().default("DEALING"),
     starterId: t.string(),
+    // SIN `.optional()`: una ronda siempre tiene tablero, así que auto-instanciar es correcto.
     board: t.ref(BoardState),
-    boneyard: t.ref(BoneyardState),
-    currentTurn: t.ref(Turn),
+    // CON `.optional()`, y es obligatorio para que la rama nula exista: un `t.ref()` sin
+    // `.optional()` se AUTO-INSTANCIA (ver la nota del Step 5), y un pozo siempre presente
+    // con `count: 0` hace indistinguible "este modo no tiene pozo" de "el pozo se agotó".
+    boneyard: t.ref(BoneyardState).optional(),
+    // CON `.optional()`: la instancia el arranque de la ronda, no la construcción del nodo.
+    currentTurn: t.ref(Turn).optional(),
   },
   "RoundState",
 );
@@ -1281,9 +1308,12 @@ export type Scoreboard = SchemaType<typeof Scoreboard>;
 export const MatchState = schema(
   {
     phase: t.string().default("NOT_STARTED"),
-    scoreboard: t.ref(Scoreboard),
+    // Los dos con `.optional()`: los instancia la génesis y el arranque de ronda
+    // respectivamente. Sin él se auto-instancian y `currentRound` nunca sería `undefined`,
+    // así que "todavía no hay ronda" dejaría de ser un estado representable.
+    scoreboard: t.ref(Scoreboard).optional(),
     players: t.array(PlayerState),
-    currentRound: t.ref(RoundState),
+    currentRound: t.ref(RoundState).optional(),
     pastRounds: t.array(RoundSummary),
     pointsToWin: t.number().default(0),
     activeDeadline: t.number().default(0),
@@ -1307,10 +1337,35 @@ export * from "./tile.js";
 - [ ] **Step 5: Correr el test hasta que pase**
 
 Run: `npx vitest run src/features/match/core/state/state.test.ts`
-Expected: los 5 tests PASAN.
+Expected: los 5 tests PASAN — los cuatro del árbol más el de la rama nula. El del cap de 63 campos
+se borró; la nota de abajo explica por qué no protegía nada.
 
-`Scoreboard` y `Turn` son `t.ref()` sin default, así que arrancan `undefined`; los instancia la
-génesis (Tarea 6). Si algún test los toca antes, falla por `undefined` y eso es correcto.
+> **⚠ `t.ref()` NO arranca en `undefined`: AUTO-INSTANCIA.** La primera redacción de esta tarea
+> afirmaba lo contrario y estaba mal. En `@colyseus/schema` 5, un `t.ref(X)` sin `.default()` se
+> auto-instancia al construir el padre (`annotations.ts`, `makeAutoDefaultFactory`) siempre que `X`
+> tenga constructor sin argumentos — que es el caso de todas las clases de este árbol. Verificado
+> ejecutándolo, no leyéndolo.
+>
+> **Y eso rompe la rama nula, que es una decisión de diseño, no un detalle.** Sin `.optional()`, un
+> `RoundState.boneyard` existiría SIEMPRE como `{count: 0}`, y ahí "este modo no tiene pozo" (4P
+> reparte las 28) vuelve a ser indistinguible de "el pozo se agotó" — exactamente el caso que la rama
+> nula existe para separar, y exactamente donde la tranca se calcula distinto.
+>
+> Llevan `.optional()`, entonces: `MatchState.scoreboard`, `MatchState.currentRound`,
+> `RoundState.currentTurn` y `RoundState.boneyard`.
+>
+> **NO lo llevan `RoundState.board` ni `PlayerState.hand`**, y la asimetría es el punto: una ronda
+> siempre tiene tablero y un jugador siempre tiene mano. Solo algunos modos tienen pozo.
+>
+> **Consecuencia para la génesis (Tarea 6): tiene que instanciar explícitamente `scoreboard`,
+> `currentRound`, `currentTurn` y —condicionalmente— `boneyard`.** Ya no vienen gratis.
+
+> **El cap de 63 campos lo hace cumplir la librería, no un test.** `Metadata.defineField` lanza
+> cuando el índice llega a 63, e incluye los heredados, así que pasarse **revienta al importar** — no
+> en runtime. La primera redacción tenía acá un test que contaba `Object.keys(node.toJSON()).length`,
+> y era doblemente inútil: `toJSON()` omite los campos `undefined` (un `PlayerState` recién construido
+> declara 8 campos y devuelve 5 claves), y un test no puede ser lo primero que falla cuando el import
+> ya crashea. Se borró. El hecho que ese test buscaba proteger es esta nota.
 
 - [ ] **Step 6: Correr la suite completa y commitear**
 
@@ -1657,6 +1712,18 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 > cambio de código. **Restricción no negociable: el sorteo se deriva del `seed`.** El v1 mezcla con
 > `Math.random()` (`four-players/commands/on-ready.ts:70-101`), así que las parejas de una partida
 > jugada no se pueden reconstruir — y sin eso el replay de la Tarea 21 no reproduce nada.
+
+> **⚠ HERENCIA DE LA TAREA 4: los `t.ref()` con `.optional()` ya no vienen instanciados.** Los cuatro
+> campos que llevan `.optional()` en el árbol —`MatchState.scoreboard`, `MatchState.currentRound`,
+> `RoundState.currentTurn`, `RoundState.boneyard`— arrancan en `undefined` **a propósito**, porque
+> `t.ref()` sin `.optional()` se auto-instancia y eso rompería la rama nula del pozo.
+>
+> Así que `createMatchState` tiene que instanciar `scoreboard` explícitamente, y quien arranca la
+> ronda tiene que instanciar `board`, `currentTurn` y —solo si la mesa tiene pozo— `boneyard`. Lo que
+> **no** hay que instanciar es lo que no lleva `.optional()`: `board` y `hand` ya vienen.
+>
+> Si esto se olvida, el síntoma no es un `undefined` prolijo: es un `TypeError` la primera vez que
+> alguien lea `match.scoreboard.teamA`.
 
 - [ ] **Step 0a: Escribir el test de la política de equipos**
 

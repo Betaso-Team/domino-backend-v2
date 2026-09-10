@@ -1,6 +1,6 @@
 import { Encoder, StateView } from "@colyseus/schema";
 import { describe, expect, it } from "vitest";
-import { Hand, MatchState, PlayerState, Tile } from "./index.js";
+import { Hand, MatchState, RoundState, Tile } from "./index.js";
 
 describe("árbol de estado", () => {
   it("una ficha lleva sus dos números", () => {
@@ -25,7 +25,22 @@ describe("árbol de estado", () => {
     expect(match.phase).toBe("NOT_STARTED");
     expect(match.players.length).toBe(0);
     expect(match.currentRound).toBeUndefined();
+    expect(match.scoreboard).toBeUndefined();
     expect(match.activeDeadline).toBe(0);
+  });
+
+  it("RoundState: la rama nula del pozo es distinguible de un tablero que sí existe", () => {
+    // La asimetría ES el punto, así que el test la fija en las dos direcciones:
+    // `board` existe siempre (toda ronda tiene tablero, aunque esté vacío), pero
+    // `boneyard` y `currentTurn` llevan `.optional()` y arrancan `undefined` — es la
+    // génesis (Tarea 6) quien decide instanciar `boneyard` o no, según el modo tenga
+    // pozo. Si alguien le saca el `.optional()` a `boneyard` en round.ts, este test es
+    // el que se pone rojo: sin él, un 4P (sin pozo) sería indistinguible de un pozo ya
+    // agotado, que es justo el bug que la rama nula existe para prevenir.
+    const round = new RoundState();
+    expect(round.board).toBeDefined();
+    expect(round.boneyard).toBeUndefined();
+    expect(round.currentTurn).toBeUndefined();
   });
 
   it("las fichas de la mano son un campo de VISTA: una StateView vacía no las tiene", () => {
@@ -45,9 +60,9 @@ describe("árbol de estado", () => {
     expect(view.has(hand.tiles)).toBe(true);
   });
 
-  it("ningún nodo pasa el cap de 63 campos de 0.18", () => {
-    for (const node of [new Tile(), new Hand(), new PlayerState(), new MatchState()]) {
-      expect(Object.keys(node.toJSON()).length).toBeLessThan(63);
-    }
-  });
+  // No hay test de "ningún nodo pasa el cap de 63 campos": @colyseus/schema lo aplica
+  // en tiempo de DEFINICIÓN (`Metadata.defineField` lanza al construir el schema), no
+  // en runtime, así que una violación real revienta al importar el módulo, antes de que
+  // corra un solo `it()` de este archivo — no hay nada útil que este describe pudiera
+  // asertar. Detalle completo en el comentario de cabecera de `state/index.ts`.
 });

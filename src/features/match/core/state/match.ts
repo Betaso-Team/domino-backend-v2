@@ -46,7 +46,7 @@ export type Scoreboard = SchemaType<typeof Scoreboard>;
 // `undefined`; la génesis (Tarea 6) los instancia.
 export const MatchState = schema(
   {
-    phase: t.string().default("NOT_STARTED"),
+    phase: t.string().default("NOT_STARTED"), // MatchPhase — misma nota que `side` en tile.ts
     scoreboard: t.ref(Scoreboard).optional(),
     players: t.array(PlayerState),
     currentRound: t.ref(RoundState).optional(),
