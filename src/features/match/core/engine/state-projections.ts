@@ -15,6 +15,7 @@ import type {
   PlayerState,
   RoundPhase,
   RoundState,
+  Scoreboard,
 } from "../state/index.js";
 import type { BoardSide } from "../state/tile.js";
 import { InvariantViolationError } from "./errors.js";
@@ -38,6 +39,17 @@ export function handOf(playerId: PlayerId, match: MatchState): Hand {
 export function currentRoundOf(match: MatchState): RoundState {
   if (!match.currentRound) throw new InvariantViolationError("no hay ronda en curso");
   return match.currentRound;
+}
+
+// `scoreboard` es `.optional()` por la misma razón que `currentRound`: un `t.ref()` sin
+// `.optional()` se auto-instancia, y esa rama tiene que poder arrancar `undefined` antes
+// de que la génesis (Tarea 6) la instancie. El costo de esa decisión lo paga quien lee el
+// campo —TS lo ve `Scoreboard | undefined` en cada sitio—, así que se angosta UNA vez acá
+// en vez de en cada lugar que hace `scoreboard.teamA += puntos` (el scorer de tareas
+// siguientes, sobre todo: `?.` no compila del lado de una asignación).
+export function scoreboardOf(match: MatchState): Scoreboard {
+  if (!match.scoreboard) throw new InvariantViolationError("no hay marcador");
+  return match.scoreboard;
 }
 
 // EL POZO ES UNA RAMA NULA, y estas dos proyecciones son la única forma de tocarlo.

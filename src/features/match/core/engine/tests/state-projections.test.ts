@@ -1,6 +1,6 @@
 // src/features/match/core/engine/tests/state-projections.test.ts
 import { describe, expect, it } from "vitest";
-import { BoardState, BoneyardState, RoundState } from "../../state/index.js";
+import { BoardState, BoneyardState, MatchState, RoundState } from "../../state/index.js";
 import { InvariantViolationError } from "../errors.js";
 import { createMatchState } from "../genesis.js";
 import {
@@ -9,6 +9,7 @@ import {
   isRoundActive,
   opponentTeam,
   playerOf,
+  scoreboardOf,
   teamOf,
   turnOrderFrom,
 } from "../state-projections.js";
@@ -51,6 +52,16 @@ describe("proyecciones puras del estado", () => {
     round.boneyard = new BoneyardState();
     match.currentRound = round;
     expect(currentRoundOf(match).roundNumber).toBe(1);
+  });
+
+  // A diferencia de `currentRound`, la génesis SIEMPRE instancia `scoreboard` (Step 3), así
+  // que la rama que lanza no se ve pasando por `build()` — hay que construir un MatchState
+  // pelado para reproducirla, tal como quedaría un árbol si la génesis dejara de hacerlo.
+  it("scoreboardOf estrecha el opcional afirmando la invariante", () => {
+    expect(() => scoreboardOf(new MatchState())).toThrow(InvariantViolationError);
+
+    const match = build();
+    expect(scoreboardOf(match).teamA).toBe(0);
   });
 
   it("isRoundActive es falso para quien abandonó", () => {

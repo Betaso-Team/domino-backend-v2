@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { DominoMatchConfig } from "../../config.js";
 import { createMatchState } from "../genesis.js";
+import { scoreboardOf } from "../state-projections.js";
 // El test compara contra la política DIRECTAMENTE, y por eso la importa: así afirma que la
 // génesis la DELEGA en vez de reimplementar `i % 2` y coincidir por casualidad.
 import { assignTeams } from "../team-assignment.js";
@@ -51,13 +52,10 @@ describe("createMatchState", () => {
     const match = createMatchState(config(["u1", "u2"]));
     expect(match.phase).toBe("NOT_STARTED");
     expect(match.currentRound).toBeUndefined();
-    // `scoreboard` es `t.ref().optional()` en el tipo, así que TS lo ve como
-    // `Scoreboard | undefined` pese a que la génesis SIEMPRE lo instancia (Step 3).
-    // El `?.` narrows sin non-null assertion (prohibido por lint): si la génesis
-    // alguna vez dejara de instanciarlo, la comparación contra `undefined` falla
-    // igual, en vez de crashear con un TypeError.
-    expect(match.scoreboard?.teamA).toBe(0);
-    expect(match.scoreboard?.teamB).toBe(0);
+    // `scoreboardOf` (state-projections.ts) angosta el opcional en un solo lugar; se usa
+    // acá también para no tener dos formas de leer el mismo campo en el proyecto.
+    expect(scoreboardOf(match).teamA).toBe(0);
+    expect(scoreboardOf(match).teamB).toBe(0);
     expect(match.startedAt).toBe(0);
   });
 
