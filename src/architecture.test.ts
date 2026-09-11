@@ -40,8 +40,12 @@ function writeViolation(source: string): void {
 }
 
 afterEach(() => {
-  rmSync(FEATURE_A_DIR, { recursive: true, force: true });
-  rmSync(FEATURE_B_DIR, { recursive: true, force: true });
+  // `maxRetries`/`retryDelay` NO son adorno: en Windows, depcruise corrió como subproceso
+  // y acaba de leer estos archivos, así que el handle puede seguir abierto unos ms cuando
+  // llega el borrado. Sin reintentos eso es un EBUSY intermitente — y un guardarraíl que
+  // falla al azar es un guardarraíl que alguien termina desactivando por ruidoso.
+  rmSync(FEATURE_A_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  rmSync(FEATURE_B_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe("reglas de arquitectura", () => {

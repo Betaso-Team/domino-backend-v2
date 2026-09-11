@@ -56,7 +56,10 @@ function writeFixture(source: string): void {
 }
 
 afterEach(() => {
-  rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  // Reintentos por el mismo motivo que en architecture.test.ts: en Windows un handle
+  // recién cerrado puede dar EBUSY. Acá el riesgo es menor (no hay subproceso), pero el
+  // costo de cubrirlo es cero y el modo de falla sería igual de confuso.
+  rmSync(FIXTURE_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe("invariante: env.ts es el único lector de la configuración del proceso", () => {
