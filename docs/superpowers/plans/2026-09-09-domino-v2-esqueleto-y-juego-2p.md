@@ -1726,6 +1726,27 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 > Si esto se olvida, el síntoma no es un `undefined` prolijo: es un `TypeError` la primera vez que
 > alguien lea `match.scoreboard.teamA`.
 
+> **⚠ ORDEN: esta tarea necesita `src/shared/rng.ts`, que la primera redacción creaba recién en la
+> Tarea 15.** `team-assignment.ts` importa `hashSeed`/`mulberry32`/`shuffled` para derivar el sorteo
+> del `seed`, así que sin ese módulo la tarea no puede quedar verde. Se descubrió ejecutando: el plan
+> ponía al consumidor quince tareas antes que a su dependencia.
+>
+> **`rng.ts` y su test se crean acá, en el Step 0, y la Tarea 15 pasa a solo consumirlos.** Es el
+> orden correcto de todas formas: el primer consumidor es quien lo necesita, y el `Dealer` de la
+> Tarea 15 es el segundo.
+
+- [ ] **Step 0: El RNG sembrado (movido desde la Tarea 15)**
+
+Portable y sin dominio: FNV-1a de 32 bits sobre `${seed}:${round}`, `mulberry32` como PRNG sin estado
+compartido, y un Fisher-Yates sobre una copia. Lo que hace posible el replay es que **cada llamada a
+`mulberry32` devuelve una secuencia nueva desde su semilla**, así que cada ronda es reproducible de
+forma aislada y no depende del orden de consumo de ningún generador global.
+
+El test (`src/shared/rng.test.ts`) y la implementación (`src/shared/rng.ts`) están escritos completos
+en la **Tarea 15, Steps 1 y 2** — se copian de ahí tal cual. Son 7 tests.
+
+Run: `npx vitest run src/shared/rng.test.ts` → los 7 PASAN antes de seguir.
+
 - [ ] **Step 0a: Escribir el test de la política de equipos**
 
 ```ts
@@ -5182,8 +5203,13 @@ Es lo que hace posible el replay: mismo `seed` → mismo reparto, y cada ronda r
 aislada** porque la aleatoriedad se deriva de `(seed, roundNumber)` sin estado mutable.
 
 **Files:**
-- Create: `src/shared/rng.ts`, `src/features/match/core/engine/dealer.ts`
-- Test: `src/shared/rng.test.ts`, `src/features/match/core/engine/tests/dealer.test.ts`
+- Create: `src/features/match/core/engine/dealer.ts`
+- Test: `src/features/match/core/engine/tests/dealer.test.ts`
+
+> **`src/shared/rng.ts` YA EXISTE**: lo creó la Tarea 6, que es su primer consumidor
+> (`team-assignment.ts` deriva el sorteo de equipos del `seed`). Los Steps 1 y 2 de abajo quedan como
+> la referencia de su contenido —de ahí los copió la Tarea 6— pero **acá no hay nada que escribir**:
+> verificar que `npx vitest run src/shared/rng.test.ts` sigue en verde y saltar al Step 3.
 
 - [ ] **Step 1: Escribir el test del RNG**
 
