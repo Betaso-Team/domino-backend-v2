@@ -1878,6 +1878,9 @@ Expected: los 9 tests PASAN.
 import { describe, expect, it } from "vitest";
 import type { DominoMatchConfig } from "../../config.js";
 import { createMatchState } from "../genesis.js";
+// El test compara contra la política DIRECTAMENTE, y por eso la importa: así afirma que la
+// génesis la DELEGA en vez de reimplementar `i % 2` y coincidir por casualidad.
+import { assignTeams } from "../team-assignment.js";
 
 const config = (
   seats: string[],
@@ -2032,6 +2035,10 @@ import {
   turnOrderFrom,
 } from "../state-projections.js";
 
+// SEAT_ORDER y no SHUFFLED, a propósito: este test prueba las PROYECCIONES, no el sorteo.
+// Con SHUFFLED las aserciones de abajo (u1→A, u2→B, u3→A) dependerían de que la permutación
+// del seed "s" resulte ser la identidad — o sea que pasarían por casualidad, y se romperían
+// el día que alguien toque el PRNG. El sorteo tiene su propio test en el Step 0a.
 const build = (seats = ["u1", "u2"]) =>
   createMatchState({
     matchId: "m1",
@@ -2039,7 +2046,7 @@ const build = (seats = ["u1", "u2"]) =>
     seed: "s",
     seats,
     pointsToWin: 100,
-    teamAssignment: "SHUFFLED",
+    teamAssignment: "SEAT_ORDER",
     isDealWindowEnabled: false,
   });
 
