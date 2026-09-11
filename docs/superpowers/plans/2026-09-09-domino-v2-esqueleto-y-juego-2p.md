@@ -2865,10 +2865,16 @@ describe("identityDecoder", () => {
     expect(identityDecoder("ABANDON").decode({}, "u1")).toEqual({ playerId: "u1" });
   });
 
-  it("ignora un playerId mandado por el cliente", () => {
-    expect(identityDecoder("ABANDON").decode({ playerId: "victima" }, "u1")).toEqual({
-      playerId: "u1",
-    });
+  // RECHAZA, no ignora. El plan decía "ignora ... y devuelve {playerId:'u1'}", y eso
+  // contradecía al `.strict()` de `payloads.ts` dos bloques más abajo: con `.strict()`
+  // zod emite `unrecognized_keys` y el decoder lanza. Gana `.strict()`, que es la
+  // doctrina escrita ("un campo de más es un rechazo, no algo que se ignore en
+  // silencio") y además la conducta más fuerte: el que intenta suplantar se come un
+  // error duro, no un no-op mudo que lo deja creyendo que el tiro salió.
+  it("rechaza un playerId mandado por el cliente", () => {
+    expect(() => identityDecoder("ABANDON").decode({ playerId: "victima" }, "u1")).toThrow(
+      ValidationError,
+    );
   });
 
   it("acepta un payload ausente", () => {
