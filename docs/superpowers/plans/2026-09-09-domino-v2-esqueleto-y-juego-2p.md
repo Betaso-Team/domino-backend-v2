@@ -3535,7 +3535,7 @@ Se prueba **sin levantar una sala**, y eso es la prueba de que la clase no conoc
 
 ```ts
 // src/features/match/transports/colyseus/visibility.test.ts
-import { StateView } from "@colyseus/schema";
+import { Encoder, StateView } from "@colyseus/schema";
 import { describe, expect, it } from "vitest";
 import { Tile } from "../../core/state/index.js";
 import { StateViewVisibilityController } from "./visibility.js";
@@ -3548,10 +3548,16 @@ function build() {
   return { views, controller: new StateViewVisibilityController(views) };
 }
 
+function attachedTile() {
+  const tile = new Tile();
+  new Encoder(tile);
+  return tile;
+}
+
 describe("StateViewVisibilityController", () => {
   it("PLAYER agrega el nodo solo a la vista de ese asiento", () => {
     const { views, controller } = build();
-    const tile = new Tile();
+    const tile = attachedTile();
     controller.makePublic(tile, { kind: "PLAYER", playerId: "u1" });
 
     expect(views.get("u1")?.has(tile)).toBe(true);
@@ -3560,7 +3566,7 @@ describe("StateViewVisibilityController", () => {
 
   it("ALL agrega el nodo a todas las vistas", () => {
     const { views, controller } = build();
-    const tile = new Tile();
+    const tile = attachedTile();
     controller.makePublic(tile, { kind: "ALL" });
 
     expect(views.get("u1")?.has(tile)).toBe(true);
@@ -3569,7 +3575,7 @@ describe("StateViewVisibilityController", () => {
 
   it("hide lo quita de esa vista", () => {
     const { views, controller } = build();
-    const tile = new Tile();
+    const tile = attachedTile();
     controller.makePublic(tile, { kind: "ALL" });
     controller.hide(tile, { kind: "PLAYER", playerId: "u2" });
 
@@ -3582,7 +3588,7 @@ describe("StateViewVisibilityController", () => {
   // que hace que al volver no entres ciego.
   it("un asiento sin conexión igual recibe lo revelado", () => {
     const { views, controller } = build();
-    const tile = new Tile();
+    const tile = attachedTile();
     // Nadie se conectó nunca; las vistas se crearon en onCreate.
     controller.makePublic(tile, { kind: "PLAYER", playerId: "u2" });
     expect(views.get("u2")?.has(tile)).toBe(true);
@@ -3590,7 +3596,7 @@ describe("StateViewVisibilityController", () => {
 
   it("repetir makePublic es no-op", () => {
     const { views, controller } = build();
-    const tile = new Tile();
+    const tile = attachedTile();
     controller.makePublic(tile, { kind: "ALL" });
     controller.makePublic(tile, { kind: "ALL" });
     expect(views.get("u1")?.has(tile)).toBe(true);
@@ -3696,6 +3702,7 @@ referencia del Step 1 de la Tarea 4). Lo que no se negocia es que el test demues
 ```ts
 // src/features/match/transports/match-registry.test.ts
 import { describe, expect, it } from "vitest";
+import type { DominoMatchConfig } from "../core/config.js";
 import { MatchRegistry } from "./match-registry.js";
 
 const config = {
@@ -3706,7 +3713,7 @@ const config = {
   pointsToWin: 100,
   teamAssignment: "SHUFFLED",
   isDealWindowEnabled: true,
-};
+} satisfies DominoMatchConfig;
 
 describe("MatchRegistry", () => {
   it("responde el DTO público por roomId", () => {
@@ -3756,7 +3763,7 @@ describe("MatchRegistry", () => {
 // EL CONTRATO de una sala: con qué se abre y con qué se sienta uno. Nada de esto
 // menciona Colyseus, y lo importa el emparejamiento —que es quien crea las salas—,
 // así que vive en la raíz de transports y no dentro de colyseus/.
-import type { DominoMatchConfig } from "../core/config.js";
+import type { DominoMatchConfig, TeamAssignmentMode } from "../core/config.js";
 
 // Unión discriminada por modo, no un objeto con todo opcional: así no existe la
 // combinación ilegal ni hay que confiar en que nadie la arme. Hoy hay una rama;
