@@ -2376,11 +2376,7 @@ export function buildEngine(
   };
 }
 
-export { visibilityNoop } from "./visibility-noop.js";
 ```
-
-Borrar la última línea del bloque anterior: `visibilityNoop` no existe todavía y no hace falta acá.
-El fixture ya construye su propio `visibility` no-op.
 
 - [ ] **Step 3: Escribir el test que falla**
 
@@ -2767,10 +2763,7 @@ export * from "./abandon.js";
 Run: `npx vitest run src/features/match/core/engine/tests/abandon.test.ts`
 Expected: los 5 tests PASAN.
 
-- [ ] **Step 8: Borrar la línea sobrante del fixture y commitear**
-
-Quitar de `build-engine.ts` la línea `export { visibilityNoop } from "./visibility-noop.js";`
-(quedó del Step 2 y no resuelve).
+- [ ] **Step 8: Commit**
 
 ```bash
 npm run typecheck && npm test
