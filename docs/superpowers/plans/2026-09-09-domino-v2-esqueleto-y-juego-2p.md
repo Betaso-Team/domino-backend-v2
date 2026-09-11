@@ -2512,7 +2512,14 @@ export class MatchPlayer {
 import type { PlayerId, TeamId } from "../../ids.js";
 import type { MatchState } from "../../state/index.js";
 import { RuleViolationError } from "../errors.js";
-import { hasTeamAbandoned, isRoundActive, opponentTeam, playerOf, teamOf } from "../state-projections.js";
+import {
+  hasTeamAbandoned,
+  isRoundActive,
+  opponentTeam,
+  playerOf,
+  scoreboardOf,
+  teamOf,
+} from "../state-projections.js";
 
 export interface MatchOutcome {
   readonly winnerTeamId: TeamId;
@@ -2557,7 +2564,9 @@ export class MatchReferee {
         return { winnerTeamId: opponentTeam(teamId), reason: "ABANDONMENT" };
       }
     }
-    const { teamA, teamB } = this.match.scoreboard;
+    // Por la proyección y no directo: `scoreboard` es `.optional()` (Tarea 4), así que
+    // con `strict: true` desestructurarlo a pelo no compila.
+    const { teamA, teamB } = scoreboardOf(this.match);
     const target = this.match.pointsToWin;
     if (teamA >= target) return { winnerTeamId: "A", reason: "SCORE" };
     if (teamB >= target) return { winnerTeamId: "B", reason: "SCORE" };
@@ -2578,7 +2587,7 @@ import type { PlayerId } from "../../ids.js";
 import type { MatchState } from "../../state/index.js";
 import type { Clock } from "../clock.js";
 import { deadlineKindOf } from "../deadline-kind.js";
-import type { Driver, TransitionResult } from "../driver.js";
+import type { Driver, RoundAction, TransitionResult } from "../driver.js";
 import { InvariantViolationError } from "../errors.js";
 import type { TimeoutScheduler } from "../timeout-scheduler.js";
 import type { MatchReferee } from "./referee.js";
@@ -2608,7 +2617,11 @@ export class MatchDriver implements Driver {
     }
   }
 
-  advance(_actorId: PlayerId): TransitionResult {
+  // Los DOS parámetros, aunque esta altura no use ninguno: la firma la fija la interfaz
+  // `Driver`, y el comando ya llama `advance(playerId, "ABANDONED")`. Con un solo
+  // parámetro esto no compila —`TS2554: Expected 1 arguments, but got 2`— y la Tarea 19,
+  // que reescribe este método para delegar en la ronda, sí los usa los dos.
+  advance(_actorId: PlayerId, _action: RoundAction): TransitionResult {
     if (this.match.phase !== "PLAYING") return { events: [], finished: false };
     if (this.referee.outcome()) {
       return { events: this.enterPresentingMatch(), finished: false };
