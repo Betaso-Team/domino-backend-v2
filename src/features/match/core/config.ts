@@ -1,3 +1,5 @@
+import type { PlayerId } from "./ids.js";
+
 // Value-object INMUTABLE, fuera del estado de Colyseus e inyectado por DI.
 // Acá vive el `seed`: hace el reparto determinista y reproducible, y como no está
 // en el árbol no hay superficie por donde filtrarse al cliente (spec §7.1).
@@ -9,7 +11,7 @@ export interface DominoMatchConfig {
   readonly matchId: string;
   readonly gameModeId: string;
   readonly seed: string;
-  readonly seats: readonly string[];
+  readonly seats: readonly PlayerId[];
   readonly pointsToWin: number;
   readonly teamAssignment: TeamAssignmentMode;
   /**

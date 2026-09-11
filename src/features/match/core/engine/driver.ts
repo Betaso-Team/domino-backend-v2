@@ -3,6 +3,10 @@ import type { PlayerId } from "../ids.js";
 
 export interface TransitionResult {
   readonly events: readonly MatchEvent[];
+  // Overloaded a propósito según qué conductor lo devuelve: para el conductor de RONDA
+  // significa "esta ronda se resolvió"; para el conductor de PARTIDA significa "la
+  // partida llegó a su fase terminal". Mismo nombre, distinta granularidad según qué
+  // conductor lo tengas en la mano.
   readonly finished: boolean;
 }
 
