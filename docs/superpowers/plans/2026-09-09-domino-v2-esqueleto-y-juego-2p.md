@@ -3527,7 +3527,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Create: `src/features/match/transports/colyseus/visibility.ts`, `.../timeout-scheduler.ts`, `src/features/match/transports/match-contract.ts`, `.../match-registry.ts`, `src/logger.ts`, `.../colyseus/commands/di-wiring.ts`
-- Test: `src/features/match/transports/colyseus/visibility.test.ts`, `.../match-registry.test.ts`
+- Test: `src/features/match/transports/colyseus/visibility.test.ts`, `.../timeout-scheduler.test.ts`, `.../match-registry.test.ts`
 
 - [ ] **Step 1: Escribir el test de la visibilidad**
 
@@ -3602,12 +3602,26 @@ describe("StateViewVisibilityController", () => {
     expect(views.get("u1")?.has(tile)).toBe(true);
   });
 
+  it("PLAYER para un asiento ausente lanza InvariantViolationError con el id", () => {
+    const { controller } = build();
+    expect(() => controller.makePublic(attachedTile(), { kind: "PLAYER", playerId: "u9" })).toThrow(
+      /u9/,
+    );
+  });
+
 });
 ```
 
+- [ ] **Step 1b: Escribir el test del scheduler**
+
+Usar un reloj mínimo que registre callbacks y `clear()`. Cubrir que `schedule` difunde el
+resultado al vencer, que un segundo `schedule` limpia y reemplaza el primero, que `cancel`
+evita la difusión y es idempotente, y que un deadline pasado se programa con delay `0`.
+El test de reemplazo debe fallar si se quita temporalmente el `clear` del timer anterior.
+
 - [ ] **Step 2: Correr el test para verificar que falla**
 
-Run: `npx vitest run src/features/match/transports/colyseus/visibility.test.ts`
+Run: `npx vitest run src/features/match/transports/colyseus/visibility.test.ts src/features/match/transports/colyseus/timeout-scheduler.test.ts`
 Expected: FAIL con `Failed to resolve import "./visibility.js"`.
 
 - [ ] **Step 3: Escribir los dos adaptadores**
@@ -3688,10 +3702,10 @@ export class RoomTimeoutScheduler implements TimeoutScheduler {
 }
 ```
 
-- [ ] **Step 4: Correr el test hasta que pase**
+- [ ] **Step 4: Correr los tests hasta que pasen**
 
-Run: `npx vitest run src/features/match/transports/colyseus/visibility.test.ts`
-Expected: los 5 tests PASAN.
+Run: `npx vitest run src/features/match/transports/colyseus/visibility.test.ts src/features/match/transports/colyseus/timeout-scheduler.test.ts`
+Expected: los 6 tests de visibilidad y los 4 del scheduler PASAN.
 
 Si `StateView` no expone `has()`, cambiar las aserciones por lo que sí exponga (comprobado en la
 referencia del Step 1 de la Tarea 4). Lo que no se negocia es que el test demuestre que un asiento
