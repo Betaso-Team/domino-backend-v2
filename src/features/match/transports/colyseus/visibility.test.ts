@@ -1,0 +1,80 @@
+import { Encoder, StateView } from "@colyseus/schema";
+import { describe, expect, it } from "vitest";
+import { InvariantViolationError } from "../../core/engine/errors.js";
+import { Tile } from "../../core/state/index.js";
+import { StateViewVisibilityController } from "./visibility.js";
+
+function build() {
+  const views = new Map([
+    ["u1", new StateView()],
+    ["u2", new StateView()],
+  ]);
+  return { views, controller: new StateViewVisibilityController(views) };
+}
+
+function tile(): Tile {
+  const value = new Tile();
+  new Encoder(value);
+  return value;
+}
+
+describe("StateViewVisibilityController", () => {
+  it("revela una ficha solo al asiento indicado", () => {
+    const { views, controller } = build();
+    const value = tile();
+
+    controller.makePublic(value, { kind: "PLAYER", playerId: "u1" });
+
+    expect(views.get("u1")?.has(value)).toBe(true);
+    expect(views.get("u2")?.has(value)).toBe(false);
+  });
+
+  it("revela una ficha a todos los asientos", () => {
+    const { views, controller } = build();
+    const value = tile();
+
+    controller.makePublic(value, { kind: "ALL" });
+
+    expect(views.get("u1")?.has(value)).toBe(true);
+    expect(views.get("u2")?.has(value)).toBe(true);
+  });
+
+  it("oculta una ficha al asiento indicado", () => {
+    const { views, controller } = build();
+    const value = tile();
+    controller.makePublic(value, { kind: "ALL" });
+
+    controller.hide(value, { kind: "PLAYER", playerId: "u2" });
+
+    expect(views.get("u1")?.has(value)).toBe(true);
+    expect(views.get("u2")?.has(value)).toBe(false);
+  });
+
+  it("revela al asiento aunque todavía no tenga conexión", () => {
+    const { views, controller } = build();
+    const value = tile();
+
+    controller.makePublic(value, { kind: "PLAYER", playerId: "u2" });
+
+    expect(views.get("u2")?.has(value)).toBe(true);
+  });
+
+  it("repetir una revelación global es idempotente", () => {
+    const { views, controller } = build();
+    const value = tile();
+
+    controller.makePublic(value, { kind: "ALL" });
+    controller.makePublic(value, { kind: "ALL" });
+
+    expect(views.get("u1")?.has(value)).toBe(true);
+  });
+
+  it("PLAYER para un asiento ausente lanza una invarianta con el id", () => {
+    const { controller } = build();
+    const value = tile();
+
+    expect(() => controller.makePublic(value, { kind: "PLAYER", playerId: "u9" })).toThrow(
+      new InvariantViolationError("sin vista para el asiento u9"),
+    );
+  });
+});
