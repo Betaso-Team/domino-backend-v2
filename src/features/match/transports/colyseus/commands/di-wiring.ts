@@ -19,6 +19,7 @@ import { identityDecoder } from "./decoders.js";
 
 export type MatchStarter = () => void;
 export type MatchSeatGuard = (playerId: string) => boolean;
+export type MatchHasOutcome = () => boolean;
 
 export function registerIndividualCommands(child: DependencyContainer): void {
   const match = child.resolve<MatchState>("MatchState");
@@ -38,6 +39,9 @@ export function registerIndividualCommands(child: DependencyContainer): void {
 
   child.register<Referee>("Referee", { useValue: referee });
   child.register<MatchStarter>("MatchStarter", { useValue: () => matchDriver.begin() });
+  child.register<MatchHasOutcome>("MatchHasOutcome", {
+    useValue: () => matchReferee.outcome() !== undefined,
+  });
   child.register<MatchSeatGuard>("MatchSeatGuard", {
     useValue: (playerId) =>
       !match.players.find((player) => player.playerId === playerId)?.hasAbandoned,
