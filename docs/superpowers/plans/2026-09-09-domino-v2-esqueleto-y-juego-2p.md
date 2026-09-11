@@ -4107,6 +4107,14 @@ describe("JwtVerifier", () => {
     await expect(verifier.verify(token)).rejects.toThrow(InvalidTokenError);
   });
 
+  // `alg: none` no alcanza para probar la allowlist: jsonwebtoken también lo rechaza
+  // automáticamente cuando recibe un secreto. HS384 con el secreto correcto demuestra
+  // que el verificador no acepta algoritmos HMAC distintos del contratado.
+  it("rechaza HS384 aunque use el secreto correcto", async () => {
+    const token = jwt.sign({ sub: "u1" }, SECRET, { algorithm: "HS384" });
+    await expect(verifier.verify(token)).rejects.toThrow(InvalidTokenError);
+  });
+
   it("rechaza un token sin claim sub", async () => {
     const token = jwt.sign({ foo: "bar" }, SECRET, { algorithm: "HS256" });
     await expect(verifier.verify(token)).rejects.toThrow(InvalidTokenError);
@@ -4189,7 +4197,7 @@ export * from "./transports/jwt-verifier.js";
 - [ ] **Step 4: Correr el test hasta que pase**
 
 Run: `npx vitest run src/features/auth/transports/jwt-verifier.test.ts`
-Expected: los 7 tests PASAN.
+Expected: los 8 tests PASAN.
 
 - [ ] **Step 5: Commit**
 
