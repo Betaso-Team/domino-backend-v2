@@ -19,5 +19,11 @@ export function deadlineKindOf(match: MatchState): DeadlineKind {
   // retira a uno, se retira a todos los que no levantaron sus fichas (reglas §3.1).
   if (match.currentRound?.phase === "DEALING") return "DEALING";
   if (match.currentRound?.phase === "PLAYING") return "TURN";
+  // Dos causas MUY distintas caen en esta misma línea, y el mensaje no las separa:
+  // (a) `match.phase` genuinamente no tiene ventana propia (p. ej. "NOT_STARTED"), o
+  // (b) `match.phase === "PLAYING"` pero `match.currentRound` es `undefined` — la ronda
+  // nunca se creó. El (b) es un bug de otro conductor (el de RONDA, que arranca en la
+  // Tarea 8+), no de éste; si lo ves, no busques una fase sin ventana, buscá por qué no
+  // hay ronda.
   throw new InvariantViolationError(`sin ventana temporizada en fase ${match.phase}`);
 }

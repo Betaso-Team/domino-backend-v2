@@ -1,6 +1,13 @@
 // src/features/match/core/engine/tests/build-engine.ts
 // Fixture de los tests de engine: arma el grafo de actores sobre un MatchState de
-// prueba, SIN tsyringe y sin levantar una Room. Es el espejo del wiring de producción.
+// prueba, SIN tsyringe y sin levantar una Room.
+//
+// OJO con lo que este fixture NO es: no es el espejo verificado del wiring de producción,
+// porque el wiring de producción todavía no existe (llega con el composition root de la
+// sala). Es un grafo armado a mano que hay que mantener en paso con el real cuando
+// aparezca, y **nada lo obliga** — si divergen, los tests de engine siguen verdes
+// probando una composición que nadie ejecuta. Cuando exista el wiring, esto pasa a ser
+// deuda a vigilar.
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
 import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
 import type { MatchEvent } from "../../events.js";
@@ -14,7 +21,6 @@ import { Player } from "../player-facade.js";
 import { PlayerRepository } from "../player-repository.js";
 import { Referee } from "../referee-facade.js";
 import type { TimeoutScheduler } from "../timeout-scheduler.js";
-import type { SchemaVisibilityController } from "../visibility.js";
 
 export interface EngineHarness {
   readonly match: MatchState;
@@ -65,8 +71,6 @@ export function buildEngine(
       pending = undefined;
     },
   };
-
-  const visibility: SchemaVisibilityController = { makePublic() {}, hide() {} };
 
   const matchReferee = new MatchReferee(match);
   const matchDriver = new MatchDriver(match, clock, scheduler, globalConfig, matchReferee);

@@ -7,7 +7,6 @@ import {
   opponentTeam,
   playerOf,
   scoreboardOf,
-  teamOf,
 } from "../state-projections.js";
 
 export interface MatchOutcome {
@@ -58,9 +57,5 @@ export class MatchReferee {
     if (teamA >= target) return { winnerTeamId: "A", reason: "SCORE" };
     if (teamB >= target) return { winnerTeamId: "B", reason: "SCORE" };
     return undefined;
-  }
-
-  teamOf(playerId: PlayerId): TeamId {
-    return teamOf(playerId, this.match);
   }
 }

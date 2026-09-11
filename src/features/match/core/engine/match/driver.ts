@@ -34,6 +34,10 @@ export class MatchDriver implements Driver {
     }
   }
 
+  // Los dos parámetros van sin usar HOY: a esta altura la única pregunta es si el juez ya
+  // tiene veredicto, y eso no depende de quién actuó ni de qué hizo. La firma la fija la
+  // interfaz `Driver`. La Tarea 19 los empieza a usar los dos, cuando este método pasa a
+  // delegar en el conductor de RONDA —que sí reconcilia distinto según la acción—.
   advance(_actorId: PlayerId, _action: RoundAction): TransitionResult {
     if (this.match.phase !== "PLAYING") return { events: [], finished: false };
     if (this.referee.outcome()) {

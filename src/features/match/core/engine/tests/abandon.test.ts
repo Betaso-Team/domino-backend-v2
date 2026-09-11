@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AbandonCommand } from "../../commands/abandon.js";
+import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
 import { RuleViolationError } from "../errors.js";
 import { playerOf } from "../state-projections.js";
 import { buildEngine } from "./build-engine.js";
@@ -62,5 +63,36 @@ describe("ABANDON", () => {
     e.clockBox.now += 5_000;
     e.matchDriver.begin();
     expect(e.match.startedAt).toBe(startedAt);
+  });
+
+  // LA RESERVA SE SIEMBRA UNA VEZ Y SOLO DECRECE (reglas §5.1, decisión 7). Es el único
+  // lugar del motor que la escribe hacia arriba, así que es el único que puede regalarla.
+  it("el arranque siembra la reserva de tiempo extra de cada jugador", () => {
+    const e = engine();
+    for (const player of e.match.players) expect(player.extraTimeRemainingMs).toBe(0);
+
+    e.matchDriver.begin();
+
+    for (const player of e.match.players) {
+      expect(player.extraTimeRemainingMs).toBe(DEFAULT_GLOBAL_CONFIG.extraTimeReserveMs);
+    }
+  });
+
+  // EL TEST TIENE QUE GASTAR LA RESERVA PRIMERO, y no es un detalle: una reserva intacta
+  // y completa es INDISTINGUIBLE de una recién rellenada. Sin gastarla, este test pasaría
+  // igual con la siembra corriendo en cada `begin()` — que es justo el bug que cuida.
+  //
+  // Qué se rompe si la guarda de idempotencia se mueve debajo del loop de siembra: el que
+  // logre disparar un segundo arranque recupera su colchón entero, gratis.
+  it("un segundo begin() NO rellena la reserva ya gastada", () => {
+    const e = engine();
+    e.matchDriver.begin();
+
+    const spent = playerOf("u1", e.match);
+    spent.extraTimeRemainingMs = 1_234;
+
+    e.matchDriver.begin();
+
+    expect(spent.extraTimeRemainingMs).toBe(1_234);
   });
 });
