@@ -34,7 +34,7 @@ describe("ABANDON", () => {
     expect(e.scheduled).toEqual([e.clockBox.now + 6_000]);
     // El verbo dicho por el JUGADOR no emite evento —el comando ya es el registro—,
     // pero el VEREDICTO no es el verbo: es consecuencia computada, y sale acá.
-    expect(events).toEqual([{ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "ABANDONMENT" }]);
+    expect(events).toEqual([{ type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" }]);
   });
 
   it("al vencer la pausa solo se cierra la máquina; el veredicto ya salió", () => {

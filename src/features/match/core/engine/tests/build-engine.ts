@@ -34,13 +34,18 @@ export function buildEngine(
   overrides: Partial<GlobalDominoConfig> = {},
 ): EngineHarness {
   const globalConfig: GlobalDominoConfig = { ...DEFAULT_GLOBAL_CONFIG, ...overrides };
+  // SEAT_ORDER y no SHUFFLED, a propósito: estos tests de engine prueban REGLAS de juego
+  // (forfeit, rondas, turnos), no el sorteo. Con SHUFFLED, "u1" ganaría o perdería el
+  // equipo según la permutación del seed, y las aserciones de team letter pasarían por
+  // casualidad hasta que alguien toque el PRNG o la lista de seats. El sorteo tiene su
+  // propio test dedicado en team-assignment.test.ts; acá la mesa tiene que ser predecible.
   const config: DominoMatchConfig = {
     matchId: "m-test",
     gameModeId: "test",
     seed: "seed-test",
     seats,
     pointsToWin: 100,
-    teamAssignment: "SHUFFLED",
+    teamAssignment: "SEAT_ORDER",
     isDealWindowEnabled: false,
   };
   const match = createMatchState(config);
