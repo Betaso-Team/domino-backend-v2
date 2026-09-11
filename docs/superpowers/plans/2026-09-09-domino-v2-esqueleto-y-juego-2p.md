@@ -2015,7 +2015,7 @@ preguntarse de qué equipo es nadie: lo lee de `PlayerState.teamId`.
 - [ ] **Step 4: Correr el test hasta que pase**
 
 Run: `npx vitest run src/features/match/core/engine/tests/genesis.test.ts`
-Expected: los 7 tests PASAN.
+Expected: los 8 tests PASAN.
 
 - [ ] **Step 5: Escribir el test de las proyecciones**
 
@@ -2150,6 +2150,16 @@ export function currentRoundOf(match: MatchState): RoundState {
   return match.currentRound;
 }
 
+// EL COSTO DE LA RAMA NULA SE PAGA UNA VEZ, ACÁ. `scoreboard` es `.optional()` porque
+// `t.ref()` se auto-instancia y el árbol necesita que las ramas nulas sean de verdad
+// (Tarea 4). El precio es que con `strict: true` ningún consumidor puede escribir
+// `match.scoreboard.teamA += x` — y `?.` no compila del lado de la escritura, así que no
+// alcanza con encogerse de hombros en cada call site. Se estrecha una vez y listo.
+export function scoreboardOf(match: MatchState): Scoreboard {
+  if (!match.scoreboard) throw new InvariantViolationError("no hay marcador");
+  return match.scoreboard;
+}
+
 // EL POZO ES UNA RAMA NULA, y estas dos proyecciones son la única forma de tocarlo.
 //
 // `boneyardCountOf` es para PREGUNTAR: ausente y agotado dan 0, que es lo correcto para
@@ -2219,11 +2229,15 @@ export function turnOrderFrom(playerId: PlayerId, match: MatchState): PlayerStat
 - [ ] **Step 8: Correr los tests y commitear**
 
 Run: `npx vitest run src/features/match/core/engine/tests/`
-Expected: 13 tests PASAN.
+Expected: 25 tests PASAN — 9 de la política, 8 de la génesis y 8 de las proyecciones (las 7 del
+bloque más `scoreboardOf`). Los 7 del RNG corren aparte, en `src/shared/rng.test.ts`.
+
+`src/shared` va en el `git add` porque el Step 0 crea `rng.ts` ahí. Sin eso, la tarea commitea el
+consumidor y deja la dependencia sin versionar.
 
 ```bash
 npm run typecheck && npm test
-git add src/features/match/core/engine
+git add src/features/match/core/engine src/shared
 git commit -m "feat(engine): génesis del árbol y proyecciones puras del estado
 
 El orden de los asientos ES la asignación de equipos, con test propio: con el
@@ -6136,6 +6150,19 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 Solo el juez y el mutador, probados **directo contra el estado**: sin conductor y sin comandos, que
 llegan en la Tarea 19. Así esta tarea no depende de nada que no exista todavía.
+
+> **⚠ ACÁ HACE FALTA `currentTurnOf(round)`, y es la tercera vez que aparece el mismo patrón.**
+> `RoundState.currentTurn` es `.optional()` (Tarea 4), así que con `strict: true` los usos de esta
+> tarea y de la 19 —`round.currentTurn.playerId`, `currentTurn.consecutivePasses = …`— no compilan. Y
+> `?.` no sirve: del lado de la **escritura** no compila de ninguna forma.
+>
+> Se resuelve igual que `currentRoundOf` y `scoreboardOf`: una proyección que estrecha y lanza la
+> invariante si falta, en `state-projections.ts`, con su test de las dos ramas. **No se creó antes a
+> propósito** —en la Tarea 6 no había consumidor y habría sido construir por adelantado—, pero acá sí
+> lo hay, así que es el primer paso de esta tarea.
+>
+> `boneyard` ya está cubierto por `boneyardOf`/`boneyardCountOf`. Con `currentTurnOf`, las cuatro
+> ramas nulas del árbol quedan con su proyección.
 
 **Files:**
 - Create: `src/features/match/core/engine/round/player.ts`, `.../round/referee.ts`, `.../round/index.ts`
