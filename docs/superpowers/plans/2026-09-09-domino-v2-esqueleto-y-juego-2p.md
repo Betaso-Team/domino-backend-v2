@@ -6089,9 +6089,14 @@ describe("isBlocked", () => {
     expect(isBlocked(build({ u1: [[6, 1]], u2: [[3, 2]] }))).toBe(false);
   });
 
-  it("no está trancado si queda pozo, aunque nadie pueda jugar", () => {
-    // Nadie engancha, pero hay de dónde robar.
-    expect(isBlocked(build({ u1: [[3, 2]], u2: [[5, 1]] }, [[0, 0]]))).toBe(false);
+  it("no está trancado si el pozo contiene una ficha jugable", () => {
+    // Ninguna mano engancha, pero el 6|0 del pozo sí.
+    expect(isBlocked(build({ u1: [[3, 2]], u2: [[5, 1]] }, [[6, 0]]))).toBe(false);
+  });
+
+  it("está trancado si las fichas del pozo tampoco pueden jugarse", () => {
+    // La definición estricta de §3.7 mira el contenido, no solo si queda pozo.
+    expect(isBlocked(build({ u1: [[3, 2]], u2: [[5, 1]] }, [[0, 0]]))).toBe(true);
   });
 
   it("está trancado si nadie puede jugar y el pozo está vacío", () => {
@@ -6182,28 +6187,26 @@ function maxTileValueOf(hand: SeatHand): number {
 // src/features/match/core/engine/round/block.ts
 import type { PlayerId } from "../../ids.js";
 import type { MatchState } from "../../state/index.js";
-import { boneyardCountOf, currentRoundOf, roundActivePlayers } from "../state-projections.js";
+import { currentRoundOf, roundActivePlayers } from "../state-projections.js";
 import { handValue } from "../tile-set.js";
 import { boardEndsOf } from "./board-ends.js";
 import { hasPlayableTile } from "./playable.js";
 
-// TRANCA: nadie puede jugar Y no queda de dónde robar. Mientras haya pozo, quien no
-// puede jugar roba, así que la ronda no está cerrada.
-//
-// `boneyardCountOf` y no `round.boneyard.count`: en 4P la rama no existe, y ahí "no
-// queda de dónde robar" es cierto DESDE EL PRIMER TURNO. Es la razón entera de que los
-// dos modos compartan esta función en vez de tener un `isGameBlockedFourPlayers` como
-// el v1 (reglas §3.7 y el hallazgo de duplicación de §6).
+// TRANCA: nadie puede jugar ni siquiera con las fichas que quedan en el pozo. No alcanza
+// con que el pozo tenga fichas: si ninguna conecta, la ronda ya está cerrada (§3.7).
+// En 4P la rama no existe y el recorrido se limita naturalmente a las manos actuales.
 export function isBlocked(match: MatchState): boolean {
   const round = currentRoundOf(match);
-  if (boneyardCountOf(round) > 0) return false;
-
   const active = roundActivePlayers(match);
   // Una mano vacía cierra por DOMINÓ, no por tranca: no es este camino.
   if (active.some((player) => player.hand.tiles.length === 0)) return false;
 
   const ends = boardEndsOf(round.board);
-  return !active.some((player) => hasPlayableTile([...player.hand.tiles], ends));
+  const someHandCanPlay = active.some((player) => hasPlayableTile([...player.hand.tiles], ends));
+  const boneyardCanPlay = round.boneyard
+    ? hasPlayableTile([...round.boneyard.tiles], ends)
+    : false;
+  return !someHandCanPlay && !boneyardCanPlay;
 }
 
 export interface BlockVerdict {
@@ -6250,10 +6253,11 @@ export function blockVerdictOf(match: MatchState): BlockVerdict {
 - [ ] **Step 5: Correr los tests y commitear**
 
 Run: `npx vitest run src/features/match/core/engine/round/tests/`
-Expected: 5 + 8 + 21 = 34 tests PASAN.
+Expected: 5 + 9 + 18 = 32 tests PASAN.
 
 ```bash
-npm run typecheck && npm test
+npm run format
+npm run typecheck && npm test && npm run lint
 git add src/features/match/core
 git commit -m "feat(round): tranca y primer turno, con el desempate determinista
 
