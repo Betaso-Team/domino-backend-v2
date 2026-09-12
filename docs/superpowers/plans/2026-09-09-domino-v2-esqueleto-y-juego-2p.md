@@ -4735,7 +4735,7 @@ Los tests de esta tarea corren contra `boot(appConfig)`, o sea **el mismo wiring
 lo único que prueba que las piezas de las 12 tareas anteriores encajan.
 
 **Files:**
-- Modify: `src/features/match/core/config.ts` (las duraciones salen de env), `src/env.ts`, `vitest.setup.ts`
+- Modify: `src/features/match/core/config.ts` (las duraciones salen de env), `src/env.ts`, `src/di-container.ts`, `vitest.setup.ts`
 - Create: `src/features/match/tests/e2e-harness.ts`, `src/features/match/tests/lifecycle-e2e.test.ts`
 
 - [ ] **Step 1: Hacer configurables las duraciones, para que los tests no esperen 6 s reales**
@@ -4884,14 +4884,8 @@ export async function waitUntil(
 // FIRMA DEL ESTADO. Permite esperar a que el servidor PROCESÓ el mensaje en vez de
 // dormir un tiempo arbitrario.
 //
-// TRAMPA: si un verbo no cambia ninguna de estas claves, act() cuelga. Cuando se
-// sume un verbo que sea un overlay del turno (una negociación de apuesta, por
-// ejemplo), hay que sumar su rama acá.
-//
-// `hasSeenTiles` está en la lista por esa trampa exacta: el PRIMER `REVEAL_TILES` de la
-// ventana de reparto no mueve ninguna otra clave —no pone ficha, no toca el pozo, no
-// cambia el turno ni la fase, porque todavía falta el otro—. Sin este campo, `act` se
-// cuelga esperando un cambio que ocurrió pero no estaba mirando.
+// TRAMPA: si un verbo no cambia ninguna de estas claves, act() cuelga. Cada tarea que
+// agregue vocabulario debe sumar acá la mínima rama que demuestre su efecto observable.
 export function signatureOf(state: MatchState): string {
   return JSON.stringify([
     state.phase,
@@ -4906,7 +4900,6 @@ export function signatureOf(state: MatchState): string {
     state.players.map((player) => [
       player.hand.tileCount,
       player.hasAbandoned,
-      player.hasSeenTiles,
       player.connected,
     ]),
   ]);
@@ -4918,17 +4911,13 @@ export interface SeatedMatch {
   readonly clients: Record<string, Awaited<ReturnType<ColyseusTestServer["connectTo"]>>>;
 }
 
-// La sala nace LLENA: se crea con todos sus asientos y después se conectan.
-// Sienta a los dos y, por defecto, LEVANTA LAS FICHAS de los dos: en producción la
-// ventana de reparto está encendida en toda mesa (`configOf`), así que un e2e que la
-// saltee estaría probando un camino que no existe.
-//
-// `skipDealWindow: true` es para el único test que necesita la ventana ABIERTA: el suyo.
+// La sala nace con todos sus asientos reservados y después se conectan. A esta altura
+// el único verbo del catálogo es ABANDON: la ventana de reparto y REVEAL_TILES llegan
+// en las Tareas 15 y 19, por lo que este arnés no puede adelantarlos.
 export async function seatPair(
   server: ColyseusTestServer,
   seats: [string, string],
   seed?: string,
-  options: { skipDealWindow?: boolean } = {},
 ): Promise<SeatedMatch> {
   const room = await server.createRoom("domino", casualTable([...seats], seed));
   const clients: SeatedMatch["clients"] = {};
@@ -4936,19 +4925,7 @@ export async function seatPair(
     server.sdk.auth.token = mintToken(userId);
     clients[userId] = await server.connectTo(room);
   }
-  const match = { roomId: room.roomId, serverState: room.state as MatchState, clients };
-  if (!options.skipDealWindow) await revealAll(match);
-  return match;
-}
-
-// Los dos levantan sus fichas y la ronda arranca. Un `act` por jugador, así cada uno
-// espera a que el servidor lo procesó: el último cierra la ventana y la fase pasa a
-// `PLAYING`, que es el cambio de firma que `act` está esperando.
-export async function revealAll(match: SeatedMatch): Promise<void> {
-  for (const userId of Object.keys(match.clients)) {
-    await act(match, userId, "REVEAL_TILES");
-  }
-  await waitUntil(() => match.serverState.currentRound?.phase === "PLAYING");
+  return { roomId: room.roomId, serverState: room.state as MatchState, clients };
 }
 
 // Manda y espera a que la firma del estado cambie.
@@ -5111,24 +5088,19 @@ describe("ciclo de vida de una partida", () => {
     });
   });
 
-  // LA MUESTRA DEL RELOJ ES LO QUE HACE DIBUJABLE EL `activeDeadline`. Sin ella el front
-  // le resta su propio `Date.now()` a un instante estampado por el servidor, y un
-  // dispositivo con el reloj corrido muestra el turno vencido. El test afirma las dos
-  // cosas que el front necesita: que el campo viene, y que es de la misma escala que el
-  // deadline (epoch ms), porque compararlos es exactamente lo que va a hacer.
-  it("el config trae una muestra del reloj del servidor, en la escala del deadline", async () => {
+  // activeDeadline todavía no existe en una ronda: aparece con el reparto y los turnos.
+  // A esta altura se prueba el contrato que sí está presente, que serverNow es epoch ms
+  // muestreado durante el request. La comparación entre ambos relojes llega en Tarea 20.
+  it("el config trae una muestra actual del reloj del servidor", async () => {
     const match = await seatPair(server, ["t1", "t2"]);
-    await waitUntil(() => match.serverState.activeDeadline > 0);
-
+    const before = Date.now();
     const body = (await (
       await fetch(`http://localhost:2585/config/${match.roomId}`)
     ).json()) as { serverNow: number };
+    const after = Date.now();
 
-    // Mismo origen de tiempo: el deadline vigente cae DESPUÉS de la muestra, y no a
-    // cincuenta años de distancia. Si alguien pasa el deadline a la timeline de la sala
-    // (ms desde el arranque), esta aserción es la que lo caza.
-    expect(body.serverNow).toBeGreaterThan(1_700_000_000_000);
-    expect(match.serverState.activeDeadline).toBeGreaterThan(body.serverNow);
+    expect(body.serverNow).toBeGreaterThanOrEqual(before);
+    expect(body.serverNow).toBeLessThanOrEqual(after);
   });
 });
 ```
