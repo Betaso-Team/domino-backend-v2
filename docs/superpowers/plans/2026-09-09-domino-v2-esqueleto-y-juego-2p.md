@@ -4761,7 +4761,7 @@ Los tests de esta tarea corren contra `boot(appConfig)`, o sea **el mismo wiring
 lo único que prueba que las piezas de las 12 tareas anteriores encajan.
 
 **Files:**
-- Modify: `src/features/match/core/config.ts` (las duraciones salen de env), `src/env.ts`, `src/di-container.ts`, `vitest.setup.ts`
+- Modify: `src/features/match/core/config.ts` (las duraciones salen de env), `src/env.ts`, `src/di-container.ts`, `src/app.config.ts`, `src/features/match/transports/colyseus/domino-room.test.ts`, `vitest.setup.ts`
 - Create: `src/features/match/tests/e2e-harness.ts`, `src/features/match/tests/lifecycle-e2e.test.ts`
 
 - [ ] **Step 1: Hacer configurables las duraciones, para que los tests no esperen 6 s reales**
@@ -4857,6 +4857,30 @@ Anotar tres cosas antes de escribir el arnés:
 3. Cómo se conecta un cliente con token (`server.sdk` + `auth.token`, o un parámetro de
    `connectTo`).
 
+En 0.18.5 hay una diferencia no visible en el `.d.ts`: si `boot` recibe el `Server` devuelto por
+`defineServer`, ignora el puerto pedido y siempre usa 2568. `app.config.ts` debe exportar además
+las mismas opciones de rooms/Express como `testConfig`, y los tests deben hacer
+`boot(testConfig, puerto)`. El test de sala existente usa 2584 y este arnés 2585; así las suites
+paralelas ejercitan el mismo wiring sin competir por el puerto fijo.
+
+```ts
+// src/app.config.ts
+import type { ConfigOptions } from "@colyseus/tools";
+
+const rooms = { domino: defineRoom(DominoRoom) };
+const registerHttp = (app: Express) => registerMatchHttp(app);
+
+export const testConfig = {
+  rooms,
+  initializeExpress: registerHttp,
+} satisfies ConfigOptions<typeof rooms>;
+
+export const server = defineServer({ rooms, express: registerHttp });
+```
+
+Y cambiar `domino-room.test.ts` para importar `testConfig` y arrancar con
+`boot(testConfig, 2584)`.
+
 El arnés de abajo asume `server.createRoom` + `server.connectTo`. Si la API difiere, **ajustar el
 arnés y no los tests**: los tests expresan el comportamiento y no deben conocer el transporte.
 
@@ -4866,7 +4890,7 @@ arnés y no los tests**: los tests expresan el comportamiento y no deben conocer
 // src/features/match/tests/e2e-harness.ts
 import { boot, type ColyseusTestServer } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
-import appConfig from "../../../app.config.js";
+import { testConfig } from "../../../app.config.js";
 import { rootContainer } from "../../../di-container.js";
 import { env } from "../../../env.js";
 import type { MatchState } from "../core/state/index.js";
@@ -4893,7 +4917,7 @@ export function casualTable(seats: string[], seed = "seed-e2e"): DominoRoomOptio
 
 // Cada suite arranca en su PROPIO puerto: las suites corren en paralelo.
 export async function bootServer(port: number): Promise<ColyseusTestServer> {
-  return boot(appConfig, port);
+  return boot(testConfig, port);
 }
 
 export async function waitUntil(
@@ -5076,7 +5100,6 @@ describe("ciclo de vida de una partida", () => {
 
     server.sdk.auth.token = mintToken("d1");
     const second = await server.sdk.joinById(match.roomId);
-    await waitUntil(() => second.hasJoined === true);
 
     // Sigue habiendo exactamente dos conexiones: la nueva reemplazó, no sumó.
     await waitUntil(() => server.getRoomById(match.roomId).clients.length === 2);
@@ -5086,9 +5109,11 @@ describe("ciclo de vida de una partida", () => {
 
   it("quien no tiene asiento no entra", async () => {
     const room = await server.createRoom("domino", casualTable(["x1", "x2"]));
+    server.sdk.auth.token = mintToken("x1");
+    await server.connectTo(room);
     server.sdk.auth.token = mintToken("intruso");
     await expect(server.connectTo(room)).rejects.toThrow();
-    // Y la sala sigue en pie para los que sí tienen asiento.
+    // La sala, sostenida por el jugador legítimo, no cae por el rechazo esperado.
     expect(server.getRoomById(room.roomId)).toBeDefined();
   });
 
