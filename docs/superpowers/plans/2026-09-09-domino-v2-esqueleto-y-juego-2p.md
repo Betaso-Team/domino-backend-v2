@@ -4280,7 +4280,14 @@ child.register<MatchHasOutcome>("MatchHasOutcome", {
 ```ts
 // src/features/match/transports/colyseus/domino-room.ts
 import { StateView } from "@colyseus/schema";
-import { type AuthContext, type Client, CloseCode, type Delayed, Room } from "colyseus";
+import {
+  type AuthContext,
+  type Client,
+  CloseCode,
+  type Deferred,
+  type Delayed,
+  Room,
+} from "colyseus";
 import { rootContainer } from "../../../../di-container.js";
 import type { Logger } from "../../../../logger.js";
 import { InvalidTokenError, type TokenVerifier } from "../../../auth/index.js";
@@ -4329,6 +4336,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private readonly views = new Map<PlayerId, StateView>();
   /** Qué asientos ya tuvieron conexión: distingue "llegó" de "volvió". */
   private readonly seated = new Set<PlayerId>();
+  /** Una sola reserva viva por asiento; una sesión fresca invalida la anterior. */
+  private readonly pendingReconnections = new Map<PlayerId, Deferred<Client>>();
 
   // Importar `colyseus` carga @colyseus/auth, que instala un onAuth estático y, si
   // acepta el token, hace que Colyseus saltee el verificador de instancia. Esta sala
@@ -4418,6 +4427,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const { userId } = client.auth as SeatCredentials;
     if (!this.seats.includes(userId)) throw new SeatNotReservedError(userId);
     if (!this.isStillPlaying(userId)) throw new PlayerAlreadyOutError(userId);
+    this.cancelPendingReconnection(userId);
 
     client.userData = { playerId: userId };
     client.view = this.views.get(userId); // la vista de su ASIENTO, con lo ya revelado
@@ -4442,7 +4452,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const playerId = client.userData?.playerId as PlayerId | undefined;
     if (!playerId) return;
 
-    void this.allowReconnection(client, RECONNECTION_WINDOW_SECONDS).catch(() => undefined);
+    this.cancelPendingReconnection(playerId);
+    const pending = this.allowReconnection(client, RECONNECTION_WINDOW_SECONDS);
+    this.pendingReconnections.set(playerId, pending);
+    void pending.then(
+      () => this.forgetPendingReconnection(playerId, pending),
+      () => this.forgetPendingReconnection(playerId, pending),
+    );
 
     // unlock() abre el listing, pero NO libera la reserva ni baja
     // hasReachedMaxClients(). El cupo técnico doble de onCreate es lo que permite
@@ -4585,6 +4601,16 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     );
   }
 
+  private cancelPendingReconnection(playerId: PlayerId): void {
+    this.pendingReconnections.get(playerId)?.reject(new Error("reconexión desplazada"));
+  }
+
+  private forgetPendingReconnection(playerId: PlayerId, pending: Deferred<Client>): void {
+    if (this.pendingReconnections.get(playerId) === pending) {
+      this.pendingReconnections.delete(playerId);
+    }
+  }
+
   private crash(error: Error, methodName: string): void {
     this.log.error("bug: el estado dejó de ser confiable, cerrando la partida", {
       methodName,
@@ -4599,8 +4625,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 Antes de seguir, `domino-room.test.ts` debe arrancar `boot(app)` y cubrir con sockets reales:
 
 1. Un JWT HS256 válido llega al `TokenVerifier` de instancia pese al parche de `@colyseus/auth`.
-2. Una sesión fresca ocupa un asiento caído aunque siga viva su reserva de reconexión.
-3. El token viejo no desplaza después a la sesión fresca.
+2. Tres ciclos seguidos de caída y sesión fresca no acumulan reservas ni vuelven a llenar la sala.
+3. El primer token viejo sigue inválido incluso después de salir la última sesión fresca.
 4. Un jugador que abandonó tampoco vuelve por el camino especial de reconexión.
 5. Disponer después de `MATCH_RESOLVED` no agrega `MATCH_ABORTED`; sin veredicto sí lo agrega.
 6. El config público responde `Cache-Control: no-store`.
