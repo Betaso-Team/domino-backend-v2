@@ -5241,6 +5241,8 @@ describe("tile-set", () => {
   it("ningún número sale del rango 0..6", () => {
     for (const [a, b] of orderedTileSet()) {
       expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThanOrEqual(DOMINO_MAX_PIP);
+      expect(b).toBeGreaterThanOrEqual(0);
       expect(b).toBeLessThanOrEqual(DOMINO_MAX_PIP);
     }
   });
