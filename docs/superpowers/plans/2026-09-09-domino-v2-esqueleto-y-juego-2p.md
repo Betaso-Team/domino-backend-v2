@@ -4865,15 +4865,16 @@ paralelas ejercitan el mismo wiring sin competir por el puerto fijo.
 
 ```ts
 // src/app.config.ts
-import type { ConfigOptions } from "@colyseus/tools";
+import config from "@colyseus/tools";
+import type { Application } from "express";
 
 const rooms = { domino: defineRoom(DominoRoom) };
-const registerHttp = (app: Express) => registerMatchHttp(app);
+const registerHttp = (app: Application) => registerMatchHttp(app);
 
-export const testConfig = {
+export const testConfig = config({
   rooms,
   initializeExpress: registerHttp,
-} satisfies ConfigOptions<typeof rooms>;
+});
 
 export const server = defineServer({ rooms, express: registerHttp });
 ```
@@ -5119,7 +5120,7 @@ describe("ciclo de vida de una partida", () => {
 
   it("sin token no entra", async () => {
     const room = await server.createRoom("domino", casualTable(["y1", "y2"]));
-    server.sdk.auth.token = undefined;
+    await server.sdk.auth.signOut();
     await expect(server.connectTo(room)).rejects.toThrow();
   });
 
