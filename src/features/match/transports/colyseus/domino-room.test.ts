@@ -2,7 +2,7 @@ import { ColyseusSDK } from "@colyseus/sdk";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import app from "../../../../app.config.js";
+import { testConfig } from "../../../../app.config.js";
 import { rootContainer } from "../../../../di-container.js";
 import { env } from "../../../../env.js";
 import type { MemoryHistory } from "../../network/transports/memory-history.js";
@@ -12,7 +12,7 @@ import type { DominoRoom } from "./domino-room.js";
 let server: ColyseusTestServer | undefined;
 
 beforeAll(async () => {
-  server = await boot(app);
+  server = await boot(testConfig, 2584);
 });
 
 afterAll(async () => {

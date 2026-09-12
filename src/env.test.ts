@@ -14,6 +14,28 @@ describe("parseEnv", () => {
     expect(env.nodeEnv).toBe("development");
     expect(env.port).toBe(2567);
     expect(env.logLevel).toBe("debug");
+    expect(env.turnTimeoutMs).toBe(60_000);
+    expect(env.extraTimeReserveMs).toBe(30_000);
+    expect(env.presentingRoundMs).toBe(6_000);
+    expect(env.presentingMatchMs).toBe(6_000);
+    expect(env.seatingTimeoutMs).toBe(30_000);
+  });
+
+  it("permite acortar los plazos desde el entorno", () => {
+    const env = parseEnv({
+      JWT_SECRET: "s".repeat(16),
+      TURN_TIMEOUT_MS: "600",
+      EXTRA_TIME_RESERVE_MS: "300",
+      PRESENTING_ROUND_MS: "120",
+      PRESENTING_MATCH_MS: "130",
+      SEATING_TIMEOUT_MS: "3000",
+    });
+
+    expect(env.turnTimeoutMs).toBe(600);
+    expect(env.extraTimeReserveMs).toBe(300);
+    expect(env.presentingRoundMs).toBe(120);
+    expect(env.presentingMatchMs).toBe(130);
+    expect(env.seatingTimeoutMs).toBe(3_000);
   });
 
   it("en producción el nivel de log baja a info", () => {

@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { container } from "tsyringe";
 import { env } from "./env.js";
 import { JwtVerifier } from "./features/auth/index.js";
-import { DEFAULT_GLOBAL_CONFIG, type GlobalDominoConfig } from "./features/match/core/config.js";
+import { type GlobalDominoConfig, globalConfigWith } from "./features/match/core/config.js";
 import type { Clock } from "./features/match/core/engine/clock.js";
 import { MemoryHistory } from "./features/match/network/transports/memory-history.js";
 import { MatchRegistry } from "./features/match/transports/match-registry.js";
@@ -13,7 +13,13 @@ import { type Logger, logger } from "./logger.js";
 export const rootContainer = container;
 
 rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
-  useValue: DEFAULT_GLOBAL_CONFIG,
+  useValue: globalConfigWith({
+    turnTimeoutMs: env.turnTimeoutMs,
+    extraTimeReserveMs: env.extraTimeReserveMs,
+    presentingRoundMs: env.presentingRoundMs,
+    presentingMatchMs: env.presentingMatchMs,
+    seatingTimeoutMs: env.seatingTimeoutMs,
+  }),
 });
 rootContainer.register<Clock>("Clock", { useValue: { now: () => Date.now() } satisfies Clock });
 rootContainer.register<Logger>("Logger", { useValue: logger });

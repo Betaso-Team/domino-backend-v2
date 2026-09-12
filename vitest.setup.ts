@@ -6,3 +6,8 @@ import "reflect-metadata";
 process.env.NODE_ENV ??= "test";
 process.env.JWT_SECRET ??= "test-secret-do-not-use-in-production";
 process.env.PORT ??= "2567";
+process.env.PRESENTING_MATCH_MS ??= "120";
+process.env.PRESENTING_ROUND_MS ??= "120";
+process.env.TURN_TIMEOUT_MS ??= "600";
+process.env.EXTRA_TIME_RESERVE_MS ??= "300";
+process.env.SEATING_TIMEOUT_MS ??= "3000";

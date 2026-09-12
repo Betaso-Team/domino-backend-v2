@@ -60,3 +60,7 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   seatingTimeoutMs: 30_000,
   tilesPerPlayer: 7,
 };
+
+export function globalConfigWith(overrides: Partial<GlobalDominoConfig>): GlobalDominoConfig {
+  return { ...DEFAULT_GLOBAL_CONFIG, ...overrides };
+}
