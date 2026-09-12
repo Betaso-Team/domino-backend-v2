@@ -6297,8 +6297,40 @@ llegan en la Tarea 19. Así esta tarea no depende de nada que no exista todavía
 **Files:**
 - Create: `src/features/match/core/engine/round/player.ts`, `.../round/referee.ts`, `.../round/index.ts`
 - Test: `src/features/match/core/engine/round/tests/referee.test.ts`, `.../tests/player.test.ts`
+- Modify: `src/features/match/core/engine/state-projections.ts`, `.../tests/state-projections.test.ts`
 
-- [ ] **Step 1: Escribir un helper de estado para los dos tests**
+- [ ] **Step 1: Escribir el test de `currentTurnOf` y verificar el rojo**
+
+Añadir `Turn` al import de estado, `currentTurnOf` al import de proyecciones y este caso a
+`src/features/match/core/engine/tests/state-projections.test.ts`:
+
+```ts
+it("currentTurnOf estrecha el opcional afirmando la invariante", () => {
+  const round = new RoundState();
+  expect(() => currentTurnOf(round)).toThrow(InvariantViolationError);
+
+  const turn = new Turn();
+  turn.playerId = "u1";
+  round.currentTurn = turn;
+  expect(currentTurnOf(round).playerId).toBe("u1");
+});
+```
+
+Run: `npx vitest run src/features/match/core/engine/tests/state-projections.test.ts`
+Expected: FAIL — no existe `currentTurnOf`.
+
+- [ ] **Step 2: Implementar `currentTurnOf`**
+
+Añadir `Turn` al import de estado y la proyección a `state-projections.ts`:
+
+```ts
+export function currentTurnOf(round: RoundState): Turn {
+  if (!round.currentTurn) throw new InvariantViolationError("no hay turno en curso");
+  return round.currentTurn;
+}
+```
+
+- [ ] **Step 3: Escribir un helper de estado para los dos tests**
 
 ```ts
 // src/features/match/core/engine/round/tests/round-fixture.ts
@@ -6374,7 +6406,7 @@ export function roundState(setup: RoundSetup): MatchState {
 
 Añadir `Turn` al import de `state/index.js` en ese archivo.
 
-- [ ] **Step 2: Escribir el test del juez**
+- [ ] **Step 4: Escribir el test del juez**
 
 ```ts
 // src/features/match/core/engine/round/tests/referee.test.ts
@@ -6474,15 +6506,24 @@ describe("RoundReferee — robar y pasar", () => {
 });
 ```
 
-- [ ] **Step 3: Escribir el test del mutador**
+- [ ] **Step 5: Escribir el test del mutador**
 
 ```ts
 // src/features/match/core/engine/round/tests/player.test.ts
 import { describe, expect, it } from "vitest";
 import { handOf } from "../../state-projections.js";
+import type { SchemaVisibilityController } from "../../visibility.js";
 import { boardEndsOf } from "../board-ends.js";
 import { RoundPlayer } from "../player.js";
 import { roundState } from "./round-fixture.js";
+
+const visibility: SchemaVisibilityController = {
+  makePublic() {},
+  hide() {},
+};
+
+const playerFor = (playerId: string, match: ReturnType<typeof roundState>) =>
+  new RoundPlayer(playerId, match, visibility);
 
 describe("RoundPlayer.playTile", () => {
   it("saca la ficha de la mano, la pone en la mesa y mantiene tileCount", () => {
@@ -6490,7 +6531,7 @@ describe("RoundPlayer.playTile", () => {
       hands: { u1: [[6, 1], [3, 2]], u2: [[5, 5]] },
       board: [[6, 4, "RIGHT"]],
     });
-    new RoundPlayer("u1", match).playTile({ left: 6, right: 1 }, "LEFT");
+    playerFor("u1", match).playTile({ left: 6, right: 1 }, "LEFT");
 
     const hand = handOf("u1", match);
     expect(hand.tiles.length).toBe(1);
@@ -6498,12 +6539,12 @@ describe("RoundPlayer.playTile", () => {
     expect(match.currentRound?.board.tiles.length).toBe(2);
   });
 
-  it("guarda quién la jugó, de qué lado y por qué número enganchó", () => {
+  it("guarda quién la jugó y de qué lado", () => {
     const match = roundState({
       hands: { u1: [[6, 1]], u2: [[5, 5]] },
       board: [[6, 4, "RIGHT"]],
     });
-    new RoundPlayer("u1", match).playTile({ left: 6, right: 1 }, "LEFT");
+    playerFor("u1", match).playTile({ left: 6, right: 1 }, "LEFT");
 
     const placed = match.currentRound?.board.tiles.at(-1);
     expect(placed?.playedBy).toBe("u1");
@@ -6518,7 +6559,7 @@ describe("RoundPlayer.playTile", () => {
       hands: { u1: [[6, 1]], u2: [[5, 5]] },
       board: [[6, 4, "RIGHT"]],
     });
-    new RoundPlayer("u1", match).playTile({ left: 6, right: 1 }, "LEFT");
+    playerFor("u1", match).playTile({ left: 6, right: 1 }, "LEFT");
 
     expect(match.currentRound?.board.tiles.at(0)?.tile.toJSON()).toEqual({ left: 6, right: 4 });
     expect(boardEndsOf(match.currentRound!.board)).toEqual({ left: 1, right: 4 });
@@ -6529,7 +6570,7 @@ describe("RoundPlayer.playTile", () => {
       hands: { u1: [[6, 1]], u2: [[5, 5]] },
       board: [[6, 4, "RIGHT"]],
     });
-    new RoundPlayer("u1", match).playTile({ left: 1, right: 6 }, "LEFT");
+    playerFor("u1", match).playTile({ left: 1, right: 6 }, "LEFT");
     expect(match.currentRound?.board.tiles.at(-1)?.tile.toJSON()).toEqual({ left: 6, right: 1 });
   });
 });
@@ -6541,7 +6582,7 @@ describe("RoundPlayer.drawTile", () => {
       board: [[6, 4, "RIGHT"]],
       boneyard: [[0, 0], [1, 1]],
     });
-    new RoundPlayer("u1", match).drawTile();
+    playerFor("u1", match).drawTile();
 
     expect(handOf("u1", match).tiles.length).toBe(2);
     expect(handOf("u1", match).tileCount).toBe(2);
@@ -6555,18 +6596,18 @@ describe("RoundPlayer.drawTile", () => {
       board: [[6, 4, "RIGHT"]],
       boneyard: [[0, 0], [1, 1]],
     });
-    new RoundPlayer("u1", match).drawTile();
+    playerFor("u1", match).drawTile();
     expect(handOf("u1", match).tiles.at(-1)?.toJSON()).toEqual({ left: 0, right: 0 });
   });
 });
 ```
 
-- [ ] **Step 4: Correr los tests para verificar que fallan**
+- [ ] **Step 6: Correr los tests para verificar que fallan**
 
 Run: `npx vitest run src/features/match/core/engine/round/tests/referee.test.ts src/features/match/core/engine/round/tests/player.test.ts`
 Expected: FAIL — no existen `referee.js` ni `player.js`.
 
-- [ ] **Step 5: Escribir `RoundReferee` y `RoundPlayer`**
+- [ ] **Step 7: Escribir `RoundReferee` y `RoundPlayer`**
 
 ```ts
 // src/features/match/core/engine/round/referee.ts
@@ -6577,6 +6618,7 @@ import { RuleViolationError } from "../errors.js";
 import {
   boneyardCountOf,
   currentRoundOf,
+  currentTurnOf,
   handOf,
   playerOf,
   roundActivePlayers,
@@ -6652,7 +6694,7 @@ export class RoundReferee {
   private assertIsTurn(playerId: PlayerId): void {
     const round = currentRoundOf(this.match);
     if (round.phase !== "PLAYING") throw new RuleViolationError("NOT_PLAYING");
-    if (round.currentTurn.playerId !== playerId) throw new RuleViolationError("NOT_YOUR_TURN");
+    if (currentTurnOf(round).playerId !== playerId) throw new RuleViolationError("NOT_YOUR_TURN");
   }
 }
 ```
@@ -6660,7 +6702,7 @@ export class RoundReferee {
 ```ts
 // src/features/match/core/engine/round/player.ts
 import type { PlayerId } from "../../ids.js";
-import { PlacedTile, Tile } from "../../state/index.js";
+import { PlacedTile } from "../../state/index.js";
 import type { BoardSide, TileLike } from "../../state/tile.js";
 import type { MatchState } from "../../state/index.js";
 import { InvariantViolationError } from "../errors.js";
@@ -6763,15 +6805,16 @@ export * from "./player.js";
 export * from "./referee.js";
 ```
 
-- [ ] **Step 6: Correr los tests hasta que pasen**
+- [ ] **Step 8: Correr los tests hasta que pasen**
 
 Run: `npx vitest run src/features/match/core/engine/round/tests/`
-Expected: 12 + 6 + 34 = 52 tests PASAN.
+Expected: 1 + 12 + 6 + 32 = 51 tests PASAN.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-npm run typecheck && npm test
+npm run format
+npm run typecheck && npm test && npm run lint
 git add src/features/match/core
 git commit -m "feat(round): juez y mutador de la ronda
 
