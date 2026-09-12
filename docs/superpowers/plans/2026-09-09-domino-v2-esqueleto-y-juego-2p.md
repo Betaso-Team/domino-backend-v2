@@ -4223,10 +4223,13 @@ La única pieza que habla Colyseus. Además de transportar, **cuenta** los tres 
 tiene por qué saber: que un socket se cayó, que volvió, y que esta partida murió sin veredicto.
 
 **Files:**
-- Create: `src/features/match/transports/colyseus/domino-room.ts`, `src/features/match/transports/http/register-http.ts`, `src/features/match/index.ts`, `src/di-container.ts`, `src/app.config.ts`, `src/index.ts`
+- Create: `src/features/match/transports/colyseus/domino-room.ts`, `src/features/match/transports/colyseus/domino-room.test.ts`, `src/features/match/transports/http/register-http.ts`, `src/features/match/index.ts`, `src/di-container.ts`, `src/app.config.ts`, `src/index.ts`
+- Modify: `src/features/match/transports/colyseus/commands/di-wiring.ts`
 
-No hay test unitario en esta tarea: la sala se prueba de punta a punta con clientes reales en la
-Tarea 13. Un test que la instancie a mano probaría el mock, no la sala.
+La sala se prueba acá con `boot(app)` y clientes reales. La revisión contra el runtime instalado
+descubrió comportamientos que un test instanciado a mano no ve: `@colyseus/auth` parchea el
+`onAuth` estático, las reservas pendientes cuentan para `maxClients`, y el camino de reconexión no
+vuelve a ejecutar `onAuth` ni `onJoin`.
 
 - [ ] **Step 1: Escribir el composition root global**
 
@@ -4263,6 +4266,17 @@ rootContainer.register("HistoryPort", { useValue: new MemoryHistory() });
 
 - [ ] **Step 2: Escribir la sala**
 
+Antes, exponer desde el wiring una consulta angosta del veredicto; la sala no recibe el
+`MatchDriver` concreto ni decide de nuevo cuándo una partida tiene resultado:
+
+```ts
+export type MatchHasOutcome = () => boolean;
+
+child.register<MatchHasOutcome>("MatchHasOutcome", {
+  useValue: () => matchReferee.outcome() !== undefined,
+});
+```
+
 ```ts
 // src/features/match/transports/colyseus/domino-room.ts
 import { StateView } from "@colyseus/schema";
@@ -4275,7 +4289,7 @@ import { createMatchState } from "../../core/engine/genesis.js";
 import { RuleViolationError } from "../../core/engine/errors.js";
 import type { PlayerId } from "../../core/ids.js";
 import type { MatchState } from "../../core/state/index.js";
-import type { NetworkMatchEvent } from "../../network/events.js";
+import type { AbortReason } from "../../network/events.js";
 import type { MatchHistory } from "../../network/history.js";
 import { MatchEventNotifier } from "../../network/listeners.js";
 import { configOf, type DominoRoomOptions, type SeatCredentials } from "../match-contract.js";
@@ -4284,6 +4298,7 @@ import type { CommandCatalog } from "./commands/catalog.js";
 import {
   buildCatalog,
   buildPieces,
+  type MatchHasOutcome,
   type MatchSeatGuard,
   type MatchStarter,
   registerIndividualCommands,
@@ -4305,6 +4320,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private notifier!: MatchEventNotifier;
   private scheduler!: RoomTimeoutScheduler;
   private history!: MatchHistory;
+  private hasOutcome!: MatchHasOutcome;
   private isStillPlaying!: MatchSeatGuard;
   private startMatch!: MatchStarter;
   private log!: Logger;
@@ -4314,11 +4330,23 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   /** Qué asientos ya tuvieron conexión: distingue "llegó" de "volvió". */
   private readonly seated = new Set<PlayerId>();
 
+  // Importar `colyseus` carga @colyseus/auth, que instala un onAuth estático y, si
+  // acepta el token, hace que Colyseus saltee el verificador de instancia. Esta sala
+  // neutraliza ese default: TokenVerifier sigue siendo la única autoridad.
+  static override async onAuth(
+    _token: string,
+    _options: unknown,
+    _context: AuthContext,
+  ): Promise<true> {
+    return true;
+  }
+
   override onCreate(options: DominoRoomOptions): void {
     const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
-    // Sin esto la reserva de asiento no es una puerta. Sigue siendo tope de llenado
-    // aunque la puerta de SEGURIDAD sea el guard de onJoin.
-    this.maxClients = options.seats.length;
+    // Colyseus suma sockets y reservas pendientes antes de llegar a onJoin. El cupo
+    // técnico doble conserva un token viejo mientras admite un reemplazo autenticado;
+    // la puerta de asientos reales sigue siendo el guard de onJoin.
+    this.maxClients = options.seats.length * 2;
     this.seats = options.seats;
 
     const config = configOf(options);
@@ -4352,6 +4380,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
     // Se resuelven UNA vez acá: resolver pertenece al momento de composición,
     // no al request.
+    this.hasOutcome = child.resolve<MatchHasOutcome>("MatchHasOutcome");
     this.isStillPlaying = child.resolve<MatchSeatGuard>("MatchSeatGuard");
     this.startMatch = child.resolve<MatchStarter>("MatchStarter");
 
@@ -4390,13 +4419,14 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     if (!this.seats.includes(userId)) throw new SeatNotReservedError(userId);
     if (!this.isStillPlaying(userId)) throw new PlayerAlreadyOutError(userId);
 
-    // UNA conexión por asiento, y gana la más nueva. El agujero se abre cuando
-    // alguien se cae y deja un cupo libre: ahí un segundo dispositivo de la misma
-    // cuenta pasaría con todo derecho y quedarían dos conexiones por un asiento.
-    this.clientOf(userId)?.leave(CloseCode.CONSENTED);
-
     client.userData = { playerId: userId };
     client.view = this.views.get(userId); // la vista de su ASIENTO, con lo ya revelado
+    const player = this.state.players.find((candidate) => candidate.playerId === userId);
+    if (player) player.connected = true;
+
+    // UNA conexión por asiento. Se registra primero la nueva identidad para que
+    // onLeave del socket desplazado no marque el asiento offline por una carrera.
+    this.clientOf(userId, client)?.leave(CloseCode.CONSENTED);
 
     const isBack = this.seated.has(userId);
     this.seated.add(userId);
@@ -4412,15 +4442,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const playerId = client.userData?.playerId as PlayerId | undefined;
     if (!playerId) return;
 
-    this.allowReconnection(client, RECONNECTION_WINDOW_SECONDS);
+    void this.allowReconnection(client, RECONNECTION_WINDOW_SECONDS).catch(() => undefined);
 
-    // EL unlock() NO ES OPCIONAL. Mientras allowReconnection está pendiente,
-    // Colyseus sostiene el asiento por sessionId y hasReachedMaxClients() lo CUENTA:
-    // la sala queda llena y el matchmaker rechaza el joinById de quien perdió su
-    // token (app matada, recarga, otro dispositivo), o sea que lo deja fuera de su
-    // propia partida. Y cancelar la reserva desde onJoin llega tarde: el rechazo
-    // ocurre antes de que ese hook corra.
-    this.unlock();
+    // unlock() abre el listing, pero NO libera la reserva ni baja
+    // hasReachedMaxClients(). El cupo técnico doble de onCreate es lo que permite
+    // que un reemplazo fresco llegue a onJoin.
+    void this.unlock();
 
     const player = this.state.players.find((candidate) => candidate.playerId === playerId);
     if (player) player.connected = false;
@@ -4433,6 +4460,14 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   override onReconnect(client: Client): void {
     const playerId = client.userData?.playerId as PlayerId | undefined;
     if (!playerId) return;
+    // La reconexión SDK saltea onAuth y onJoin: repite sus guards en el mismo orden.
+    if (!this.seats.includes(playerId)) throw new SeatNotReservedError(playerId);
+    if (!this.isStillPlaying(playerId)) throw new PlayerAlreadyOutError(playerId);
+    // Si un reemplazo fresco ya ganó el asiento, el token del socket viejo no lo expulsa.
+    if (this.clientOf(playerId, client)) {
+      client.leave(CloseCode.CONSENTED);
+      return;
+    }
     const player = this.state.players.find((candidate) => candidate.playerId === playerId);
     if (player) player.connected = true;
     if (this.clients.length >= this.maxClients) this.lock();
@@ -4458,12 +4493,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // El hecho es de la SALA: el juego no tiene un final sin veredicto. Sin este
     // aviso, el anillo nunca se entera y una entrada cobrada se queda sin reembolsar.
     //
-    // ⚠ LA GUARDA NO PUEDE PREGUNTAR SOLO POR EL TERMINAL. Hoy `phase !== "FINISHED"`
-    // alcanza, pero en cuanto entren las fases de revancha —que van DESPUÉS del
-    // veredicto— una partida ya PAGADA caería en esta rama y se reembolsaría encima. Lo
-    // correcto entonces es preguntar por el VEREDICTO, no por la fase. Truco lo pagó y
-    // lo documentó (negocio v27 §12.6); acá queda anotado antes de que pase.
-    if (this.notifier && this.state.phase !== "FINISHED") {
+    // ABANDON ya produce un veredicto en PRESENTING_MATCH. Preguntar por la fase
+    // emitiría después MATCH_ABORTED y dejaría dos instrucciones de liquidación.
+    if (this.notifier && !this.hasOutcome()) {
       const reason = this.abortReason();
       this.notifier.notify([{ type: "MATCH_ABORTED", reason }]);
       this.log.warn("partida abortada sin veredicto", { reason });
@@ -4547,8 +4579,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.startMatch();
   }
 
-  private clientOf(playerId: PlayerId): Client | undefined {
-    return this.clients.find((client) => client.userData?.playerId === playerId);
+  private clientOf(playerId: PlayerId, except?: Client): Client | undefined {
+    return this.clients.find(
+      (client) => client !== except && client.userData?.playerId === playerId,
+    );
   }
 
   private crash(error: Error, methodName: string): void {
@@ -4561,6 +4595,18 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   }
 }
 ```
+
+Antes de seguir, `domino-room.test.ts` debe arrancar `boot(app)` y cubrir con sockets reales:
+
+1. Un JWT HS256 válido llega al `TokenVerifier` de instancia pese al parche de `@colyseus/auth`.
+2. Una sesión fresca ocupa un asiento caído aunque siga viva su reserva de reconexión.
+3. El token viejo no desplaza después a la sesión fresca.
+4. Un jugador que abandonó tampoco vuelve por el camino especial de reconexión.
+5. Disponer después de `MATCH_RESOLVED` no agrega `MATCH_ABORTED`; sin veredicto sí lo agrega.
+6. El config público responde `Cache-Control: no-store`.
+
+Run: `npx vitest run src/features/match/transports/colyseus/domino-room.test.ts`
+Expected: los 6 tests PASAN.
 
 - [ ] **Step 3: Escribir el endpoint HTTP, el barrel de la feature y el arranque**
 
@@ -4590,7 +4636,7 @@ export function registerMatchHttp(app: Express): void {
     // y afirmar el valor exacto en vez de un rango.
     const clock = rootContainer.resolve<Clock>("Clock");
     const body: MatchConfigResponse = { ...config, serverNow: clock.now() };
-    response.json(body);
+    response.set("Cache-Control", "no-store").json(body);
   });
 }
 ```
@@ -4650,7 +4696,7 @@ En PowerShell: `$env:JWT_SECRET = "s" * 32; npm run dev`
 
 - [ ] **Step 5: Verificar que las reglas de arquitectura siguen valiendo**
 
-Run: `npm test`
+Run: `npm run typecheck && npm test`
 Expected: TODO pasa. `src/architecture.test.ts` ahora tiene que ver `tsyringe` en exactamente tres
 archivos: `di-container.ts`, `domino-room.ts` y `di-wiring.ts`. Si aparece en un cuarto, falla — y es
 correcto que falle.
@@ -4658,7 +4704,7 @@ correcto que falle.
 - [ ] **Step 6: Commit**
 
 ```bash
-npm run typecheck && npm run lint && npm test
+npm run format && npm run typecheck && npm test && npm run lint
 git add src
 git commit -m "feat(room): DominoRoom como transporte y composition root per-partida
 
