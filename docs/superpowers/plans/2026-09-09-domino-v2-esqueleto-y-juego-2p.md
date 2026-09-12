@@ -5682,14 +5682,14 @@ export class Dealer {
 ```
 
 Run: `npx vitest run src/features/match/core/engine/tests/dealer.test.ts`
-Expected: los 10 tests PASAN.
+Expected: los 9 tests PASAN.
 
 Si `hand.tiles.clear()` no existe en `ArraySchema` de schema 5, usar `while (hand.tiles.length) hand.tiles.pop()` y corregir también el uso en `boneyard`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-npm run typecheck && npm test
+npm run format && npm run typecheck && npm test && npm run lint
 git add src/shared src/features/match/core/engine
 git commit -m "feat(engine): RNG sembrado y Dealer determinista por (seed, roundNumber)
 
@@ -5700,8 +5700,8 @@ de ningún RNG.
 orderedTiles() es protected a propósito: es el seam que permite forzar manos
 exactas, sin el cual no se puede testear la tranca ni el conteo.
 
-El pozo queda en el árbol y fuera de toda audiencia, con un test que afirma que
-NUNCA se revela.
+El pozo queda en el árbol y fuera de toda audiencia por construcción: Dealer no
+recibe el puerto de visibilidad.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
