@@ -38,3 +38,5 @@ export const PlacedTile = schema(
 export type PlacedTile = SchemaType<typeof PlacedTile>;
 
 export type BoardSide = "LEFT" | "RIGHT";
+
+export type { TileLike } from "../engine/tile-set.js";
