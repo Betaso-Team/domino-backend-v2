@@ -6901,8 +6901,8 @@ La tarea más grande de la rebanada: acá muere el `sleep()` y nace la ronda com
 
 **Files:**
 - Create: `src/features/match/core/engine/scorer.ts`, `.../engine/round/driver.ts`, `src/features/match/core/commands/play-tile.ts`, `.../commands/draw-tile.ts`, `.../commands/pass.ts`, `.../commands/reveal-tiles.ts`
-- Modify: `src/features/match/core/events.ts`, `.../command.ts`, `.../engine/match/driver.ts`, `.../engine/player-facade.ts`, `.../engine/player-repository.ts`, `.../engine/referee-facade.ts`, `.../commands/abandon.ts`, `.../commands/index.ts`, `.../transports/colyseus/commands/payloads.ts`, `.../commands/di-wiring.ts`, `src/features/match/core/engine/tests/build-engine.ts`
-- Test: `src/features/match/core/engine/tests/scorer.test.ts`, `.../tests/round-flow.test.ts`
+- Modify: `src/features/match/core/events.ts`, `.../command.ts`, `.../engine/match/driver.ts`, `.../engine/player-facade.ts`, `.../engine/player-repository.ts`, `.../engine/referee-facade.ts`, `.../engine/round/player.ts`, `.../commands/abandon.ts`, `.../commands/index.ts`, `.../transports/colyseus/commands/payloads.ts`, `.../commands/di-wiring.ts`, `src/features/match/core/engine/tests/build-engine.ts`
+- Test: `src/features/match/core/engine/tests/scorer.test.ts`, `.../tests/round-flow.test.ts`, `.../round/tests/player.test.ts`
 
 - [ ] **Step 1: Sumar los cuatro verbos al contrato y ver romperse la compilación**
 
@@ -7071,6 +7071,23 @@ Antes de escribir producción, adelantar el Step 9 completo: crear `round-flow.t
 casos de reserva, empate y ventana indicados allí, y correrlo. Expected: FAIL porque todavía no
 existen `RoundDriver`, `Scorer` ni los comandos. Los Steps 4–8 son el verde de esos tests; no escribir
 el conductor antes de observar ese rojo.
+
+Ampliar primero `RoundPlayer` con el cierre público de la mano. Es distinto de `revealTiles()`:
+aquél prueba que el dueño levantó sus fichas; éste conserva la decisión de mostrarlas a toda la mesa
+para contar pips, sin tocar `hasSeenTiles`.
+
+```ts
+  revealTilesToAll(): void {
+    const hand = handOf(this.playerId, this.match);
+    hand.isRevealed = true;
+    this.visibility.makePublic(hand.tiles, { kind: "ALL" });
+  }
+```
+
+Antes de implementarlo, añadir a `round/tests/player.test.ts` un test con un
+`SchemaVisibilityController` espía que afirme las tres cosas: `isRevealed === true`,
+`hasSeenTiles === false` y `makePublic(hand.tiles, { kind: "ALL" })`. Expected: FAIL porque el método
+todavía no existe.
 
 ```ts
 // src/features/match/core/engine/round/driver.ts
@@ -7298,6 +7315,9 @@ export class RoundDriver implements Driver {
 
   private closeRound(verdict: RoundVerdict): TransitionResult {
     const round = currentRoundOf(this.match);
+    for (const player of this.match.players) {
+      this.playerAt(player.playerId).revealTilesToAll();
+    }
     this.scorer.credit(verdict);
     round.phase = "PRESENTING_ROUND";
     this.stampDeadline(this.config.presentingRoundMs);
@@ -8047,6 +8067,8 @@ describe("flujo de la ronda", () => {
       { type: "ROUND_RESOLVED", roundNumber: 1, winnerId: "u1", winnerTeamId: "A", points: 9, reason: "DOMINO" },
     ]);
     expect(scoreboardOf(e.match).teamA).toBe(9);
+    expect(e.hand("u1").isRevealed).toBe(true);
+    expect(e.hand("u2").isRevealed).toBe(true);
   });
 
   // ACÁ MUERE EL sleep(6000): la pausa es una fase con plazo, no una espera.
@@ -8061,6 +8083,8 @@ describe("flujo de la ronda", () => {
     expect(e.round().roundNumber).toBe(2);
     expect(e.round().phase).toBe("PLAYING");
     expect(e.match.pastRounds.length).toBe(1);
+    expect(e.hand("u1").isRevealed).toBe(false);
+    expect(e.hand("u2").isRevealed).toBe(false);
   });
 
   it("la ventana de reparto espera a que ambos levanten sus fichas", () => {
