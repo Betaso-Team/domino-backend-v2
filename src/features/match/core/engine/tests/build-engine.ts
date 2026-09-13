@@ -1,18 +1,18 @@
-// src/features/match/core/engine/tests/build-engine.ts
-// Fixture de los tests de engine: arma el grafo de actores sobre un MatchState de
-// prueba, SIN tsyringe y sin levantar una Room.
-//
-// OJO con lo que este fixture NO es: no es el espejo verificado del wiring de producción,
-// porque el wiring de producción todavía no existe (llega con el composition root de la
-// sala). Es un grafo armado a mano que hay que mantener en paso con el real cuando
-// aparezca, y **nada lo obliga** — si divergen, los tests de engine siguen verdes
-// probando una composición que nadie ejecuta. Cuando exista el wiring, esto pasa a ser
-// deuda a vigilar.
+import {
+  AbandonCommand,
+  DrawTileCommand,
+  PassCommand,
+  PlayTileCommand,
+  RevealTilesCommand,
+} from "../../commands/index.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
 import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
 import type { MatchEvent } from "../../events.js";
 import type { MatchState } from "../../state/index.js";
+import { Tile } from "../../state/index.js";
+import type { BoardSide } from "../../state/tile.js";
 import type { Clock } from "../clock.js";
+import { Dealer } from "../dealer.js";
 import { createMatchState } from "../genesis.js";
 import { MatchDriver } from "../match/driver.js";
 import { MatchPlayer } from "../match/player.js";
@@ -20,31 +20,83 @@ import { MatchReferee } from "../match/referee.js";
 import { Player } from "../player-facade.js";
 import { PlayerRepository } from "../player-repository.js";
 import { Referee } from "../referee-facade.js";
+import { RoundDriver } from "../round/driver.js";
+import { RoundPlayer } from "../round/player.js";
+import { RoundReferee } from "../round/referee.js";
+import { Scorer } from "../scorer.js";
+import { boneyardOf, currentRoundOf, handOf } from "../state-projections.js";
 import type { TimeoutScheduler } from "../timeout-scheduler.js";
+import type { SchemaVisibilityController } from "../visibility.js";
 
-export interface EngineHarness {
-  readonly match: MatchState;
-  readonly players: Player;
-  readonly referee: Referee;
-  readonly matchDriver: MatchDriver;
-  /** Mueve el reloj a mano. Nada espera tiempo real. */
-  readonly clockBox: { now: number };
-  /** Los deadlines que el engine programó, en orden. */
-  readonly scheduled: number[];
-  /** Dispara el último vencimiento programado. */
-  fireTimeout(): readonly MatchEvent[];
+class FixedDealer extends Dealer {
+  constructor(
+    private readonly fixtureMatch: MatchState,
+    private readonly fixtureConfig: DominoMatchConfig,
+    private readonly fixtureGlobalConfig: GlobalDominoConfig,
+    private readonly deck: readonly { left: number; right: number }[],
+  ) {
+    super(fixtureMatch, fixtureConfig, fixtureGlobalConfig);
+  }
+
+  override deal(_roundNumber: number): void {
+    let cursor = 0;
+    for (const playerId of this.fixtureConfig.seats) {
+      const hand = handOf(playerId, this.fixtureMatch);
+      hand.tiles.clear();
+      for (let dealt = 0; dealt < this.fixtureGlobalConfig.tilesPerPlayer; dealt += 1) {
+        const tile = this.deck[cursor];
+        cursor += 1;
+        if (!tile) break;
+        hand.tiles.push(this.tile(tile));
+      }
+      hand.tileCount = hand.tiles.length;
+      hand.isRevealed = false;
+    }
+
+    const round = currentRoundOf(this.fixtureMatch);
+    if (round.boneyard) {
+      const boneyard = boneyardOf(round);
+      boneyard.tiles.clear();
+      for (const tile of this.deck.slice(cursor)) boneyard.tiles.push(this.tile(tile));
+      boneyard.count = boneyard.tiles.length;
+    }
+  }
+
+  private tile({ left, right }: { left: number; right: number }): Tile {
+    const tile = new Tile();
+    tile.left = left;
+    tile.right = right;
+    return tile;
+  }
 }
 
-export function buildEngine(
-  seats: string[] = ["u1", "u2"],
-  overrides: Partial<GlobalDominoConfig> = {},
-): EngineHarness {
-  const globalConfig: GlobalDominoConfig = { ...DEFAULT_GLOBAL_CONFIG, ...overrides };
-  // SEAT_ORDER y no SHUFFLED, a propósito: estos tests de engine prueban REGLAS de juego
-  // (forfeit, rondas, turnos), no el sorteo. Con SHUFFLED, "u1" ganaría o perdería el
-  // equipo según la permutación del seed, y las aserciones de team letter pasarían por
-  // casualidad hasta que alguien toque el PRNG o la lista de seats. El sorteo tiene su
-  // propio test dedicado en team-assignment.test.ts; acá la mesa tiene que ser predecible.
+interface EngineOptions {
+  readonly extraTimeReserveMs?: number;
+  readonly isDealWindowEnabled?: boolean;
+}
+
+export function engineWithHands(
+  handsBySeat: Record<string, [number, number][]>,
+  boneyard: [number, number][] = [],
+  options: EngineOptions = {},
+) {
+  const seats = Object.keys(handsBySeat);
+  const lengths = new Set(Object.values(handsBySeat).map((tiles) => tiles.length));
+  if (lengths.size !== 1) throw new Error("todas las manos tienen que tener el mismo largo");
+  const tilesPerPlayer = [...lengths][0] as number;
+  const deck = [
+    ...seats.flatMap((seat) => (handsBySeat[seat] ?? []).map(([left, right]) => ({ left, right }))),
+    ...boneyard.map(([left, right]) => ({ left, right })),
+  ];
+
+  const globalConfig: GlobalDominoConfig = {
+    ...DEFAULT_GLOBAL_CONFIG,
+    tilesPerPlayer,
+    turnTimeoutMs: 600,
+    extraTimeReserveMs: options.extraTimeReserveMs ?? 0,
+    presentingRoundMs: 120,
+    presentingMatchMs: 120,
+  };
   const config: DominoMatchConfig = {
     matchId: "m-test",
     gameModeId: "test",
@@ -52,16 +104,13 @@ export function buildEngine(
     seats,
     pointsToWin: 100,
     teamAssignment: "SEAT_ORDER",
-    isDealWindowEnabled: false,
+    isDealWindowEnabled: options.isDealWindowEnabled ?? false,
   };
   const match = createMatchState(config);
-
   const clockBox = { now: 1_000 };
   const clock: Clock = { now: () => clockBox.now };
-
   const scheduled: number[] = [];
   let pending: (() => readonly MatchEvent[]) | undefined;
-  // Scheduler NO-OP: registra el instante y guarda el callback, pero no espera.
   const scheduler: TimeoutScheduler = {
     schedule(at, onExpire) {
       scheduled.push(at);
@@ -71,12 +120,45 @@ export function buildEngine(
       pending = undefined;
     },
   };
+  const visibility: SchemaVisibilityController = { makePublic() {}, hide() {} };
 
   const matchReferee = new MatchReferee(match);
-  const matchDriver = new MatchDriver(match, clock, scheduler, globalConfig, matchReferee);
-  const repository = new PlayerRepository(seats, (playerId) => new MatchPlayer(playerId, match));
+  const roundReferee = new RoundReferee(match);
+  const scorer = new Scorer(match);
+  const dealer = new FixedDealer(match, config, globalConfig, deck);
+  const repository = new PlayerRepository(
+    seats,
+    (playerId) => new MatchPlayer(playerId, match),
+    (playerId) => new RoundPlayer(playerId, match, visibility),
+  );
   const players = new Player(repository);
-  const referee = new Referee(matchReferee);
+  const referee = new Referee(matchReferee, roundReferee);
+  const roundDriver = new RoundDriver(
+    match,
+    clock,
+    globalConfig,
+    config,
+    roundReferee,
+    dealer,
+    scorer,
+    (playerId) => repository.round(playerId),
+  );
+  const matchDriver = new MatchDriver(
+    match,
+    clock,
+    scheduler,
+    globalConfig,
+    matchReferee,
+    players,
+    roundDriver,
+  );
+  const commands = {
+    ABANDON: new AbandonCommand(referee, players, matchDriver),
+    PLAY_TILE: new PlayTileCommand(referee, players, matchDriver),
+    DRAW_TILE: new DrawTileCommand(referee, players, matchDriver),
+    PASS: new PassCommand(referee, matchDriver),
+    REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
+  };
 
   return {
     match,
@@ -85,7 +167,16 @@ export function buildEngine(
     matchDriver,
     clockBox,
     scheduled,
-    fireTimeout() {
+    start: () => matchDriver.begin(),
+    round: () => currentRoundOf(match),
+    hand: (playerId: string) => handOf(playerId, match),
+    playTile: (playerId: string, tile: { left: number; right: number }, side: BoardSide) =>
+      commands.PLAY_TILE.execute({ playerId, ...tile, side }),
+    drawTile: (playerId: string) => commands.DRAW_TILE.execute({ playerId }),
+    pass: (playerId: string) => commands.PASS.execute({ playerId }),
+    revealTiles: (playerId: string) => commands.REVEAL_TILES.execute({ playerId }),
+    abandon: (playerId: string) => commands.ABANDON.execute({ playerId }),
+    fireTimeout(): readonly MatchEvent[] {
       if (!pending) throw new Error("no hay timeout programado");
       const run = pending;
       pending = undefined;

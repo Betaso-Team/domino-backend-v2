@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { AbandonCommand } from "../../commands/abandon.js";
 import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
 import { RuleViolationError } from "../errors.js";
 import { playerOf } from "../state-projections.js";
-import { buildEngine } from "./build-engine.js";
+import { engineWithHands } from "./build-engine.js";
 
-function engine(seats?: string[]) {
-  const harness = buildEngine(seats);
-  const command = new AbandonCommand(harness.referee, harness.players, harness.matchDriver);
-  return { ...harness, command };
+function engine() {
+  const harness = engineWithHands({ u1: [[6, 6]], u2: [[5, 5]] }, [], {
+    extraTimeReserveMs: DEFAULT_GLOBAL_CONFIG.extraTimeReserveMs,
+  });
+  return {
+    ...harness,
+    command: { execute: (payload: { playerId: string }) => harness.abandon(payload.playerId) },
+  };
 }
 
 describe("ABANDON", () => {
@@ -31,8 +34,8 @@ describe("ABANDON", () => {
     expect(playerOf("u1", e.match).hasAbandoned).toBe(true);
     expect(e.match.phase).toBe("PRESENTING_MATCH");
     // El plazo se estampa en el estado Y se programa por el puerto.
-    expect(e.match.activeDeadline).toBe(e.clockBox.now + 6_000);
-    expect(e.scheduled).toEqual([e.clockBox.now + 6_000]);
+    expect(e.match.activeDeadline).toBe(e.clockBox.now + 120);
+    expect(e.scheduled.at(-1)).toBe(e.clockBox.now + 120);
     // El verbo dicho por el JUGADOR no emite evento —el comando ya es el registro—,
     // pero el VEREDICTO no es el verbo: es consecuencia computada, y sale acá.
     expect(events).toEqual([{ type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" }]);

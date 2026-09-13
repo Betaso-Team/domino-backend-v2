@@ -4,6 +4,7 @@ import { RuleViolationError } from "../errors.js";
 import {
   hasTeamAbandoned,
   isRoundActive,
+  matchPhaseOf,
   opponentTeam,
   playerOf,
   scoreboardOf,
@@ -21,7 +22,7 @@ export class MatchReferee {
   // Va delante de TODA acción de jugador. Repetida y no envuelta en un genérico,
   // a propósito: así se ve de un vistazo cuáles la tienen, y es grepeable.
   assertIsPlaying(playerId: PlayerId): void {
-    if (this.match.phase !== "PLAYING") {
+    if (matchPhaseOf(this.match) !== "PLAYING") {
       throw new RuleViolationError("MATCH_NOT_IN_PROGRESS");
     }
     if (!isRoundActive(playerOf(playerId, this.match))) {

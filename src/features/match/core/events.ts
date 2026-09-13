@@ -21,7 +21,7 @@ export type MatchEvent =
       type: "ROUND_RESOLVED";
       roundNumber: number;
       winnerId: PlayerId;
-      winnerTeamId: TeamId;
+      winnerTeamId: TeamId | "";
       points: number;
       reason: "DOMINO" | "BLOCKED";
     }

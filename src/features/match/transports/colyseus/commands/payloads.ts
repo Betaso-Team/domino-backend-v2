@@ -13,6 +13,16 @@ import type { CommandName } from "../../../core/command.js";
 // NO COMPILA.
 export const COMMAND_PAYLOADS = {
   ABANDON: z.object({}).strict(),
+  PLAY_TILE: z
+    .object({
+      left: z.number().int().min(0).max(6),
+      right: z.number().int().min(0).max(6),
+      side: z.enum(["LEFT", "RIGHT"]),
+    })
+    .strict(),
+  DRAW_TILE: z.object({}).strict(),
+  PASS: z.object({}).strict(),
+  REVEAL_TILES: z.object({}).strict(),
 } satisfies Record<CommandName, z.ZodType>;
 
 export type WirePayload<N extends CommandName> = z.infer<(typeof COMMAND_PAYLOADS)[N]>;

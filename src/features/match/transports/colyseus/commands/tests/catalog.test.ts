@@ -4,8 +4,22 @@ import { CommandCatalog } from "../catalog.js";
 
 const build = () =>
   new CommandCatalog(
-    { ABANDON: { decode: vi.fn(() => ({ playerId: "u1" })) } },
-    { ABANDON: { execute: vi.fn(() => []) } },
+    {
+      ABANDON: { decode: vi.fn(() => ({ playerId: "u1" })) },
+      PLAY_TILE: {
+        decode: vi.fn(() => ({ playerId: "u1", left: 6, right: 6, side: "RIGHT" as const })),
+      },
+      DRAW_TILE: { decode: vi.fn(() => ({ playerId: "u1" })) },
+      PASS: { decode: vi.fn(() => ({ playerId: "u1" })) },
+      REVEAL_TILES: { decode: vi.fn(() => ({ playerId: "u1" })) },
+    },
+    {
+      ABANDON: { execute: vi.fn(() => []) },
+      PLAY_TILE: { execute: vi.fn(() => []) },
+      DRAW_TILE: { execute: vi.fn(() => []) },
+      PASS: { execute: vi.fn(() => []) },
+      REVEAL_TILES: { execute: vi.fn(() => []) },
+    },
   );
 
 describe("CommandCatalog", () => {
@@ -14,7 +28,7 @@ describe("CommandCatalog", () => {
   });
 
   it("rechaza un verbo que no existe", () => {
-    expect(build().accepts("PLAY_TILE")).toBe(false);
+    expect(build().accepts("CHEAT")).toBe(false);
   });
 
   // EL CASO QUE IMPORTA. Con `in` en vez de Object.hasOwn, "toString" pasa la
