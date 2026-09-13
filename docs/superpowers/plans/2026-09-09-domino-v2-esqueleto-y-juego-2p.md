@@ -7214,6 +7214,9 @@ export class RoundDriver implements Driver {
     }
 
     if (roundPhaseOf(round) !== "PLAYING") return { events: [], finished: false };
+    // Liquidar antes de cualquier reconciliación, incluso si la acción cierra la ronda.
+    // Si solo se hiciera en `startTurn`, un dominó quemaría toda la reserva no usada.
+    this.settleExtraTime();
 
     // ROBAR conserva el turno pero REINICIA el plazo (reglas §7 decisión 4).
     // No puede cerrar la mano: robar no vacía una mano ni destapa una tranca
@@ -7243,8 +7246,9 @@ export class RoundDriver implements Driver {
       });
     }
 
-    // ¿TRANCA? Nadie puede jugar y no queda de dónde robar.
-    if (isBlocked(this.match)) {
+    // ¿TRANCA? Nadie puede jugar, no queda de dónde robar y todos tuvieron la
+    // oportunidad observable de pasar en esta vuelta.
+    if (turn.consecutivePasses >= roundActivePlayers(this.match).length && isBlocked(this.match)) {
       const verdict = blockVerdictOf(this.match);
       return this.closeRound({
         roundNumber: round.roundNumber,
@@ -7341,7 +7345,6 @@ export class RoundDriver implements Driver {
 
   private startTurn(playerId: PlayerId): void {
     const round = currentRoundOf(this.match);
-    this.settleExtraTime();
     const turn = currentTurnOf(round);
     turn.playerId = playerId;
     turn.isConsumingExtendedTime = false;
@@ -7828,26 +7831,50 @@ Expected: PASA. Los mapas exhaustivos del Step 1 están cerrados para los cuatro
 - [ ] **Step 8: Cerrar el fixture con `engineWithHands`**
 
 Reemplazar en `build-engine.ts` la función `buildEngine` por una que cablee todo el grafo, con el
-`FixedDealer` como seam:
+`FixedDealer` como seam. Importar `boneyardOf`, `currentRoundOf` y `handOf`: no basta con
+sobrescribir `orderedTiles()`, porque `Dealer.deal()` baraja ese resultado y dejaría de entregar las
+manos declaradas.
 
 ```ts
 class FixedDealer extends Dealer {
   constructor(
-    match: MatchState,
-    config: DominoMatchConfig,
-    globalConfig: GlobalDominoConfig,
+    private readonly fixtureMatch: MatchState,
+    private readonly fixtureConfig: DominoMatchConfig,
+    private readonly fixtureGlobalConfig: GlobalDominoConfig,
     private readonly deck: readonly { left: number; right: number }[],
   ) {
-    super(match, config, globalConfig);
+    super(fixtureMatch, fixtureConfig, fixtureGlobalConfig);
   }
 
-  protected override orderedTiles(): Tile[] {
-    return this.deck.map(({ left, right }) => {
-      const tile = new Tile();
-      tile.left = left;
-      tile.right = right;
-      return tile;
-    });
+  override deal(_roundNumber: number): void {
+    let cursor = 0;
+    for (const playerId of this.fixtureConfig.seats) {
+      const hand = handOf(playerId, this.fixtureMatch);
+      hand.tiles.clear();
+      for (let dealt = 0; dealt < this.fixtureGlobalConfig.tilesPerPlayer; dealt += 1) {
+        const tile = this.deck[cursor];
+        cursor += 1;
+        if (!tile) break;
+        hand.tiles.push(this.tile(tile));
+      }
+      hand.tileCount = hand.tiles.length;
+      hand.isRevealed = false;
+    }
+
+    const round = currentRoundOf(this.fixtureMatch);
+    if (round.boneyard) {
+      const boneyard = boneyardOf(round);
+      boneyard.tiles.clear();
+      for (const tile of this.deck.slice(cursor)) boneyard.tiles.push(this.tile(tile));
+      boneyard.count = boneyard.tiles.length;
+    }
+  }
+
+  private tile({ left, right }: { left: number; right: number }): Tile {
+    const tile = new Tile();
+    tile.left = left;
+    tile.right = right;
+    return tile;
   }
 }
 
@@ -8101,9 +8128,9 @@ describe("flujo de la ronda", () => {
     expect(e.fireTimeout().map((event) => event.type)).toContain("ABANDON");
   });
 
-  it("devuelve la reserva no usada cuando el jugador actúa", () => {
+  it("devuelve la reserva no usada aunque la jugada cierre la ronda", () => {
     const e = engineWithHands(
-      { u1: [[6, 6], [5, 4]], u2: [[6, 3], [1, 0]] },
+      { u1: [[6, 6]], u2: [[6, 3]] },
       [],
       { extraTimeReserveMs: 300 },
     );
@@ -8128,12 +8155,13 @@ describe("flujo de la ronda", () => {
   });
 
   // El ABANDON del EVENTO existe porque no hubo comando detrás. El voluntario no
-  // emite nada: el comando ya es el registro del acto. Es la misma regla leída de
+  // emite ABANDON: el comando ya es el registro del acto. Sí puede emitir la consecuencia
+  // MATCH_RESOLVED por forfeit, fijada desde la Tarea 7. Es la misma regla leída de
   // los dos lados, y para soporte es la diferencia entre "se fue" y "lo sacaron".
-  it("el ABANDON voluntario no emite evento; el del timeout sí", () => {
+  it("el ABANDON voluntario no emite ABANDON; el del timeout sí", () => {
     const voluntary = engineWithHands({ u1: [[6, 6], [5, 4]], u2: [[6, 3], [1, 0]] });
     voluntary.start();
-    expect(voluntary.abandon("u1")).toEqual([]);
+    expect(voluntary.abandon("u1").some((event) => event.type === "ABANDON")).toBe(false);
 
     const forced = engineWithHands({ u1: [[6, 6], [5, 4]], u2: [[6, 3], [1, 0]] });
     forced.start();
