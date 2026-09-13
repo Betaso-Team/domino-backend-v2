@@ -1,4 +1,4 @@
-import type { Schema } from "@colyseus/schema";
+import type { Ref } from "@colyseus/schema";
 import type { PlayerId } from "../ids.js";
 
 // La audiencia es de DOMINIO: un JUGADOR o la mesa, nunca una conexión. Eso es lo que
@@ -17,6 +17,6 @@ export type Audience = { kind: "PLAYER"; playerId: PlayerId } | { kind: "ALL" };
 // El dominio ordena "hacé público este nodo a esta audiencia"; el puerto hace el view.add.
 // El dominio nunca toca client.view.
 export interface SchemaVisibilityController {
-  makePublic(node: Schema, audience: Audience): void;
-  hide(node: Schema, audience: Audience): void;
+  makePublic(node: Ref, audience: Audience): void;
+  hide(node: Ref, audience: Audience): void;
 }

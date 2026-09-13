@@ -16,6 +16,7 @@ import type {
   RoundPhase,
   RoundState,
   Scoreboard,
+  Turn,
 } from "../state/index.js";
 import type { BoardSide } from "../state/tile.js";
 import { InvariantViolationError } from "./errors.js";
@@ -39,6 +40,11 @@ export function handOf(playerId: PlayerId, match: MatchState): Hand {
 export function currentRoundOf(match: MatchState): RoundState {
   if (!match.currentRound) throw new InvariantViolationError("no hay ronda en curso");
   return match.currentRound;
+}
+
+export function currentTurnOf(round: RoundState): Turn {
+  if (!round.currentTurn) throw new InvariantViolationError("no hay turno en curso");
+  return round.currentTurn;
 }
 
 // `scoreboard` es `.optional()` por la misma razón que `currentRound`: un `t.ref()` sin

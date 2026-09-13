@@ -1,4 +1,4 @@
-import type { Schema, StateView } from "@colyseus/schema";
+import type { Ref, StateView } from "@colyseus/schema";
 import { InvariantViolationError } from "../../core/engine/errors.js";
 import type { Audience, SchemaVisibilityController } from "../../core/engine/visibility.js";
 import type { PlayerId } from "../../core/ids.js";
@@ -6,11 +6,11 @@ import type { PlayerId } from "../../core/ids.js";
 export class StateViewVisibilityController implements SchemaVisibilityController {
   constructor(private readonly views: ReadonlyMap<PlayerId, StateView>) {}
 
-  makePublic(node: Schema, audience: Audience): void {
+  makePublic(node: Ref, audience: Audience): void {
     for (const view of this.resolve(audience)) view.add(node);
   }
 
-  hide(node: Schema, audience: Audience): void {
+  hide(node: Ref, audience: Audience): void {
     for (const view of this.resolve(audience)) view.remove(node);
   }
 

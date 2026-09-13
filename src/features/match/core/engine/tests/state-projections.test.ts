@@ -1,10 +1,11 @@
 // src/features/match/core/engine/tests/state-projections.test.ts
 import { describe, expect, it } from "vitest";
-import { BoardState, BoneyardState, MatchState, RoundState } from "../../state/index.js";
+import { BoardState, BoneyardState, MatchState, RoundState, Turn } from "../../state/index.js";
 import { InvariantViolationError } from "../errors.js";
 import { createMatchState } from "../genesis.js";
 import {
   currentRoundOf,
+  currentTurnOf,
   handOf,
   isRoundActive,
   opponentTeam,
@@ -62,6 +63,16 @@ describe("proyecciones puras del estado", () => {
 
     const match = build();
     expect(scoreboardOf(match).teamA).toBe(0);
+  });
+
+  it("currentTurnOf estrecha el opcional afirmando la invariante", () => {
+    const round = new RoundState();
+    expect(() => currentTurnOf(round)).toThrow(InvariantViolationError);
+
+    const turn = new Turn();
+    turn.playerId = "u1";
+    round.currentTurn = turn;
+    expect(currentTurnOf(round).playerId).toBe("u1");
   });
 
   it("isRoundActive es falso para quien abandonó", () => {
