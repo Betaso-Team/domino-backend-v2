@@ -1571,7 +1571,7 @@ export type DeadlineKind = "DEALING" | "TURN" | "PRESENTING_ROUND" | "PRESENTING
 // porque ahí no hay comando que los cuente. El evento existe ⟺ no hubo comando detrás.
 export type MatchEvent =
   // ── Consecuencias computadas ────────────────────────────────────────────
-  | { type: "ROUND_RESOLVED"; roundNumber: number; winnerId: PlayerId; winnerTeamId: TeamId; points: number; reason: "DOMINO" | "BLOCKED" }
+  | { type: "ROUND_RESOLVED"; roundNumber: number; winnerId: PlayerId; winnerTeamId: TeamId | ""; points: number; reason: "DOMINO" | "BLOCKED" }
   // ── Lo que el SISTEMA hizo ──────────────────────────────────────────────
   | { type: "DEADLINE_EXPIRED"; kind: DeadlineKind }
   // Retirado POR TIMEOUT, nunca por el verbo voluntario. Es el caso canónico de
@@ -6877,7 +6877,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Tarea 19: `Scorer`, `RoundDriver` y los tres verbos de juego
+## Tarea 19: `Scorer`, `RoundDriver` y los cuatro verbos de ronda
 
 La tarea más grande de la rebanada: acá muere el `sleep()` y nace la ronda completa.
 
@@ -6900,11 +6900,11 @@ La tarea más grande de la rebanada: acá muere el `sleep()` y nace la ronda com
 >   reloj lo tocan las transiciones, nunca un comando por su cuenta.
 
 **Files:**
-- Create: `src/features/match/core/engine/scorer.ts`, `.../engine/round/driver.ts`, `src/features/match/core/commands/play-tile.ts`, `.../commands/draw-tile.ts`, `.../commands/pass.ts`
-- Modify: `src/features/match/core/command.ts`, `.../engine/match/driver.ts`, `.../engine/player-facade.ts`, `.../engine/player-repository.ts`, `.../engine/referee-facade.ts`, `.../commands/index.ts`, `.../transports/colyseus/commands/payloads.ts`, `.../commands/di-wiring.ts`, `src/features/match/core/engine/tests/build-engine.ts`
+- Create: `src/features/match/core/engine/scorer.ts`, `.../engine/round/driver.ts`, `src/features/match/core/commands/play-tile.ts`, `.../commands/draw-tile.ts`, `.../commands/pass.ts`, `.../commands/reveal-tiles.ts`
+- Modify: `src/features/match/core/events.ts`, `.../command.ts`, `.../engine/match/driver.ts`, `.../engine/player-facade.ts`, `.../engine/player-repository.ts`, `.../engine/referee-facade.ts`, `.../commands/abandon.ts`, `.../commands/index.ts`, `.../transports/colyseus/commands/payloads.ts`, `.../commands/di-wiring.ts`, `src/features/match/core/engine/tests/build-engine.ts`
 - Test: `src/features/match/core/engine/tests/scorer.test.ts`, `.../tests/round-flow.test.ts`
 
-- [ ] **Step 1: Sumar los tres verbos al contrato y ver romperse la compilación**
+- [ ] **Step 1: Sumar los cuatro verbos al contrato y ver romperse la compilación**
 
 En `src/features/match/core/command.ts`:
 
@@ -6923,6 +6923,14 @@ export interface CommandPayloads {
 }
 ```
 
+La tranca empatada también resuelve y se archiva, pero no tiene equipo ganador. En `events.ts`,
+ampliar solo ese campo de `ROUND_RESOLVED` (el `winnerId` ya es `string` y admite el centinela vacío
+que usa el schema):
+
+```ts
+winnerTeamId: TeamId | "";
+```
+
 Run: `npm run typecheck`
 Expected: **FALLA**, y eso es la garantía funcionando. `payloads.ts` no satisface
 `Record<CommandName, z.ZodType>` y los mapas de `buildCatalog` están incompletos. Cada error apunta a
@@ -6935,6 +6943,7 @@ lo que falta. No arreglarlo todavía: se cierra en el Step 7.
 import { describe, expect, it } from "vitest";
 import { createMatchState } from "../genesis.js";
 import { Scorer } from "../scorer.js";
+import { scoreboardOf } from "../state-projections.js";
 
 const build = (pointsToWin = 100) =>
   createMatchState({
@@ -6952,8 +6961,8 @@ describe("Scorer", () => {
     const match = build();
     new Scorer(match).credit({ roundNumber: 1, winnerId: "u1", points: 14, reason: "DOMINO" });
 
-    expect(match.scoreboard.teamA).toBe(14);
-    expect(match.scoreboard.teamB).toBe(0);
+    expect(scoreboardOf(match).teamA).toBe(14);
+    expect(scoreboardOf(match).teamB).toBe(0);
   });
 
   // El marcador es del EQUIPO y solo del equipo: no hay `PlayerState.score` que
@@ -6964,8 +6973,8 @@ describe("Scorer", () => {
     const match = build();
     new Scorer(match).credit({ roundNumber: 1, winnerId: "u2", points: 9, reason: "BLOCKED" });
 
-    expect(match.scoreboard.teamB).toBe(9);
-    expect(match.scoreboard.teamA).toBe(0);
+    expect(scoreboardOf(match).teamB).toBe(9);
+    expect(scoreboardOf(match).teamA).toBe(0);
   });
 
   it("acumula entre rondas", () => {
@@ -6974,7 +6983,7 @@ describe("Scorer", () => {
     scorer.credit({ roundNumber: 1, winnerId: "u1", points: 10, reason: "DOMINO" });
     scorer.credit({ roundNumber: 2, winnerId: "u1", points: 5, reason: "BLOCKED" });
 
-    expect(match.scoreboard.teamA).toBe(15);
+    expect(scoreboardOf(match).teamA).toBe(15);
   });
 
   it("archiva un resumen por ronda, que es lo único que sobrevive de las pasadas", () => {
@@ -6995,8 +7004,8 @@ describe("Scorer", () => {
     const match = build();
     new Scorer(match).credit({ roundNumber: 1, winnerId: undefined, points: 0, reason: "BLOCKED" });
 
-    expect(match.scoreboard.teamA).toBe(0);
-    expect(match.scoreboard.teamB).toBe(0);
+    expect(scoreboardOf(match).teamA).toBe(0);
+    expect(scoreboardOf(match).teamB).toBe(0);
     expect(match.pastRounds.length).toBe(1);
     expect(match.pastRounds.at(0)?.winnerId).toBe("");
   });
@@ -7011,7 +7020,7 @@ import type { PlayerId } from "../ids.js";
 import { RoundSummary } from "../state/index.js";
 import type { MatchState } from "../state/index.js";
 import type { RoundEndReason } from "../state/round.js";
-import { playerOf } from "./state-projections.js";
+import { playerOf, scoreboardOf } from "./state-projections.js";
 
 export interface RoundVerdict {
   readonly roundNumber: number;
@@ -7037,8 +7046,9 @@ export class Scorer {
       const winner = playerOf(verdict.winnerId, this.match);
       // UN SOLO acumulador. El puntaje del jugador no se guarda: es
       // `scoreboard[teamOf(player)]` (ver el comentario de `PlayerState`).
-      if (winner.teamId === "A") this.match.scoreboard.teamA += verdict.points;
-      else this.match.scoreboard.teamB += verdict.points;
+      const scoreboard = scoreboardOf(this.match);
+      if (winner.teamId === "A") scoreboard.teamA += verdict.points;
+      else scoreboard.teamB += verdict.points;
       summary.winnerId = verdict.winnerId;
       summary.winnerTeamId = winner.teamId;
     } else {
@@ -7057,6 +7067,11 @@ Expected: los 5 tests PASAN.
 
 - [ ] **Step 4: Escribir el `RoundDriver`**
 
+Antes de escribir producción, adelantar el Step 9 completo: crear `round-flow.test.ts`, sumar los
+casos de reserva, empate y ventana indicados allí, y correrlo. Expected: FAIL porque todavía no
+existen `RoundDriver`, `Scorer` ni los comandos. Los Steps 4–8 son el verde de esos tests; no escribir
+el conductor antes de observar ese rojo.
+
 ```ts
 // src/features/match/core/engine/round/driver.ts
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
@@ -7070,8 +7085,15 @@ import type { Dealer } from "../dealer.js";
 import type { Driver, TransitionResult } from "../driver.js";
 import { InvariantViolationError } from "../errors.js";
 import type { RoundVerdict, Scorer } from "../scorer.js";
-import { currentRoundOf, handOf, playerOf, roundActivePlayers, turnOrderFrom } from "../state-projections.js";
-import type { TimeoutScheduler } from "../timeout-scheduler.js";
+import {
+  currentRoundOf,
+  currentTurnOf,
+  handOf,
+  playerOf,
+  roundActivePlayers,
+  roundPhaseOf,
+  turnOrderFrom,
+} from "../state-projections.js";
 import { DOMINO_SET_SIZE, tileValue } from "../tile-set.js";
 import { blockVerdictOf, isBlocked } from "./block.js";
 import { boardEndsOf } from "./board-ends.js";
@@ -7090,7 +7112,6 @@ export class RoundDriver implements Driver {
   constructor(
     private readonly match: MatchState,
     private readonly clock: Clock,
-    private readonly scheduler: TimeoutScheduler,
     private readonly config: GlobalDominoConfig,
     // Del config per-partida lo único que este conductor pregunta es si la mesa reparte
     // con ventana. Es un booleano compuesto AFUERA: acá no se sabe qué es "casual" ni
@@ -7187,12 +7208,12 @@ export class RoundDriver implements Driver {
     // LA VENTANA DE REPARTO se reconcilia antes que nada y NO llega a la guarda de
     // `PLAYING` de abajo: es la única fase, además de esa, en la que un verbo de jugador
     // es legal (reglas §3.1). Cuando ya no falta nadie, la ronda arranca.
-    if (round.phase === "DEALING") {
+    if (roundPhaseOf(round) === "DEALING") {
       if (this.referee.playersWithoutTilesSeen().length === 0) this.continueAfterDeal();
       return { events: [], finished: false };
     }
 
-    if (round.phase !== "PLAYING") return { events: [], finished: false };
+    if (roundPhaseOf(round) !== "PLAYING") return { events: [], finished: false };
 
     // ROBAR conserva el turno pero REINICIA el plazo (reglas §7 decisión 4).
     // No puede cerrar la mano: robar no vacía una mano ni destapa una tranca
@@ -7206,9 +7227,10 @@ export class RoundDriver implements Driver {
     // el contador ES su rastro: sin esto, el rival no tiene de dónde enterarse de que
     // alguien pasó (el historial de Mongo no se sincroniza — spec §5.1). Jugar lo
     // resetea, porque lo que el front dibuja es la racha, no el total de la ronda.
-    round.currentTurn.consecutivePasses =
+    const turn = currentTurnOf(round);
+    turn.consecutivePasses =
       action === "PASSED" || action === "ABANDONED"
-        ? round.currentTurn.consecutivePasses + 1
+        ? turn.consecutivePasses + 1
         : 0;
 
     // ¿DOMINÓ? El que se quedó sin fichas cierra y cobra las manos ajenas.
@@ -7241,7 +7263,7 @@ export class RoundDriver implements Driver {
   // (`MatchPlayer.abandon` es el único escritor de `hasAbandoned`).
   timeout(): TransitionResult {
     const round = currentRoundOf(this.match);
-    if (round.phase === "PRESENTING_ROUND") {
+    if (roundPhaseOf(round) === "PRESENTING_ROUND") {
       // La pausa de presentación terminó. Quien decide si sigue otra ronda o cierra
       // la partida es el conductor de PARTIDA: acá solo se declara terminada la mano.
       return { events: [], finished: true };
@@ -7249,7 +7271,7 @@ export class RoundDriver implements Driver {
     // La ventana de reparto la vence el conductor de PARTIDA: su consecuencia es RETIRAR
     // gente, y `hasAbandoned` lo escribe solo `MatchPlayer`. Acá arriba queda lo que sí es
     // de esta altura —revelar y arrancar la mano—, en `resumeAfterDealWindow`.
-    throw new InvariantViolationError(`el conductor de RONDA no maneja la fase ${round.phase}`);
+    throw new InvariantViolationError(`el conductor de RONDA no maneja la fase ${roundPhaseOf(round)}`);
   }
 
   /** Quiénes siguen en la partida y NO levantaron sus fichas. Lo lee el conductor de PARTIDA. */
@@ -7267,7 +7289,7 @@ export class RoundDriver implements Driver {
 
   /** De quién es el turno. Lo lee el conductor de PARTIDA para saber a quién retirar. */
   currentTurnPlayerId(): PlayerId {
-    return currentRoundOf(this.match).currentTurn.playerId;
+    return currentTurnOf(currentRoundOf(this.match)).playerId;
   }
 
   private closeRound(verdict: RoundVerdict): TransitionResult {
@@ -7283,7 +7305,7 @@ export class RoundDriver implements Driver {
           type: "ROUND_RESOLVED",
           roundNumber: verdict.roundNumber,
           winnerId: verdict.winnerId ?? "",
-          winnerTeamId: (winner?.teamId ?? "") as "A" | "B",
+          winnerTeamId: winner?.teamId ?? "",
           points: verdict.points,
           reason: verdict.reason,
         },
@@ -7320,8 +7342,9 @@ export class RoundDriver implements Driver {
   private startTurn(playerId: PlayerId): void {
     const round = currentRoundOf(this.match);
     this.settleExtraTime();
-    round.currentTurn.playerId = playerId;
-    round.currentTurn.isConsumingExtendedTime = false;
+    const turn = currentTurnOf(round);
+    turn.playerId = playerId;
+    turn.isConsumingExtendedTime = false;
     this.stampDeadline(this.config.turnTimeoutMs);
   }
 
@@ -7330,9 +7353,13 @@ export class RoundDriver implements Driver {
   // antes de retirar a nadie, porque retirar es verbo de esa altura pero el saldo es de
   // este nivel (es el turno el que se estira).
   extendWithReserve(playerId: PlayerId): boolean {
-    const remaining = playerOf(playerId, this.match).extraTimeRemainingMs;
+    const player = playerOf(playerId, this.match);
+    const remaining = player.extraTimeRemainingMs;
     if (remaining <= 0) return false;
-    currentRoundOf(this.match).currentTurn.isConsumingExtendedTime = true;
+    // Se debita al abrir el tramo. Si actúa antes, `settleExtraTime` devuelve lo no
+    // usado; si vence, queda en cero y no puede extenderse para siempre.
+    player.extraTimeRemainingMs = 0;
+    currentTurnOf(currentRoundOf(this.match)).isConsumingExtendedTime = true;
     this.stampDeadline(remaining);
     return true;
   }
@@ -7341,32 +7368,14 @@ export class RoundDriver implements Driver {
   // Sin esto, tocar la reserva la quemaría entera —y la regla es que solo decrece por
   // lo consumido, no por haberla usado (reglas §5.1, decisión 7)—.
   private settleExtraTime(): void {
-    const turn = currentRoundOf(this.match).currentTurn;
+    const turn = currentTurnOf(currentRoundOf(this.match));
     if (!turn.isConsumingExtendedTime || !turn.playerId) return;
     const unused = this.match.activeDeadline - this.clock.now();
     playerOf(turn.playerId, this.match).extraTimeRemainingMs = Math.max(0, unused);
   }
 
   private stampDeadline(durationMs: number): void {
-    const at = this.clock.now() + durationMs;
-    this.match.activeDeadline = at;
-    this.scheduler.schedule(at, () => this.match.currentRound?.phase === "PRESENTING_ROUND"
-      ? this.onRoundPauseExpired()
-      : this.timeout().events);
-  }
-
-  // La pausa de la mano venció: se lo cuenta al conductor de PARTIDA por su
-  // callback, porque decidir "otra ronda o cerrar" es de esa altura.
-  private onRoundPauseExpired(): readonly MatchEvent[] {
-    return this.onRoundFinished();
-  }
-
-  /** Lo inyecta el conductor de PARTIDA en el wiring. */
-  onRoundFinished: () => readonly MatchEvent[] = () => [];
-
-  /** El juez de la ronda, para que el conductor de PARTIDA no lo resuelva aparte. */
-  get roundReferee(): RoundReferee {
-    return this.referee;
+    this.match.activeDeadline = this.clock.now() + durationMs;
   }
 }
 ```
@@ -7383,16 +7392,14 @@ dependencia del `RoundDriver`:
 
 ```ts
   begin(): void {
-    if (this.match.phase !== "NOT_STARTED") return;
+    if (matchPhaseOf(this.match) !== "NOT_STARTED") return;
     this.match.phase = "PLAYING";
     this.match.startedAt = this.clock.now();
     for (const player of this.match.players) {
       player.extraTimeRemainingMs = this.config.extraTimeReserveMs;
     }
-    // El conductor de RONDA nos avisa cuando su pausa vence, y de ahí sale la
-    // decisión de esta altura: otra ronda, o cerrar la partida.
-    this.roundDriver.onRoundFinished = () => this.afterRound();
     this.roundDriver.begin();
+    this.syncTimeout();
   }
 
   timeout(): TransitionResult {
@@ -7432,18 +7439,24 @@ dependencia del `RoundDriver`:
       //    test, y el plan lo hereda gratis por haberlo leído.
       if (roundActivePlayers(this.match).length === 0) {
         this.match.activeDeadline = 0;
-        this.scheduler.cancel();
+        this.syncTimeout();
         return { events, finished: false };
       }
 
       // 2) UN LADO SE VACIÓ: forfeit. El juez ya sabe leerlo, y el veredicto sale al
       //    entrar a la presentación como en cualquier otro cierre.
       if (this.referee.outcome()) {
-        return { events: [...events, ...this.enterPresentingMatch()], finished: false };
+        const transition = {
+          events: [...events, ...this.enterPresentingMatch()],
+          finished: false,
+        };
+        this.syncTimeout();
+        return transition;
       }
 
       // 3) QUEDÓ GENTE DE LOS DOS LADOS: la ronda arranca, con uno menos si hace falta.
       this.roundDriver.resumeAfterDealWindow();
+      this.syncTimeout();
       return { events, finished: false };
     }
 
@@ -7456,6 +7469,7 @@ dependencia del `RoundDriver`:
       // igual: venció un plazo de verdad, y para soporte esa línea es la que explica por
       // qué el turno duró 90 s.
       if (this.roundDriver.extendWithReserve(playerId)) {
+        this.syncTimeout();
         return { events, finished: false };
       }
 
@@ -7467,14 +7481,19 @@ dependencia del `RoundDriver`:
 
     if (kind === "PRESENTING_ROUND") {
       const inner = this.roundDriver.timeout();
-      return { events: [...events, ...inner.events, ...this.afterRound()], finished: false };
+      const transition = {
+        events: [...events, ...inner.events, ...this.afterRound()],
+        finished: false,
+      };
+      this.syncTimeout();
+      return transition;
     }
 
     // Vencida la presentación solo queda cerrar la máquina: el veredicto ya salió
     // al ENTRAR (ver `enterPresentingMatch`).
     this.match.phase = "FINISHED";
     this.match.activeDeadline = 0;
-    this.scheduler.cancel();
+    this.syncTimeout();
     return { events, finished: true };
   }
 
@@ -7490,16 +7509,17 @@ Y `advance` pasa a delegar en la ronda:
 
 ```ts
   advance(actorId: PlayerId, action: RoundAction): TransitionResult {
-    if (this.match.phase !== "PLAYING") return { events: [], finished: false };
+    if (matchPhaseOf(this.match) !== "PLAYING") return { events: [], finished: false };
     // Un abandono se resuelve a esta altura; todo lo demás es de la ronda.
-    if (this.referee.outcome()) {
-      return { events: this.enterPresentingMatch(), finished: false };
-    }
-    return this.roundDriver.advance(actorId, action);
+    const transition = this.referee.outcome()
+      ? { events: this.enterPresentingMatch(), finished: false }
+      : this.roundDriver.advance(actorId, action);
+    this.syncTimeout();
+    return transition;
   }
 ```
 
-Con `import type { RoundDriver } from "../round/driver.js";` y `roundActivePlayers` de
+Con `import type { RoundDriver } from "../round/driver.js";` y `matchPhaseOf`/`roundActivePlayers` de
 `state-projections.js` arriba, y el `Player` facade en el constructor —el conductor de PARTIDA
 necesita retirar al que dejó vencer el turno, y al que no levantó sus fichas—:
 
@@ -7510,13 +7530,34 @@ necesita retirar al que dejó vencer el turno, y al que no levantó sus fichas�
 El `Player` se construye antes que el `MatchDriver` en el wiring, así que el orden de dependencias
 sigue siendo acíclico: facades → conductores, nunca al revés.
 
-- [ ] **Step 6: Escribir los tres comandos y ampliar las facades**
+Reemplazar también `stampDeadline` para que solo describa el instante y añadir la sincronización
+centralizada, igual que en truco. El `RoundDriver` nunca programa timers: si lo hiciera, los
+vencimientos de turno no pasarían por `MatchDriver.timeout()` y se perderían tanto el retiro como el
+evento `DEADLINE_EXPIRED`.
+
+```ts
+  private stampDeadline(durationMs: number): void {
+    this.match.activeDeadline = this.clock.now() + durationMs;
+  }
+
+  private syncTimeout(): void {
+    const at = this.match.activeDeadline;
+    if (at > 0) this.scheduler.schedule(at, () => this.timeout().events);
+    else this.scheduler.cancel();
+  }
+```
+
+- [ ] **Step 6: Escribir los cuatro comandos y ampliar las facades**
+
+Los cuatro comandos se tipan contra `Driver`, como ya hace `AbandonCommand`: solo necesitan
+`advance`. Actualizar también el comentario de `abandon.ts` para quitar las referencias futuras a
+`onRoundFinished` y `roundReferee`, miembros que esta tarea ya no añade a `MatchDriver`.
 
 ```ts
 // src/features/match/core/commands/play-tile.ts
 import type { Command, CommandPayload } from "../command.js";
 import type { MatchEvent } from "../events.js";
-import type { MatchDriver } from "../engine/match/driver.js";
+import type { Driver } from "../engine/driver.js";
 import type { Player } from "../engine/player-facade.js";
 import type { Referee } from "../engine/referee-facade.js";
 
@@ -7524,7 +7565,7 @@ export class PlayTileCommand implements Command<"PLAY_TILE", MatchEvent> {
   constructor(
     private readonly referee: Referee,
     private readonly players: Player,
-    private readonly matchDriver: MatchDriver,
+    private readonly matchDriver: Driver,
   ) {}
 
   execute({ playerId, left, right, side }: CommandPayload<"PLAY_TILE">): readonly MatchEvent[] {
@@ -7540,7 +7581,7 @@ export class PlayTileCommand implements Command<"PLAY_TILE", MatchEvent> {
 // src/features/match/core/commands/draw-tile.ts
 import type { Command, CommandPayload } from "../command.js";
 import type { MatchEvent } from "../events.js";
-import type { MatchDriver } from "../engine/match/driver.js";
+import type { Driver } from "../engine/driver.js";
 import type { Player } from "../engine/player-facade.js";
 import type { Referee } from "../engine/referee-facade.js";
 
@@ -7548,7 +7589,7 @@ export class DrawTileCommand implements Command<"DRAW_TILE", MatchEvent> {
   constructor(
     private readonly referee: Referee,
     private readonly players: Player,
-    private readonly matchDriver: MatchDriver,
+    private readonly matchDriver: Driver,
   ) {}
 
   // Robar NO pasa el turno —el jugador roba hasta poder jugar— pero SÍ reinicia el
@@ -7566,13 +7607,13 @@ export class DrawTileCommand implements Command<"DRAW_TILE", MatchEvent> {
 // src/features/match/core/commands/pass.ts
 import type { Command, CommandPayload } from "../command.js";
 import type { MatchEvent } from "../events.js";
-import type { MatchDriver } from "../engine/match/driver.js";
+import type { Driver } from "../engine/driver.js";
 import type { Referee } from "../engine/referee-facade.js";
 
 export class PassCommand implements Command<"PASS", MatchEvent> {
   constructor(
     private readonly referee: Referee,
-    private readonly matchDriver: MatchDriver,
+    private readonly matchDriver: Driver,
   ) {}
 
   // Pasar no muta nada del jugador: solo cede el turno. Por eso no toca el Player.
@@ -7596,7 +7637,7 @@ export * from "./reveal-tiles.js";
 // src/features/match/core/commands/reveal-tiles.ts
 import type { Command, CommandPayload } from "../command.js";
 import type { MatchEvent } from "../events.js";
-import type { MatchDriver } from "../engine/match/driver.js";
+import type { Driver } from "../engine/driver.js";
 import type { Player } from "../engine/player-facade.js";
 import type { Referee } from "../engine/referee-facade.js";
 
@@ -7610,7 +7651,7 @@ export class RevealTilesCommand implements Command<"REVEAL_TILES", MatchEvent> {
   constructor(
     private readonly referee: Referee,
     private readonly players: Player,
-    private readonly matchDriver: MatchDriver,
+    private readonly matchDriver: Driver,
   ) {}
 
   execute({ playerId }: CommandPayload<"REVEAL_TILES">): readonly MatchEvent[] {
@@ -7697,30 +7738,6 @@ export class PlayerRepository {
 }
 ```
 
-Ampliar `referee-facade.ts`:
-
-```ts
-  constructor(
-    private readonly matchReferee: MatchReferee,
-    private readonly roundReferee: RoundReferee,
-  ) {}
-
-  assertCanPlay(playerId: PlayerId, tile: TileLike, side: BoardSide): void {
-    this.matchReferee.assertIsPlaying(playerId);
-    this.roundReferee.assertCanPlay(playerId, tile, side);
-  }
-
-  assertCanDraw(playerId: PlayerId): void {
-    this.matchReferee.assertIsPlaying(playerId);
-    this.roundReferee.assertCanDraw(playerId);
-  }
-
-  assertCanPass(playerId: PlayerId): void {
-    this.matchReferee.assertIsPlaying(playerId);
-    this.roundReferee.assertCanPass(playerId);
-  }
-```
-
 `assertIsPlaying` va repetido delante de cada uno y **no** envuelto en un genérico, a propósito: así
 se ve de un vistazo cuáles la tienen y es grepeable.
 
@@ -7760,13 +7777,15 @@ En `di-wiring.ts`, dentro de `registerIndividualCommands`, reemplazar el bloque 
     (playerId) => new MatchPlayer(playerId, match),
     (playerId) => new RoundPlayer(playerId, match, visibility),
   );
-  const roundDriver = new RoundDriver(
-    match, clock, scheduler, globalConfig, config, roundReferee, dealer, scorer,
-    (playerId) => repository.round(playerId),
-  );
-  const matchDriver = new MatchDriver(match, clock, scheduler, globalConfig, matchReferee, roundDriver);
   const players = new Player(repository);
   const referee = new Referee(matchReferee, roundReferee);
+  const roundDriver = new RoundDriver(
+    match, clock, globalConfig, config, roundReferee, dealer, scorer,
+    (playerId) => repository.round(playerId),
+  );
+  const matchDriver = new MatchDriver(
+    match, clock, scheduler, globalConfig, matchReferee, players, roundDriver,
+  );
 
   child.register("Referee", { useValue: referee });
   child.register("MatchStarter", { useValue: (() => matchDriver.begin()) satisfies MatchStarter });
@@ -7790,19 +7809,21 @@ export function buildCatalog(child: DependencyContainer): CommandCatalog {
       PLAY_TILE: identityDecoder("PLAY_TILE"),
       DRAW_TILE: identityDecoder("DRAW_TILE"),
       PASS: identityDecoder("PASS"),
+      REVEAL_TILES: identityDecoder("REVEAL_TILES"),
     },
     {
       ABANDON: child.resolve("Command:ABANDON"),
       PLAY_TILE: child.resolve("Command:PLAY_TILE"),
       DRAW_TILE: child.resolve("Command:DRAW_TILE"),
       PASS: child.resolve("Command:PASS"),
+      REVEAL_TILES: child.resolve("Command:REVEAL_TILES"),
     },
   );
 }
 ```
 
 Run: `npm run typecheck`
-Expected: PASA. Los tres errores del Step 1 están cerrados.
+Expected: PASA. Los mapas exhaustivos del Step 1 están cerrados para los cuatro verbos.
 
 - [ ] **Step 8: Cerrar el fixture con `engineWithHands`**
 
@@ -7815,10 +7836,9 @@ class FixedDealer extends Dealer {
     match: MatchState,
     config: DominoMatchConfig,
     globalConfig: GlobalDominoConfig,
-    visibility: SchemaVisibilityController,
     private readonly deck: readonly { left: number; right: number }[],
   ) {
-    super(match, config, globalConfig, visibility);
+    super(match, config, globalConfig);
   }
 
   protected override orderedTiles(): Tile[] {
@@ -7834,9 +7854,15 @@ class FixedDealer extends Dealer {
 // Las manos tienen que declararse TODAS del mismo largo: el Dealer reparte de a
 // `tilesPerPlayer` desde el frente del mazo, así que un largo distinto por asiento
 // desalinearía el reparto.
+interface EngineOptions {
+  readonly extraTimeReserveMs?: number;
+  readonly isDealWindowEnabled?: boolean;
+}
+
 export function engineWithHands(
   handsBySeat: Record<string, [number, number][]>,
   boneyard: [number, number][] = [],
+  options: EngineOptions = {},
 ) {
   const seats = Object.keys(handsBySeat);
   const lengths = new Set(Object.values(handsBySeat).map((tiles) => tiles.length));
@@ -7854,11 +7880,12 @@ export function engineWithHands(
     ...DEFAULT_GLOBAL_CONFIG,
     tilesPerPlayer,
     turnTimeoutMs: 600,
+    extraTimeReserveMs: options.extraTimeReserveMs ?? 0,
     presentingRoundMs: 120,
     presentingMatchMs: 120,
   };
   const config: DominoMatchConfig = {
-    matchId: "m-test", gameModeId: "test", seed: "seed-test", seats, pointsToWin: 100, teamAssignment: "SHUFFLED", isDealWindowEnabled: false,
+    matchId: "m-test", gameModeId: "test", seed: "seed-test", seats, pointsToWin: 100, teamAssignment: "SHUFFLED", isDealWindowEnabled: options.isDealWindowEnabled ?? false,
   };
   const match = createMatchState(config);
 
@@ -7875,25 +7902,28 @@ export function engineWithHands(
   const matchReferee = new MatchReferee(match);
   const roundReferee = new RoundReferee(match);
   const scorer = new Scorer(match);
-  const dealer = new FixedDealer(match, config, globalConfig, visibility, deck);
+  const dealer = new FixedDealer(match, config, globalConfig, deck);
   const repository = new PlayerRepository(
     seats,
     (playerId) => new MatchPlayer(playerId, match),
-    (playerId) => new RoundPlayer(playerId, match),
+    (playerId) => new RoundPlayer(playerId, match, visibility),
   );
-  const roundDriver = new RoundDriver(
-    match, clock, scheduler, globalConfig, roundReferee, dealer, scorer,
-    (playerId) => repository.round(playerId),
-  );
-  const matchDriver = new MatchDriver(match, clock, scheduler, globalConfig, matchReferee, roundDriver);
   const players = new Player(repository);
   const referee = new Referee(matchReferee, roundReferee);
+  const roundDriver = new RoundDriver(
+    match, clock, globalConfig, config, roundReferee, dealer, scorer,
+    (playerId) => repository.round(playerId),
+  );
+  const matchDriver = new MatchDriver(
+    match, clock, scheduler, globalConfig, matchReferee, players, roundDriver,
+  );
 
   const commands = {
     ABANDON: new AbandonCommand(referee, players, matchDriver),
     PLAY_TILE: new PlayTileCommand(referee, players, matchDriver),
     DRAW_TILE: new DrawTileCommand(referee, players, matchDriver),
     PASS: new PassCommand(referee, matchDriver),
+    REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
   };
 
   return {
@@ -7905,6 +7935,7 @@ export function engineWithHands(
       commands.PLAY_TILE.execute({ playerId, ...tile, side }),
     drawTile: (playerId: string) => commands.DRAW_TILE.execute({ playerId }),
     pass: (playerId: string) => commands.PASS.execute({ playerId }),
+    revealTiles: (playerId: string) => commands.REVEAL_TILES.execute({ playerId }),
     abandon: (playerId: string) => commands.ABANDON.execute({ playerId }),
     fireTimeout(): readonly MatchEvent[] {
       if (!pending) throw new Error("no hay timeout programado");
@@ -7927,11 +7958,12 @@ function engine() {
 }
 ```
 
-- [ ] **Step 9: Escribir el test del flujo de la ronda**
+- [ ] **Step 9: Completar el test del flujo de la ronda y dejarlo verde**
 
 ```ts
 // src/features/match/core/engine/tests/round-flow.test.ts
 import { describe, expect, it } from "vitest";
+import { currentTurnOf, scoreboardOf } from "../state-projections.js";
 import { engineWithHands } from "./build-engine.js";
 
 describe("flujo de la ronda", () => {
@@ -7940,7 +7972,7 @@ describe("flujo de la ronda", () => {
     e.start();
 
     expect(e.round().phase).toBe("PLAYING");
-    expect(e.round().currentTurn.playerId).toBe("u1"); // tiene el doble seis
+    expect(currentTurnOf(e.round()).playerId).toBe("u1"); // tiene el doble seis
     expect(e.match.activeDeadline).toBe(e.clockBox.now + 600);
   });
 
@@ -7950,7 +7982,7 @@ describe("flujo de la ronda", () => {
     e.clockBox.now += 100;
     e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
 
-    expect(e.round().currentTurn.playerId).toBe("u2");
+    expect(currentTurnOf(e.round()).playerId).toBe("u2");
     expect(e.match.activeDeadline).toBe(e.clockBox.now + 600);
   });
 
@@ -7965,7 +7997,7 @@ describe("flujo de la ronda", () => {
     e.clockBox.now += 400;
     e.drawTile("u2"); // no engancha con nada, y hay pozo
 
-    expect(e.round().currentTurn.playerId).toBe("u2");
+    expect(currentTurnOf(e.round()).playerId).toBe("u2");
     expect(e.match.activeDeadline).toBe(e.clockBox.now + 600);
     expect(e.match.activeDeadline).not.toBe(before);
     expect(e.hand("u2").tileCount).toBe(3);
@@ -7987,7 +8019,7 @@ describe("flujo de la ronda", () => {
     expect(events).toEqual([
       { type: "ROUND_RESOLVED", roundNumber: 1, winnerId: "u1", winnerTeamId: "A", points: 9, reason: "DOMINO" },
     ]);
-    expect(e.match.scoreboard.teamA).toBe(9);
+    expect(scoreboardOf(e.match).teamA).toBe(9);
   });
 
   // ACÁ MUERE EL sleep(6000): la pausa es una fase con plazo, no una espera.
@@ -8002,6 +8034,85 @@ describe("flujo de la ronda", () => {
     expect(e.round().roundNumber).toBe(2);
     expect(e.round().phase).toBe("PLAYING");
     expect(e.match.pastRounds.length).toBe(1);
+  });
+
+  it("la ventana de reparto espera a que ambos levanten sus fichas", () => {
+    const e = engineWithHands(
+      { u1: [[6, 6], [5, 4]], u2: [[3, 2], [1, 0]] },
+      [],
+      { isDealWindowEnabled: true },
+    );
+    e.start();
+
+    expect(e.round().phase).toBe("DEALING");
+    e.revealTiles("u1");
+    expect(e.round().phase).toBe("DEALING");
+    e.revealTiles("u2");
+    expect(e.round().phase).toBe("PLAYING");
+  });
+
+  it("al vencer la ventana retira al que no levantó sus fichas", () => {
+    const e = engineWithHands(
+      { u1: [[6, 6], [5, 4]], u2: [[3, 2], [1, 0]] },
+      [],
+      { isDealWindowEnabled: true },
+    );
+    e.start();
+    e.revealTiles("u1");
+
+    const events = e.fireTimeout();
+
+    expect(events).toContainEqual({ type: "DEADLINE_EXPIRED", kind: "DEALING" });
+    expect(events).toContainEqual({ type: "ABANDON", playerId: "u2" });
+    expect(events).toContainEqual({
+      type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "ABANDONMENT",
+    });
+  });
+
+  it("si nadie levanta sus fichas apaga el plazo sin inventar ganador", () => {
+    const e = engineWithHands(
+      { u1: [[6, 6], [5, 4]], u2: [[3, 2], [1, 0]] },
+      [],
+      { isDealWindowEnabled: true },
+    );
+    e.start();
+
+    const events = e.fireTimeout();
+
+    expect(events.filter((event) => event.type === "ABANDON")).toHaveLength(2);
+    expect(events.some((event) => event.type === "MATCH_RESOLVED")).toBe(false);
+    expect(e.match.activeDeadline).toBe(0);
+    expect(() => e.fireTimeout()).toThrow("no hay timeout programado");
+  });
+
+  it("el primer vencimiento consume la reserva y el segundo retira", () => {
+    const e = engineWithHands(
+      { u1: [[6, 6], [5, 4]], u2: [[6, 3], [1, 0]] },
+      [],
+      { extraTimeReserveMs: 300 },
+    );
+    e.start();
+
+    expect(e.fireTimeout()).toEqual([{ type: "DEADLINE_EXPIRED", kind: "TURN" }]);
+    expect(e.match.players.find((player) => player.playerId === "u1")?.extraTimeRemainingMs).toBe(0);
+    expect(currentTurnOf(e.round()).isConsumingExtendedTime).toBe(true);
+    expect(e.match.activeDeadline).toBe(e.clockBox.now + 300);
+
+    expect(e.fireTimeout().map((event) => event.type)).toContain("ABANDON");
+  });
+
+  it("devuelve la reserva no usada cuando el jugador actúa", () => {
+    const e = engineWithHands(
+      { u1: [[6, 6], [5, 4]], u2: [[6, 3], [1, 0]] },
+      [],
+      { extraTimeReserveMs: 300 },
+    );
+    e.start();
+    e.fireTimeout();
+    e.clockBox.now += 100;
+    e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
+
+    expect(e.match.players.find((player) => player.playerId === "u1")?.extraTimeRemainingMs).toBe(200);
   });
 
   // Reglas §5.2 decisión 1: al vencer el plazo se RETIRA al jugador. El motor no
@@ -8032,16 +8143,16 @@ describe("flujo de la ronda", () => {
   it("retirar al jugador en 2P resuelve la partida por forfeit", () => {
     const e = engineWithHands({ u1: [[6, 6], [5, 4]], u2: [[6, 3], [1, 0]] });
     e.start();
-    e.fireTimeout(); // vence el turno de u1 → se lo retira
+    const events = e.fireTimeout(); // vence el turno de u1 → se lo retira
 
     expect(e.match.phase).toBe("PRESENTING_MATCH");
+    expect(events).toContainEqual({
+      type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT",
+    });
 
-    const events = e.fireTimeout(); // vence la pausa de cierre
+    const closingEvents = e.fireTimeout(); // vence la pausa de cierre
     expect(e.match.phase).toBe("FINISHED");
-    expect(events).toEqual([
-      { type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" },
-      { type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" },
-    ]);
+    expect(closingEvents).toEqual([{ type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" }]);
   });
 
   it("cierra por tranca cuando nadie puede jugar y el pozo está vacío", () => {
@@ -8059,21 +8170,30 @@ describe("flujo de la ronda", () => {
     ]);
   });
 
+  it("una tranca empatada emite ganador y equipo vacíos", () => {
+    const e = engineWithHands({ u1: [[6, 6], [5, 5]], u2: [[4, 3], [2, 1]] });
+    e.start();
+    e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
+    e.pass("u2");
+
+    expect(e.pass("u1")).toEqual([
+      { type: "ROUND_RESOLVED", roundNumber: 1, winnerId: "", winnerTeamId: "", points: 0, reason: "BLOCKED" },
+    ]);
+  });
+
   it("alcanzar pointsToWin cierra la partida en vez de abrir otra ronda", () => {
     const e = engineWithHands({ u1: [[6, 6]], u2: [[6, 3]] });
     e.match.pointsToWin = 9; // exactamente lo que cobra el dominó de abajo
     e.start();
     e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
-    e.fireTimeout(); // vence la pausa de la mano
+    const events = e.fireTimeout(); // vence la pausa de la mano
 
     expect(e.match.phase).toBe("PRESENTING_MATCH");
+    expect(events).toContainEqual({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" });
 
-    const events = e.fireTimeout(); // vence la pausa de la partida
+    const closingEvents = e.fireTimeout(); // vence la pausa de la partida
     expect(e.match.phase).toBe("FINISHED");
-    expect(events).toEqual([
-      { type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" },
-      { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
-    ]);
+    expect(closingEvents).toEqual([{ type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" }]);
   });
 });
 ```
@@ -8081,27 +8201,27 @@ describe("flujo de la ronda", () => {
 - [ ] **Step 10: Correr toda la suite hasta que pase**
 
 Run: `npm test`
-Expected: TODO pasa, incluidos los 10 tests nuevos de `round-flow` y los de `abandon` adaptados.
+Expected: TODO pasa, incluidos los 17 tests nuevos de `round-flow` y los de `abandon` adaptados.
 
 - [ ] **Step 11: Commit**
 
 ```bash
-npm run typecheck && npm run lint && npm test
+npm run format
+npm run typecheck && npm test && npm run lint
 git add src
-git commit -m "feat(round): conductor de la ronda, Scorer y los tres verbos de juego
+git commit -m "feat(round): conduce la ronda y sus cuatro verbos
 
 Acá mueren los sleep() del v1: la pausa de presentación es una FASE con plazo
 (PRESENTING_ROUND), no una espera dentro de la mutación del estado. El motor
 estampa el instante y devuelve, así que no hay ventana en la que otro mensaje
 corra sobre estado a medio mutar.
 
-Al vencer el turno el sistema ejecuta el verbo del que calló —juega la legal de
-mayor valor, o roba, o pasa— por el mismo camino que el hablado, y lo EMITE
-porque no hubo comando que lo registre. La elección es determinista, así que el
-replay reproduce la misma jugada.
+Al vencer el turno, el primer plazo consume la reserva disponible. Si vuelve a
+vencer sin saldo, el sistema retira al jugador y emite ABANDON porque no hubo
+comando que registre esa consecuencia.
 
-Robar no pasa el turno ni toca el plazo: el jugador roba hasta poder jugar, y por
-eso ese comando no llama a advance().
+Robar conserva el turno pero reinicia su plazo; todos los cambios de deadline se
+programan por MatchDriver para que el timeout recorra el mismo flujo observable.
 
 El Scorer es el único que escribe el marcador y el único que archiva una ronda.
 
