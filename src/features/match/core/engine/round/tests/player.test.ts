@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { currentRoundOf, handOf } from "../../state-projections.js";
+import { describe, expect, it, vi } from "vitest";
+import { currentRoundOf, handOf, playerOf } from "../../state-projections.js";
 import type { SchemaVisibilityController } from "../../visibility.js";
 import { boardEndsOf } from "../board-ends.js";
 import { RoundPlayer } from "../player.js";
@@ -12,6 +12,36 @@ const visibility: SchemaVisibilityController = {
 
 const playerFor = (playerId: string, match: ReturnType<typeof roundState>) =>
   new RoundPlayer(playerId, match, visibility);
+
+describe("RoundPlayer.revealTiles y hideTiles", () => {
+  it("marca la mano vista y revela exactamente sus fichas al dueño", () => {
+    const match = roundState({ hands: { u1: [[6, 1]], u2: [[5, 5]] } });
+    const makePublic = vi.fn();
+    const recordingVisibility = { makePublic, hide: vi.fn() } satisfies SchemaVisibilityController;
+
+    new RoundPlayer("u1", match, recordingVisibility).revealTiles();
+
+    expect(playerOf("u1", match).hasSeenTiles).toBe(true);
+    expect(makePublic).toHaveBeenCalledOnce();
+    expect(makePublic.mock.calls[0]?.[0]).toBe(handOf("u1", match).tiles);
+    expect(makePublic.mock.calls[0]?.[1]).toEqual({
+      kind: "PLAYER",
+      playerId: "u1",
+    });
+  });
+
+  it("oculta exactamente las fichas de la mano a todos", () => {
+    const match = roundState({ hands: { u1: [[6, 1]], u2: [[5, 5]] } });
+    const hide = vi.fn();
+    const recordingVisibility = { makePublic: vi.fn(), hide } satisfies SchemaVisibilityController;
+
+    new RoundPlayer("u1", match, recordingVisibility).hideTiles();
+
+    expect(hide).toHaveBeenCalledOnce();
+    expect(hide.mock.calls[0]?.[0]).toBe(handOf("u1", match).tiles);
+    expect(hide.mock.calls[0]?.[1]).toEqual({ kind: "ALL" });
+  });
+});
 
 describe("RoundPlayer.playTile", () => {
   it("saca la ficha de la mano, la pone en la mesa y mantiene tileCount", () => {

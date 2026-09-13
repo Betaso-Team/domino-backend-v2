@@ -9,6 +9,7 @@ import {
   handOf,
   playerOf,
   roundActivePlayers,
+  roundPhaseOf,
 } from "../state-projections.js";
 import { sameTile } from "../tile-set.js";
 import { boardEndsOf } from "./board-ends.js";
@@ -49,7 +50,7 @@ export class RoundReferee {
   }
 
   assertCanRevealTiles(playerId: PlayerId): void {
-    if (currentRoundOf(this.match).phase !== "DEALING") {
+    if (roundPhaseOf(currentRoundOf(this.match)) !== "DEALING") {
       throw new RuleViolationError("NOT_DEALING");
     }
     if (playerOf(playerId, this.match).hasSeenTiles) {
@@ -74,7 +75,7 @@ export class RoundReferee {
 
   private assertIsTurn(playerId: PlayerId): void {
     const round = currentRoundOf(this.match);
-    if (round.phase !== "PLAYING") throw new RuleViolationError("NOT_PLAYING");
+    if (roundPhaseOf(round) !== "PLAYING") throw new RuleViolationError("NOT_PLAYING");
     if (currentTurnOf(round).playerId !== playerId) {
       throw new RuleViolationError("NOT_YOUR_TURN");
     }

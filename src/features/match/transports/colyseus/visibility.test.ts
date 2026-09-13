@@ -1,7 +1,7 @@
 import { Encoder, StateView } from "@colyseus/schema";
 import { describe, expect, it } from "vitest";
 import { InvariantViolationError } from "../../core/engine/errors.js";
-import { Tile } from "../../core/state/index.js";
+import { Hand, Tile } from "../../core/state/index.js";
 import { StateViewVisibilityController } from "./visibility.js";
 
 function build() {
@@ -48,6 +48,19 @@ describe("StateViewVisibilityController", () => {
 
     expect(views.get("u1")?.has(value)).toBe(true);
     expect(views.get("u2")?.has(value)).toBe(false);
+  });
+
+  it("revela y oculta una colección completa", () => {
+    const { views, controller } = build();
+    const hand = new Hand();
+    hand.tiles.push(new Tile());
+    new Encoder(hand);
+
+    controller.makePublic(hand.tiles, { kind: "PLAYER", playerId: "u1" });
+    expect(views.get("u1")?.has(hand.tiles)).toBe(true);
+
+    controller.hide(hand.tiles, { kind: "PLAYER", playerId: "u1" });
+    expect(views.get("u1")?.has(hand.tiles)).toBe(false);
   });
 
   it("revela al asiento aunque todavía no tenga conexión", () => {
