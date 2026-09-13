@@ -41,6 +41,18 @@ describe("RoundPlayer.revealTiles y hideTiles", () => {
     expect(hide.mock.calls[0]?.[0]).toBe(handOf("u1", match).tiles);
     expect(hide.mock.calls[0]?.[1]).toEqual({ kind: "ALL" });
   });
+
+  it("publica la mano al cerrar sin marcar que el dueño levantó sus fichas", () => {
+    const match = roundState({ hands: { u1: [[6, 1]], u2: [[5, 5]] } });
+    const makePublic = vi.fn();
+    const recordingVisibility = { makePublic, hide: vi.fn() } satisfies SchemaVisibilityController;
+
+    new RoundPlayer("u1", match, recordingVisibility).revealTilesToAll();
+
+    expect(handOf("u1", match).isRevealed).toBe(true);
+    expect(playerOf("u1", match).hasSeenTiles).toBe(false);
+    expect(makePublic).toHaveBeenCalledWith(handOf("u1", match).tiles, { kind: "ALL" });
+  });
 });
 
 describe("RoundPlayer.playTile", () => {

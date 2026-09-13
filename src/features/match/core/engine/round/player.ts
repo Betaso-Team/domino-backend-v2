@@ -23,6 +23,12 @@ export class RoundPlayer {
     });
   }
 
+  revealTilesToAll(): void {
+    const hand = handOf(this.playerId, this.match);
+    hand.isRevealed = true;
+    this.visibility.makePublic(hand.tiles, { kind: "ALL" });
+  }
+
   // `hand.tiles` es el mismo nodo ronda a ronda. Ocultarlo antes de repartir evita que
   // una mano revelada a la mesa al cerrar una ronda siga pública en la siguiente.
   hideTiles(): void {

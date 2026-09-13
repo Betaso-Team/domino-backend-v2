@@ -154,6 +154,9 @@ export class RoundDriver implements Driver {
 
   private closeRound(verdict: RoundVerdict): TransitionResult {
     const round = currentRoundOf(this.match);
+    for (const player of this.match.players) {
+      this.playerAt(player.playerId).revealTilesToAll();
+    }
     this.scorer.credit(verdict);
     round.phase = "PRESENTING_ROUND";
     this.stampDeadline(this.config.presentingRoundMs);

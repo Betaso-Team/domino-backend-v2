@@ -98,6 +98,8 @@ describe("flujo de la ronda", () => {
       },
     ]);
     expect(scoreboardOf(e.match).teamA).toBe(9);
+    expect(e.hand("u1").isRevealed).toBe(true);
+    expect(e.hand("u2").isRevealed).toBe(true);
   });
 
   it("la pausa de la mano es una fase con plazo, y al vencer arranca la ronda 2", () => {
@@ -109,6 +111,8 @@ describe("flujo de la ronda", () => {
     expect(e.round().roundNumber).toBe(2);
     expect(e.round().phase).toBe("PLAYING");
     expect(e.match.pastRounds.length).toBe(1);
+    expect(e.hand("u1").isRevealed).toBe(false);
+    expect(e.hand("u2").isRevealed).toBe(false);
   });
 
   it("la ventana de reparto espera a que ambos levanten sus fichas", () => {
