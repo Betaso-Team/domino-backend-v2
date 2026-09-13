@@ -1491,7 +1491,7 @@ export interface TimeoutScheduler {
 
 ```ts
 // src/features/match/core/engine/visibility.ts
-import type { Schema } from "@colyseus/schema";
+import type { Ref } from "@colyseus/schema";
 import type { PlayerId } from "../ids.js";
 
 // La audiencia es de DOMINIO: un JUGADOR o la mesa, nunca una conexión. Eso es lo que
@@ -1510,8 +1510,10 @@ export type Audience = { kind: "PLAYER"; playerId: PlayerId } | { kind: "ALL" };
 // El dominio ordena "hacé público este nodo a esta audiencia"; el puerto hace el view.add.
 // El dominio nunca toca client.view.
 export interface SchemaVisibilityController {
-  makePublic(node: Schema, audience: Audience): void;
-  hide(node: Schema, audience: Audience): void;
+  // `Ref`, no `Schema`: las manos y el pozo son `ArraySchema`, y StateView acepta
+  // ambos. Tiparlo más angosto hace imposible revelar una colección sin un cast falso.
+  makePublic(node: Ref, audience: Audience): void;
+  hide(node: Ref, audience: Audience): void;
 }
 ```
 
@@ -3537,7 +3539,7 @@ Se prueba **sin levantar una sala**, y eso es la prueba de que la clase no conoc
 // src/features/match/transports/colyseus/visibility.test.ts
 import { Encoder, StateView } from "@colyseus/schema";
 import { describe, expect, it } from "vitest";
-import { Tile } from "../../core/state/index.js";
+import { Hand, Tile } from "../../core/state/index.js";
 import { StateViewVisibilityController } from "./visibility.js";
 
 function build() {
@@ -3602,6 +3604,21 @@ describe("StateViewVisibilityController", () => {
     expect(views.get("u1")?.has(tile)).toBe(true);
   });
 
+  // El puerto acepta `Ref`, no solo `Schema`: las fichas de una mano son una
+  // colección sincronizada y ésta es la llamada real que hace RoundPlayer.
+  it("revela y oculta una colección completa", () => {
+    const { views, controller } = build();
+    const hand = new Hand();
+    hand.tiles.push(new Tile());
+    new Encoder(hand);
+
+    controller.makePublic(hand.tiles, { kind: "PLAYER", playerId: "u1" });
+    expect(views.get("u1")?.has(hand.tiles)).toBe(true);
+
+    controller.hide(hand.tiles, { kind: "PLAYER", playerId: "u1" });
+    expect(views.get("u1")?.has(hand.tiles)).toBe(false);
+  });
+
   it("PLAYER para un asiento ausente lanza InvariantViolationError con el id", () => {
     const { controller } = build();
     expect(() => controller.makePublic(attachedTile(), { kind: "PLAYER", playerId: "u9" })).toThrow(
@@ -3628,7 +3645,7 @@ Expected: FAIL con `Failed to resolve import "./visibility.js"`.
 
 ```ts
 // src/features/match/transports/colyseus/visibility.ts
-import type { Schema, StateView } from "@colyseus/schema";
+import type { Ref, StateView } from "@colyseus/schema";
 import { InvariantViolationError } from "../../core/engine/errors.js";
 import type { Audience, SchemaVisibilityController } from "../../core/engine/visibility.js";
 import type { PlayerId } from "../../core/ids.js";
@@ -3647,11 +3664,11 @@ import type { PlayerId } from "../../core/ids.js";
 export class StateViewVisibilityController implements SchemaVisibilityController {
   constructor(private readonly views: ReadonlyMap<PlayerId, StateView>) {}
 
-  makePublic(node: Schema, audience: Audience): void {
+  makePublic(node: Ref, audience: Audience): void {
     for (const view of this.resolve(audience)) view.add(node);
   }
 
-  hide(node: Schema, audience: Audience): void {
+  hide(node: Ref, audience: Audience): void {
     for (const view of this.resolve(audience)) view.remove(node);
   }
 
@@ -3705,7 +3722,7 @@ export class RoomTimeoutScheduler implements TimeoutScheduler {
 - [ ] **Step 4: Correr los tests hasta que pasen**
 
 Run: `npx vitest run src/features/match/transports/colyseus/visibility.test.ts src/features/match/transports/colyseus/timeout-scheduler.test.ts`
-Expected: los 6 tests de visibilidad y los 4 del scheduler PASAN.
+Expected: los 7 tests de visibilidad y los 4 del scheduler PASAN.
 
 Si `StateView` no expone `has()`, cambiar las aserciones por lo que sí exponga (comprobado en la
 referencia del Step 1 de la Tarea 4). Lo que no se negocia es que el test demuestre que un asiento
@@ -6510,8 +6527,8 @@ describe("RoundReferee — robar y pasar", () => {
 
 ```ts
 // src/features/match/core/engine/round/tests/player.test.ts
-import { describe, expect, it } from "vitest";
-import { handOf } from "../../state-projections.js";
+import { describe, expect, it, vi } from "vitest";
+import { currentRoundOf, handOf, playerOf } from "../../state-projections.js";
 import type { SchemaVisibilityController } from "../../visibility.js";
 import { boardEndsOf } from "../board-ends.js";
 import { RoundPlayer } from "../player.js";
@@ -6524,6 +6541,32 @@ const visibility: SchemaVisibilityController = {
 
 const playerFor = (playerId: string, match: ReturnType<typeof roundState>) =>
   new RoundPlayer(playerId, match, visibility);
+
+describe("RoundPlayer.revealTiles y hideTiles", () => {
+  it("marca la mano vista y revela exactamente sus fichas al dueño", () => {
+    const match = roundState({ hands: { u1: [[6, 1]], u2: [[5, 5]] } });
+    const makePublic = vi.fn();
+    const recordingVisibility = { makePublic, hide: vi.fn() } satisfies SchemaVisibilityController;
+
+    new RoundPlayer("u1", match, recordingVisibility).revealTiles();
+
+    expect(playerOf("u1", match).hasSeenTiles).toBe(true);
+    expect(makePublic).toHaveBeenCalledWith(handOf("u1", match).tiles, {
+      kind: "PLAYER",
+      playerId: "u1",
+    });
+  });
+
+  it("oculta exactamente las fichas de la mano a todos", () => {
+    const match = roundState({ hands: { u1: [[6, 1]], u2: [[5, 5]] } });
+    const hide = vi.fn();
+    const recordingVisibility = { makePublic: vi.fn(), hide } satisfies SchemaVisibilityController;
+
+    new RoundPlayer("u1", match, recordingVisibility).hideTiles();
+
+    expect(hide).toHaveBeenCalledWith(handOf("u1", match).tiles, { kind: "ALL" });
+  });
+});
 
 describe("RoundPlayer.playTile", () => {
   it("saca la ficha de la mano, la pone en la mesa y mantiene tileCount", () => {
@@ -6562,7 +6605,7 @@ describe("RoundPlayer.playTile", () => {
     playerFor("u1", match).playTile({ left: 6, right: 1 }, "LEFT");
 
     expect(match.currentRound?.board.tiles.at(0)?.tile.toJSON()).toEqual({ left: 6, right: 4 });
-    expect(boardEndsOf(match.currentRound!.board)).toEqual({ left: 1, right: 4 });
+    expect(boardEndsOf(currentRoundOf(match).board)).toEqual({ left: 1, right: 4 });
   });
 
   it("acepta la ficha escrita al revés y guarda la que tenía en la mano", () => {
@@ -6622,6 +6665,7 @@ import {
   handOf,
   playerOf,
   roundActivePlayers,
+  roundPhaseOf,
 } from "../state-projections.js";
 import { sameTile } from "../tile-set.js";
 import { boardEndsOf } from "./board-ends.js";
@@ -6665,7 +6709,7 @@ export class RoundReferee {
   // punto de la ventana—, y por eso es el único verbo de jugador que no pasa por
   // `assertIsTurn`.
   assertCanRevealTiles(playerId: PlayerId): void {
-    if (currentRoundOf(this.match).phase !== "DEALING") {
+    if (roundPhaseOf(currentRoundOf(this.match)) !== "DEALING") {
       throw new RuleViolationError("NOT_DEALING");
     }
     if (playerOf(playerId, this.match).hasSeenTiles) {
@@ -6693,7 +6737,7 @@ export class RoundReferee {
 
   private assertIsTurn(playerId: PlayerId): void {
     const round = currentRoundOf(this.match);
-    if (round.phase !== "PLAYING") throw new RuleViolationError("NOT_PLAYING");
+    if (roundPhaseOf(round) !== "PLAYING") throw new RuleViolationError("NOT_PLAYING");
     if (currentTurnOf(round).playerId !== playerId) throw new RuleViolationError("NOT_YOUR_TURN");
   }
 }
@@ -6807,8 +6851,8 @@ export * from "./referee.js";
 
 - [ ] **Step 8: Correr los tests hasta que pasen**
 
-Run: `npx vitest run src/features/match/core/engine/round/tests/`
-Expected: 1 + 12 + 6 + 32 = 51 tests PASAN.
+Run: `npx vitest run src/features/match/core/engine/tests/state-projections.test.ts src/features/match/core/engine/round/tests/`
+Expected: 9 tests de proyecciones + 52 tests de ronda PASAN.
 
 - [ ] **Step 9: Commit**
 
