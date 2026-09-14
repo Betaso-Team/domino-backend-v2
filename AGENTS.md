@@ -91,7 +91,35 @@ partida, el apagado por mensaje sale con 0 y no deja claves atrás, y `kill -9` 
 TTL de 119 s, que es lo que las limpia—. Medido: el drenado tarda **9 ms** con el servidor vacío;
 `/ready` contra un Mongo inalcanzable contesta **503 `{"missing":["mongo"]}` en 2014 ms** mientras
 `/health` sigue contestando 200 en 43 ms.
-**Baseline actual: 311 tests / 47 archivos.**
+
+Y después la **primera tanda de correcciones de la capa de deploy**, portadas de truco
+(`5210cd6`/`48ac4bc`/`3d3eb0f`) — la segunda (CI/CD y el script de deploy) viene después:
+
+- **La app carga su propio `.env`** con `process.loadEnvFile()` en `src/env.ts`, en vez de
+  heredarlo de rebote de quien la arrancó. El archivo es opcional y **el entorno le gana al
+  archivo** (medido sobre la node 22.17.1). No es redundante con `@colyseus/tools` —que también
+  carga uno al importarse—, porque `src/replay.ts` no lo importa: medido, `npm run replay` con la
+  configuración sólo en el `.env` moría con «Entorno inválido — JWT_SECRET». **Y ahí apareció un
+  agujero que ya estaba vivo**: `vitest.setup.ts` borra `MONGO_URI`/`REDIS_URL` y
+  `@colyseus/tools` las REPONE después (un `setupFile` corre antes de los imports del archivo de
+  test, así que contra ése no hay orden que salve). Medido: 18 tests rojos en 6 archivos. Se
+  desactiva `dotenv.config` en `vitest.setup.ts` — la FUNCIÓN, no las dos variables, porque un
+  `.env` también puede traer `WRITE_GOLDEN=1`, que es `npm test` reescribiendo los golden.
+- **El aislamiento de Redis por índice de base SE SOSTIENE, y ahora está medido** en vez de
+  argumentado: dos instancias contra el mismo Redis, una en `/0` y otra en `/1`, cada una con su
+  juego completo de claves y con los mismos NOMBRES (`roomcaches`, `roomcount`, `ch:domino`,
+  `match_config:*`, `player_match:*`), ciegas entre sí (`/config` 404, `joinById` 522) mientras
+  una tercera en `/0` las ve. **Lo que el índice no cubre es el pub/sub —que no tiene base— y un
+  prefijo de claves tampoco lo cubriría** (medido: con `keyPrefix` la clave sale prefijada y el
+  canal no). **El default pasó de `/0` a `/1`**: el `0` es donde cae todo el que no eligió, y
+  truco no elige.
+- **No llegar a escuchar se dice y se sale.** Medido: `listen()` no rechaza con el puerto
+  ocupado, se CUELGA —`@colyseus/ws-transport` se come el `'error'` del servidor HTTP en su
+  constructor y sólo lo imprime; el `reject` de `@colyseus/core` se registra dentro del callback
+  de `'listening'`, que nunca corre—, así que el `.catch()` de truco no alcanza. Va un plazo de
+  arranque de 20 s en `src/main.ts`, que cubre también el Redis caído al arrancar.
+
+**Baseline actual: 319 tests / 48 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
