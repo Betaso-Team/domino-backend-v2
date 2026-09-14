@@ -1,0 +1,86 @@
+import type { RequestHandler, Response } from "express";
+import { z } from "zod";
+
+// VALIDA + TIPA la entrada de un endpoint HTTP, en el mismo molde que el `MessageDecoder`
+// del wire de Colyseus (`../colyseus/commands/decoders.ts`): el schema es la fuente de
+// verdad de la FORMA, el handler recibe algo ya válido, y lo que el schema no deja pasar no
+// llega. La diferencia con el socket es de forma y no de fondo —allá el catálogo de verbos
+// es un mapa cerrado (`COMMAND_PAYLOADS`) y acá cada ruta declara lo suyo—, pero la frontera
+// es la misma: **ningún handler ve un `unknown`**.
+//
+// POR QUÉ VIVE ACÁ Y NO EN `shared/`. `shared/` es para lo portable **que una segunda parte
+// del sistema ya necesita**; esta pieza es portable pero hoy tiene un solo consumidor, y
+// `match` es la única feature que registra rutas —`auth` verifica tokens y no expone
+// ninguna (`src/features/auth/`), y en `app.config.ts` hay una sola llamada de registro—.
+// El `httpErrorHandler` sí se ganó `shared/` por el criterio opuesto: se registra en
+// `app.config.ts` y cubre TODA la superficie Express, así que no puede vivir dentro de una
+// feature sin que otra dependa de ella.
+//
+// **DISPARADOR DE PROMOCIÓN, concreto y verificable**: el día que `app.config.ts` tenga una
+// SEGUNDA llamada de registro de rutas —de cualquier feature—, esta pieza sube a
+// `src/shared/http/` junto al `error-handler` y las dos se exportan por un barrel. El
+// disparador se escribe así, sobre una línea que se puede ir a mirar, y no nombrando la
+// feature que uno adivina que vendrá: en truco el comentario del cliente HTTP apostó a que
+// el disparador lo apretaría `match`, y `match` fue justamente la única que no lo tocó.
+//
+// Que esté dentro de `match` no le deja saber de `match`: no importa nada de `core/` ni
+// extiende los errores de la feature, para que mudarla de carpeta sea mover el archivo.
+
+// Las tres fuentes de entrada de un request. Un endpoint declara SOLO las que le llegan; lo
+// que no declara no viaja al handler.
+interface RouteSchemas {
+  params?: z.ZodType;
+  query?: z.ZodType;
+  body?: z.ZodType;
+}
+
+// La entrada YA VALIDADA, tipada DESDE los schemas. Mismo truco que el `WirePayload<N> =
+// z.infer<…>` del wire: el tipo del handler no se escribe a mano, se DERIVA, así que el
+// schema y el handler no pueden divergir sin que deje de compilar. Una fuente no declarada
+// queda `undefined` en el tipo, no `any`: leerla es un error de compilación y no una
+// sorpresa en producción.
+//
+// El `-?` no es cosmético: sin él el tipo hereda la opcionalidad de `RouteSchemas` y hasta
+// la fuente que el endpoint SÍ declaró llega como "puede faltar", que es exactamente lo
+// contrario de lo que esta pieza promete. Con `-?`, las tres están siempre presentes: la
+// declarada con su tipo, la que no con `undefined`.
+type Validated<S extends RouteSchemas> = {
+  [K in keyof RouteSchemas]-?: S[K] extends z.ZodType ? z.infer<S[K]> : undefined;
+};
+
+// El cuerpo de un 400 por forma inválida. MISMO vocabulario que el del socket
+// (`{ code: "MALFORMED", detail }`, ver `domino-room.ts` en el `catch` de `ValidationError`):
+// el cliente aprende un solo juego de códigos, no uno por transporte.
+const MALFORMED = "MALFORMED";
+
+// ENVOLTORIO Y NO MIDDLEWARE, por dos razones. La de tipos pesa más: un middleware no puede
+// decirle a TS que `req.query` ya pasó por el schema, y el handler termina casteando a mano
+// —que es exactamente el `unknown` disfrazado que esto viene a sacar—. La otra es que en
+// Express 5 `req.query` es un GETTER SIN SETTER (`express/lib/request.js:217`, definido con
+// `defineGetter` en la línea 508: `configurable` y `enumerable`, sin `set`), así que la
+// receta habitual —un middleware que parsea y sobrescribe `req.query`— tira `TypeError` en
+// módulo ESM. Acá no se sobrescribe nada: lo parseado va a un objeto aparte que es lo único
+// que el handler ve.
+export function validated<S extends RouteSchemas>(
+  schemas: S,
+  handle: (input: Validated<S>, response: Response) => void | Promise<void>,
+): RequestHandler {
+  return (request, response, next) => {
+    const input: Record<string, unknown> = {};
+    for (const source of ["params", "query", "body"] as const) {
+      const schema = schemas[source];
+      if (!schema) continue;
+      const parsed = schema.safeParse(request[source]);
+      if (!parsed.success) {
+        response.status(400).json({ code: MALFORMED, detail: z.prettifyError(parsed.error) });
+        return;
+      }
+      input[source] = parsed.data;
+    }
+    // El handler puede ser async. Express 5 reenvía las promesas rechazadas al manejador de
+    // errores, pero SOLO si el handler devuelve la promesa; acá se encadena explícito para
+    // no depender de esa sutileza del framework y para que se vea de dónde sale el 500 que
+    // arma `httpErrorHandler`.
+    void Promise.resolve(handle(input as Validated<S>, response)).catch(next);
+  };
+}
