@@ -1,23 +1,49 @@
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { boardEndsOf } from "../core/engine/round/board-ends.js";
-import { playableSides } from "../core/engine/round/playable.js";
 import { boneyardCountOf } from "../core/engine/state-projections.js";
 import {
   type SeatedMatch,
   act,
   bootServer,
   historyOf,
+  legalPlayFor,
   revealHands,
   seatPair,
   waitUntil,
 } from "./e2e-harness.js";
 
-let server: ColyseusTestServer;
+const MATCH_ID = "m-g1-g2";
 
+let server: ColyseusTestServer;
+let match: SeatedMatch;
+
+// La partida se juega UNA vez, en el hook, y los cuatro `it` afirman sobre lo que quedó.
+// Jugarla dentro del primero ataría a los otros tres a su orden: `vitest -t "historial"`
+// correría solo y leería un historial vacío, y una caída del primero se manifestaría como
+// tres fallos más que no señalan la causa.
 beforeAll(async () => {
   server = await bootServer(2587);
-});
+  match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
+  await revealHands(match);
+
+  // Tope de seguridad: una partida a 100 puntos no debería pasar de esto, y si
+  // lo pasa es un bucle. No se corta acá con un throw: agotar la vuelta deja la fase
+  // sin terminar y el primer test la reporta como lo que es, un fallo con su aserción.
+  for (let turns = 0; turns < 3_000; turns += 1) {
+    if (match.serverState.phase === "FINISHED") break;
+    const played = await playOneTurn(match);
+    if (!played) {
+      // Fuera de PLAYING: o es la pausa de la mano, o la de la partida. Los dos
+      // plazos son cortos en test, así que se espera a que el reloj los venza.
+      await waitUntil(
+        () =>
+          match.serverState.currentRound?.phase === "PLAYING" ||
+          match.serverState.phase === "FINISHED",
+        3_000,
+      );
+    }
+  }
+}, 30_000);
 
 afterAll(async () => {
   await server.shutdown();
@@ -30,64 +56,37 @@ afterAll(async () => {
 // de señal: jugar mueve una de la mano al tablero y robar la mueve del pozo a la mano, así
 // que board + hand + boneyard es un invariante de la ronda y nunca se mueve. La firma, en
 // cambio, incluye el plazo vigente, y los tres verbos lo re-estampan.
-async function playOneTurn(match: SeatedMatch): Promise<boolean> {
-  const round = match.serverState.currentRound;
+async function playOneTurn(seated: SeatedMatch): Promise<boolean> {
+  const round = seated.serverState.currentRound;
   if (!round || round.phase !== "PLAYING") return false;
 
   const playerId = round.currentTurn?.playerId;
   if (!playerId) return false;
-  const hand = match.serverState.players.find((p) => p.playerId === playerId)?.hand;
-  if (!hand) return false;
 
-  const ends = boardEndsOf(round.board);
-  const candidate = [...hand.tiles]
-    .map((tile) => ({ tile, side: playableSides(tile, ends).at(0) }))
-    .find((entry) => entry.side !== undefined);
-
-  if (candidate?.side) {
-    await act(match, playerId, "PLAY_TILE", {
-      left: candidate.tile.left,
-      right: candidate.tile.right,
-      side: candidate.side,
-    });
+  const play = legalPlayFor(seated.serverState, playerId);
+  if (play) {
+    await act(seated, playerId, "PLAY_TILE", play);
   } else if (boneyardCountOf(round) > 0) {
-    await act(match, playerId, "DRAW_TILE");
+    await act(seated, playerId, "DRAW_TILE");
   } else {
-    await act(match, playerId, "PASS");
+    await act(seated, playerId, "PASS");
   }
   return true;
 }
 
 describe("partida 2P completa", () => {
-  it("se juega de punta a punta hasta que hay veredicto", async () => {
-    const match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
-    await revealHands(match);
-
-    // Tope de seguridad: una partida a 100 puntos no debería pasar de esto, y si
-    // lo pasa es un bucle y hay que verlo como fallo, no como cuelgue.
-    for (let turns = 0; turns < 3_000; turns += 1) {
-      if (match.serverState.phase === "FINISHED") break;
-      const played = await playOneTurn(match);
-      if (!played) {
-        // Fuera de PLAYING: o es la pausa de la mano, o la de la partida. Los dos
-        // plazos son cortos en test, así que se espera a que el reloj los venza.
-        await waitUntil(
-          () =>
-            match.serverState.currentRound?.phase === "PLAYING" ||
-            match.serverState.phase === "FINISHED",
-          3_000,
-        );
-      }
-    }
-
+  it("se jugó de punta a punta hasta que hubo veredicto", async () => {
     expect(match.serverState.phase).toBe("FINISHED");
-    const { teamA, teamB } = match.serverState.scoreboard ?? { teamA: 0, teamB: 0 };
-    expect(Math.max(teamA, teamB)).toBeGreaterThanOrEqual(match.serverState.pointsToWin);
+    const scoreboard = match.serverState.scoreboard;
+    expect(scoreboard).toBeDefined();
+    expect(Math.max(scoreboard?.teamA ?? 0, scoreboard?.teamB ?? 0)).toBeGreaterThanOrEqual(
+      match.serverState.pointsToWin,
+    );
     expect(match.serverState.pastRounds.length).toBeGreaterThan(0);
   });
 
   it("el historial de esa partida cierra con el veredicto y sin huecos de seq", async () => {
-    const entries = historyOf("m-g1-g2");
+    const entries = historyOf(MATCH_ID);
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.map((entry) => entry.seq)).toEqual(entries.map((_, index) => index + 1));
     // El veredicto NO es la última línea: `MATCH_RESOLVED` abre la presentación de la
@@ -101,7 +100,7 @@ describe("partida 2P completa", () => {
   });
 
   it("cada DEADLINE_EXPIRED quedó registrado como evento del sistema", async () => {
-    const entries = historyOf("m-g1-g2");
+    const entries = historyOf(MATCH_ID);
     const expirations = entries.filter((entry) => entry.type === "DEADLINE_EXPIRED");
     expect(expirations.length).toBeGreaterThan(0);
 
@@ -127,7 +126,9 @@ describe("partida 2P completa", () => {
   });
 
   it("ningún comando quedó registrado con source SYSTEM ni al revés", async () => {
-    for (const entry of historyOf("m-g1-g2")) {
+    const entries = historyOf(MATCH_ID);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
       if (entry.kind === "COMMAND") expect(entry.source).toBe("PLAYER");
       if (entry.kind === "EVENT") expect(entry.source).toBe("SYSTEM");
     }

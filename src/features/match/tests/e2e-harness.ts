@@ -1,9 +1,13 @@
+import type { Room } from "@colyseus/sdk";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
 import { testConfig } from "../../../app.config.js";
 import { rootContainer } from "../../../di-container.js";
 import { env } from "../../../env.js";
+import { boardEndsOf } from "../core/engine/round/board-ends.js";
+import { playableSides } from "../core/engine/round/playable.js";
 import type { MatchState } from "../core/state/index.js";
+import type { BoardSide } from "../core/state/tile.js";
 import type { HistoryEntry } from "../network/history.js";
 import type { MemoryHistory } from "../network/transports/memory-history.js";
 import type { DominoRoomOptions } from "../transports/match-contract.js";
@@ -91,11 +95,43 @@ export async function revealHands(match: SeatedMatch): Promise<void> {
 // llega un viaje después, así que el llamador lee un `state` con los campos en `undefined`
 // y no puede distinguir "todavía no llegó" de "la vista no me lo muestra" — que es
 // justamente lo que este arnés existe para medir.
-export async function rejoinAs(server: ColyseusTestServer, roomId: string, userId: string) {
+export async function rejoinAs(
+  server: ColyseusTestServer,
+  roomId: string,
+  userId: string,
+): Promise<Room<unknown, MatchState>> {
   server.sdk.auth.token = mintToken(userId);
-  const room = await server.sdk.joinById(roomId);
+  // El parámetro de tipo elige el overload que devuelve el estado tipado. Sin él,
+  // `joinById` resuelve al de `State = any` y el llamador termina casteando `back.state`
+  // en cada línea — casts que no verifican nada y que se quedarían mudos si el árbol
+  // cambiara de forma.
+  const room = await server.sdk.joinById<MatchState>(roomId);
   await room.waitForInitialState();
   return room;
+}
+
+// La PRIMERA jugada legal del que la pide, ya en la forma del payload de `PLAY_TILE`.
+// Devuelve `undefined` cuando no hay ninguna, que es el caso en que toca robar o pasar.
+//
+// El lado NO se puede hardcodear en "RIGHT" aunque el tablero esté vacío: que ahí funcione
+// es una NORMALIZACIÓN de `playableSides` —con la cadena sin extremos, la primera ficha
+// entra por un solo lado para que el mismo tablero no tenga dos representaciones—, no una
+// regla del dominó. Derivarlo es lo que hace que el helper siga sirviendo en la jugada 2.
+export function legalPlayFor(
+  state: MatchState,
+  playerId: string,
+): { left: number; right: number; side: BoardSide } | undefined {
+  const round = state.currentRound;
+  if (!round) return undefined;
+  const hand = state.players.find((player) => player.playerId === playerId)?.hand;
+  if (!hand) return undefined;
+
+  const ends = boardEndsOf(round.board);
+  for (const tile of hand.tiles) {
+    const side = playableSides(tile, ends).at(0);
+    if (side) return { left: tile.left, right: tile.right, side };
+  }
+  return undefined;
 }
 
 export async function act(
