@@ -9,6 +9,7 @@ import { MemoryHistory } from "./features/match/network/transports/memory-histor
 import { MongoHistory } from "./features/match/network/transports/mongo-history.js";
 import { MatchRegistry } from "./features/match/transports/match-registry.js";
 import { type Logger, logger } from "./logger.js";
+import { type KeyValueStore, MemoryKeyValueStore } from "./shared/kv.js";
 import { Mongo } from "./shared/mongo.js";
 
 // Acá viven solo dependencias globales y sin estado de partida. Los actores del motor
@@ -30,10 +31,17 @@ rootContainer.register<Clock>("Clock", { useValue: { now: () => Date.now() } sat
 rootContainer.register<Logger>("Logger", { useValue: logger });
 rootContainer.register("TokenVerifier", { useValue: new JwtVerifier(env.jwtSecret) });
 
-// Registro e historial sobreviven a las salas, sin convertir a la sala en dueña de esa
-// infraestructura. El del historial ya es Mongo (abajo); el del registro sigue en memoria
-// —ver el comentario de `MatchRegistry`, que explica cuándo pasa a Redis—.
-rootContainer.register(MatchRegistry, { useValue: new MatchRegistry() });
+// EL ALMACÉN COMPARTIDO. Hoy el de memoria, que NO es un doble: es la implementación del
+// proceso único, igual que `MemoryHistory` más abajo. La instancia de Redis entra en el paso
+// siguiente, por la misma puerta y sin una clase en el medio —el puerto tiene la forma de la
+// `Presence` de Colyseus, ver `src/shared/kv.ts`—.
+const store: KeyValueStore = new MemoryKeyValueStore();
+
+// EL REGISTRO DE PARTIDAS VIVAS, que ya no es del proceso sino del CLÚSTER: sus dos respuestas
+// —el config público del endpoint HTTP y en qué sala está sentado un jugador— salen del almacén
+// compartido y no de un `Map` local. Sobrevive a las salas sin convertir a la sala en dueña de
+// esa infraestructura, igual que el historial.
+rootContainer.register(MatchRegistry, { useValue: new MatchRegistry(store) });
 
 // LA PRESENCIA DE LA URI ES LA QUE ELIGE, y no hay un `HISTORY_DRIVER` ni lo va a haber:
 // un interruptor que NOMBRA la implementación es deuda, no configuración —deja escribir

@@ -112,9 +112,20 @@ export function registerMatchHttp(app: Express, deps: MatchHttpDeps): void {
     // Un `roomId` de forma imposible es 400 ANTES de consultar, y no un 404 después. La
     // diferencia no es cosmética: 400 y 404 son dos respuestas distintas para el cliente
     // —"pediste mal" contra "eso no existe"— y sin el schema las dos caían en la misma,
-    // porque cualquier cosa rara se volvía un `Map.get` fallido.
-    validated({ params: CONFIG_PARAMS }, ({ params }, response) => {
-      const config = deps.registry.publicConfigOf(params.roomId);
+    // porque cualquier cosa rara se volvía una búsqueda fallida.
+    //
+    // Y DESDE QUE EL REGISTRO ES COMPARTIDO la guarda dejó de ser barata en el buen sentido: lo
+    // que antes era un `Map.get` ahora es una CLAVE que se arma concatenando lo que mandó el
+    // cliente (`match_config:${roomId}`), contra un almacén que el clúster entero comparte.
+    //
+    // EL `await` ES LO ÚNICO QUE EL REGISTRO COMPARTIDO LE PIDIÓ A ESTA RUTA, y llegó gratis:
+    // este handler ya podía ser asíncrono porque `validated` reenvía el rechazo a `next` desde
+    // que el historial lo necesitó. Lo que cambió del otro lado es la RESPUESTA: antes, un
+    // `GET /config/:roomId` que caía en un proceso distinto del que hospeda la sala daba 404
+    // —"eso no existe"— con total confianza y total falsedad; ahora la pregunta va al almacén
+    // compartido y contesta igual desde cualquier instancia.
+    validated({ params: CONFIG_PARAMS }, async ({ params }, response) => {
+      const config = await deps.registry.publicConfigOf(params.roomId);
       if (!config) {
         response.status(404).json({ error: "NOT_FOUND" });
         return;

@@ -20,7 +20,7 @@ import type { MatchState } from "../../core/state/index.js";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events.js";
 import { MatchEventNotifier, type MatchHistory } from "../../network/index.js";
 import { type DominoRoomOptions, type SeatCredentials, configOf } from "../match-contract.js";
-import { MatchRegistry } from "../match-registry.js";
+import { HEARTBEAT_MS, MatchRegistry } from "../match-registry.js";
 import {
   type MatchHasOutcome,
   type MatchSeatGuard,
@@ -55,6 +55,17 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private startMatch!: MatchStarter;
   private log!: Logger;
   private seating?: Delayed;
+  // LAS PARTIDAS VIVAS DEL CLÚSTER. Se resuelve UNA vez y se guarda: la sala se anota al nacer,
+  // late mientras vive y se borra al morir, y en el medio nadie más la toca. Resolverlo tres
+  // veces del root era barato pero dejaba el `onDispose` dependiendo de que el container siga en
+  // pie mientras el proceso se apaga.
+  private matches!: MatchRegistry;
+  private heartbeat?: Delayed;
+  // LOS LATIDOS, EN FILA. Escribir el registro es ir a la red, así que dos latidos que se pisan
+  // pueden dejar sus escrituras intercaladas y el último en llegar no es el último que salió. La
+  // cadena los ordena, y de paso le da al apagado algo que esperar: lo que se esté escribiendo
+  // tiene que terminar ANTES de la limpieza, o la limpieza no limpia nada.
+  private beats: Promise<void> = Promise.resolve();
   private readonly views = new Map<PlayerId, StateView>();
   private readonly seated = new Set<PlayerId>();
   private readonly pendingReconnections = new Map<PlayerId, Deferred<Client>>();
@@ -70,7 +81,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     return true;
   }
 
-  override onCreate(options: DominoRoomOptions): void {
+  override async onCreate(options: DominoRoomOptions): Promise<void> {
     const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
     this.seats = options.seats;
@@ -119,7 +130,24 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       .resolve<Logger>("Logger")
       .child({ matchId: config.matchId, roomId: this.roomId, gameModeId: config.gameModeId });
     this.setState(match);
-    rootContainer.resolve(MatchRegistry).register(this.roomId, config);
+
+    // SE ANOTA ENTRE LAS PARTIDAS VIVAS DEL CLÚSTER, y SE ESPERA. A partir de que `onCreate`
+    // devuelve, la sala ya puede recibir gente y su `roomId` ya circula en la reserva de asiento:
+    // un `GET /config/:roomId` que llegue antes de que la clave esté escrita —y que caiga en otro
+    // proceso, que es todo el punto de esto— responde 404 por una sala que existe.
+    this.matches = rootContainer.resolve(MatchRegistry);
+    await this.matches.register(this.roomId, config);
+
+    // EL LATIDO que renueva ese plazo. Va POR EL RELOJ DE LA SALA —el mismo que vence los
+    // turnos— y no colgado de los hechos del juego, porque tiene que darse aunque no pase nada:
+    // una mesa esperando a que levanten las fichas no produce un solo evento durante todo el
+    // `dealingTimeoutMs`, y sus asientos siguen ocupados igual.
+    //
+    // Y NO HAY, ADEMÁS, UN LATIDO POR HECHO como el de truco. Allá cada evento es una oportunidad
+    // de SOLTAR al que el motor retiró, porque su registro guarda quién sigue jugando; acá lo
+    // anotado son los ASIENTOS DE LA MESA, que salen del config y no cambian en toda la partida.
+    // Un latido por hecho escribiría exactamente lo mismo que el anterior.
+    this.heartbeat = this.clock.setInterval(() => this.beat(), HEARTBEAT_MS);
 
     this.seating = this.clock.setTimeout(() => {
       this.log.warn("plazo de ocupación vencido", { clients: this.clients.length });
@@ -222,7 +250,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.log.info("jugador salió", { playerId });
   }
 
-  override onDispose(): void {
+  override async onDispose(): Promise<void> {
+    // PRIMERO SE CORTA EL LATIDO: lo que sigue es limpieza, y un latido posterior volvería a
+    // escribir justo lo que estamos por borrar — dejando la sala anunciada dos minutos más.
+    this.heartbeat?.clear();
     if (this.notifier && !this.hasOutcome()) {
       // Con revancha habrá fases posteriores al veredicto: la guarda futura debe mirar el
       // veredicto del juez, no la fase terminal, para no reembolsar una partida ya pagada.
@@ -232,7 +263,26 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.scheduler?.cancel();
     this.seating?.clear();
     for (const view of this.views.values()) view.dispose();
-    rootContainer.resolve(MatchRegistry).remove(this.roomId);
+    // Se esperan los latidos EN VUELO y recién después se borra: un latido que llegue tarde al
+    // almacén volvería a anunciar la sala después del borrado. Colyseus espera lo que este hook
+    // devuelve (`@colyseus/core/build/Room.mjs:1383`), así que el apagado de la sala espera esto.
+    await this.beats;
+    // `?.` por el mismo motivo que el `scheduler` de arriba: si `onCreate` se cayó antes de
+    // resolverlo, esta sala nunca se anotó y no hay nada que borrar.
+    await this.matches?.remove(this.roomId);
+  }
+
+  // UN LATIDO. No se espera —la partida no depende de él— pero sí se ENCOLA, y un fallo se
+  // registra y no tumba nada: si el almacén se cae, lo que se pierde es que esta mesa figure en
+  // el clúster durante dos minutos, no la partida que se está jugando adentro.
+  private beat(): void {
+    this.beats = this.beats
+      .then(() => this.matches.keepAlive(this.roomId))
+      .catch((error: unknown) =>
+        this.log.error("no se pudo mantener el registro de la partida", {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
   }
 
   override onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
