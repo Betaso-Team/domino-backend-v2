@@ -8712,7 +8712,7 @@ soporte y el test de regresión más fuerte del motor.
 
 **Files:**
 - Create: `src/features/match/history/replay.ts`, `src/features/match/history/engine-factory.ts`, `src/replay.ts`, `src/features/match/tests/replay.test.ts`, `src/features/match/tests/fixtures/golden-2p.json`
-- Modify: `package.json` (script `replay`), `src/features/match/transports/http/register-http.ts`
+- Modify: `package.json` (script `replay`), `src/features/match/transports/http/register-http.ts`, `src/features/match/transports/colyseus/commands/di-wiring.ts`, `src/features/match/transports/colyseus/domino-room.ts` (la génesis se muda a la fábrica), `src/features/match/tests/e2e-harness.ts` (`writeGolden`), `src/features/match/tests/game-2p-e2e.test.ts`, `src/env.ts` (el flag `WRITE_GOLDEN`)
 
 - [ ] **Step 1: Extraer la construcción del engine a una fábrica reusable**
 
@@ -8723,9 +8723,11 @@ de una regla obligadas a coincidir.
 
 ```ts
 // src/features/match/history/engine-factory.ts
-import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config.js";
 import type { Command, CommandName } from "../core/command.js";
-import { AbandonCommand, DrawTileCommand, PassCommand, PlayTileCommand } from "../core/commands/index.js";
+import {
+  AbandonCommand, DrawTileCommand, PassCommand, PlayTileCommand, RevealTilesCommand,
+} from "../core/commands/index.js";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config.js";
 import type { Clock } from "../core/engine/clock.js";
 import { Dealer } from "../core/engine/dealer.js";
 import { createMatchState } from "../core/engine/genesis.js";
@@ -8742,19 +8744,22 @@ import { Scorer } from "../core/engine/scorer.js";
 import type { TimeoutScheduler } from "../core/engine/timeout-scheduler.js";
 import type { SchemaVisibilityController } from "../core/engine/visibility.js";
 import type { MatchEvent } from "../core/events.js";
+import type { PlayerId } from "../core/ids.js";
 import type { MatchState } from "../core/state/index.js";
 
 export interface EngineGraph {
   readonly match: MatchState;
   readonly matchDriver: MatchDriver;
+  readonly referee: Referee;
   readonly commands: { readonly [N in CommandName]: Command<N, MatchEvent> };
+  hasOutcome(): boolean;
+  isStillPlaying(playerId: PlayerId): boolean;
 }
 
 export interface EngineDeps {
   readonly clock: Clock;
   readonly scheduler: TimeoutScheduler;
   readonly visibility: SchemaVisibilityController;
-  readonly dealer?: Dealer;
 }
 
 // EN ORDEN DE DEPENDENCIA: jueces, servicios, conductores, players, facades, comandos.
@@ -8768,38 +8773,50 @@ export function buildEngineGraph(
   const matchReferee = new MatchReferee(match);
   const roundReferee = new RoundReferee(match);
   const scorer = new Scorer(match);
-  const dealer = deps.dealer ?? new Dealer(match, config, globalConfig);
+  const dealer = new Dealer(match, config, globalConfig);
   const repository = new PlayerRepository(
     config.seats,
     (playerId) => new MatchPlayer(playerId, match),
     (playerId) => new RoundPlayer(playerId, match, deps.visibility),
   );
+  const players = new Player(repository);
+  const referee = new Referee(matchReferee, roundReferee);
+  // El conductor de RONDA no recibe scheduler: estampa el plazo en el estado y el
+  // único que programa es el de PARTIDA, contra el único `activeDeadline`.
   const roundDriver = new RoundDriver(
-    match, deps.clock, deps.scheduler, globalConfig, config, roundReferee, dealer, scorer,
+    match, deps.clock, globalConfig, config, roundReferee, dealer, scorer,
     (playerId) => repository.round(playerId),
   );
   const matchDriver = new MatchDriver(
-    match, deps.clock, deps.scheduler, globalConfig, matchReferee, roundDriver,
+    match, deps.clock, deps.scheduler, globalConfig, matchReferee, players, roundDriver,
   );
-  const players = new Player(repository);
-  const referee = new Referee(matchReferee, roundReferee);
 
   return {
     match,
     matchDriver,
+    referee,
+    hasOutcome: () => matchReferee.outcome() !== undefined,
+    isStillPlaying: (playerId) =>
+      !match.players.find((player) => player.playerId === playerId)?.hasAbandoned,
     commands: {
       ABANDON: new AbandonCommand(referee, players, matchDriver),
       PLAY_TILE: new PlayTileCommand(referee, players, matchDriver),
       DRAW_TILE: new DrawTileCommand(referee, players, matchDriver),
       PASS: new PassCommand(referee, matchDriver),
+      REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
     },
   };
 }
 ```
 
 Y en `di-wiring.ts`, reemplazar el bloque de construcción por una llamada a `buildEngineGraph`,
-registrando lo que la sala necesita alcanzar. Run `npm test` después: la suite entera tiene que seguir
-pasando sin cambios.
+registrando lo que la sala necesita alcanzar (`MatchState`, `MatchStarter`, `MatchHasOutcome`,
+`MatchSeatGuard` y los cinco `Command:*`). **`domino-room.ts` también cambia**: hoy es la sala la
+que llama a `createMatchState` y registra `MatchState`, así que si la fábrica hace la génesis, la
+sala tiene que dejar de hacerla y resolver el árbol ya armado después de `registerIndividualCommands`.
+Dejarla de los dos lados sería justo la duplicación que este Step declara cerrar.
+
+Run `npm test` después: la suite entera tiene que seguir pasando sin cambios.
 
 - [ ] **Step 2: Escribir el test del replay**
 
