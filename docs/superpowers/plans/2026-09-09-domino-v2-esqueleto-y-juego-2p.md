@@ -94,7 +94,7 @@ Qué archivo es responsable de qué. Esto fija la decomposición; las tareas la 
 |---|---|
 | `events.ts` | `NetworkMatchEvent` = `MatchEvent | PlatformMatchEvent` |
 | `listeners.ts` | `MatchEventListener`, `MatchEventSink`, `MatchEventNotifier` (con disyuntor de cascada) |
-| `history.ts` | `HistoryPort`, `HistoryEntry`, `MatchHistory` (el grabador per-partida) |
+| `history.ts` | `HistoryPort` (escritura), `HistoryReader` (lectura), `HistoryEntry`, `MatchHistory` (el grabador per-partida) |
 | `admission.ts` | puerto `MatchAdmission` + `AdmissionRefusedError` |
 | `pieces.ts` | `MatchPieces`: lo que el wiring le entrega a la sala |
 | `transports/memory-history.ts` | implementación de memoria del `HistoryPort` |
@@ -3250,6 +3250,16 @@ export interface HistoryPort {
   record(entries: readonly HistoryEntry[]): void;
 }
 
+// El lado de LECTURA, SEPARADO del de escritura. Es un puerto y no un cast porque el cast
+// es una mentira que tsc no puede ver: `resolve("HistoryPort") as MemoryHistory` afirma la
+// implementación concreta sobre un token cuyo tipo declarado solo promete `record`. El día
+// que "HistoryPort" quede registrado contra el adaptador de Mongo —que es el plan— el cast
+// sigue compilando y el endpoint revienta en runtime con `of is not a function`. Con el
+// puerto aparte, ese día el que no compila es el registro, que es donde está la decisión.
+export interface HistoryReader {
+  of(matchId: string): readonly HistoryEntry[];
+}
+
 // Grabador PER-PARTIDA. Lo arma el wiring; la sala solo lo usa.
 export class MatchHistory {
   private seq = 0;
@@ -4278,7 +4288,14 @@ rootContainer.register("TokenVerifier", { useValue: new JwtVerifier(env.jwtSecre
 rootContainer.register(MatchRegistry, { useValue: new MatchRegistry() });
 // El adaptador de Mongo llega con la persistencia; cambiarlo no toca ninguna pieza
 // de arriba, que es todo el punto del puerto.
-rootContainer.register("HistoryPort", { useValue: new MemoryHistory() });
+//
+// UNA instancia detrás de DOS tokens: escritura (el camino caliente de la sala) y lectura
+// (el endpoint interno y el CLI de replay). Los `register` van TIPADOS: sin el parámetro
+// de tipo tsyringe acepta cualquier valor contra el token, y el adaptador al que le falte
+// `of` se descubre en el `resolve`, o sea en runtime.
+const history = new MemoryHistory();
+rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
+rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
 ```
 
 - [ ] **Step 2: Escribir la sala**
@@ -5009,7 +5026,7 @@ export async function act(
 }
 
 export function historyOf(matchId: string): readonly HistoryEntry[] {
-  return (rootContainer.resolve("HistoryPort") as MemoryHistory).of(matchId);
+  return rootContainer.resolve<HistoryReader>("HistoryReader").of(matchId);
 }
 
 /** "SOURCE TYPE" por entrada, que es la forma en que se lee un reclamo. */
@@ -8749,7 +8766,13 @@ import type { MatchState } from "../core/state/index.js";
 
 export interface EngineGraph {
   readonly match: MatchState;
-  readonly matchDriver: MatchDriver;
+  /**
+   * ARRANCAR la partida, y nada más. Publicar el `MatchDriver` entero publica también
+   * `advance`/`timeout`: la sala podría avanzar el juego sin pasar por un comando y el
+   * replay sin pasar por el historial. Es la misma protección que `di-wiring.ts` escribe
+   * al NO registrar el conductor, cedida por atrás en la interfaz compartida.
+   */
+  begin(): void;
   readonly referee: Referee;
   readonly commands: { readonly [N in CommandName]: Command<N, MatchEvent> };
   hasOutcome(): boolean;
@@ -8793,7 +8816,7 @@ export function buildEngineGraph(
 
   return {
     match,
-    matchDriver,
+    begin: () => matchDriver.begin(),
     referee,
     hasOutcome: () => matchReferee.outcome() !== undefined,
     isStillPlaying: (playerId) =>
@@ -8951,9 +8974,16 @@ export interface ReplayInput {
 }
 
 export function replay(input: ReplayInput): MatchState {
+  // SE ORDENA UNA SOLA VEZ, y las dos cosas que dependen del orden salen de acá: el
+  // instante de arranque y el bucle de reaplicación. Con el fallback leyendo el arreglo
+  // CRUDO y el bucle ordenando, un historial que no llegue ordenado (Mongo sin `sort`, un
+  // merge de dos lotes) arranca el reloj en el `at` de una entrada que no es la primera.
+  // El orden es `seq` y no `at`: `seq` es lo único monótono por partida.
+  const ordered = [...input.entries].sort((a, b) => a.seq - b.seq);
+
   // El reloj avanza con los timestamps del historial, así que los deadlines que se
   // estampan son los mismos que la partida real tuvo.
-  const clockBox = { now: input.startedAt ?? input.entries.at(0)?.at ?? 0 };
+  const clockBox = { now: input.startedAt ?? ordered.at(0)?.at ?? 0 };
   const clock: Clock = { now: () => clockBox.now };
 
   // No hay timers: los vencimientos ya están EN el historial como DEADLINE_EXPIRED,
@@ -8978,9 +9008,9 @@ export function replay(input: ReplayInput): MatchState {
   // no existir. Eso es lo que convierte un verbo desconocido en un error con su `seq`.
   const commands: Readonly<Partial<Record<string, Command<CommandName, MatchEvent>>>> =
     graph.commands;
-  graph.matchDriver.begin();
+  graph.begin();
 
-  for (const entry of [...input.entries].sort((a, b) => a.seq - b.seq)) {
+  for (const entry of ordered) {
     clockBox.now = entry.at;
 
     if (entry.kind === "COMMAND") {
@@ -9140,19 +9170,36 @@ function isTeamAssignment(value: string | undefined): value is TeamAssignmentMod
   return value === "SHUFFLED" || value === "SEAT_ORDER";
 }
 
-if (
-  !matchId || !seed || !Number.isInteger(pointsToWin) || pointsToWin <= 0 ||
-  !isTeamAssignment(teamAssignment) || seats.length === 0
-) {
-  logger.error(USAGE);
+// Se acumulan TODOS los argumentos inválidos y se listan juntos: con un booleano único,
+// cinco argumentos mal dan el mismo USAGE genérico que uno solo y el operador los descubre
+// de a uno por corrida. Sin parser de argumentos: son cinco posiciones fijas.
+//
+// DOS asientos como mínimo, no uno. El dominó no tiene modo solitario, y con un solo
+// asiento el reparto y el `teamAssignment` describen una mesa que nunca existió.
+const invalidos: string[] = [];
+if (!matchId) invalidos.push("matchId: falta");
+if (!seed) invalidos.push("seed: falta");
+if (!Number.isInteger(pointsToWin) || pointsToWin <= 0) {
+  invalidos.push(`pointsToWin: se esperaba un entero > 0, llegó "${process.argv[4] ?? ""}"`);
+}
+if (!isTeamAssignment(teamAssignment)) {
+  invalidos.push(`teamAssignment: se esperaba SHUFFLED|SEAT_ORDER, llegó "${teamAssignment ?? ""}"`);
+}
+if (seats.length < 2) invalidos.push(`asientos: se esperaban al menos 2, llegaron ${seats.length}`);
+
+// `process.exit` devuelve `never`, así que salir por acá ESTRECHA los tipos abajo — pero
+// solo para las condiciones escritas EN el `if`. `invalidos.length > 0` es opaco para tsc.
+// Por eso las tres que estrechan se repiten: es lo que permite armar el config sin casts.
+if (invalidos.length > 0 || !matchId || !seed || !isTeamAssignment(teamAssignment)) {
+  logger.error(USAGE, { invalidos });
   process.exit(1);
 }
 
 // Con la implementación de memoria esto solo sirve dentro del mismo proceso; el
 // adaptador de Mongo lo vuelve útil desde la consola.
-const entries: readonly HistoryEntry[] = (
-  rootContainer.resolve("HistoryPort") as MemoryHistory
-).of(matchId);
+const entries: readonly HistoryEntry[] = rootContainer
+  .resolve<HistoryReader>("HistoryReader")
+  .of(matchId);
 
 if (entries.length === 0) {
   logger.error("no hay historial para esa partida", { matchId });
@@ -9160,15 +9207,22 @@ if (entries.length === 0) {
 }
 
 logger.info("rebobinando", { matchId, entries: entries.length });
+// El config sale de `configOf` y NO se arma a mano: escrito a mano es la misma regla en dos
+// lugares obligada a coincidir sin que nada lo verifique. Un campo nuevo en
+// `DominoMatchConfig`, o el día que `isDealWindowEnabled` deje de estar siempre encendida,
+// le dan al CLI una partida distinta de la que la sala jugó, en silencio.
+const options: DominoRoomOptions = {
+  mode: "CASUAL",
+  matchId, gameModeId: "replay", seats, seed, pointsToWin, teamAssignment,
+};
+
 const state = replay({
-  meta: {
-    matchId, gameModeId: "replay", seed, seats, pointsToWin, teamAssignment,
-    // Igual que en `configOf`: la ventana de reparto está encendida en TODA mesa, porque
-    // es control de presencia anti-fraude y no una opción del modo. Con `false` el motor
-    // del replay arrancaría en `PLAYING` y los `REVEAL_TILES` del historial caerían con
-    // `NOT_DEALING` — es decir, no reproduciría nada.
-    isDealWindowEnabled: true,
-  },
+  meta: configOf(options),
+  // El MISMO `globalConfig` que el container del proceso derivó de `env`. Sin esto el replay
+  // cae a `DEFAULT_GLOBAL_CONFIG` y le estampa a una partida REAL plazos que nunca tuvo —y un
+  // `extraTimeRemainingMs` inventado, que es estado observable del árbol impreso—. Es el mismo
+  // riesgo que `writeGolden` cierra guardando el `globalConfig` en el fixture.
+  globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
   // Sin `startedAt`: el instante de arranque vive en `match_meta`, que todavía no existe.
   // El replay cae al de la primera entrada, así que `startedAt` es lo único del árbol
   // impreso que no es el de la partida real.
@@ -9189,6 +9243,9 @@ En `register-http.ts`, sumar el endpoint de soporte —**detrás de la llave int
 import { timingSafeEqual } from "node:crypto";
 
 const INTERNAL_KEY_HEADER = "X-Internal-Key";
+// En una const para que el aviso de arranque y el `app.get` no puedan divergir: el warn
+// existe para que el operador encuentre ESTA ruta, no una parecida.
+const HISTORY_ROUTE = "/internal/matches/:matchId/history";
 
 // Comparación en tiempo CONSTANTE. Un `===` sobre un secreto corta en el primer byte que
 // difiere, así que el tiempo de respuesta filtra la llave carácter a carácter. El guard de
@@ -9226,9 +9283,13 @@ export function registerInternalHistoryHttp(
   // el guard comparando contra vacío es peor que no tenerla: el operador la ve responder y
   // cree que está protegida.
   if (!internalApiKey) {
+    // La RUTA va en el mensaje, no solo la causa y la variable: el que llega a este log
+    // llega desde un 404 inexplicable, y busca por path.
     rootContainer
       .resolve<Logger>("Logger")
-      .warn("API interna deshabilitada: falta INTERNAL_API_KEY");
+      .warn(
+        `API interna deshabilitada: falta INTERNAL_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
+      );
     return;
   }
 
@@ -9243,12 +9304,13 @@ export function registerInternalHistoryHttp(
   // handler— Express deja de inferir los params del literal y `request.params.matchId` pasa a
   // ser `string | string[] | undefined`. Vitest no lo ve; `tsc --noEmit` sí.
   app.get<{ matchId: string }>(
-    "/internal/matches/:matchId/history",
+    HISTORY_ROUTE,
     requireInternalKey(internalApiKey),
     (request, response) => {
-      const entries = (rootContainer.resolve("HistoryPort") as MemoryHistory).of(
-        request.params.matchId,
-      );
+      // Contra `HistoryReader`, no contra la implementación: el cast a `MemoryHistory`
+      // compila una promesa que el token no hace.
+      const reader = rootContainer.resolve<HistoryReader>("HistoryReader");
+      const entries = reader.of(request.params.matchId);
       if (entries.length === 0) {
         response.status(404).json({ error: "NOT_FOUND" });
         return;
