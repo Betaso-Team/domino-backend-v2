@@ -70,6 +70,32 @@ describe("parseEnv", () => {
     );
   });
 
+  // Ausente es un estado LEGÍTIMO y significa "clúster de uno": Colyseus se queda con su driver
+  // y su presence locales y el registro de partidas con el almacén de memoria. Es el mismo
+  // criterio que MONGO_URI — la presencia del dato elige, sin un interruptor que la nombre.
+  it("sin REDIS_URL el entorno es válido y el clúster queda en uno", () => {
+    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).redisUrl).toBeUndefined();
+  });
+
+  // EL PUERTO VA COMO PATH, que es el esquema de v1: es lo que hace que el proxy que ya rutea v1
+  // rutee esto sin aprender nada nuevo. Si esto se escribiera `host:puerto`, el cliente recibiría
+  // en la reserva de asiento una dirección que el proxy no sabe resolver.
+  it("arma la dirección pública con el puerto como path", () => {
+    const env = parseEnv({
+      JWT_SECRET: "s".repeat(16),
+      SERVER_ADDRESS: "domino.betaso.com",
+      PORT: "2568",
+    });
+
+    expect(env.publicAddress).toBe("domino.betaso.com/2568");
+  });
+
+  // Sin SERVER_ADDRESS no se anuncia NADA, y no una dirección a medias: el cliente vuelve al host
+  // al que ya le habló, que es lo correcto con una instancia sola.
+  it("sin SERVER_ADDRESS no anuncia ninguna dirección", () => {
+    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).publicAddress).toBeUndefined();
+  });
+
   it("rechaza un NODE_ENV fuera del enum", () => {
     expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), NODE_ENV: "staging" })).toThrow(/NODE_ENV/);
   });

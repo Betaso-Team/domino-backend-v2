@@ -6,6 +6,12 @@
 export type { Clock } from "./core/engine/clock.js";
 export type { HistoryReader } from "./network/history.js";
 export { DominoRoom } from "./transports/colyseus/domino-room.js";
+// El reparto de partidas entre procesos. Sale por acá porque lo entrega el composition root al
+// servidor, que es el único que puede: `matchMaker` no se importa desde ningún otro lado.
+export {
+  NoProcessAvailableError,
+  selectProcessIdToCreateRoom,
+} from "./transports/colyseus/load-balancer.js";
 export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/register-http.js";
 export {
   configOf,

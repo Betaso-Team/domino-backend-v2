@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
 import { container } from "tsyringe";
 import { env } from "./env.js";
 import { JwtVerifier } from "./features/auth/index.js";
@@ -31,11 +32,41 @@ rootContainer.register<Clock>("Clock", { useValue: { now: () => Date.now() } sat
 rootContainer.register<Logger>("Logger", { useValue: logger });
 rootContainer.register("TokenVerifier", { useValue: new JwtVerifier(env.jwtSecret) });
 
-// EL ALMACÉN COMPARTIDO. Hoy el de memoria, que NO es un doble: es la implementación del
-// proceso único, igual que `MemoryHistory` más abajo. La instancia de Redis entra en el paso
-// siguiente, por la misma puerta y sin una clase en el medio —el puerto tiene la forma de la
-// `Presence` de Colyseus, ver `src/shared/kv.ts`—.
-const store: KeyValueStore = new MemoryKeyValueStore();
+// EL PRESENCE Y EL DRIVER DE COLYSEUS, que son infraestructura del SERVIDOR y no de una feature:
+// Colyseus escribe ahí su registro de salas en cada creación y en cada reserva de asiento, y por
+// eso los arma el composition root y `src/app.config.ts` se los entrega al servidor.
+//
+//   · el DRIVER es el registro de salas del clúster. Sin él cada proceso solo ve las suyas, y
+//     `joinById` contra una sala de otro nodo no encuentra nada.
+//   · el PRESENCE es cómo los procesos se enteran unos de otros: de ahí sale la lista que lee el
+//     balanceador (`matchMaker.stats.fetchAll()`) y por ahí viaja el pedido de abrir una sala en
+//     otro proceso.
+//
+// LA PRESENCIA DE LA URL ES LA QUE ELIGE, igual que con Mongo. Sin `REDIS_URL` quedan `undefined`
+// y Colyseus usa los suyos, que son los LOCALES —`matchMaker.setup()` cae en `getDefaultDriver()`
+// y `getDefaultPresence()`, `@colyseus/core/build/utils/Env.mjs`—: exactamente lo correcto con
+// una instancia sola, y lo que hace que ni el servidor ni la suite necesiten un Redis andando.
+// No hay ningún `CLUSTER_DRIVER`: `src/di-container.test.ts` se pone rojo si aparece.
+//
+// Se EXPORTAN en vez de registrarse contra un token, por el mismo motivo que `mongo` de más
+// abajo: no son colaboradores que alguien resuelva, son piezas del proceso que el otro
+// composition root necesita nombrar.
+export const presence: Presence | undefined = env.redisUrl
+  ? new RedisPresence(env.redisUrl)
+  : undefined;
+export const driver: MatchMakerDriver | undefined = env.redisUrl
+  ? new RedisDriver(env.redisUrl)
+  : undefined;
+
+// EL ALMACÉN COMPARTIDO ES EL MISMO `presence`, y encaja POR ESTRUCTURA: `KeyValueStore` está
+// copiado de la interfaz `Presence`, así que no hay una clase en el medio traduciendo
+// (ver `src/shared/kv.ts`). Por eso la variable se NOMBRA `Presence` y no `RedisPresence`: la
+// clase concreta declara `get(): Promise<unknown>` y no sería asignable; la interfaz declara
+// `get(): any` y sí. Verificado con `tsc --noEmit` sobre las dos formas.
+//
+// Sin Redis queda el de memoria, que NO es un doble: es la implementación del proceso único,
+// igual que `MemoryHistory` más abajo.
+const store: KeyValueStore = presence ?? new MemoryKeyValueStore();
 
 // EL REGISTRO DE PARTIDAS VIVAS, que ya no es del proceso sino del CLÚSTER: sus dos respuestas
 // —el config público del endpoint HTTP y en qué sala está sentado un jugador— salen del almacén

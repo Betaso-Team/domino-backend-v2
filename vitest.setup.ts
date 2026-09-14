@@ -21,6 +21,17 @@ process.env.INTERNAL_API_KEY ??= "test-internal-key-do-not-use-in-production";
 // El adaptador de Mongo se prueba con un doble del driver
 // (src/features/match/network/transports/mongo-history.test.ts).
 delete process.env.MONGO_URI;
+// SE BORRA POR LA MISMA RAZÓN, y acá el daño sería peor. La presencia de `REDIS_URL` elige el
+// driver y el presence de Colyseus (ver `src/di-container.ts`): un desarrollador que la tenga
+// exportada en su shell —porque corre el truco al lado— haría que los archivos de la suite, que
+// corren EN PARALELO, compartan el registro de salas de Colyseus contra un mismo Redis. Cada
+// archivo levanta su propio servidor de test, así que se verían las salas unos a otros y un
+// `joinById` podría irse a la sala de otro archivo. Eso es exactamente el motivo por el que truco
+// necesita un prefijo de claves configurable, y el motivo por el que acá no hace falta.
+//
+// Es además lo que garantiza que `npm test` no dependa de NINGÚN servicio externo: sin esta
+// línea la propiedad no sería del repo sino del entorno de quien lo corre.
+delete process.env.REDIS_URL;
 process.env.PORT ??= "2567";
 process.env.PRESENTING_MATCH_MS ??= "120";
 process.env.PRESENTING_ROUND_MS ??= "120";

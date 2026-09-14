@@ -61,6 +61,43 @@ const schema = z.object({
    */
   MONGO_URI: z.string().min(1).optional(),
   /**
+   * La URL de Redis (`redis://host:puerto/db`), que es lo que convierte a varios procesos en UN
+   * clúster. Del otro lado viven tres cosas: el registro de salas de Colyseus (para que
+   * `joinById` encuentre una sala de otro nodo), el presence (para que cada proceso sepa de los
+   * otros) y el registro de partidas vivas del dominó (para que `GET /config/:roomId` conteste
+   * por una sala que abrió otra instancia).
+   *
+   * OPCIONAL, Y SU PRESENCIA ES LA QUE ELIGE, igual que `MONGO_URI` y por la misma razón: sin
+   * ella Colyseus usa su driver y su presence LOCALES —`@colyseus/core/build/utils/Env.mjs`, los
+   * defaults de `matchMaker.setup()`— y el registro de partidas usa el almacén de memoria, que
+   * es exactamente lo correcto con UNA instancia. Con ella, los tres pasan a ser compartidos. No
+   * hay ningún `CLUSTER_DRIVER` ni lo va a haber: un interruptor que nombra la implementación
+   * deja escribir "redis" sin URL, y `src/di-container.test.ts` se pone rojo si aparece.
+   *
+   * LA BASE VIAJA EN LA URL, y ahí está el aislamiento: dos productos sobre el mismo servidor de
+   * Redis —el caso del operador que corre el truco al lado— van en índices distintos. No se
+   * portó el `REDIS_KEY_PREFIX` de truco: allá existe por una sola razón, que sus archivos de
+   * test corren EN PARALELO contra el mismo Redis y se pelearían la contabilidad de salas, y acá
+   * la suite no toca Redis (ver `vitest.setup.ts`, que borra esta variable).
+   *
+   * NO tiene default, ni siquiera `redis://127.0.0.1:6379`: un default haría que una instancia
+   * mal configurada arranque creyendo que forma parte de un clúster.
+   */
+  REDIS_URL: z.string().min(1).optional(),
+  /**
+   * CÓMO SE LLEGA A ESTE PROCESO DESDE AFUERA, sin el puerto. Colyseus se lo manda al cliente en
+   * la reserva de asiento, y por eso cada instancia anuncia la SUYA: con las salas repartidas, el
+   * jugador tiene que conectarse al proceso que hospeda la suya, no a cualquiera.
+   *
+   * El esquema es el de v1 —un host y el PUERTO COMO PREFIJO DE PATH, `dominio.com/2567`—, así
+   * que el proxy que ya rutea v1 sirve igual sin aprender nada nuevo. Lo arma `publicAddress` más
+   * abajo con `PORT`, que es el otro valor que el proxy necesita.
+   *
+   * Ausente ⇒ no se anuncia nada, y eso es LO CORRECTO con una instancia sola: el cliente vuelve
+   * al host al que ya le habló.
+   */
+  SERVER_ADDRESS: z.string().min(1).optional(),
+  /**
    * Interruptor de HERRAMIENTA, no de producto: regenera los fixtures golden del replay
    * (`writeGolden` en features/match/tests/e2e-harness.ts). El servidor nunca lo mira.
    * Vive acá igual porque este archivo es el único lector de la configuración del proceso
@@ -79,6 +116,10 @@ export interface Env {
   readonly internalApiKey: string | undefined;
   /** `undefined` ⇒ el historial es el de memoria y muere con el proceso. Ver MONGO_URI. */
   readonly mongoUri: string | undefined;
+  /** `undefined` ⇒ este proceso es un clúster de uno: driver, presence y registro locales. */
+  readonly redisUrl: string | undefined;
+  /** `undefined` ⇒ este proceso no anuncia dirección. Ver SERVER_ADDRESS. */
+  readonly publicAddress: string | undefined;
   readonly turnTimeoutMs: number;
   readonly extraTimeReserveMs: number;
   readonly dealingTimeoutMs: number;
@@ -105,6 +146,11 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     jwtSecret: parsed.JWT_SECRET,
     internalApiKey: parsed.INTERNAL_API_KEY,
     mongoUri: parsed.MONGO_URI,
+    redisUrl: parsed.REDIS_URL,
+    // El puerto va COMO PATH y no como `host:puerto`: es el esquema de v1 y es lo que hace que
+    // el proxy que ya rutea v1 rutee esto sin aprender nada. Se arma acá —el único lector del
+    // entorno— y no en el composition root, para que el formato tenga UN dueño.
+    publicAddress: parsed.SERVER_ADDRESS ? `${parsed.SERVER_ADDRESS}/${parsed.PORT}` : undefined,
     turnTimeoutMs: parsed.TURN_TIMEOUT_MS,
     extraTimeReserveMs: parsed.EXTRA_TIME_RESERVE_MS,
     dealingTimeoutMs: parsed.DEALING_TIMEOUT_MS,

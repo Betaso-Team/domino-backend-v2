@@ -1,7 +1,7 @@
 import config from "@colyseus/tools";
-import { defineRoom, defineServer } from "colyseus";
+import { type ServerOptions, defineRoom, defineServer } from "colyseus";
 import express, { type Application } from "express";
-import { rootContainer } from "./di-container.js";
+import { driver, presence, rootContainer } from "./di-container.js";
 import { env } from "./env.js";
 import {
   type Clock,
@@ -9,6 +9,7 @@ import {
   type HistoryReader,
   MatchRegistry,
   registerMatchHttp,
+  selectProcessIdToCreateRoom,
 } from "./features/match/index.js";
 import type { Logger } from "./logger.js";
 import { httpErrorHandler } from "./shared/http/error-handler.js";
@@ -63,17 +64,40 @@ const registerHttp = (app: Application) => {
   app.use(httpErrorHandler(logger));
 };
 
+// LO QUE CONVIERTE A VARIOS PROCESOS EN UN CLÚSTER, y las cuatro piezas son una sola decisión:
+//
+//   · `presence` y `driver` — compartidos, el registro de salas y la comunicación entre procesos
+//     viven en Redis. Cuando `REDIS_URL` no está los dos son `undefined` y Colyseus usa los
+//     LOCALES, que es exactamente lo correcto con una instancia sola (ver `src/di-container.ts`).
+//   · `publicAddress` — CÓMO SE LLEGA A ESTE PROCESO. Colyseus se lo manda al cliente en la
+//     reserva de asiento, y por eso cada instancia anuncia la suya: con las salas repartidas, el
+//     jugador tiene que conectarse al proceso que hospeda la SUYA, no a cualquiera. Sin esto, un
+//     `joinById` contra una sala de otro nodo se conecta al nodo equivocado.
+//   · `selectProcessIdToCreateRoom` — dónde se abre la partida siguiente. Ver `load-balancer.ts`.
+//
+// VAN EN LAS DOS SUPERFICIES, la real y la de test, porque una superficie de test que no arma el
+// servidor igual que la real deja de medir lo que se despliega. En test no cambia nada: la suite
+// corre sin `REDIS_URL` —`vitest.setup.ts` la BORRA— así que las cuatro caen en el camino local.
+const cluster: ServerOptions = {
+  presence,
+  driver,
+  publicAddress: env.publicAddress,
+  selectProcessIdToCreateRoom,
+};
+
 // @colyseus/testing solo respeta el puerto pedido cuando recibe opciones, no un
 // Server ya construido. Ambas superficies comparten estas mismas definiciones.
 export const testConfig = config({
   rooms,
   initializeExpress: registerHttp,
+  options: cluster,
 });
 
 // El export nombrado conserva el tipo de salas para el cliente generado de Colyseus.
 export const server = defineServer({
   rooms,
   express: registerHttp,
+  ...cluster,
 });
 
 export default server;
