@@ -84,9 +84,16 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
     beforeAll(async () => {
       match = await seatPair(server, ["concurrency-k1", "concurrency-k2"]);
       const actor = clientOf(match, "concurrency-k2");
-      actor.onMessage("illegal", (payload: { code: string }) => illegal.push(payload));
       seen.push(match.serverState.phase);
-      const observer = setInterval(() => seen.push(match.serverState.phase), 10);
+      actor.onMessage("illegal", (payload: { code: string }) => {
+        illegal.push(payload);
+        seen.push(match.serverState.phase);
+      });
+      const room = server.getRoomById(match.roomId);
+      const tick = room.clock.tick;
+      // `Room` conduce este reloj desde su intervalo de patches, así que `clock.stop()` no
+      // lo pausa. Congelar esta instancia evita tocar timeouts globales o las otras suites.
+      room.clock.tick = () => {};
 
       // Abandonar abre PRESENTING_MATCH, que es una fase de pausa: nada de juego es
       // legal ahí. Es el equivalente al hueco que el v1 dejaba con sleep(6000).
@@ -105,12 +112,12 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
 
         await waitUntil(() => illegal.length >= 10, 5_000);
       } finally {
-        clearInterval(observer);
+        room.clock.tick = tick;
       }
     });
 
     it("cae durante PRESENTING_MATCH, no toca el estado y rebota entera por regla de dominio", () => {
-      expect(seen).toContain("PRESENTING_MATCH");
+      expect(seen).toEqual(["PLAYING", ...Array(10).fill("PRESENTING_MATCH")]);
       expect(match.serverState.currentRound?.board.tiles.length).toBe(tilesBefore);
       expect(illegal).toHaveLength(10);
       for (const rejection of illegal) {
