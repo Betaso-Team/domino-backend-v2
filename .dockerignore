@@ -5,6 +5,10 @@ dist
 .gitattributes
 docs
 *.md
+# EL CI/CD NO ENTRA A LA IMAGEN. No lo usa nadie adentro —el runtime solo copia `dist/`— y sin
+# esto cada retoque a un workflow invalida el caché de la capa `COPY . .` para nada.
+.github
+scripts
 # EL `.env` NO ENTRA A LA IMAGEN. Lo pasa el compose por `env_file` en tiempo de ejecución, y
 # una imagen con los secretos horneados adentro los lleva a donde sea que se publique.
 .env
