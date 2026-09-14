@@ -8944,47 +8944,59 @@ export function replay(input: ReplayInput): MatchState {
 
 - [ ] **Step 4: Generar el golden desde una partida real**
 
-El golden se captura **dentro** del test de la partida completa, que es el único lugar donde el estado
-final y su historial están los dos en alcance. Añadir un helper al arnés:
+El golden se captura al final del `beforeAll` de `game-2p-e2e.test.ts`, que desde la Tarea 20 es
+donde la partida se juega — y es el único punto donde el árbol final y su historial están los dos
+completos y en alcance. Añadir un helper al arnés:
 
 ```ts
 // añadir a src/features/match/tests/e2e-harness.ts
 import { mkdirSync, writeFileSync } from "node:fs";
-import type { DominoMatchConfig } from "../core/config.js";
+import { fileURLToPath } from "node:url";
+import type { GlobalDominoConfig } from "../core/config.js";
+import { type DominoRoomOptions, configOf } from "../transports/match-contract.js";
 
-const GOLDEN_DIR = "src/features/match/tests/fixtures";
+const GOLDEN_DIR = fileURLToPath(new URL("fixtures", import.meta.url));
 
-// Solo escribe si se pide con WRITE_GOLDEN=1. En una corrida normal es no-op, así
-// que el fixture no se regenera por accidente y una regresión no se auto-aprueba.
-export function writeGolden(
-  name: string,
-  meta: DominoMatchConfig,
-  state: { toJSON(): unknown },
-): void {
-  if (process.env.WRITE_GOLDEN !== "1") return;
+// Captura una partida REAL entera —config, historial y árbol final— como fixture de
+// regresión del replay. Nada se escribe a mano: el `meta` sale de las mismas opciones
+// con las que la sala se creó (`SeatedMatch.options`, que `seatPair` ahora devuelve) y
+// el `globalConfig` del mismo container, así que el fixture no puede describir una
+// partida distinta de la que se jugó.
+//
+// `startedAt` viaja aparte porque NO está en el historial: `begin()` no emite nada, así
+// que la primera entrada grabada es posterior al arranque.
+//
+// Solo escribe si se pide con WRITE_GOLDEN=1. En una corrida normal es no-op, así que el
+// fixture no se regenera por accidente y una regresión no se auto-aprueba. El flag entra
+// por `env` y NO leyendo el entorno a mano: `src/env.ts` es el único lector permitido de
+// la configuración del proceso, y `env-single-reader.test.ts` se pone rojo si alguien lo
+// saltea — incluso si el nombre de esa variable global aparece solo en un comentario.
+export function writeGolden(name: string, match: SeatedMatch): void {
+  if (!env.writeGolden) return;
+  const meta = configOf(match.options);
+  const payload = {
+    meta,
+    globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
+    startedAt: match.serverState.startedAt,
+    entries: historyOf(meta.matchId),
+    finalState: match.serverState.toJSON(),
+  };
   mkdirSync(GOLDEN_DIR, { recursive: true });
-  const payload = { meta, entries: historyOf(meta.matchId), finalState: state.toJSON() };
   writeFileSync(`${GOLDEN_DIR}/${name}.json`, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 ```
 
-Y al final del `it("se juega de punta a punta…")` de `game-2p-e2e.test.ts`, después del último
-`expect`:
+En `src/env.ts`, el flag: `WRITE_GOLDEN: z.string().optional()` en el schema y
+`writeGolden: parsed.WRITE_GOLDEN === "1"` en el `Env`. Es un interruptor de herramienta y el
+servidor nunca lo mira, pero un guardarraíl con una excepción por conveniencia deja de serlo.
+
+`seatPair` pasa a devolver también las `options` con las que creó la sala, para que el `meta` del
+fixture no pueda divergir de la mesa real.
+
+Y al final del `beforeAll` de `game-2p-e2e.test.ts`, después del bucle:
 
 ```ts
-    writeGolden(
-      "golden-2p",
-      {
-        matchId: "m-g1-g2",
-        gameModeId: "clasica-2p",
-        seed: "seed-partida-completa",
-        seats: ["g1", "g2"],
-        pointsToWin: 100,
-        teamAssignment: "SHUFFLED",
-        isDealWindowEnabled: true,
-      },
-      match.serverState,
-    );
+  writeGolden("golden-2p", match);
 ```
 
 Generarlo una sola vez:
