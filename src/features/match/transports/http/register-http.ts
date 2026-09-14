@@ -1,11 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Application as Express, RequestHandler } from "express";
-import { rootContainer } from "../../../../di-container.js";
-import { env } from "../../../../env.js";
 import type { Logger } from "../../../../logger.js";
 import type { Clock } from "../../core/engine/clock.js";
 import type { HistoryReader } from "../../network/history.js";
-import { type MatchConfigResponse, MatchRegistry } from "../match-registry.js";
+import type { MatchConfigResponse, MatchRegistry } from "../match-registry.js";
 
 const INTERNAL_KEY_HEADER = "X-Internal-Key";
 // En una const para que el aviso de arranque y el `app.get` no puedan divergir: el warn
@@ -37,33 +35,52 @@ function requireInternalKey(expected: string): RequestHandler {
   };
 }
 
-export function registerMatchHttp(app: Express): void {
+// TODAS las dependencias entran por PARÁMETRO OBLIGATORIO, ninguna con default y ninguna
+// leída de `env` acá adentro. El razonamiento ya estaba escrito para la llave interna
+// —con un default, `undefined` vuelve a caer en el valor del entorno, así es JS, y el caso
+// "no hay llave" queda irrepresentable— y vale igual para las otras cuatro: un default es
+// una dependencia que el llamador cree haber elegido.
+//
+// UN OBJETO y no cinco posicionales. Con posicionales, `(app, registry, clock, logger,
+// history, key)` deja tres parámetros de tipos estructuralmente compatibles seguidos
+// —`Clock`, `Logger` y `HistoryReader` son interfaces de un puñado de métodos—, así que
+// dos argumentos cambiados de orden pueden compilar. Nombrados, un cruce es un error en la
+// propiedad. De paso el `internalApiKey` sigue leyéndose por su nombre en el call site,
+// que es donde importa que se vea la decisión de fail-closed.
+export interface MatchHttpDeps {
+  readonly registry: MatchRegistry;
+  readonly clock: Clock;
+  readonly logger: Logger;
+  readonly history: HistoryReader;
+  /** `undefined` ⇒ la ruta interna NO se registra. Ver registerInternalHistoryHttp. */
+  readonly internalApiKey: string | undefined;
+}
+
+// RECIBE sus dependencias en vez de resolverlas del container: resolver es una operación de
+// COMPOSICIÓN y un transporte no es un composition root (Regla 3). Recibir el CONTAINER
+// como parámetro no habría alcanzado —mueve el acoplamiento sin quitarlo: la función
+// seguiría dependiendo de tsyringe, escondiendo qué necesita, y sin poder testearse sin
+// armar un container—. Lo que un transporte no puede saber es que el container existe.
+export function registerMatchHttp(app: Express, deps: MatchHttpDeps): void {
   app.get("/config/:roomId", (request, response) => {
-    const registry = rootContainer.resolve(MatchRegistry);
-    const config = registry.publicConfigOf(request.params.roomId);
+    const config = deps.registry.publicConfigOf(request.params.roomId);
     if (!config) {
       response.status(404).json({ error: "NOT_FOUND" });
       return;
     }
 
-    const clock = rootContainer.resolve<Clock>("Clock");
     // El seed nunca cruza esta frontera. serverNow viaja con el pedido que el cliente ya
     // hacía, para calcular el offset de reloj con el que lee activeDeadline.
-    const body: MatchConfigResponse = { ...config, serverNow: clock.now() };
+    const body: MatchConfigResponse = { ...config, serverNow: deps.clock.now() };
     response.set("Cache-Control", "no-store").json(body);
   });
 
-  registerInternalHistoryHttp(app, env.internalApiKey);
+  registerInternalHistoryHttp(app, deps);
 }
 
-// La llave entra por PARÁMETRO OBLIGATORIO, no como default (`internalApiKey = env...`) y
-// no leyendo `env` acá adentro. Con un default, `registerInternalHistoryHttp(app, undefined)`
-// vuelve a caer en el valor del entorno —así es JS—, o sea que el caso "no hay llave" sería
-// irrepresentable y su test no mediría nada. Se descubrió escribiéndolo: pasaba en verde
-// contra la rama equivocada.
 export function registerInternalHistoryHttp(
   app: Express,
-  internalApiKey: string | undefined,
+  { logger, history, internalApiKey }: Pick<MatchHttpDeps, "logger" | "history" | "internalApiKey">,
 ): void {
   // FAIL CLOSED: sin llave configurada la ruta interna NO EXISTE. La alternativa —
   // registrarla igual y dejar el guard comparando contra vacío— es peor que no tenerla,
@@ -72,11 +89,9 @@ export function registerInternalHistoryHttp(
     // La RUTA va en el mensaje, no solo la causa y la variable. El que llega a este log
     // llega desde un 404 inexplicable, y busca por path: sin el path acá, el aviso que
     // explica el 404 es justamente el que no encuentra.
-    rootContainer
-      .resolve<Logger>("Logger")
-      .warn(
-        `API interna deshabilitada: falta INTERNAL_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
-      );
+    logger.warn(
+      `API interna deshabilitada: falta INTERNAL_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
+    );
     return;
   }
 
@@ -96,8 +111,7 @@ export function registerInternalHistoryHttp(
     (request, response) => {
       // Contra `HistoryReader` y no contra la implementación: el cast a `MemoryHistory`
       // que estaba acá compilaba una promesa que el token no hacía.
-      const reader = rootContainer.resolve<HistoryReader>("HistoryReader");
-      const entries = reader.of(request.params.matchId);
+      const entries = history.of(request.params.matchId);
       if (entries.length === 0) {
         response.status(404).json({ error: "NOT_FOUND" });
         return;

@@ -81,6 +81,10 @@ module.exports = {
           // ENTRYPOINT: el CLI de replay arma el proceso entero, y componer es su trabajo
           // —el mismo criterio con el que truco deja src/index.ts fuera de la lista—.
           "^src/replay\\.ts$",
+          // EL COMPOSITION ROOT de la superficie Express y de Colyseus: arma las dos
+          // configuraciones (la real y la de test) y le pasa al transporte HTTP sus
+          // dependencias ya resueltas. Es el `src/index.ts` de truco con otro nombre.
+          "^src/app\\.config\\.ts$",
           // LOS TESTS QUEDAN AFUERA, y es una decisión, no un olvido. La Regla 3 existe
           // para que el código que se DESPLIEGA reciba sus dependencias sin saber quién las
           // armó; un test no tiene llamador del que recibirlas, y los que resuelven del root
