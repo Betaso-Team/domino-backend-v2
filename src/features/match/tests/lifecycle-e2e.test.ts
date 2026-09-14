@@ -7,6 +7,7 @@ import {
   historyOf,
   linesOf,
   mintToken,
+  revealHands,
   seatPair,
   waitUntil,
 } from "./e2e-harness.js";
@@ -133,5 +134,26 @@ describe("ciclo de vida de una partida", () => {
 
     expect(body.serverNow).toBeGreaterThanOrEqual(before);
     expect(body.serverNow).toBeLessThanOrEqual(after);
+  });
+
+  // El endpoint de SOPORTE: es de dónde sale el historial que después se rebobina.
+  // Se indexa por matchId y no por roomId a propósito — la sala muere y la partida no.
+  it("el endpoint interno devuelve el historial de la partida", async () => {
+    const match = await seatPair(server, ["h1", "h2"]);
+    await revealHands(match);
+
+    const response = await fetch("http://localhost:2585/internal/matches/m-h1-h2/history");
+    const body = (await response.json()) as { matchId: string; entries: { type: string }[] };
+
+    expect(response.status).toBe(200);
+    expect(body.matchId).toBe("m-h1-h2");
+    expect(body.entries.map((entry) => entry.type)).toEqual(["REVEAL_TILES", "REVEAL_TILES"]);
+  });
+
+  it("una partida sin historial es 404 y no un cuerpo vacío", async () => {
+    const response = await fetch("http://localhost:2585/internal/matches/m-no-existe/history");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "NOT_FOUND" });
   });
 });
