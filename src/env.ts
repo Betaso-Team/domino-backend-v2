@@ -7,6 +7,60 @@
 // que esto nunca truene solo por faltar configuración de entorno.
 import { z } from "zod";
 
+/**
+ * EL `.env`, CARGADO POR SU CONSUMIDOR. Lo carga este archivo —el único lector de la
+ * configuración del proceso— y no el de pm2. Truco venía del revés heredado de v1: su
+ * `ecosystem.config.js` llamaba a dotenv y el proceso hijo heredaba ese `process.env` de
+ * rebote, con lo que la configuración de la aplicación terminaba dependiendo de QUIÉN la
+ * arrancó. En node 22 leer el propio no cuesta ninguna dependencia: `process.loadEnvFile()`.
+ *
+ * NO ES REDUNDANTE CON `@colyseus/tools`, que también carga un `.env` al importarse
+ * (`node_modules/@colyseus/tools/build/loadenv.mjs`, con dotenv). Ése solo corre si alguien
+ * importa ese paquete, y hay un consumidor del entorno que NO lo importa: `src/replay.ts`, la
+ * herramienta de soporte. Medido sobre el grafo de imports: `npm run replay` con un `.env` que
+ * tiene `MONGO_URI` no veía la URI y contestaba "no hay historial para esa partida" — el 404
+ * que más se investiga al pedo, del lado de la línea de comandos.
+ *
+ * TRES DECISIONES, y ninguna es preferencia:
+ *
+ *   · EL ARCHIVO ES OPCIONAL. En producción puede venir todo del entorno del proceso (el
+ *     `environment:` del compose, el CI, el shell), así que el `ENOENT` de un `.env` que no
+ *     existe NO es un error: se traga y el parseo de abajo dirá lo que falte, que es quien
+ *     sabe decirlo todo junto.
+ *   · EL ENTORNO LE GANA AL ARCHIVO. Es lo que mantiene mandando al `environment:` del compose
+ *     —donde vive el `MONGO_URI=mongodb://mongo:27017/domino` que apunta al servicio y no a
+ *     localhost— y a las variables del CI. Es el comportamiento de `loadEnvFile`, MEDIDO sobre
+ *     la node 22.17.1 instalada y no leído de la documentación:
+ *     `printf 'FOO=del-archivo\nBAR=solo-archivo\n' > .env && FOO=del-entorno node -e
+ *     "process.loadEnvFile(); console.log(process.env.FOO, process.env.BAR)"` imprime
+ *     `del-entorno solo-archivo`.
+ *   · LA SUITE QUEDA AFUERA, y acá el riesgo es concreto y ya estaba vivo. `vitest.setup.ts`
+ *     BORRA `MONGO_URI` y `REDIS_URL` para que `npm test` no dependa de ningún servicio
+ *     externo; un `.env` cargado después de ese borrado anula el guardarraíl entero. Medido:
+ *     con esas dos variables en un `.env` local, la suite pasa de 311 verdes a **18 tests
+ *     rojos en 6 archivos**, porque las salas de test se van contra un Redis y un Mongo de
+ *     verdad. Ver el comentario gemelo en `vitest.setup.ts`, que desactiva al OTRO cargador.
+ *
+ * Se expone la función —y no un `if` suelto— porque es lo que hace testeable la decisión sin
+ * tocar el entorno real del worker: `src/env-dotenv.test.ts` le pasa un entorno de mentira y
+ * un doble de `load`.
+ */
+export function loadEnvFileUnlessTest(
+  source: Record<string, string | undefined>,
+  load: () => void,
+): void {
+  if (source.VITEST) return;
+  try {
+    load();
+  } catch {
+    // No hay `.env`: el entorno ya está puesto, o falta algo y el parseo de abajo lo va a decir.
+  }
+}
+
+loadEnvFileUnlessTest(process.env, () => {
+  process.loadEnvFile();
+});
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   /**

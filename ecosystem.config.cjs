@@ -11,10 +11,15 @@
 // conectarse al proceso que hospeda SU sala. El modo cluster comparte un socket entre los
 // workers, y con un socket compartido no hay a quién anunciar.
 //
-// LAS VARIABLES DE LA APLICACIÓN NO ESTÁN ACÁ: las lee el proceso del `.env` de al lado
-// —`@colyseus/tools` lo carga solo al importarse, antes de que corra `src/env.ts`—, que es el
-// mismo archivo que usa el compose. Un segundo lugar donde escribir `JWT_SECRET` sería un
-// segundo lugar donde tenerla desactualizada, y la que manda es siempre la última escrita.
+// LAS VARIABLES DE LA APLICACIÓN NO ESTÁN ACÁ: las lee el proceso del `.env` de al lado, con
+// `process.loadEnvFile()` en `src/env.ts` —EL CONSUMIDOR LEE EL SUYO—, y es el mismo archivo que
+// usa el compose. Un segundo lugar donde escribir `JWT_SECRET` sería un segundo lugar donde
+// tenerla desactualizada, y la que manda es siempre la última escrita.
+//
+// Y ES AL REVÉS DE COMO LO HACE v1, que llama a dotenv DESDE ESTE ARCHIVO y deja que el proceso
+// hijo herede ese entorno de rebote: así la configuración de la aplicación depende de quién la
+// arrancó, y `npm start` a mano no da lo mismo que `pm2 start`. Acá pm2 no aporta ninguna
+// variable de producto; aporta `NODE_APP_INSTANCE`, que es suya.
 //
 // LO QUE FALTA CONFIRMAR CON INFRAESTRUCTURA ANTES DE SUBIR A DOS INSTANCIAS: el proxy de
 // adelante tiene que rutear POR PREFIJO DE PATH, porque cada instancia se anuncia como
@@ -29,6 +34,13 @@ module.exports = {
       // el único `entry` de tsup — los cuatro los pinea `src/entrypoint.test.ts`, porque
       // ninguno rompe el gate al desincronizarse.
       script: "dist/main.js",
+      // EL DIRECTORIO DE ESTE ARCHIVO, y no aquel desde donde se invocó a pm2. Es la misma
+      // familia de razones que el `.env`: en el servidor cada despliegue es una carpeta nueva
+      // detrás de un symlink, y tanto el `dist/` que corre como el `.env` que `src/env.ts` lee
+      // —los dos son rutas RELATIVAS, resueltas contra el cwd— tienen que ser los del release
+      // que se está arrancando. Sin esto, arrancarlo parado en otra carpeta levanta el código de
+      // una release y la configuración de otra, sin un solo error.
+      cwd: __dirname,
       time: true,
       watch: false,
       exec_mode: "fork",

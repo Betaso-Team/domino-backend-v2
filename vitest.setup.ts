@@ -1,4 +1,35 @@
 import "reflect-metadata";
+import dotenv from "dotenv";
+
+// EL `.env` NO EXISTE PARA LA SUITE, y esta línea es lo único que puede garantizarlo.
+//
+// Hay DOS cargadores de `.env` en este repo y solo uno es nuestro. El nuestro —`src/env.ts`
+// con `process.loadEnvFile()`— se guarda solo, mirando `VITEST`. El otro es
+// `@colyseus/tools`, que hace `import "./loadenv.mjs"` en la primera línea de su bundle
+// (`node_modules/@colyseus/tools/build/index.mjs:2`) y ahí llama a `dotenv.config()`
+// (`build/loadenv.mjs`, `loadEnvFile([".env.${NODE_ENV}", ".env"])`).
+//
+// Y contra ése NO HAY ORDEN QUE NOS SALVE: este archivo es un `setupFile`, o sea que corre
+// ANTES de que se evalúen los imports del archivo de test, y `@colyseus/tools` entra por
+// `src/app.config.ts` —el composition root que importan los tests de sala, los e2e y el de la
+// raíz HTTP—. O sea que dotenv inyecta el `.env` del desarrollador DESPUÉS de los `delete` de
+// más abajo y ANTES de que `src/env.ts` lea `process.env`. El borrado quedaba anulado.
+//
+// No es hipotético: medido con un `.env` local que tenía `MONGO_URI` y `REDIS_URL`, la suite
+// pasó de 311 verdes a 18 tests rojos en 6 archivos, y vitest lo imprimía en cada archivo
+// (`✅ .env loaded.`) sin que nadie lo leyera.
+//
+// SE DESACTIVA LA FUNCIÓN, no se borran variables después: un `.env` no trae solo esas dos.
+// Trae `TURN_TIMEOUT_MS`, trae `SERVER_ADDRESS`, y puede traer `WRITE_GOLDEN=1` — que es
+// `npm test` REESCRIBIENDO los fixtures golden en vez de medir contra ellos. Los valores de la
+// suite los pone este archivo y ahí terminan.
+//
+// `dotenv` no se declara en `package.json` a propósito, y no es un descuido: no es una
+// dependencia nuestra sino LA QUE `@colyseus/tools` YA TRAE, y es exactamente esa instancia la
+// que hay que desactivar. Declararla dejaría que npm resuelva una segunda copia y el parche
+// apuntaría a la que nadie usa. Verificado: hay UN solo `node_modules/dotenv` y
+// `@colyseus/tools` no tiene `node_modules` propio.
+dotenv.config = () => ({ parsed: {} });
 
 // src/env.ts valida el entorno al importarse y lanza si falta JWT_SECRET (ver su cabecera).
 // Estos defaults evitan que cualquier test que importe env.ts — directa o transitivamente —
