@@ -33,9 +33,13 @@ module.exports = {
         // "node_modules/colyseus/build/index.cjs"), no contra el specifier del import. Por
         // eso el prefijo "^node_modules/" es obligatorio: sin él, "^colyseus" nunca matchea
         // nada y la regla queda deshabilitada en silencio (build verde, cero protección).
-        // mongoose/mongodb/pg/amqplib/axios/ioredis todavía no están instalados: son
-        // dependencias de runtime anticipadas (DB/cola/HTTP) que este core tampoco debe usar
-        // el día que se agreguen.
+        // `mongodb` YA ESTÁ INSTALADO (la persistencia del historial), así que para él esta
+        // regla no es anticipación sino una arista viva: el core no lo importa, y el
+        // adaptador que sí lo hace vive en `shared/mongo.ts`, que es de donde el core tiene
+        // permitido importar. Verificado con una violación a propósito, no de memoria.
+        // mongoose/pg/amqplib/axios/ioredis siguen sin instalarse: son dependencias de
+        // runtime anticipadas (DB/cola/HTTP) que este core tampoco debe usar el día que
+        // lleguen.
         path: "^node_modules/(colyseus|@colyseus/(?!schema)|mongoose|mongodb|pg|amqplib|axios|ioredis|tsyringe|express)",
       },
     },

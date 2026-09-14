@@ -25,6 +25,7 @@
     "colyseus": "^0.18.5",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.6.0",
     "pino": "^10.1.0",
     "reflect-metadata": "^0.2.2",
     "tsyringe": "^4.8.0",
