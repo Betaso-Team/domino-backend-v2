@@ -55,6 +55,18 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), PORT: "abc" })).toThrow(/PORT/);
   });
 
+  // Ausente es un estado LEGÍTIMO y significa "esta instancia no expone /internal/*".
+  // Por eso no tiene default: un default es una llave publicada.
+  it("sin INTERNAL_API_KEY el entorno es válido y la llave queda indefinida", () => {
+    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).internalApiKey).toBeUndefined();
+  });
+
+  it("rechaza una INTERNAL_API_KEY corta en vez de aceptar una llave enumerable", () => {
+    expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), INTERNAL_API_KEY: "corta" })).toThrow(
+      /INTERNAL_API_KEY/,
+    );
+  });
+
   it("rechaza un NODE_ENV fuera del enum", () => {
     expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), NODE_ENV: "staging" })).toThrow(/NODE_ENV/);
   });

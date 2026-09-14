@@ -1,5 +1,6 @@
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { env } from "../../../env.js";
 import {
   act,
   bootServer,
@@ -13,6 +14,12 @@ import {
 } from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
+
+const HISTORY_URL = (matchId: string) =>
+  `http://localhost:2585/internal/matches/${matchId}/history`;
+// La misma llave que vitest.setup.ts le pone al entorno: es la credencial de la consola
+// de soporte, no un dato de la partida.
+const INTERNAL_HEADERS = { "X-Internal-Key": env.internalApiKey ?? "" };
 
 beforeAll(async () => {
   server = await bootServer(2585);
@@ -142,7 +149,7 @@ describe("ciclo de vida de una partida", () => {
     const match = await seatPair(server, ["h1", "h2"]);
     await revealHands(match);
 
-    const response = await fetch("http://localhost:2585/internal/matches/m-h1-h2/history");
+    const response = await fetch(HISTORY_URL("m-h1-h2"), { headers: INTERNAL_HEADERS });
     const body = (await response.json()) as { matchId: string; entries: { type: string }[] };
 
     expect(response.status).toBe(200);
@@ -151,9 +158,26 @@ describe("ciclo de vida de una partida", () => {
   });
 
   it("una partida sin historial es 404 y no un cuerpo vacío", async () => {
-    const response = await fetch("http://localhost:2585/internal/matches/m-no-existe/history");
+    const response = await fetch(HISTORY_URL("m-no-existe"), { headers: INTERNAL_HEADERS });
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "NOT_FOUND" });
+  });
+
+  // La llave NO es opcional ni "cuando exista": el matchId es enumerable y esto sirve el
+  // registro completo de una mesa. Sin credencial es 401 —el recurso existe, lo que falta
+  // es la llave— y el cuerpo no dice nada de si la partida existe o no.
+  it("el endpoint interno rechaza sin llave y con la llave equivocada", async () => {
+    const match = await seatPair(server, ["k1", "k2"]);
+    await revealHands(match);
+
+    const sinLlave = await fetch(HISTORY_URL("m-k1-k2"));
+    const conLlaveMala = await fetch(HISTORY_URL("m-k1-k2"), {
+      headers: { "X-Internal-Key": "llave-equivocada-pero-del-mismo-largo" },
+    });
+
+    expect(sinLlave.status).toBe(401);
+    expect(await sinLlave.json()).toEqual({ error: "UNAUTHORIZED" });
+    expect(conLlaveMala.status).toBe(401);
   });
 });

@@ -18,6 +18,21 @@ const schema = z.object({
   // Compartido con el backend principal. El dominó verifica y NUNCA firma.
   JWT_SECRET: z.string().min(16, "JWT_SECRET debe tener al menos 16 caracteres"),
   /**
+   * La llave de la API INTERNA (consola de soporte). OPCIONAL y sin default a propósito:
+   * un default es una llave publicada, y una llave publicada no protege nada.
+   *
+   * Ausente significa "esta instancia no expone `/internal/*`", y las rutas directamente
+   * NO se registran (ver register-http.ts). Es fail closed: una ruta interna viva con la
+   * llave vacía es PEOR que no tenerla, porque parece protegida.
+   *
+   * El mínimo de largo es el mismo criterio que el de JWT_SECRET: una llave corta se
+   * enumera, y acá el entorno es o la llave buena o ninguna.
+   */
+  INTERNAL_API_KEY: z
+    .string()
+    .min(16, "INTERNAL_API_KEY debe tener al menos 16 caracteres")
+    .optional(),
+  /**
    * Interruptor de HERRAMIENTA, no de producto: regenera los fixtures golden del replay
    * (`writeGolden` en features/match/tests/e2e-harness.ts). El servidor nunca lo mira.
    * Vive acá igual porque este archivo es el único lector de la configuración del proceso
@@ -32,6 +47,8 @@ export interface Env {
   readonly nodeEnv: z.infer<typeof schema>["NODE_ENV"];
   readonly port: number;
   readonly jwtSecret: string;
+  /** `undefined` ⇒ esta instancia no expone la API interna. Ver INTERNAL_API_KEY. */
+  readonly internalApiKey: string | undefined;
   readonly turnTimeoutMs: number;
   readonly extraTimeReserveMs: number;
   readonly presentingRoundMs: number;
@@ -54,6 +71,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     nodeEnv: parsed.NODE_ENV,
     port: parsed.PORT,
     jwtSecret: parsed.JWT_SECRET,
+    internalApiKey: parsed.INTERNAL_API_KEY,
     turnTimeoutMs: parsed.TURN_TIMEOUT_MS,
     extraTimeReserveMs: parsed.EXTRA_TIME_RESERVE_MS,
     presentingRoundMs: parsed.PRESENTING_ROUND_MS,
