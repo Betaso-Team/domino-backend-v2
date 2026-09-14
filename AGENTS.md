@@ -39,7 +39,7 @@ aparece). `vitest.setup.ts` **borra** `MONGO_URI`: la suite no depende de ningú
 externo, y eso tiene que ser una propiedad del repo y no del shell de quien lo corre.
 
 Y después el **escalamiento horizontal**, portado de truco (`874a778`/`909217a`/`a3bb6dd`) —
-primero de dos incrementos; el segundo (pm2, apagado ordenado, sondas) todavía no está. El
+primero de dos incrementos. El
 registro de partidas vivas dejó de ser un `Map` del proceso y pasó al almacén compartido
 (`src/shared/kv.ts`, un puerto con la forma de la `Presence` de Colyseus, así que **el
 adaptador de Redis son cero líneas propias**); Colyseus recibe el driver y el presence
@@ -52,7 +52,46 @@ memoria. `vitest.setup.ts` **también borra `REDIS_URL`**, así que la suite sig
 ningún servicio externo. Verificado con dos instancias reales sobre el compose: `/config`
 contesta desde las dos por una sala de cualquiera, `joinById` cruza de proceso, las salas se
 reparten y el latido renueva el plazo.
-**Baseline actual: 295 tests / 45 archivos.**
+
+Y después el **segundo incremento, la capa de deploy** (`89fa497`/`26e1bd4`/`290017c`/`57194e5`/
+`ebb5082`): el entrypoint se partió en `src/main.ts` —el que CORRE— y `src/app.config.ts` —el que
+se IMPORTA—, porque el apagado ordenado necesita un lugar donde registrar manejadores de señal
+que ningún test arrastre. Cuatro archivos que no se importan entre sí nombran ese bundle (tsup,
+los dos scripts de npm, el `CMD` de la imagen y el `script` de pm2) y ninguno rompe el gate al
+desincronizarse: lo pinea `src/entrypoint.test.ts`.
+
+**`PORT` ES LA BASE Y NO EL PUERTO**, y es el hallazgo que cuesta una tarde: el que le suma
+`NODE_APP_INSTANCE` no es pm2 ni nosotros, es `@colyseus/tools` ADENTRO de su `listen()`
+(`node_modules/@colyseus/tools/build/index.mjs:45-46`, `port += processNumber`, medido sobre la
+0.18.3 instalada). Sumárselo antes lo contaría dos veces. `env.listeningPort` es el efectivo, y es
+el que va en el `publicAddress` — anunciar la base manda al jugador al proceso equivocado, y es la
+única falla de esta capa que aparece en el CLIENTE y no en el servidor. Sin pm2 la dirección se
+anuncia PLANA, sin puerto en el path: un proceso solo no necesita un proxy que rutee por prefijo.
+
+**El apagado es nuestro** (`gracefullyShutdown: false` en `app.config.ts`, el orden en
+`src/main.ts`): salas y emparejamiento primero (`server.gracefullyShutdown(false)`), después
+`shutdown()` del container, que drena el historial y RECIÉN AHÍ cierra Mongo —`record` es `void` y
+no reintenta, así que al revés se pierde el último lote, o sea el desenlace—. Redis NO se cierra
+ahí: lo cierra Colyseus adentro del paso 1, y hacerlo dos veces deja una promesa rechazada en cada
+apagado. Y se escucha el **mensaje** `shutdown` de pm2 además de las señales: con
+`shutdown_with_message`, pm2 manda un MENSAJE y no una señal, así que sin esa rama el drenado no
+correría en ningún `pm2 reload` —o sea en ningún deploy— sin un solo error en el log.
+
+**Las sondas son dos a propósito** (`src/shared/http/health.ts`): `/health` NO consulta nada,
+porque una dependencia caída nunca puede contestarse con "reiniciame" —reiniciar es lo único que
+destruye partidas en curso, y el dominó sigue jugando sin sus bases—; `/ready` sí consulta y dice
+CUÁL falta, con un plazo **por chequeo** de 2 s, porque una base caída no falla: CUELGA. Una
+dependencia que la instancia eligió no tener no entra al mapa.
+
+Verificado con dos instancias reales sobre el compose (**pm2 no está instalado en esta máquina**;
+se reprodujo con `fork` + IPC + `NODE_APP_INSTANCE` + el mensaje `shutdown`): cada una ata
+`PORT + índice` y anuncia el efectivo, dos jugadores que entran por procesos distintos caen en una
+sala, `/config` contesta desde las dos, el que se cae vuelve por el OTRO nodo y recupera su
+partida, el apagado por mensaje sale con 0 y no deja claves atrás, y `kill -9` sí las deja —con
+TTL de 119 s, que es lo que las limpia—. Medido: el drenado tarda **9 ms** con el servidor vacío;
+`/ready` contra un Mongo inalcanzable contesta **503 `{"missing":["mongo"]}` en 2014 ms** mientras
+`/health` sigue contestando 200 en 43 ms.
+**Baseline actual: 311 tests / 47 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
