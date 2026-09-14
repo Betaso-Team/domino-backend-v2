@@ -43,6 +43,24 @@ const schema = z.object({
     .min(16, "INTERNAL_API_KEY debe tener al menos 16 caracteres")
     .optional(),
   /**
+   * La URI de Mongo, donde queda escrito el historial de cada partida
+   * (`mongodb://host:puerto/nombre` — la base viaja en la URI, como en truco y como en v1,
+   * para que apuntar a otra sea cambiar UN valor).
+   *
+   * OPCIONAL, y SU PRESENCIA ES LA QUE ELIGE LA IMPLEMENTACIÓN: sin ella el historial es el
+   * de memoria y muere con el proceso; con ella es el de Mongo y sobrevive al reinicio. Es
+   * el mismo criterio que `INTERNAL_API_KEY` —la variable ausente es una decisión, no un
+   * error— y es deliberadamente lo contrario a un `HISTORY_DRIVER`: un interruptor que
+   * NOMBRA la implementación es deuda, no configuración, porque deja escribir "mongo" sin
+   * URI y "memory" con una base andando al lado. Acá el dato y la decisión son lo mismo,
+   * así que no existe la combinación incoherente.
+   *
+   * NO tiene default, ni siquiera `mongodb://localhost:27017/domino`: un default haría que
+   * una instancia mal configurada arranque creyendo que persiste y escriba en una base
+   * equivocada —o en ninguna—, que es peor que no persistir a la vista.
+   */
+  MONGO_URI: z.string().min(1).optional(),
+  /**
    * Interruptor de HERRAMIENTA, no de producto: regenera los fixtures golden del replay
    * (`writeGolden` en features/match/tests/e2e-harness.ts). El servidor nunca lo mira.
    * Vive acá igual porque este archivo es el único lector de la configuración del proceso
@@ -59,6 +77,8 @@ export interface Env {
   readonly jwtSecret: string;
   /** `undefined` ⇒ esta instancia no expone la API interna. Ver INTERNAL_API_KEY. */
   readonly internalApiKey: string | undefined;
+  /** `undefined` ⇒ el historial es el de memoria y muere con el proceso. Ver MONGO_URI. */
+  readonly mongoUri: string | undefined;
   readonly turnTimeoutMs: number;
   readonly extraTimeReserveMs: number;
   readonly dealingTimeoutMs: number;
@@ -84,6 +104,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     port: parsed.PORT,
     jwtSecret: parsed.JWT_SECRET,
     internalApiKey: parsed.INTERNAL_API_KEY,
+    mongoUri: parsed.MONGO_URI,
     turnTimeoutMs: parsed.TURN_TIMEOUT_MS,
     extraTimeReserveMs: parsed.EXTRA_TIME_RESERVE_MS,
     dealingTimeoutMs: parsed.DEALING_TIMEOUT_MS,

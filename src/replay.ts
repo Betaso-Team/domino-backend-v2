@@ -14,7 +14,7 @@
 // hace falta va en `match_meta` al cerrar la partida, no colgado de una entrada. Un campo
 // opcional que nadie escribe es peor que no tenerlo: hace creer que el replay puede
 // autoverificarse contra producción cuando no puede.
-import { rootContainer } from "./di-container.js";
+import { mongo, rootContainer } from "./di-container.js";
 import type { GlobalDominoConfig, TeamAssignmentMode } from "./features/match/core/config.js";
 import { replay } from "./features/match/history/replay.js";
 import type { HistoryEntry, HistoryReader } from "./features/match/network/history.js";
@@ -124,3 +124,14 @@ const state = replay({
   entries,
 });
 logger.info("estado final reconstruido", { matchId, state: state.toJSON() });
+
+// CERRAR LA CONEXIÓN ES LO QUE HACE QUE EL CLI TERMINE. El cliente de Mongo mantiene
+// sockets abiertos y con ellos el event loop vivo, así que sin esto `npm run replay`
+// imprime el estado final y se queda colgado sin decir por qué — el modo de falla más
+// confuso posible para una herramienta de una sola corrida. El servidor no lo necesita
+// porque no termina nunca.
+//
+// Con `?.` porque sin `MONGO_URI` no hay conexión que cerrar, y un `process.exit(0)` en su
+// lugar no serviría: cortaría también el vaciado de los logs de pino, que es justamente la
+// salida por la que se corre este comando.
+await mongo?.close();
