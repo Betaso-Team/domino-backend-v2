@@ -9873,102 +9873,131 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Create: `src/features/match/tests/deal-window-e2e.test.ts`
+- Modify: `src/env.ts`, `src/env.test.ts`, `src/di-container.ts`, `vitest.setup.ts`
+- Modify: `src/features/match/tests/e2e-harness.ts`, `src/features/match/tests/reconnection-e2e.test.ts`
+- Regenerate: `src/features/match/tests/fixtures/golden-2p.json`
 
-- [ ] **Step 1: Escribir los cuatro tests**
+- [x] **Step 1: Escribir los cuatro tests**
 
 ```ts
 // src/features/match/tests/deal-window-e2e.test.ts
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state/index.js";
-import { act, bootServer, linesOf, seatPair, waitUntil } from "./e2e-harness.js";
+import {
+  type SeatedMatch,
+  act,
+  bootServer,
+  clientOf,
+  historyOf,
+  linesOf,
+  seatPair,
+  waitUntil,
+} from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
 beforeAll(async () => {
-  server = await bootServer(2588);
+  server = await bootServer(2590);
 });
 
 afterAll(async () => {
   await server.shutdown();
 });
 
-const seenOf = (state: MatchState, playerId: string) =>
-  state.players.find((player) => player.playerId === playerId)?.hasSeenTiles;
+const seenOf = (state: MatchState, playerId: string): boolean =>
+  state.players.find((player) => player.playerId === playerId)?.hasSeenTiles ?? false;
 
-const tilesVisibleTo = (state: MatchState, playerId: string) =>
-  [...(state.players.find((player) => player.playerId === playerId)?.hand.tiles ?? [])];
+const revealTiles = async (match: SeatedMatch, playerId: string): Promise<void> => {
+  clientOf(match, playerId).send("REVEAL_TILES", {});
+  await waitUntil(() => seenOf(match.serverState, playerId));
+};
 
-describe("la ventana de reparto", () => {
+const tilesSeenBy = (match: SeatedMatch, viewerId: string, ownerId: string) => [
+  ...((clientOf(match, viewerId).state as MatchState).players.find(
+    (player) => player.playerId === ownerId,
+  )?.hand.tiles ?? []),
+];
+
+describe("ventana de reparto", () => {
   // EL PUNTO DE PARTIDA: se repartió, pero nadie vio nada todavía.
   it("reparte tapado y espera: la ronda no arranca hasta que los dos levantan", async () => {
-    const match = await seatPair(server, ["d1", "d2"], undefined, { skipDealWindow: true });
+    const match = await seatPair(server, ["deal-d1", "deal-d2"]);
 
-    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
-    expect(match.serverState.activeDeadline).toBeGreaterThan(0);
-    expect(seenOf(match.serverState, "d1")).toBe(false);
-    expect(seenOf(match.serverState, "d2")).toBe(false);
+    expect(match.serverState.currentRound?.phase).toBe("DEALING");
+    expect(match.serverState.players.map((player) => player.hand.tileCount)).toEqual([7, 7]);
+    expect(tilesSeenBy(match, "deal-d1", "deal-d1")).toHaveLength(0);
+    expect(tilesSeenBy(match, "deal-d2", "deal-d2")).toHaveLength(0);
 
     // Uno levanta: se marca, y la ronda SIGUE esperando al otro.
-    await act(match, "d1", "REVEAL_TILES");
-    expect(seenOf(match.serverState, "d1")).toBe(true);
+    await revealTiles(match, "deal-d1");
+    expect(seenOf(match.serverState, "deal-d1")).toBe(true);
+    expect(seenOf(match.serverState, "deal-d2")).toBe(false);
     expect(match.serverState.currentRound?.phase).toBe("DEALING");
 
     // El otro levanta: recién ahí arranca el turno.
-    await act(match, "d2", "REVEAL_TILES");
-    await waitUntil(() => match.serverState.currentRound?.phase === "PLAYING");
-    expect(match.serverState.currentRound?.currentTurn.playerId).not.toBe("");
+    await act(match, "deal-d2", "REVEAL_TILES");
+    expect(match.serverState.currentRound?.phase).toBe("PLAYING");
+    expect(match.serverState.currentRound?.currentTurn?.playerId).toBeTruthy();
   });
 
   // LEVANTAR ES DEL DUEÑO Y DE NADIE MÁS. Es la mitad antifraude: si levantar revelara
   // a la mesa, la ventana sería peor que no tenerla.
   it("levantar revela solo al dueño", async () => {
-    const match = await seatPair(server, ["v1", "v2"], undefined, { skipDealWindow: true });
-    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
+    const match = await seatPair(server, ["deal-v1", "deal-v2"]);
 
-    await act(match, "v1", "REVEAL_TILES");
+    await revealTiles(match, "deal-v1");
+    await waitUntil(
+      () =>
+        tilesSeenBy(match, "deal-v1", "deal-v1").length === 7 &&
+        seenOf(clientOf(match, "deal-v2").state as MatchState, "deal-v1"),
+    );
 
-    // En el estado del SERVIDOR las fichas están (el dominio las tiene); lo que se
-    // prueba acá es que la vista del rival no las tiene. El smoke de visibilidad afirma
-    // esa mitad desde el cliente; acá basta con que el rival siga sin levantar.
-    expect(tilesVisibleTo(match.serverState, "v1")).toHaveLength(7);
-    expect(seenOf(match.serverState, "v2")).toBe(false);
+    expect(tilesSeenBy(match, "deal-v1", "deal-v1")).toHaveLength(7);
+    expect(tilesSeenBy(match, "deal-v2", "deal-v1")).toHaveLength(0);
   });
 
   // CAMINO 2: uno no está. Se lo retira y el otro gana por forfeit — sin haber jugado
   // una ficha, que es exactamente lo que la regla quiere.
   it("al vencer, el que no levantó se retira y el otro gana por forfeit", async () => {
-    const match = await seatPair(server, ["f1", "f2"], undefined, { skipDealWindow: true });
-    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
+    const match = await seatPair(server, ["deal-f1", "deal-f2"]);
+    const matchId = "m-deal-f1-deal-f2";
 
-    await act(match, "f1", "REVEAL_TILES");
+    await revealTiles(match, "deal-f1");
 
-    await waitUntil(() => match.serverState.phase === "PRESENTING_MATCH", 20_000);
-    expect(match.serverState.players.find((p) => p.playerId === "f2")?.hasAbandoned).toBe(true);
-    expect(match.serverState.players.find((p) => p.playerId === "f1")?.hasAbandoned).toBe(false);
+    await waitUntil(
+      () =>
+        match.serverState.players.find((player) => player.playerId === "deal-f2")?.hasAbandoned ===
+        true,
+      5_000,
+    );
 
     // El ABANDON del ausente lo dijo el SISTEMA, no él: para un reclamo esa es toda la
     // diferencia. Y el veredicto sale al entrar a la presentación, no al vencerla.
-    const lines = linesOf("m-f1-f2");
-    expect(lines).toContain("SYSTEM ABANDON");
-    expect(lines).toContain("SYSTEM MATCH_RESOLVED");
-  });
+    const winnerTeamId = match.serverState.players.find(
+      (player) => player.playerId === "deal-f1",
+    )?.teamId;
+    expect(linesOf(matchId)).toContain("SYSTEM ABANDON");
+    expect(linesOf(matchId)).toContain("SYSTEM MATCH_RESOLVED");
+    expect(historyOf(matchId).find((entry) => entry.type === "MATCH_RESOLVED")?.payload).toEqual({
+      winnerTeamId,
+      reason: "ABANDONMENT",
+    });
+  }, 7_000);
 
   // CAMINO 3, Y EL QUE IMPORTA: NO LA LEVANTA NADIE. Nadie jugó, así que nadie gana. Si
   // este test se pone verde con un `MATCH_RESOLVED` en el historial, el motor está
   // pagando el premio de una partida que no existió.
   it("si no la levanta nadie, no gana nadie y la mesa se muere", async () => {
-    const match = await seatPair(server, ["z1", "z2"], undefined, { skipDealWindow: true });
-    await waitUntil(() => match.serverState.currentRound?.phase === "DEALING");
+    const match = await seatPair(server, ["deal-z1", "deal-z2"]);
+    const matchId = "m-deal-z1-deal-z2";
 
-    await waitUntil(
-      () => match.serverState.players.every((player) => player.hasAbandoned),
-      20_000,
-    );
+    await waitUntil(() => match.serverState.players.every((player) => player.hasAbandoned), 5_000);
 
     // NADIE gana: sin veredicto no hay `MATCH_RESOLVED`, y la fase no llega al terminal
     // por la vía del juego.
-    expect(linesOf("m-z1-z2")).not.toContain("SYSTEM MATCH_RESOLVED");
+    expect(linesOf(matchId).filter((line) => line === "SYSTEM ABANDON")).toHaveLength(2);
+    expect(linesOf(matchId)).not.toContain("SYSTEM MATCH_RESOLVED");
     expect(match.serverState.phase).not.toBe("FINISHED");
 
     // Y el plazo quedó APAGADO: si siguiera vencido, el conductor despertaría en el
@@ -9976,20 +10005,24 @@ describe("la ventana de reparto", () => {
     expect(match.serverState.activeDeadline).toBe(0);
 
     // La sala cierra y el motivo es auditable: no es lo mismo que nunca se llenó.
-    await server.getRoomById(match.roomId)?.disconnect();
-    await waitUntil(() => linesOf("m-z1-z2").includes("SYSTEM MATCH_ABORTED"), 5_000);
-    const aborted = historyOf("m-z1-z2").find((entry) => entry.type === "MATCH_ABORTED");
-    expect(aborted?.payload).toEqual({ reason: "NEVER_PLAYED" });
-  });
+    await server.getRoomById(match.roomId).disconnect();
+    expect(historyOf(matchId).find((entry) => entry.type === "MATCH_ABORTED")).toMatchObject({
+      source: "SYSTEM",
+      kind: "EVENT",
+      payload: { reason: "NEVER_PLAYED" },
+    });
+  }, 7_000);
 });
 ```
 
-Con `historyOf` en el import de `./e2e-harness.js`.
-
-- [ ] **Step 2: Correr y ajustar los plazos**
+- [x] **Step 2: Correr en rojo y ajustar los plazos**
 
 Run: `npx vitest run src/features/match/tests/deal-window-e2e.test.ts`
-Expected: los 4 tests PASAN.
+Expected RED: pasan los dos caminos de revelación y los dos vencimientos agotan su espera de
+5 s porque el plazo productivo sigue hardcodeado en 15 s. La espera no puede ser de 20 s: así la
+versión sin override también pasa y el supuesto rojo nunca demuestra que el test mida el cambio.
+
+Después del override, Expected GREEN: los 4 tests PASAN.
 
 Los dos tests de vencimiento esperan el plazo REAL de la ventana, así que en `vitest.setup.ts` va
 corto igual que los demás:
@@ -10001,15 +10034,22 @@ process.env.DEALING_TIMEOUT_MS ??= "800";
 Y en `src/env.ts`, junto a los otros: `DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000)`,
 su campo en `Env`, su línea en `parseEnv`, y su override en el registro de `GlobalDominoConfig`.
 
+El E2E de reconexión conserva localmente `dealingTimeoutMs` por encima de sus 3 s de reserva:
+esa suite deja la ronda tapada a propósito y debe medir reconexión, no el timeout E2E de 800 ms.
+
 Si el camino 3 falla porque `MATCH_ABORTED` nunca llega, el sospechoso es la guarda de `onDispose`:
 con la partida en `DEALING` y `phase !== "FINISHED"`, tiene que entrar — y `abortReason()` tiene que
 devolver `NEVER_PLAYED` porque nadie tiene `hasSeenTiles`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
-npm run typecheck && npm run lint && npm test
-git add src
+npm run typecheck && npm test && npm run lint
+git add src/di-container.ts src/env.ts src/env.test.ts \
+  src/features/match/tests/deal-window-e2e.test.ts \
+  src/features/match/tests/e2e-harness.ts \
+  src/features/match/tests/reconnection-e2e.test.ts \
+  src/features/match/tests/fixtures/golden-2p.json vitest.setup.ts
 git commit -m "test: la ventana de reparto de punta a punta
 
 Los cuatro caminos: los dos levantan y la ronda arranca; levantar revela solo al
