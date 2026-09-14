@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.gitignore
+.gitattributes
+docs
+*.md
+# EL `.env` NO ENTRA A LA IMAGEN. Lo pasa el compose por `env_file` en tiempo de ejecución, y
+# una imagen con los secretos horneados adentro los lleva a donde sea que se publique.
+.env
+.env.*
+!.env.example
+Dockerfile
+.dockerignore
+compose.yaml

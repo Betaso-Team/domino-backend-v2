@@ -1,0 +1,65 @@
+services:
+  # SIN PERFILES, que es lo primero que el dominó decide distinto que truco. Allá los perfiles
+  # existen porque hay DOS almacenamientos (Redis para el antifraude y el registro de salas,
+  # Mongo para el historial, el libro mayor y el catálogo) y cada operador quiere un subconjunto.
+  # Acá el único servicio es Mongo: un perfil `mongo` sobre un compose de un solo servicio de
+  # almacenamiento no ofrece ninguna elección que `docker compose up mongo` no dé ya, y sumaría
+  # un `COMPOSE_PROFILES` más que acordarse de poner.
+  #
+  # La elección que sí existe —persistir o no— ya está tomada en otro lado y con otro mecanismo:
+  # LA PRESENCIA DE `MONGO_URI` ELIGE la implementación del historial (ver `.env.example` y
+  # `src/di-container.ts`). Un perfil sería un segundo interruptor para lo mismo, y dos
+  # interruptores para una decisión es la combinación incoherente que ese diseño vino a impedir.
+  mongo:
+    image: mongo:7
+    ports:
+      # El puerto del HOST es configurable porque es fácil que ya haya otro Mongo escuchando en
+      # el 27017, sobre todo si el mismo operador corre truco al lado. `MONGO_PORT` sale del
+      # `.env` de al lado, que compose interpola solo; no es una variable de `src/env.ts` y por
+      # eso no está en `.env.example` —ese archivo documenta al único lector de `process.env`—.
+      - "${MONGO_PORT:-27017}:27017"
+    # Con volumen nombrado: sin él, `docker compose down` se lleva el historial, que es
+    # exactamente lo que este servicio existe para que sobreviva.
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+  domino:
+    build: .
+    ports:
+      # Configurable por la MISMA razón que el de Mongo, y acá el choque no es probable sino
+      # seguro: truco escucha en el 2567 y el default del dominó es el 2567.
+      - "${DOMINO_PORT:-2567}:2567"
+    # `JWT_SECRET` e `INTERNAL_API_KEY` salen del `.env` de al lado (ver `.env.example`). Sin la
+    # primera el proceso NO ARRANCA —a propósito—; sin la segunda arranca, pero
+    # `/internal/matches/:matchId/history` no se registra y responde 404 (fail closed en
+    # `register-http.ts`). Un compose que no pasara el `.env` sería un 404 sin explicación.
+    env_file:
+      - .env
+    environment:
+      - PORT=2567
+      - NODE_ENV=production
+      # LA FIJA EL COMPOSE, no el `.env`: acá el host es el nombre del servicio y no
+      # `127.0.0.1`, que es lo que el `.env.example` sugiere para correr fuera del contenedor.
+      # Dejarla en el `.env` obligaría a editarla para ir de un modo al otro. `environment` le
+      # gana a `env_file`, así que una `MONGO_URI` suelta en el `.env` no rompe esto.
+      - MONGO_URI=mongodb://mongo:27017/domino
+    # CON `depends_on`, al revés que truco, y la diferencia es el porqué de allá: truco lo omite
+    # porque depender de un servicio apagado por perfil rompe el compose entero y dejaría los
+    # perfiles decorativos. Acá no hay perfiles, así que ese costo no existe.
+    #
+    # Lo que NO es: una garantía de que mongod acepte conexiones. Sin `condition:
+    # service_healthy` esto espera a que el CONTENEDOR arranque, nada más. Que el orden igual no
+    # importe lo sigue dando la conexión perezosa de `src/shared/mongo.ts` —el proceso levanta
+    # con la base caída y el primer documento paga la espera—, y el dominó no tiene `/ready`
+    # para decir cuándo llegó.
+    #
+    # Lo que sí compra, gratis: `docker compose up domino` se trae Mongo, el apagado va en
+    # orden, y la ventana en la que un lote de historial se pierde queda lo más corta posible
+    # —`MongoHistory.record` es `void` por contrato y un fallo se LOGUEA, no se reintenta—.
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
