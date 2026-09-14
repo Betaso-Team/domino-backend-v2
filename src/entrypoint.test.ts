@@ -83,6 +83,22 @@ describe("el piso de node se dice en voz alta y en todos lados", () => {
     for (const mayor of imágenes) expect(mayor).toBeGreaterThanOrEqual(nuestro);
   });
 
+  // LA CUARTA PUERTA, y la que más caro sale al revés: el CI es lo ÚNICO que verifica antes de
+  // que algo toque un servidor, así que verificar con un node por debajo del piso es un verde que
+  // no prueba lo que dice probar. Y es la puerta que menos se mira — nadie abre un workflow para
+  // revisar un número entre comillas.
+  //
+  // Se lee el YAML como TEXTO, igual que el resto de este archivo: parsearlo pediría una
+  // dependencia nueva para medir una línea. La forma es la que escribe `actions/setup-node`.
+  it("el CI no verifica con un node por debajo de ese piso", () => {
+    const nuestro = nodeMajorFloor(JSON.parse(read("package.json")).engines.node);
+    const versiones = [
+      ...read(".github/workflows/ci.yml").matchAll(/node-version:\s*'?(\d+)/g),
+    ].map((m) => Number(m[1]));
+    expect(versiones.length).toBeGreaterThan(0);
+    for (const mayor of versiones) expect(mayor).toBeGreaterThanOrEqual(nuestro);
+  });
+
   // pm2 tiene que poder recibir el intérprete: es la única de las cuatro puertas donde el node
   // no lo elige ni el repo ni la imagen.
   it("pm2 acepta un intérprete explícito", () => {
