@@ -138,8 +138,68 @@ describe("reglas de arquitectura", () => {
     // la frase "si no hay await", y el día que ese párrafo se mude a `core/commands/` el
     // grep crudo se pondría rojo sin que exista una sola espera real. Un guardarraíl que
     // falla por prosa es un guardarraíl que alguien termina borrando.
-    const withoutComments = (source: string): string =>
-      source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+    //
+    // SE RECORRE EL ARCHIVO, no se le pasan dos regex. Un `.replace(/\/\/[^\n]*/g, " ")`
+    // no distingue el `//` de un comentario del de una URL adentro de un string, así que
+    // una sola línea alcanzaba para pasar por abajo del guardarraíl:
+    //
+    //     const DOCS = "https://docs.colyseus.io/room"; async function hidden() { ... }
+    //
+    // El `//` de `https://` abría un "comentario" que se comía el resto de la línea —el
+    // `async` incluido— y el test daba VERDE con asincronía real en core/commands.
+    //
+    // Los strings se CONSERVAN en la salida a propósito: un `async` escrito adentro de uno
+    // sigue contando como ofensor. La regla acá es que la palabra no aparezca en el archivo,
+    // y errar hacia el rojo es gratis —se borra el string— mientras que errar hacia el verde
+    // es justo lo que este test existe para no hacer. Por eso tampoco se reconocen literales
+    // de regex (hoy no hay ninguno en estas carpetas): si apareciera uno con comillas, la
+    // comilla abriría un string sin cerrar y el archivo quedaría entero en la salida — rojo
+    // visible, nunca verde silencioso.
+    const withoutComments = (source: string): string => {
+      let out = "";
+      let index = 0;
+      while (index < source.length) {
+        const char = source[index];
+        const next = source[index + 1];
+        if (char === "/" && next === "/") {
+          while (index < source.length && source[index] !== "\n") index += 1;
+          out += " ";
+          continue;
+        }
+        if (char === "/" && next === "*") {
+          index += 2;
+          while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
+            index += 1;
+          }
+          index += 2;
+          out += " ";
+          continue;
+        }
+        if (char === '"' || char === "'" || char === "`") {
+          out += char;
+          index += 1;
+          while (index < source.length) {
+            const inner = source[index];
+            out += inner;
+            index += 1;
+            // La barra invertida se lleva puesto al siguiente sea cual sea: así una comilla
+            // escapada no cierra el string y el escáner no se desincroniza.
+            if (inner === "\\") {
+              if (index < source.length) {
+                out += source[index];
+                index += 1;
+              }
+              continue;
+            }
+            if (inner === char) break;
+          }
+          continue;
+        }
+        out += char;
+        index += 1;
+      }
+      return out;
+    };
 
     const offenders = scanned.filter((path) => {
       const source = withoutComments(readFileSync(path, "utf8"));

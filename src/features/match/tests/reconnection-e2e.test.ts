@@ -74,16 +74,17 @@ describe("reconexión — los tres caminos", () => {
     expect(linesOf("m-n1-n2")).toContain("SYSTEM PLAYER_RECONNECTED");
   });
 
-  // CAMINO 2: token perdido. ESTE es el test que verifica que el asiento reservado para la
-  // reconexión no le cierra la puerta a su propio dueño: `hasReachedMaxClients()` suma
-  // `clients + reservedSeats`, así que con la reserva viva el matchmaker rechaza el joinById
-  // con "is already full" y el jugador queda fuera de SU propia partida.
+  // CAMINO 2: token perdido. Mide que el asiento reservado para la reconexión no le cierre
+  // la puerta a su propio dueño: `hasReachedMaxClients()` suma `clients + reservedSeats`, así
+  // que con la reserva viva el matchmaker rechaza el joinById con "is already full" y el
+  // jugador queda fuera de SU propia partida. Lo sostiene el `maxClients = seats.length * 2`
+  // de `onCreate`, VERIFICADO bajando ese factor a 1: el joinById lanza.
   //
-  // Lo que lo sostiene es el `maxClients = seats.length * 2` de `onCreate`, VERIFICADO
-  // bajando ese factor a 1: el joinById lanza. El `unlock()` de `onDrop` no es lo que
-  // se mide acá —comentarlo deja el test verde—, porque con el doble de cupos la sala
-  // nunca llegó a auto-lockearse; abre el LISTING, que es el camino del matchmaking por
-  // nombre y no el del joinById.
+  // LO QUE ESTE TEST **NO** MIDE es el `unlock()` de `onDrop`, aunque el plan diga que sí:
+  // comentarlo deja la suite entera en verde, porque con el doble de cupos la sala nunca
+  // llega a lockearse y no hay lock que deshacer. No se fuerza uno a mano para tener
+  // cobertura —eso mediría el andamio del test y no la sala—. La condición exacta bajo la
+  // cual esa línea vuelve a importar está escrita en `domino-room.ts`, arriba del `unlock()`.
   it("quien perdió su token vuelve por roomId", async () => {
     const match = await seatPair(server, ["t1", "t2"]);
     await waitUntil(() => match.serverState.phase === "PLAYING");

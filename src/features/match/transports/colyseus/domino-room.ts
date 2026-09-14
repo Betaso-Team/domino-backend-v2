@@ -175,8 +175,23 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       () => this.forgetPendingReconnection(playerId, pending),
       () => this.forgetPendingReconnection(playerId, pending),
     );
-    // unlock abre el listing, pero no borra la reserva; el segundo cupo por asiento de
-    // onCreate es lo que deja entrar al reemplazo sin invalidar el token viejo.
+    // ESTA LÍNEA NO TIENE EFECTO OBSERVABLE HOY, y no hay test que la ejerza. Se deja, con
+    // la condición escrita, porque el día que alguien toque `maxClients` vuelve a hacer falta.
+    //
+    // `unlock()` deshace un lock, y con el `maxClients = seats.length * 2` de `onCreate` la
+    // sala NUNCA se lockea: `hasReachedMaxClients()` suma `clients + reservedSeats`
+    // (@colyseus/core Room.mjs:434), y en una mesa de 2 con 4 cupos el máximo alcanzable
+    // tras una caída es 1 + 1 = 2. Medido: `locked` vale `false` antes y después del drop.
+    //
+    // CUÁNDO VOLVERÍA A IMPORTAR — con `maxClients = seats.length`, la sala se auto-lockea
+    // al ocuparse el último asiento, y `joinById` muere en `room.locked` (MatchMaker.mjs:157)
+    // ANTES de mirar la reserva. El auto-unlock del core no salva: cuelga de
+    // `#_decrementClientCount`, que con una reconexión pendiente queda encadenado al rechazo
+    // de esa promesa (Room.mjs:1461-1463), o sea recién cuando la ventana vence. Durante toda
+    // la ventana, sin este `unlock()`, el dueño del asiento rebota con "room is locked".
+    //
+    // Y es el único que puede limpiar el lock EXPLÍCITO de `onReconnect` más abajo: el
+    // automático se abstiene si `_lockedExplicitly` está puesto (Room.mjs:1495).
     void this.unlock();
     this.player(playerId).connected = false;
     this.log.info("jugador desconectado", { playerId });

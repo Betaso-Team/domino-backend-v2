@@ -76,6 +76,7 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
     let match: SeatedMatch;
     const illegal: { code: string }[] = [];
     let tilesBefore = 0;
+    let phaseAtBurst = "";
 
     beforeAll(async () => {
       match = await seatPair(server, ["k1", "k2"]);
@@ -86,12 +87,17 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
       // Se espera con `act` —que compara la firma del estado— y no con un `waitUntil` sobre
       // `phase === "PRESENTING_MATCH"`: esa ventana dura `presentingMatchMs`, 120 ms en
       // test, así que un poll cada 10 ms puede llegar tarde y esperar para siempre una fase
-      // que ya pasó a FINISHED. La ráfaga rebota igual en las dos, porque las dos son
-      // "la partida no está en juego".
+      // que ya pasó a FINISHED.
       await act(match, "k1", "ABANDON");
 
       match.clients.k2?.onMessage("illegal", (payload) => illegal.push(payload));
       tilesBefore = match.serverState.currentRound?.board.tiles.length ?? 0;
+      // La fase se CAPTURA acá, en el instante del disparo, y se afirma abajo. Leerla dentro
+      // del `it` mediría el estado de después: para entonces los 120 ms de la pausa ya
+      // vencieron y la mesa está en FINISHED, así que el test diría "no está en juego" —que
+      // es cierto pero más flojo— en vez de "la ráfaga cayó DURANTE la pausa", que es lo que
+      // el spec pide medir.
+      phaseAtBurst = match.serverState.phase;
 
       for (let attempt = 0; attempt < 10; attempt += 1) {
         match.clients.k2?.send("PLAY_TILE", { left: 6, right: 6, side: "RIGHT" });
@@ -100,7 +106,8 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
       await waitUntil(() => illegal.length >= 10, 5_000);
     });
 
-    it("no toca el estado y rebota entera por regla de dominio", async () => {
+    it("cae durante PRESENTING_MATCH, no toca el estado y rebota entera por regla de dominio", async () => {
+      expect(phaseAtBurst).toBe("PRESENTING_MATCH");
       expect(match.serverState.currentRound?.board.tiles.length).toBe(tilesBefore);
       expect(illegal).toHaveLength(10);
       for (const rejection of illegal) {
