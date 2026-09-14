@@ -9183,21 +9183,88 @@ En `package.json`:
     "replay": "tsx src/replay.ts",
 ```
 
-En `register-http.ts`, sumar el endpoint de soporte:
+En `register-http.ts`, sumar el endpoint de soporte —**detrás de la llave interna, o no ponerlo**:
 
 ```ts
-  // Para soporte. Detrás de la API key interna cuando exista `auth/internal-key`.
-  app.get("/internal/matches/:matchId/history", (request, response) => {
-    const entries = (rootContainer.resolve("HistoryPort") as MemoryHistory).of(
-      request.params.matchId,
-    );
-    if (entries.length === 0) {
-      response.status(404).json({ error: "NOT_FOUND" });
+import { timingSafeEqual } from "node:crypto";
+
+const INTERNAL_KEY_HEADER = "X-Internal-Key";
+
+// Comparación en tiempo CONSTANTE. Un `===` sobre un secreto corta en el primer byte que
+// difiere, así que el tiempo de respuesta filtra la llave carácter a carácter. El guard de
+// largo es obligatorio (`timingSafeEqual` lanza si los buffers no miden lo mismo) y no filtra
+// nada que importe: el largo de la llave no es el secreto, la llave sí.
+function sameKey(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// 401 y no 404: el recurso puede existir perfectamente y lo que falta es la credencial. Es
+// middleware y no un `if` dentro del handler para que la próxima ruta `/internal/*` no pueda
+// nacer sin guardia por olvido.
+function requireInternalKey(expected: string): RequestHandler {
+  return (request, response, next) => {
+    const provided = request.get(INTERNAL_KEY_HEADER);
+    if (provided && sameKey(provided, expected)) {
+      next();
       return;
     }
-    response.json({ matchId: request.params.matchId, entries });
-  });
+    response.status(401).json({ error: "UNAUTHORIZED" });
+  };
+}
+
+// La llave entra por PARÁMETRO OBLIGATORIO, no como default (`internalApiKey = env...`) y no
+// leyendo `env` acá adentro. Con un default, pasar `undefined` vuelve a caer en el valor del
+// entorno —así es JS—, o sea que el caso "no hay llave" sería irrepresentable y su test
+// pasaría en verde contra la rama equivocada.
+export function registerInternalHistoryHttp(
+  app: Express,
+  internalApiKey: string | undefined,
+): void {
+  // FAIL CLOSED: sin llave configurada la ruta interna NO EXISTE. Registrarla igual y dejar
+  // el guard comparando contra vacío es peor que no tenerla: el operador la ve responder y
+  // cree que está protegida.
+  if (!internalApiKey) {
+    rootContainer
+      .resolve<Logger>("Logger")
+      .warn("API interna deshabilitada: falta INTERNAL_API_KEY");
+    return;
+  }
+
+  // Para soporte, detrás de la API key interna. Es el registro COMPLETO de una partida y el
+  // `matchId` es enumerable, así que sin llave cualquiera que alcance el HTTP se lleva el
+  // historial de cualquier mesa. Hoy ninguna entrada lleva información privada —`DRAW_TILE`
+  // graba el jugador y no la ficha—, pero eso es una propiedad del catálogo de HOY, no una
+  // barrera: el día que un payload cargue algo oculto, esto pasa a ser vector de trampa sin
+  // nada que lo frene. Con plata de por medio, se rechaza.
+  //
+  // El parámetro de ruta va EXPLÍCITO: con el overload de tres argumentos —path, guardia,
+  // handler— Express deja de inferir los params del literal y `request.params.matchId` pasa a
+  // ser `string | string[] | undefined`. Vitest no lo ve; `tsc --noEmit` sí.
+  app.get<{ matchId: string }>(
+    "/internal/matches/:matchId/history",
+    requireInternalKey(internalApiKey),
+    (request, response) => {
+      const entries = (rootContainer.resolve("HistoryPort") as MemoryHistory).of(
+        request.params.matchId,
+      );
+      if (entries.length === 0) {
+        response.status(404).json({ error: "NOT_FOUND" });
+        return;
+      }
+      response.json({ matchId: request.params.matchId, entries });
+    },
+  );
+}
 ```
+
+Y `registerMatchHttp(app)` la llama con `env.internalApiKey`.
+
+En `src/env.ts`, la llave: `INTERNAL_API_KEY: z.string().min(16, ...).optional()`. **Opcional y sin
+default** a propósito: un default es una llave publicada, y una llave publicada no protege nada.
+Ausente es un estado legítimo y significa *esta instancia no expone `/internal/*`*. El mínimo de
+largo sigue el mismo criterio que `JWT_SECRET`: el entorno es o la llave buena o ninguna.
 
 - [ ] **Step 6: Correr el test del replay hasta que pase**
 
