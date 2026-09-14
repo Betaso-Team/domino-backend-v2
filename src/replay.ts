@@ -75,9 +75,15 @@ if (invalidos.length > 0 || !matchId || !seed || !isTeamAssignment(teamAssignmen
   process.exit(1);
 }
 
-// Con la implementación de memoria esto solo sirve dentro del mismo proceso; el
-// adaptador de Mongo lo vuelve útil desde la consola.
-const entries: readonly HistoryEntry[] = rootContainer
+// DE DÓNDE SALE el historial lo decide el entorno del proceso, no este archivo: con
+// `MONGO_URI` configurada el container cablea el adaptador de Mongo y esto rebobina una
+// partida que jugó OTRO proceso, que es para lo que el CLI existe; sin ella cablea el de
+// memoria, y entonces solo se ve lo que grabó esta misma corrida —o sea, nada—.
+//
+// `await` en el tope del módulo, sin envolver todo en un `main()`: el paquete es ESM
+// (`"type": "module"` en package.json) y el archivo es un entrypoint, así que el
+// top-level await es válido y no le agrega un nivel de indentación al script entero.
+const entries: readonly HistoryEntry[] = await rootContainer
   .resolve<HistoryReader>("HistoryReader")
   .of(matchId);
 

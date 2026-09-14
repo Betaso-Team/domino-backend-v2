@@ -83,8 +83,8 @@ describe("DominoRoom", () => {
     await waitUntil(() => room.state.phase === "PRESENTING_MATCH");
     await room.disconnect();
 
-    expect(historyTypes(matchId)).toContain("MATCH_RESOLVED");
-    expect(historyTypes(matchId)).not.toContain("MATCH_ABORTED");
+    expect(await historyTypes(matchId)).toContain("MATCH_RESOLVED");
+    expect(await historyTypes(matchId)).not.toContain("MATCH_ABORTED");
     await Promise.all([a.leave().catch(() => 0), b.leave().catch(() => 0)]);
   });
 
@@ -96,7 +96,7 @@ describe("DominoRoom", () => {
 
     await room.disconnect();
 
-    expect(historyTypes(matchId)).toContain("MATCH_ABORTED");
+    expect(await historyTypes(matchId)).toContain("MATCH_ABORTED");
   });
 
   it("rechaza el token de reconexión de quien ya abandonó", async () => {
@@ -168,9 +168,8 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<v
   }
 }
 
-function historyTypes(matchId: string): string[] {
-  return rootContainer
-    .resolve<HistoryReader>("HistoryReader")
-    .of(matchId)
-    .map((entry) => entry.type);
+async function historyTypes(matchId: string): Promise<string[]> {
+  return (await rootContainer.resolve<HistoryReader>("HistoryReader").of(matchId)).map(
+    (entry) => entry.type,
+  );
 }

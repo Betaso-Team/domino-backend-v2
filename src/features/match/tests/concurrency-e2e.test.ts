@@ -56,7 +56,7 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
 
     // UNA sola ficha en la mesa, y una sola entrada en el historial.
     expect(match.serverState.currentRound?.board.tiles.length).toBe(1);
-    const plays = historyOf("m-concurrency-c1-concurrency-c2").filter(
+    const plays = (await historyOf("m-concurrency-c1-concurrency-c2")).filter(
       (entry) => entry.type === "PLAY_TILE",
     );
     expect(plays).toHaveLength(1);
@@ -125,11 +125,11 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
       }
     });
 
-    it("los rechazos NO entran al historial: son rastro antifraude", () => {
+    it("los rechazos NO entran al historial: son rastro antifraude", async () => {
       // El historial de ESTA mesa existe —el abandono lo escribió—, así que el cero de abajo
       // dice "no se grabó ninguna jugada" y no "no encontré la partida": con un matchId mal
       // escrito el filtro daría cero igual, y el test pasaría en vacío.
-      const entries = historyOf(MATCH_ID);
+      const entries = await historyOf(MATCH_ID);
       expect(entries.length).toBeGreaterThan(0);
       expect(entries.filter((entry) => entry.type === "PLAY_TILE")).toHaveLength(0);
     });

@@ -23,8 +23,16 @@ export class MemoryHistory implements HistoryPort, HistoryReader {
     }
   }
 
-  /** `HistoryReader`: para tests y para la consola de soporte. No es API de producto. */
-  of(matchId: string): readonly HistoryEntry[] {
-    return this.byMatch.get(matchId) ?? [];
+  /**
+   * `HistoryReader`: para tests y para la consola de soporte. No es API de producto.
+   *
+   * El cuerpo es SINCRÓNICO y la promesa se arma ya resuelta —no es un método `async`—
+   * a propósito: acá no hay nada que esperar, y escribirlo así deja a la vista que el
+   * `Promise` lo pide el PUERTO (por el adaptador de Mongo, que sí consulta) y no esta
+   * implementación. Un `async` sin un solo `await` adentro invita a leer una latencia
+   * que no existe, y a buscar una carrera acá cuando un test lee de más o de menos.
+   */
+  of(matchId: string): Promise<readonly HistoryEntry[]> {
+    return Promise.resolve(this.byMatch.get(matchId) ?? []);
   }
 }

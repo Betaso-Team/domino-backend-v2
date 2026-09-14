@@ -49,7 +49,7 @@ beforeAll(async () => {
   // final y su historial están los dos completos y en alcance, y desde la Tarea 20 jugar
   // la partida ya no pertenece a ningún test en particular. En una corrida normal es
   // no-op — solo escribe con WRITE_GOLDEN=1.
-  writeGolden("golden-2p", match);
+  await writeGolden("golden-2p", match);
 }, 30_000);
 
 afterAll(async () => {
@@ -93,7 +93,7 @@ describe("partida 2P completa", () => {
   });
 
   it("el historial de esa partida cierra con el veredicto y sin huecos de seq", async () => {
-    const entries = historyOf(MATCH_ID);
+    const entries = await historyOf(MATCH_ID);
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.map((entry) => entry.seq)).toEqual(entries.map((_, index) => index + 1));
     // El veredicto NO es la última línea: `MATCH_RESOLVED` abre la presentación de la
@@ -107,7 +107,7 @@ describe("partida 2P completa", () => {
   });
 
   it("cada DEADLINE_EXPIRED quedó registrado como evento del sistema", async () => {
-    const entries = historyOf(MATCH_ID);
+    const entries = await historyOf(MATCH_ID);
     const expirations = entries.filter((entry) => entry.type === "DEADLINE_EXPIRED");
     expect(expirations.length).toBeGreaterThan(0);
 
@@ -133,7 +133,7 @@ describe("partida 2P completa", () => {
   });
 
   it("ningún comando quedó registrado con source SYSTEM ni al revés", async () => {
-    const entries = historyOf(MATCH_ID);
+    const entries = await historyOf(MATCH_ID);
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
       if (entry.kind === "COMMAND") expect(entry.source).toBe("PLAYER");

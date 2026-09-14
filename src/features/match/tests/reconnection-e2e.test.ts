@@ -76,7 +76,7 @@ describe("reconexión — los tres caminos", () => {
 
     await waitUntil(() => reconnected, 5_000);
     await waitUntil(() => connectedOf(match.serverState, "n1") === true, 3_000);
-    expect(linesOf("m-n1-n2")).toContain("SYSTEM PLAYER_RECONNECTED");
+    expect(await linesOf("m-n1-n2")).toContain("SYSTEM PLAYER_RECONNECTED");
   });
 
   // CAMINO 2: token perdido. Mide que el asiento reservado para la reconexión no le cierre
@@ -139,7 +139,10 @@ describe("reconexión — los tres caminos", () => {
 
     // La ventana de producción son 120 s; para este test se baja por env. Hay que
     // ESPERARLA: hasta que vence, el asiento sigue reservado y no hay desconexión que leer.
-    await waitUntil(() => linesOf("m-e1-e2").includes("SYSTEM PLAYER_DISCONNECTED"), 10_000);
+    await waitUntil(
+      async () => (await linesOf("m-e1-e2")).includes("SYSTEM PLAYER_DISCONNECTED"),
+      10_000,
+    );
 
     // NO fue expulsado del juego: sigue siendo jugador, y la partida sigue en pie.
     expect(match.serverState.players.find((p) => p.playerId === "e1")?.hasAbandoned).toBe(false);

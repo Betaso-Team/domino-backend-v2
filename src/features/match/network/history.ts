@@ -44,17 +44,23 @@ export interface HistoryPort {
 //
 // Existe como puerto y no como un cast porque el cast era una MENTIRA que tsc no podía
 // ver: `resolve("HistoryPort") as MemoryHistory` afirma la implementación concreta sobre
-// un token cuyo tipo declarado solo promete `record`. El día que "HistoryPort" quede
-// registrado contra el adaptador de Mongo —que es el plan, ver arriba—, el cast sigue
-// compilando y el endpoint revienta en runtime con `of is not a function`. Con el puerto
-// aparte, ese día el que no compila es el registro, que es donde está la decisión.
+// un token cuyo tipo declarado solo promete `record`. Con "HistoryPort" ya registrado
+// contra el adaptador de Mongo, el cast seguiría compilando y el endpoint reventaría en
+// runtime con `of is not a function`. Con el puerto aparte, el que no compila es el
+// registro, que es donde está la decisión.
 //
-// Devuelve el arreglo YA GRABADO, sin promesa, por la misma razón que `record`: los dos
-// llamadores de hoy son sincrónicos. Cuando Mongo entre, el que cambia de forma es este
-// —y sus dos llamadores, que están contados— y no `record`, que corre en el camino del
-// comando y no puede esperar a nadie.
+// PROMETE, y es la ASIMETRÍA con `record` lo que hay que leer acá, no el `Promise`. Los
+// dos lados tienen dueños distintos: `record` corre en el camino de un comando y en el de
+// un timer —ninguno espera, y que la base falle no puede frenar una partida—, mientras que
+// `of` lo llama el operador de soporte, que no tiene nada que hacer salvo esperar la
+// respuesta. Un lector sincrónico obligaba al adaptador de Mongo a tener la partida ya
+// cargada en memoria, que es exactamente lo que la persistencia vino a dejar de exigir.
+//
+// Devolver la promesa NO le cambia la semántica a `MemoryHistory`: su `of` sigue
+// resolviendo con lo que ya tiene, sin un tick de espera real. Lo que cambia es que el
+// llamador no puede volver a asumir que leer el historial es gratis.
 export interface HistoryReader {
-  of(matchId: string): readonly HistoryEntry[];
+  of(matchId: string): Promise<readonly HistoryEntry[]>;
 }
 
 // Grabador PER-PARTIDA. Lo arma el wiring; la sala solo lo usa.

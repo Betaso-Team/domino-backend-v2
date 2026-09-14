@@ -57,7 +57,7 @@ describe("registerInternalHistoryHttp", () => {
 
     registerInternalHistoryHttp(app, {
       logger,
-      history: { of: () => [] },
+      history: { of: () => Promise.resolve([]) },
       internalApiKey: undefined,
     });
 

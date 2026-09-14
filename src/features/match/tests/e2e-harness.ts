@@ -36,9 +36,17 @@ export async function bootServer(port: number): Promise<ColyseusTestServer> {
   return boot(testConfig, port);
 }
 
-export async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+// El predicado puede ser ASÍNCRONO, y no es generalidad gratis: desde que el lector del
+// historial promete (`HistoryReader.of`), esperar a que aparezca una línea grabada —lo que
+// hace deal-window-e2e con `linesOf`— es inexpresable con un predicado sincrónico. Los
+// predicados que devuelven un booleano pelado siguen andando sin tocarlos: `await` sobre un
+// no-thenable resuelve con el mismo valor.
+export async function waitUntil(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 5_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (Date.now() > deadline) throw new Error("waitUntil: se agotó el plazo");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -166,12 +174,17 @@ export async function act(
   await waitUntil(() => signatureOf(match.serverState) !== before);
 }
 
-export function historyOf(matchId: string): readonly HistoryEntry[] {
+// PROMETEN porque el puerto promete, no porque acá haya algo que esperar: en la suite el
+// que está detrás del token es `MemoryHistory`, que resuelve con lo que ya tiene. El
+// `await` en las aserciones es el precio de medir el MISMO contrato que usa producción —un
+// helper sincrónico acá exigiría que el arnés resolviera la implementación concreta, que es
+// el cast que `HistoryReader` vino a eliminar (ver network/history.ts).
+export function historyOf(matchId: string): Promise<readonly HistoryEntry[]> {
   return rootContainer.resolve<HistoryReader>("HistoryReader").of(matchId);
 }
 
-export function linesOf(matchId: string): string[] {
-  return historyOf(matchId).map((entry) => `${entry.source} ${entry.type}`);
+export async function linesOf(matchId: string): Promise<string[]> {
+  return (await historyOf(matchId)).map((entry) => `${entry.source} ${entry.type}`);
 }
 
 const GOLDEN_DIR = fileURLToPath(new URL("fixtures", import.meta.url));
@@ -190,14 +203,14 @@ const GOLDEN_DIR = fileURLToPath(new URL("fixtures", import.meta.url));
 // por `env`, nunca leyendo el entorno a mano: env.ts es el único lector permitido de la
 // configuración del proceso, y env-single-reader.test.ts se pone rojo si alguien lo saltea
 // —incluso escribiendo el nombre de esa variable global en un comentario como éste—.
-export function writeGolden(name: string, match: SeatedMatch): void {
+export async function writeGolden(name: string, match: SeatedMatch): Promise<void> {
   if (!env.writeGolden) return;
   const meta = configOf(match.options);
   const payload = {
     meta,
     globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
     startedAt: match.serverState.startedAt,
-    entries: historyOf(meta.matchId),
+    entries: await historyOf(meta.matchId),
     finalState: match.serverState.toJSON(),
   };
   mkdirSync(GOLDEN_DIR, { recursive: true });

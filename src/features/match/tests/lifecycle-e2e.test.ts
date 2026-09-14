@@ -47,12 +47,12 @@ describe("ciclo de vida de una partida", () => {
     expect(match.serverState.phase).toBe("PRESENTING_MATCH");
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
-    expect(linesOf("m-a1-a2")).toEqual([
+    expect(await linesOf("m-a1-a2")).toEqual([
       "PLAYER ABANDON",
       "SYSTEM MATCH_RESOLVED",
       "SYSTEM DEADLINE_EXPIRED",
     ]);
-    const resolved = historyOf("m-a1-a2").find((entry) => entry.type === "MATCH_RESOLVED");
+    const resolved = (await historyOf("m-a1-a2")).find((entry) => entry.type === "MATCH_RESOLVED");
     expect(resolved?.payload).toEqual({ winnerTeamId: "B", reason: "ABANDONMENT" });
   });
 
@@ -61,7 +61,7 @@ describe("ciclo de vida de una partida", () => {
     await act(match, "s1", "ABANDON");
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
-    const seqs = historyOf("m-s1-s2").map((entry) => entry.seq);
+    const seqs = (await historyOf("m-s1-s2")).map((entry) => entry.seq);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
     expect(seqs).toEqual(seqs.map((_, index) => index + 1));
   });
@@ -74,7 +74,7 @@ describe("ciclo de vida de una partida", () => {
 
     await waitUntil(() => illegal.length > 0);
     expect(illegal[0]).toEqual({ code: "UNKNOWN_COMMAND" });
-    expect(historyOf("m-r1-r2")).toHaveLength(0);
+    expect(await historyOf("m-r1-r2")).toHaveLength(0);
     expect(match.serverState.phase).toBe("PLAYING");
   });
 
@@ -95,7 +95,9 @@ describe("ciclo de vida de una partida", () => {
     await server.sdk.joinById(match.roomId);
     await waitUntil(() => server.getRoomById(match.roomId).clients.length === 2);
 
-    expect(linesOf("m-d1-d2").filter((line) => line.includes("PLAYER_DISCONNECTED"))).toEqual([]);
+    expect(
+      (await linesOf("m-d1-d2")).filter((line) => line.includes("PLAYER_DISCONNECTED")),
+    ).toEqual([]);
   });
 
   it("quien no tiene asiento no entra", async () => {

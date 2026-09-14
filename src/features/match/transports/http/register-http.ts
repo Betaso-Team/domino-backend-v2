@@ -168,10 +168,16 @@ export function registerInternalHistoryHttp(
   app.get(
     HISTORY_ROUTE,
     requireInternalKey(internalApiKey),
-    validated({ params: HISTORY_PARAMS }, ({ params }, response) => {
+    validated({ params: HISTORY_PARAMS }, async ({ params }, response) => {
       // Contra `HistoryReader` y no contra la implementación: el cast a `MemoryHistory`
       // que estaba acá compilaba una promesa que el token no hacía.
-      const entries = history.of(params.matchId);
+      //
+      // El `await` es el único cambio que la persistencia le pidió a esta ruta, y no lleva
+      // `try`/`catch`: si la consulta a Mongo revienta, `validated` reenvía el rechazo a
+      // `next` y `httpErrorHandler` responde 500. Tragarlo acá devolvería el mismo 404 que
+      // "esa partida no existe", y en un endpoint de soporte confundir "la base no
+      // contesta" con "no hay nada" manda al operador a investigar la mesa equivocada.
+      const entries = await history.of(params.matchId);
       if (entries.length === 0) {
         response.status(404).json({ error: "NOT_FOUND" });
         return;
