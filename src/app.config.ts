@@ -73,6 +73,11 @@ const rooms = { domino: defineRoom(DominoRoom) };
 // que mandarle a pm2, que lo reiniciaría en bucle al vencer su `listen_timeout`—. Es
 // comportamiento de Colyseus y no algo que se decida acá; lo que este chequeo cubre es el otro
 // caso, que es el común: Redis que se cae con el proceso ya levantado.
+//
+// LO QUE SÍ CAMBIÓ es que ese arranque colgado ya no es ETERNO: `src/main.ts` le puso plazo, y al
+// vencerse la instancia lo dice y se muere con 1 en vez de quedar viva sin servidor. No es un
+// chequeo de dependencias —no distingue un Redis caído de un puerto ocupado— y no tiene por qué:
+// las dos cosas son "esta instancia no llegó a escuchar", que es una sola respuesta.
 // Los dos alias locales NO son cosmética: tsc no estrecha un binding IMPORTADO adentro de una
 // clausura —no puede probar que el módulo de origen no lo reasigne— así que `mongo.ping()`
 // dentro de la flecha no compila aunque el ternario de afuera ya lo haya descartado. Con la

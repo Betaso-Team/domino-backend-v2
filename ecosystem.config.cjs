@@ -41,6 +41,15 @@ module.exports = {
       // que se está arrancando. Sin esto, arrancarlo parado en otra carpeta levanta el código de
       // una release y la configuración de otra, sin un solo error.
       cwd: __dirname,
+      // CON QUÉ NODE CORRE LA APP. Por defecto, el de pm2 — que es el del DEMONIO y no el de
+      // quien despliega, y puede no ser el que probó la suite: truco encontró un servidor donde
+      // el demonio corría con un node 20 del sistema mientras el CI y el Dockerfile usaban el 22,
+      // y colyseus 0.18 declara `"node": ">= 22.x"`. Ponerlo es lo que da paridad; no ponerlo es
+      // aceptar el de pm2, que `engines` acota por abajo y `src/entrypoint.test.ts` pinea.
+      //
+      // Es opcional a propósito: en una máquina donde el demonio ya corre el node correcto,
+      // fijarlo obligaría a actualizar esto en cada upgrade de node.
+      ...(process.env.NODE_INTERPRETER ? { interpreter: process.env.NODE_INTERPRETER } : {}),
       time: true,
       watch: false,
       exec_mode: "fork",

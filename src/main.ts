@@ -40,7 +40,50 @@ process.on("unhandledRejection", (reason) => {
 //
 // El `process.send('ready')` que pm2 espera (`wait_ready`) NO se manda acá: ya lo manda
 // `@colyseus/tools` al final de su `listen()`, y mandarlo dos veces sería ruido, no una red.
-const server = await listen(app, env.port);
+//
+// NO PODER ESCUCHAR ES TERMINAL: no hay servidor, así que se dice y se SALE. Sin esto el proceso
+// queda vivo para siempre sin atender a nadie, y bajo un supervisor eso es peor de lo que suena:
+// pm2 muestra la instancia `online` —su "online" no es salud, la salud la contesta `/ready`— y
+// Docker con `restart: unless-stopped` deja el contenedor arriba, que es justo el estado que
+// nadie reinicia. Truco lo encontró desplegando (`3d3eb0f`).
+//
+// Y ACÁ EL AGUJERO ES PEOR QUE EL DE TRUCO, medido sobre `node dist/main.js` con el puerto ya
+// ocupado: `listen()` NO RECHAZA. Se queda colgada. Comprobado instrumentando el bundle — no se
+// alcanza ningún `catch`, no dispara `uncaughtException` y no dispara `unhandledRejection`; el
+// proceso seguía corriendo a los 30 s y hubo que matarlo, con Redis configurado y sin él. La
+// causa está en dos archivos de Colyseus que se contradicen: `@colyseus/ws-transport` se
+// suscribe al `'error'` del servidor HTTP EN SU CONSTRUCTOR y solo lo IMPRIME
+// (`WebSocketTransport.mjs:66`, `debugAndPrintError`), mientras que el `reject` de la promesa lo
+// registra `@colyseus/core` ADENTRO del callback de `'listening'` (`Server.mjs:89-91`) — el
+// callback que un `EADDRINUSE` justamente nunca dispara. Así que el error se consume, se imprime
+// crudo y no llega a nadie: por eso el `.catch()` que truco agregó tampoco cubriría este caso.
+//
+// POR ESO EL PLAZO, y no un `catch` solo. El `catch` se queda porque es correcto para todo lo que
+// SÍ rechaza; el plazo es lo que cubre la familia entera de "nunca llegó a escuchar", que incluye
+// la otra que este repo ya tenía documentada: con `REDIS_URL` apuntando a un Redis caído, ioredis
+// reintenta para siempre, `matchMaker.setup()` no resuelve y `listen()` tampoco termina
+// (§`src/app.config.ts`). Arrancar no es una operación sin plazo.
+//
+// VEINTE SEGUNDOS, y el número sale de los dos supervisores: pm2 corta a los 10 s por su
+// `listen_timeout` y reinicia, así que bajo pm2 este plazo no llega a correr nunca —y está bien:
+// ahí ya hay alguien mirando—. El que no tiene plazo es Docker, y es el despliegue por default de
+// este repo. El temporizador va `unref`eado para no sostener el event loop de un arranque sano.
+const PLAZO_DE_ARRANQUE_MS = 20_000;
+
+const morirSinServidor = (error: unknown): never => {
+  logger.error("no se pudo escuchar: esta instancia no tiene servidor", { error: String(error) });
+  process.exit(1);
+};
+
+const server = await Promise.race([
+  listen(app, env.port),
+  new Promise<never>((_, rechazar) => {
+    setTimeout(
+      () => rechazar(new Error(`no llegó a escuchar en ${PLAZO_DE_ARRANQUE_MS} ms`)),
+      PLAZO_DE_ARRANQUE_MS,
+    ).unref();
+  }),
+]).catch(morirSinServidor);
 logger.info("servidor escuchando", {
   instancia: env.instanceIndex ?? "única",
   puerto: env.listeningPort,

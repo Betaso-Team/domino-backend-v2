@@ -49,3 +49,43 @@ describe("el entrypoint se llama igual en todos lados", () => {
     expect(read("ecosystem.config.cjs")).toContain("module.exports");
   });
 });
+
+// EL PISO DE NODE es lo MISMO que el nombre del entrypoint: está escrito en lugares que no se
+// importan entre sí y ninguno rompe el gate al desincronizarse. `tsc` no lee el `engines`, y el
+// `FROM node:22-alpine` del Dockerfile no lo lee nadie.
+//
+// Y tiene un modo de falla que ya cobró en truco: EL NODE DE pm2 ES EL DEL DEMONIO, no el de
+// quien despliega ni el que corrió la suite. En su servidor el demonio corría con un node 20 del
+// sistema mientras el CI y la imagen usaban el 22, y colyseus 0.18 pide 22. Por eso
+// `ecosystem.config.cjs` acepta un intérprete explícito y `engines` dice el piso en voz alta:
+// un `npm ci` con un node más viejo avisa, un pm2 con un node más viejo no.
+const nodeMajorFloor = (range: string): number => {
+  const match = /(\d+)/.exec(range);
+  if (!match?.[1]) throw new Error(`no se pudo leer el piso de node de "${range}"`);
+  return Number(match[1]);
+};
+
+describe("el piso de node se dice en voz alta y en todos lados", () => {
+  // CONTRA LA DEPENDENCIA Y NO CONTRA UN NÚMERO ESCRITO A MANO: así un bump de colyseus que
+  // suba SU piso pone esto rojo en el gate, que es el único lugar barato donde enterarse.
+  it("`engines` no promete menos de lo que colyseus exige", () => {
+    const nuestro = nodeMajorFloor(JSON.parse(read("package.json")).engines.node);
+    const suyo = nodeMajorFloor(
+      JSON.parse(read("node_modules/colyseus/package.json")).engines.node,
+    );
+    expect(nuestro).toBeGreaterThanOrEqual(suyo);
+  });
+
+  it("la imagen no construye con un node por debajo de ese piso", () => {
+    const nuestro = nodeMajorFloor(JSON.parse(read("package.json")).engines.node);
+    const imágenes = [...read("Dockerfile").matchAll(/FROM node:(\d+)/g)].map((m) => Number(m[1]));
+    expect(imágenes.length).toBeGreaterThan(0);
+    for (const mayor of imágenes) expect(mayor).toBeGreaterThanOrEqual(nuestro);
+  });
+
+  // pm2 tiene que poder recibir el intérprete: es la única de las cuatro puertas donde el node
+  // no lo elige ni el repo ni la imagen.
+  it("pm2 acepta un intérprete explícito", () => {
+    expect(read("ecosystem.config.cjs")).toContain("interpreter");
+  });
+});
