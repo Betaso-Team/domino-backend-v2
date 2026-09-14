@@ -2,14 +2,7 @@ import { CloseCode } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state/index.js";
-import {
-  type SeatedMatch,
-  bootServer,
-  linesOf,
-  rejoinAs,
-  seatPair,
-  waitUntil,
-} from "./e2e-harness.js";
+import { bootServer, clientOf, linesOf, rejoinAs, seatPair, waitUntil } from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
@@ -141,15 +134,6 @@ describe("reconexión — los tres caminos", () => {
     expect(match.serverState.phase).toBe("PLAYING");
   });
 });
-
-// El cliente de un asiento, o un fallo con nombre. `SeatedMatch.clients` está indexado por
-// string, así que leerlo devuelve `T | undefined` y cada uso pediría un `?.` que convierte
-// "el asiento no existe" en "no pasó nada" — y un test que no hace nada es un test verde.
-function clientOf(match: SeatedMatch, playerId: string): SeatedMatch["clients"][string] {
-  const client = match.clients[playerId];
-  if (!client) throw new Error(`sin cliente para el asiento ${playerId}`);
-  return client;
-}
 
 const seenTilesOf = (state: MatchState, playerId: string) =>
   state.players.find((player) => player.playerId === playerId)?.hasSeenTiles;

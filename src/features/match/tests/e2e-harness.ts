@@ -30,6 +30,8 @@ export function casualTable(seats: string[], seed = "seed-e2e"): DominoRoomOptio
   };
 }
 
+// Puertos E2E reservados: lifecycle 2585, game-2p 2586, visibility 2587,
+// concurrency 2588, reconnection 2589. Deal-window usará 2590 en la Tarea 23.
 export async function bootServer(port: number): Promise<ColyseusTestServer> {
   return boot(testConfig, port);
 }
@@ -91,9 +93,9 @@ export async function revealHands(match: SeatedMatch): Promise<void> {
   await waitUntil(() => match.serverState.currentRound?.phase === "PLAYING");
 }
 
-// El camino del que perdió su token: vuelve por roomId. Es lo que verifica que el
-// unlock() de onDrop funciona — sin él, el matchmaker rechaza este join porque la
-// sala cuenta el asiento reservado.
+// El camino del que perdió su token: vuelve por roomId. El matchmaker admite este join
+// porque `maxClients = seats.length * 2`; no verifica el `unlock()` de `onDrop`, pues con
+// esa capacidad la sala no llega a lockearse durante la reserva.
 //
 // El `waitForInitialState()` no es adorno: `connectTo` del arnés de testing lo hace por
 // dentro y `joinById` no. Sin él, `join()` resuelve con el handshake y el estado completo
@@ -113,6 +115,21 @@ export async function rejoinAs(
   const room = await server.sdk.joinById<MatchState>(roomId);
   await room.waitForInitialState();
   return room;
+}
+
+// El cliente de un asiento, o un fallo con nombre. `SeatedMatch.clients` está indexado por
+// string, así que leerlo devuelve `T | undefined`; el optional chaining convertiría un
+// asiento mal escrito en un test que no hace nada.
+export function clientOf(match: SeatedMatch, playerId: string): SeatedMatch["clients"][string] {
+  const client = match.clients[playerId];
+  if (!client) throw new Error(`sin cliente para el asiento ${playerId}`);
+  return client;
+}
+
+export function turnHolderOf(match: SeatedMatch): string {
+  const playerId = match.serverState.currentRound?.currentTurn?.playerId;
+  if (!playerId) throw new Error("la ronda no tiene turno asignado");
+  return playerId;
 }
 
 // La PRIMERA jugada legal del que la pide, ya en la forma del payload de `PLAY_TILE`.

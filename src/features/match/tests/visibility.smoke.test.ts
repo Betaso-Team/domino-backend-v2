@@ -8,13 +8,14 @@ import {
   rejoinAs,
   revealHands,
   seatPair,
+  turnHolderOf,
   waitUntil,
 } from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
 beforeAll(async () => {
-  server = await bootServer(2586);
+  server = await bootServer(2587);
 });
 
 afterAll(async () => {
@@ -88,8 +89,7 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     await revealHands(match);
     await awaitDealtHands(match, ["z1", "z2"]);
 
-    const turnHolder = match.serverState.currentRound?.currentTurn?.playerId;
-    if (!turnHolder) throw new Error("sin turno en curso");
+    const turnHolder = turnHolderOf(match);
     // La jugada se elige sobre la vista DEL QUE JUEGA: si el cliente no pudiera derivarla
     // de lo que recibió, este test no tendría de dónde sacarla — que es la otra mitad de
     // lo que el smoke afirma.

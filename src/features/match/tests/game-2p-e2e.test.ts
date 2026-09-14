@@ -23,7 +23,7 @@ let match: SeatedMatch;
 // correría solo y leería un historial vacío, y una caída del primero se manifestaría como
 // tres fallos más que no señalan la causa.
 beforeAll(async () => {
-  server = await bootServer(2587);
+  server = await bootServer(2586);
   match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
   await revealHands(match);
 

@@ -12,7 +12,7 @@ import {
 import { rootContainer } from "../../../../di-container.js";
 import type { Logger } from "../../../../logger.js";
 import { InvalidTokenError, type TokenVerifier } from "../../../auth/index.js";
-import type { GlobalDominoConfig } from "../../core/config.js";
+import { DEFAULT_GLOBAL_CONFIG, type GlobalDominoConfig } from "../../core/config.js";
 import { RuleViolationError } from "../../core/engine/errors.js";
 import type { SchemaVisibilityController } from "../../core/engine/visibility.js";
 import type { PlayerId } from "../../core/ids.js";
@@ -42,10 +42,10 @@ import { StateViewVisibilityController } from "./visibility.js";
 export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private seats: readonly PlayerId[] = [];
   // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
-  // El default repite el del env a propósito: si algún día `onDrop` corriera antes de que
+  // El default reutiliza el global: si algún día `onDrop` corriera antes de que
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
   // perdería el asiento en el acto.
-  private reconnectionWindowSeconds = 120;
+  private reconnectionWindowSeconds = DEFAULT_GLOBAL_CONFIG.reconnectionWindowSeconds;
   private catalog!: CommandCatalog;
   private notifier!: MatchEventNotifier;
   private scheduler!: RoomTimeoutScheduler;

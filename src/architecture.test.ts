@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 // Dos features desechables usadas solo para violar reglas a propósito. Nunca se commitean:
@@ -37,6 +37,58 @@ function writeFile(path: string, source: string): void {
 
 function writeViolation(source: string): void {
   writeFile(VIOLATION_FILE, source);
+}
+
+// Se miden PALABRAS CLAVE, no menciones: los comentarios se borran antes de buscar.
+// Se recorre el archivo para no confundir el `//` de una URL dentro de un string con un
+// comentario. Los strings se conservan para errar hacia un rojo visible, nunca hacia un
+// verde silencioso, si contienen `async`/`await` o si aparece una sintaxis no contemplada.
+function withoutComments(source: string): string {
+  let out = "";
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (char === "/" && next === "/") {
+      while (index < source.length && source[index] !== "\n") index += 1;
+      // Load-bearing: sin el espacio, `x/*c*/async` se fusiona en `xasync` y escapa de
+      // `\basync\b`. Ambos tipos de comentario deben conservar la frontera léxica.
+      out += " ";
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      index += 2;
+      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
+        index += 1;
+      }
+      index += 2;
+      out += " ";
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      out += char;
+      index += 1;
+      while (index < source.length) {
+        const inner = source[index];
+        out += inner;
+        index += 1;
+        // La barra invertida se lleva puesto al siguiente sea cual sea: así una comilla
+        // escapada no cierra el string y el escáner no se desincroniza.
+        if (inner === "\\") {
+          if (index < source.length) {
+            out += source[index];
+            index += 1;
+          }
+          continue;
+        }
+        if (inner === char) break;
+      }
+      continue;
+    }
+    out += char;
+    index += 1;
+  }
+  return out;
 }
 
 afterEach(() => {
@@ -114,9 +166,7 @@ describe("reglas de arquitectura", () => {
   // Esta regla NO la puede aplicar dependency-cruiser: mira el grafo de imports, y la
   // asincronía es sintaxis del cuerpo del archivo. Por eso es un test de arquitectura sin
   // depcruise detrás, y de paso no le suma un segundo a los ~17 s que ya cuestan los otros.
-  it("no hay await ni async en el core del engine ni en los comandos", async () => {
-    const { readdirSync, readFileSync, statSync } = await import("node:fs");
-
+  it("no hay await ni async en el core del engine ni en los comandos", () => {
     const walk = (dir: string): string[] =>
       readdirSync(dir).flatMap((entry) => {
         const path = `${dir}/${entry}`;
@@ -132,74 +182,6 @@ describe("reglas de arquitectura", () => {
     // La red tiene que estar tendida sobre algo: si un refactor mueve estas carpetas, el
     // walk devuelve vacío y `offenders` sale vacío por la razón equivocada.
     expect(scanned.length).toBeGreaterThan(20);
-
-    // Se miden PALABRAS CLAVE, no menciones: los comentarios se borran antes de buscar.
-    // No es relajar la regla, es apuntarla — `core/command.ts` ya documenta el contrato con
-    // la frase "si no hay await", y el día que ese párrafo se mude a `core/commands/` el
-    // grep crudo se pondría rojo sin que exista una sola espera real. Un guardarraíl que
-    // falla por prosa es un guardarraíl que alguien termina borrando.
-    //
-    // SE RECORRE EL ARCHIVO, no se le pasan dos regex. Un `.replace(/\/\/[^\n]*/g, " ")`
-    // no distingue el `//` de un comentario del de una URL adentro de un string, así que
-    // una sola línea alcanzaba para pasar por abajo del guardarraíl:
-    //
-    //     const DOCS = "https://docs.colyseus.io/room"; async function hidden() { ... }
-    //
-    // El `//` de `https://` abría un "comentario" que se comía el resto de la línea —el
-    // `async` incluido— y el test daba VERDE con asincronía real en core/commands.
-    //
-    // Los strings se CONSERVAN en la salida a propósito: un `async` escrito adentro de uno
-    // sigue contando como ofensor. La regla acá es que la palabra no aparezca en el archivo,
-    // y errar hacia el rojo es gratis —se borra el string— mientras que errar hacia el verde
-    // es justo lo que este test existe para no hacer. Por eso tampoco se reconocen literales
-    // de regex (hoy no hay ninguno en estas carpetas): si apareciera uno con comillas, la
-    // comilla abriría un string sin cerrar y el archivo quedaría entero en la salida — rojo
-    // visible, nunca verde silencioso.
-    const withoutComments = (source: string): string => {
-      let out = "";
-      let index = 0;
-      while (index < source.length) {
-        const char = source[index];
-        const next = source[index + 1];
-        if (char === "/" && next === "/") {
-          while (index < source.length && source[index] !== "\n") index += 1;
-          out += " ";
-          continue;
-        }
-        if (char === "/" && next === "*") {
-          index += 2;
-          while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
-            index += 1;
-          }
-          index += 2;
-          out += " ";
-          continue;
-        }
-        if (char === '"' || char === "'" || char === "`") {
-          out += char;
-          index += 1;
-          while (index < source.length) {
-            const inner = source[index];
-            out += inner;
-            index += 1;
-            // La barra invertida se lleva puesto al siguiente sea cual sea: así una comilla
-            // escapada no cierra el string y el escáner no se desincroniza.
-            if (inner === "\\") {
-              if (index < source.length) {
-                out += source[index];
-                index += 1;
-              }
-              continue;
-            }
-            if (inner === char) break;
-          }
-          continue;
-        }
-        out += char;
-        index += 1;
-      }
-      return out;
-    };
 
     const offenders = scanned.filter((path) => {
       const source = withoutComments(readFileSync(path, "utf8"));
