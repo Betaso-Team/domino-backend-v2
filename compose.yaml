@@ -93,9 +93,15 @@ services:
     #
     # Lo que NO es: una garantía de que mongod acepte conexiones. Sin `condition:
     # service_healthy` esto espera a que el CONTENEDOR arranque, nada más. Que el orden igual no
-    # importe lo sigue dando la conexión perezosa de `src/shared/mongo.ts` —el proceso levanta
-    # con la base caída y el primer documento paga la espera—, y el dominó no tiene `/ready`
-    # para decir cuándo llegó.
+    # importe lo sigue dando la conexión perezosa de `src/shared/mongo.ts`: el proceso levanta
+    # con la base caída y el primer documento paga la espera.
+    #
+    # Y AHORA SÍ HAY UN `/ready` QUE DICE CUÁNDO LLEGÓ (`src/shared/http/health.ts`), pero NO ES
+    # PARA ESTO y por eso el `depends_on` no cambia: su consumidor es el balanceador que reparte
+    # jugadores entre varias instancias, no compose, que no sabe consultarlo sin un `healthcheck`
+    # declarado acá. Engancharlo como healthcheck del servicio haría que `docker compose up`
+    # esperara a Mongo para dar el servidor por listo — justo lo contrario de la conexión
+    # perezosa, que existe para que una base lenta no impida jugar.
     #
     # Lo que sí compra, gratis: `docker compose up domino` se trae Mongo, el apagado va en
     # orden, y la ventana en la que un lote de historial se pierde queda lo más corta posible
