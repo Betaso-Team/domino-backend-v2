@@ -15,10 +15,10 @@
 // opcional que nadie escribe es peor que no tenerlo: hace creer que el replay puede
 // autoverificarse contra producción cuando no puede.
 import { rootContainer } from "./di-container.js";
-import type { TeamAssignmentMode } from "./features/match/core/config.js";
+import type { GlobalDominoConfig, TeamAssignmentMode } from "./features/match/core/config.js";
 import { replay } from "./features/match/history/replay.js";
-import type { HistoryEntry } from "./features/match/network/history.js";
-import type { MemoryHistory } from "./features/match/network/transports/memory-history.js";
+import type { HistoryEntry, HistoryReader } from "./features/match/network/history.js";
+import { type DominoRoomOptions, configOf } from "./features/match/transports/match-contract.js";
 import { logger } from "./logger.js";
 
 const USAGE =
@@ -43,44 +43,75 @@ function isTeamAssignment(value: string | undefined): value is TeamAssignmentMod
   return value === "SHUFFLED" || value === "SEAT_ORDER";
 }
 
-if (
-  !matchId ||
-  !seed ||
-  !Number.isInteger(pointsToWin) ||
-  pointsToWin <= 0 ||
-  !isTeamAssignment(teamAssignment) ||
-  seats.length === 0
-) {
-  logger.error(USAGE);
+// Se acumulan TODOS los argumentos inválidos y se listan juntos. Con el `if` booleano que
+// había, cinco argumentos mal daban el mismo USAGE genérico que uno solo, y el operador
+// —que llega acá con una partida que no puede rebobinar— los descubría de a uno por
+// corrida. No hay parser de argumentos de por medio a propósito: son cinco posiciones
+// fijas, y una dependencia para esto es más superficie de la que ahorra.
+const invalidos: string[] = [];
+if (!matchId) invalidos.push("matchId: falta");
+if (!seed) invalidos.push("seed: falta");
+if (!Number.isInteger(pointsToWin) || pointsToWin <= 0) {
+  invalidos.push(`pointsToWin: se esperaba un entero > 0, llegó "${process.argv[4] ?? ""}"`);
+}
+if (!isTeamAssignment(teamAssignment)) {
+  invalidos.push(
+    `teamAssignment: se esperaba SHUFFLED|SEAT_ORDER, llegó "${teamAssignment ?? ""}"`,
+  );
+}
+// DOS asientos como mínimo, no uno: el dominó no tiene modo solitario, y con un solo
+// asiento el reparto y el `teamAssignment` describen una mesa que nunca existió. El CLI
+// aceptaba `seats.length === 0` como único rechazo, así que un asiento suelto llegaba
+// hasta el motor y rebobinaba contra un config imposible.
+if (seats.length < 2) invalidos.push(`asientos: se esperaban al menos 2, llegaron ${seats.length}`);
+
+// `process.exit` devuelve `never`, así que salir por acá ESTRECHA los tipos abajo — pero
+// solo para las condiciones escritas EN el `if`. `invalidos.length > 0` es opaco para tsc:
+// no le dice nada sobre `matchId` ni sobre `teamAssignment`. Por eso las tres condiciones
+// que estrechan se repiten: no es defensa duplicada —son inalcanzables con el arreglo
+// vacío—, es lo que permite que el config de abajo se arme sin un solo cast.
+if (invalidos.length > 0 || !matchId || !seed || !isTeamAssignment(teamAssignment)) {
+  logger.error(USAGE, { invalidos });
   process.exit(1);
 }
 
 // Con la implementación de memoria esto solo sirve dentro del mismo proceso; el
 // adaptador de Mongo lo vuelve útil desde la consola.
-const entries: readonly HistoryEntry[] = (rootContainer.resolve("HistoryPort") as MemoryHistory).of(
-  matchId,
-);
+const entries: readonly HistoryEntry[] = rootContainer
+  .resolve<HistoryReader>("HistoryReader")
+  .of(matchId);
 
 if (entries.length === 0) {
   logger.error("no hay historial para esa partida", { matchId });
   process.exit(1);
 }
 
+// El config sale de `configOf` y NO se arma a mano acá. Escrito a mano decía "igual que en
+// `configOf`" en un comentario, que es la misma regla en dos lugares obligada a coincidir
+// sin que nada lo verifique — el smell exacto que esta tarea vino a cerrar en el grafo de
+// actores. Un campo nuevo en `DominoMatchConfig`, o el día que `isDealWindowEnabled` deje
+// de estar siempre encendida, le daban al CLI una partida distinta de la que la sala jugó,
+// en silencio y sin que tsc dijera nada. Ahora la mesa se describe en el vocabulario de
+// matchmaking (`DominoRoomOptions`) y la traducción la hace el único que sabe hacerla.
+const options: DominoRoomOptions = {
+  mode: "CASUAL",
+  matchId,
+  gameModeId: "replay",
+  seats,
+  seed,
+  pointsToWin,
+  teamAssignment,
+};
+
 logger.info("rebobinando", { matchId, entries: entries.length });
 const state = replay({
-  meta: {
-    matchId,
-    gameModeId: "replay",
-    seed,
-    seats,
-    pointsToWin,
-    teamAssignment,
-    // Igual que en `configOf`: la ventana de reparto está encendida en TODA mesa, porque
-    // es control de presencia anti-fraude y no una opción del modo. Con `false` el motor
-    // del replay arrancaría en `PLAYING` y los `REVEAL_TILES` del historial caerían con
-    // `NOT_DEALING` — es decir, no reproduciría nada.
-    isDealWindowEnabled: true,
-  },
+  meta: configOf(options),
+  // El MISMO `globalConfig` que el container del proceso derivó de `env`. Sin esto el
+  // replay caía a `DEFAULT_GLOBAL_CONFIG` y le estampaba a una partida real plazos que
+  // nunca tuvo —y un `extraTimeRemainingMs` inventado, que es estado observable del árbol
+  // impreso—. Es el mismo riesgo que `writeGolden` ya había cerrado guardando el
+  // `globalConfig` en el fixture; acá estaba abierto.
+  globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
   // Sin `startedAt`: el instante de arranque vive en `match_meta`, que todavía no existe.
   // El replay cae al de la primera entrada, así que `startedAt` es lo único del árbol
   // impreso que no es el de la partida real.
