@@ -59,9 +59,11 @@ npm run build
 PM2_INSTANCES=2 pm2 start ecosystem.config.cjs
 ```
 
-`PM2_INSTANCES` (y `PM2_APP_NAME`, el nombre del proceso) las lee **pm2**, no `src/env.ts`, así
-que no están en `.env.example` — ese archivo documenta al único lector de `process.env`. Todo lo
-demás sale del `.env` de al lado, que el proceso carga solo.
+`PM2_INSTANCES` (y `PM2_APP_NAME`, el nombre del proceso; `PM2_CWD`, desde dónde corre; y
+`NODE_INTERPRETER`, con qué node) las lee **pm2**, no `src/env.ts`, así que no están en
+`.env.example` — ese archivo documenta al único lector de `process.env`. Las dos últimas solo hacen
+falta en el servidor, y las pone el despliegue. Todo lo demás sale del `.env` de al lado, que el
+proceso carga solo.
 
 Modo `fork` y no `cluster`: cada instancia tiene que escuchar en **su** puerto y anunciar **su**
 dirección, porque el jugador se conecta al proceso que hospeda su sala. Con `PORT=2567` y dos
@@ -99,6 +101,61 @@ paso.
 Lo que **no** hay es migración de salas: la instancia que se apaga se lleva sus partidas, igual
 que en v1. Y un `kill -9` no drena nada — las claves del registro quedan hasta que vence su TTL
 de 120 s, que es para lo que el TTL existe.
+
+## Cómo se despliega
+
+Dos workflows en `.github/workflows/`, y **el eje es la tarea, no el entorno**.
+
+`ci.yml` **verifica y empaqueta**: typecheck, lint, suite, build, y deja un `domino-v2.tgz` con
+`dist/`, `package.json`, `package-lock.json`, `ecosystem.config.cjs` y `scripts/deploy-remote.sh`.
+Construye **en el CI y no en el servidor**, que es la diferencia entre un build roto que falla en
+rojo y uno que deja a medio compilar a la máquina que está sirviendo partidas. Corre en cada PR, y
+en `develop`/`stage`/`main` lo llama `deploy.yml` — así cada evento produce una corrida y nada llega
+a un servidor sin haber pasado por él. **No levanta Mongo ni Redis**: la suite no los usa (ver
+más abajo), así que levantarlos sería un job que miente.
+
+`deploy.yml` **despliega**, con el entorno como dato: `develop → dev`, `stage → stage`,
+`main → prod`, más un `workflow_dispatch` desde cualquier rama para probar una feature en el VPS de
+dev sin mergearla. Los tres Environments guardan los secretos con el **mismo nombre**, así que no
+hay sufijos por entorno y `prod` puede exigir la aprobación de una persona.
+
+| Environment | secretos | variables |
+|---|---|---|
+| dev / stage / prod | `SSH_HOST`, `SSH_USER`, `SSH_KEY` | `DEPLOY_PATH`, `PM2_APP_NAME`, `PM2_INSTANCES`, `NODE_BIN`, `NODE_INTERPRETER`, `SSH_KNOWN_HOSTS`, `PUBLIC_URL` |
+| repositorio | — | `DEPLOY_ENVIRONMENTS` (los entornos que ya tienen servidor) |
+
+En el servidor queda así, y el **`.env` real se crea UNA vez a mano** en `shared/` — el despliegue
+solo lo enlaza, y por eso ningún secreto de la aplicación pasa por GitHub:
+
+```
+/var/www/Betaso/domino-backend-v2/
+├── shared/.env                  se crea a mano; el deploy NUNCA lo toca
+├── releases/<fecha>-<commit>/   dist/ + package.json + ecosystem.config.cjs + node_modules
+└── current ──► releases/<id>    el symlink que decide qué corre
+```
+
+El despliegue instala las dependencias de producción, voltea el symlink y **gatea contra `/ready`
+instancia por instancia, contra 127.0.0.1**. Si la release nueva no queda sana **repone la anterior
+y falla en rojo igual**: que la vieja haya vuelto no significa que se haya desplegado lo que se
+pidió. Se conservan dos releases, que es lo que hace falta para poder volver.
+
+**pm2 apunta al symlink y no a la carpeta del release**, y no es un detalle: pm2 guarda la ruta
+absoluta del script y **no la actualiza al recargar**, así que con una carpeta nueva por despliegue
+un `pm2 reload` sigue corriendo la versión anterior. Por eso `ecosystem.config.cjs` lee
+`PM2_CWD`, y por eso el deploy **comprueba** con `/proc/<pid>/cwd` desde dónde corre cada proceso
+en vez de asumirlo.
+
+Para volver atrás sin rehacer el pipeline, desde el servidor:
+
+```bash
+bash /var/www/Betaso/domino-backend-v2/current/scripts/deploy-remote.sh --rollback
+```
+
+Salta los releases marcados `FAILED` — si no, el rollback de emergencia iría a parar justo al que
+acaba de fallar, que es el más nuevo que hay en disco.
+
+`scripts/deploy-remote.sh` **es de Linux** (`/proc`, `mv -Tf`, `readlink -f`) y viaja **dentro del
+artefacto**: el que corre es siempre el de la versión que se está desplegando.
 
 ## Los tests
 

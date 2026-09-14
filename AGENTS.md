@@ -93,7 +93,7 @@ TTL de 119 s, que es lo que las limpia—. Medido: el drenado tarda **9 ms** con
 `/health` sigue contestando 200 en 43 ms.
 
 Y después la **primera tanda de correcciones de la capa de deploy**, portadas de truco
-(`5210cd6`/`48ac4bc`/`3d3eb0f`) — la segunda (CI/CD y el script de deploy) viene después:
+(`5210cd6`/`48ac4bc`/`3d3eb0f`) — la segunda (CI/CD y el script de deploy) es la de más abajo:
 
 - **La app carga su propio `.env`** con `process.loadEnvFile()` en `src/env.ts`, en vez de
   heredarlo de rebote de quien la arrancó. El archivo es opcional y **el entorno le gana al
@@ -119,7 +119,49 @@ Y después la **primera tanda de correcciones de la capa de deploy**, portadas d
   de `'listening'`, que nunca corre—, así que el `.catch()` de truco no alcanza. Va un plazo de
   arranque de 20 s en `src/main.ts`, que cubre también el Redis caído al arrancar.
 
-**Baseline actual: 319 tests / 48 archivos.**
+Y después la **segunda tanda: el CI/CD**, portado de truco (`bd591f3`/`3d3eb0f`). El repo no
+tenía `.github/` ni `scripts/`:
+
+- **`ci.yml` verifica antes de que algo toque un servidor** —typecheck, lint, suite, build— y deja
+  empaquetado el artefacto (`dist` + `package.json` + `package-lock.json` +
+  `ecosystem.config.cjs` + `scripts/deploy-remote.sh`). Construir en el CI y no en el servidor es
+  la diferencia entre un build roto que falla en rojo y uno que deja a medio compilar a la máquina
+  que está sirviendo partidas. **SIN `services:`, y es lo que el dominó decide distinto que
+  truco**: allá la suite necesita Redis y Mongo de verdad, acá `vitest.setup.ts` los borra del
+  entorno a propósito, así que levantarlos no agregaría una sola aserción y agregaría un job que
+  **miente**. Ejercitarlos de verdad pide una suite de integración que no pase por
+  `vitest.setup.ts`, no un bloque de `services:`.
+- **`deploy.yml` con el entorno como DATO.** Un solo workflow para dev/stage/prod: los
+  Environments de GitHub guardan los secretos con el mismo nombre, así que no hay sufijos
+  `_DEV`/`_STAGE`/`_PROD`, y prod puede exigir un humano. `DEPLOY_ENVIRONMENTS` lista los que
+  existen; el que no esté se saltea en vez de fallar.
+- **El deploy gatea contra `/ready`, instancia por instancia**, y si la release nueva no queda
+  sana **repone la anterior y sale en rojo igual**. `/health` no serviría de gate: no consulta
+  nada a propósito. **El procedimiento viaja DENTRO del artefacto**
+  (`scripts/deploy-remote.sh`), así que el que corre es siempre el de la versión que se despliega.
+- **pm2 guarda la ruta absoluta del script y NO la actualiza al recargar.** `cwd: __dirname` no
+  alcanza —node resuelve los symlinks, así que eso da la carpeta FÍSICA del release, distinta en
+  cada despliegue—: va `process.env.PM2_CWD || __dirname`, con pm2 apuntando al symlink `current`.
+  Y como eso estuvo mal una vez, el deploy lo **chequea** con `/proc/<pid>/cwd` en vez de asumirlo.
+- **El piso de node es la cuarta puerta de `src/entrypoint.test.ts`**: el test lee el
+  `node-version` del workflow y lo compara contra `engines`, que se compara contra colyseus.
+
+**No hay servidor ni Actions donde correr esto acá.** Lo que se verificó: `actionlint` y
+`shellcheck` en Docker (limpios salvo dos `SC2029` informativos, que son la expansión del lado del
+cliente que se quiere), el `tar` del artefacto a mano, y **el `deploy-remote.sh` entero en seco
+sobre un Linux con `/proc` y un pm2 de mentira** —siete escenarios: primer despliegue, segundo,
+uno que contesta 503 (vuelve atrás y sale 1), rollback a mano por el symlink, la limpieza dejando
+dos, y el defecto de pm2 con y sin la mitigación—. **Es un script de Linux y no lo disimula**:
+`/proc/<pid>/cwd`, `mv -Tf` y `readlink -f` no existen fuera de GNU/Linux, y no se pueden probar
+en Windows. Lo que queda sin verificar es todo lo que pide un servidor o Actions de verdad: que
+pm2 el de verdad se comporte como el de mentira, el `ssh`/`scp`, y los Environments.
+
+**Un defecto del script de truco, encontrado al ensayarlo**: el `--rollback` elegía «el más nuevo
+que no sea el que corre», y un despliegue fallido sale en rojo ANTES de la limpieza — o sea que el
+release roto sigue en disco y **es el más nuevo**. El rollback de emergencia se iba de cabeza a la
+versión que acababa de fallar. Ahora el fallido se marca con un `FAILED` y el bucle lo saltea.
+
+**Baseline actual: 320 tests / 48 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
