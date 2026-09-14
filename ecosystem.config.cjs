@@ -34,13 +34,30 @@ module.exports = {
       // el único `entry` de tsup — los cuatro los pinea `src/entrypoint.test.ts`, porque
       // ninguno rompe el gate al desincronizarse.
       script: "dist/main.js",
-      // EL DIRECTORIO DE ESTE ARCHIVO, y no aquel desde donde se invocó a pm2. Es la misma
-      // familia de razones que el `.env`: en el servidor cada despliegue es una carpeta nueva
-      // detrás de un symlink, y tanto el `dist/` que corre como el `.env` que `src/env.ts` lee
-      // —los dos son rutas RELATIVAS, resueltas contra el cwd— tienen que ser los del release
-      // que se está arrancando. Sin esto, arrancarlo parado en otra carpeta levanta el código de
-      // una release y la configuración de otra, sin un solo error.
-      cwd: __dirname,
+      // DESDE DÓNDE CORRE, y acá `__dirname` SOLO NO ALCANZA en el servidor.
+      //
+      // El problema que resuelve es el mismo de siempre: tanto el `dist/` que corre como el
+      // `.env` que `src/env.ts` lee son rutas RELATIVAS, resueltas contra el cwd, así que los
+      // dos tienen que ser los del release que se está arrancando. Arrancarlo parado en otra
+      // carpeta levanta el código de una release y la configuración de otra, sin un solo error.
+      //
+      // PERO `__dirname` NO ES EL SYMLINK: node resuelve los symlinks al cargar un módulo, así
+      // que con `current ──► releases/<id>` esto da la CARPETA FÍSICA del release, una distinta
+      // en cada despliegue. Y pm2 guarda la ruta ABSOLUTA del script y NO LA ACTUALIZA AL
+      // RECARGAR: truco lo descubrió desplegando cuatro veces al servidor de dev, donde después
+      // de voltear el symlink y recargar las dos instancias seguían corriendo la release
+      // anterior. Re-aplicar el archivo de configuración —que era la mitigación planeada— no
+      // ayuda.
+      //
+      // La solución es que LA RUTA QUE SE LE DA NUNCA CAMBIE: `deploy-remote.sh` invoca a pm2
+      // con `PM2_CWD` apuntando al symlink `current`, pm2 guarda esa ruta —que es la misma para
+      // siempre— y el symlink es lo que decide qué versión hay del otro lado. Y como eso estuvo
+      // mal una vez, el despliegue lo CHEQUEA en vez de asumirlo, con `/proc/<pid>/cwd`.
+      //
+      // `__dirname` queda de respaldo para cuando se lo arranca a mano desde una copia del
+      // repo, que es el caso del README y el de esta máquina: ahí no hay symlink ni releases, y
+      // el directorio de este archivo ES el del proyecto.
+      cwd: process.env.PM2_CWD || __dirname,
       // CON QUÉ NODE CORRE LA APP. Por defecto, el de pm2 — que es el del DEMONIO y no el de
       // quien despliega, y puede no ser el que probó la suite: truco encontró un servidor donde
       // el demonio corría con un node 20 del sistema mientras el CI y el Dockerfile usaban el 22,
