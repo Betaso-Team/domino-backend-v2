@@ -9925,6 +9925,9 @@ describe("ventana de reparto", () => {
     const match = await seatPair(server, ["deal-d1", "deal-d2"]);
 
     expect(match.serverState.currentRound?.phase).toBe("DEALING");
+    // El reloj de la ventana SE ARMÓ. Sin esta línea, el `activeDeadline === 0` del
+    // cuarto test no distingue "el plazo se apagó" de "nunca se encendió".
+    expect(match.serverState.activeDeadline).toBeGreaterThan(0);
     expect(match.serverState.players.map((player) => player.hand.tileCount)).toEqual([7, 7]);
     expect(tilesSeenBy(match, "deal-d1", "deal-d1")).toHaveLength(0);
     expect(tilesSeenBy(match, "deal-d2", "deal-d2")).toHaveLength(0);
@@ -9977,6 +9980,10 @@ describe("ventana de reparto", () => {
     const winnerTeamId = match.serverState.players.find(
       (player) => player.playerId === "deal-f1",
     )?.teamId;
+    // Al presente NO lo retiran: el forfeit es del que no levantó, y solo de él.
+    expect(
+      match.serverState.players.find((player) => player.playerId === "deal-f1")?.hasAbandoned,
+    ).toBe(false);
     expect(linesOf(matchId)).toContain("SYSTEM ABANDON");
     expect(linesOf(matchId)).toContain("SYSTEM MATCH_RESOLVED");
     expect(historyOf(matchId).find((entry) => entry.type === "MATCH_RESOLVED")?.payload).toEqual({
@@ -10006,11 +10013,16 @@ describe("ventana de reparto", () => {
 
     // La sala cierra y el motivo es auditable: no es lo mismo que nunca se llenó.
     await server.getRoomById(match.roomId).disconnect();
-    expect(historyOf(matchId).find((entry) => entry.type === "MATCH_ABORTED")).toMatchObject({
-      source: "SYSTEM",
-      kind: "EVENT",
-      payload: { reason: "NEVER_PLAYED" },
-    });
+    await waitUntil(() => linesOf(matchId).includes("SYSTEM MATCH_ABORTED"), 5_000);
+
+    const aborted = historyOf(matchId).find((entry) => entry.type === "MATCH_ABORTED");
+    expect(aborted).toBeDefined();
+    expect(aborted?.source).toBe("SYSTEM");
+    expect(aborted?.kind).toBe("EVENT");
+    // `toEqual` y no `toMatchObject`: el payload del aborto es el motivo del reembolso
+    // y nada más. Con `toMatchObject` un campo agregado mañana entra sin que nadie se
+    // entere, y este es el registro que respalda no haber pagado el premio.
+    expect(aborted?.payload).toEqual({ reason: "NEVER_PLAYED" });
   }, 7_000);
 });
 ```
