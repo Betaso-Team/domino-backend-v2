@@ -100,7 +100,7 @@ describe("partida 2P completa", () => {
     ]);
   });
 
-  it("cada DEADLINE_EXPIRED es del sistema, y el de turno trae detrás el retiro", async () => {
+  it("cada DEADLINE_EXPIRED quedó registrado como evento del sistema", async () => {
     const entries = historyOf("m-g1-g2");
     const expirations = entries.filter((entry) => entry.type === "DEADLINE_EXPIRED");
     expect(expirations.length).toBeGreaterThan(0);
@@ -109,8 +109,14 @@ describe("partida 2P completa", () => {
       if (entry.type !== "DEADLINE_EXPIRED") return;
       expect(entry.source).toBe("SYSTEM");
       expect(entry.kind).toBe("EVENT");
-      // Solo el plazo del TURNO tiene un verbo detrás: al vencer, el sistema retira al
-      // que no jugó. Los de las presentaciones no ejecutan verbo ninguno —arrancan la
+      // ESTA RAMA NO SE EJERCE ACÁ, y el título del test no la promete. La relación
+      // existe en producción —`MatchDriver.timeout()` con `kind === "TURN"` retira al
+      // que no jugó y emite el ABANDON del sistema (match/driver.ts:70-80)—, pero en una
+      // corrida sana de este E2E el bot juega siempre a tiempo y NINGÚN plazo de turno
+      // vence: los vencimientos reales de esta partida son 6 PRESENTING_ROUND y 1
+      // PRESENTING_MATCH, cero TURN. Queda como red por si el bot se atrasa; la
+      // cobertura de verdad de ese camino es la Tarea 22, con un jugador que se cuelga
+      // a propósito. Los de las presentaciones no ejecutan verbo ninguno —arrancan la
       // ronda siguiente o apagan la mesa—, así que exigirles uno sería inventar el
       // contrato en vez de medirlo.
       if (entry.payload.kind !== "TURN") return;
