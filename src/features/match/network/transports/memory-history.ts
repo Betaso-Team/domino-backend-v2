@@ -1,8 +1,14 @@
 import type { HistoryEntry, HistoryPort, HistoryReader } from "../history.js";
 
-// Implementación de memoria. El adaptador de Mongo llega con la persistencia;
-// esto es lo que permite que el mecanismo entero —envoltura, seq, intercalado—
-// esté probado antes de que haya base.
+// Implementación de memoria. YA NO ES "la de antes de que haya base": el adaptador de Mongo
+// existe (`./mongo-history.ts`) y el composition root elige entre los dos según haya o no
+// `MONGO_URI`. Ésta es la implementación de producción de una instancia que elige NO
+// persistir, y es la que usa la suite entera — que por eso no depende de ningún servicio
+// externo. No es un doble y no se borra.
+//
+// LO QUE SE PIERDE ELIGIÉNDOLA está acá abajo y es el argumento para configurar Mongo: tope
+// de 200 partidas y muerte con el proceso, o sea una consola de soporte que solo ve lo que
+// pasó desde el último deploy.
 const MAX_MATCHES = 200;
 
 export class MemoryHistory implements HistoryPort, HistoryReader {

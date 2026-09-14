@@ -24,8 +24,13 @@ import { logger } from "./logger.js";
 const USAGE =
   "uso: npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER> <asiento...>";
 
-// El meta sale de `match_meta` cuando exista la persistencia; hasta entonces va por
-// argumentos, porque el `seed` NO está en el historial a propósito.
+// El meta VA POR ARGUMENTOS, y ya no es porque falte la persistencia: la persistencia
+// existe, pero graba una sola colección —`match_history`, las entradas— y NO una
+// `match_meta`. Es una decisión, no un pendiente: el `seed` no está en el historial a
+// propósito (una entrada es un acto o un hecho, y el seed no es ninguno de los dos), y una
+// colección de cabeceras que hoy nadie escribiría al cerrar la partida sería un lugar vacío
+// donde el operador va a buscar. Mientras el único productor de partidas sea el arnés, los
+// cinco valores se saben.
 //
 // Los cuatro son OBLIGATORIOS y no tienen default. El `pointsToWin` sobre todo: el
 // veredicto de la partida depende de él —entrar en PRESENTING_MATCH es alcanzarlo—, así
@@ -118,9 +123,11 @@ const state = replay({
   // impreso—. Es el mismo riesgo que `writeGolden` ya había cerrado guardando el
   // `globalConfig` en el fixture; acá estaba abierto.
   globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
-  // Sin `startedAt`: el instante de arranque vive en `match_meta`, que todavía no existe.
-  // El replay cae al de la primera entrada, así que `startedAt` es lo único del árbol
-  // impreso que no es el de la partida real.
+  // Sin `startedAt`: el instante de arranque no está grabado en ninguna parte —`begin()` no
+  // emite, así que la primera entrada del historial ya es posterior—, y la persistencia no
+  // lo cambió: graba `match_history` y no una `match_meta` (ver arriba). El replay cae al
+  // `at` de la primera entrada, así que `startedAt` sigue siendo lo único del árbol impreso
+  // que no es el de la partida real.
   entries,
 });
 logger.info("estado final reconstruido", { matchId, state: state.toJSON() });

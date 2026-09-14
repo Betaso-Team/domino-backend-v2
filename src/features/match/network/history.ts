@@ -40,7 +40,9 @@ export interface HistoryPort {
 
 // El lado de LECTURA, separado del de escritura porque tiene otros dueños: escribe la sala
 // en el camino caliente, lee el operador de soporte —el endpoint interno y el CLI de
-// replay—. Un adaptador puede implementar los dos, y `MemoryHistory` lo hace.
+// replay—. Un adaptador puede implementar los dos, y los dos que hay lo hacen:
+// `MemoryHistory` y `MongoHistory`. Que hoy coincidan no los junta: son los tokens los que
+// tienen dueños distintos, y por eso `of` ya cambió de forma sin que `record` se moviera.
 //
 // Existe como puerto y no como un cast porque el cast era una MENTIRA que tsc no podía
 // ver: `resolve("HistoryPort") as MemoryHistory` afirma la implementación concreta sobre

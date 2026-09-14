@@ -27,7 +27,17 @@ la Regla 3 no veía los imports locales del container, el transporte HTTP resolv
 vez de recibir, faltaba el manejador de errores de Express y `.env.example` estaba ocho
 variables atrás de `src/env.ts`. Después vino la validación de la entrada HTTP con zod
 (`validated` en `features/match/transports/http/`, gemelo del decoder del wire).
-**Baseline actual: 266 tests / 40 archivos.**
+
+Y después la **persistencia del historial**, portada de truco (`124ed68`/`a483fe8`): la
+única dependencia de infraestructura del repo (`mongodb`). `HistoryReader.of` pasó a
+prometer y `HistoryPort.record` NO —la asimetría es la decisión: `record` lo llaman el
+camino de un comando y el de un timer, `of` lo llama el operador de soporte—.
+`MemoryHistory` **se queda** y no es un doble: es la implementación de una instancia que
+elige no persistir, y la que usa la suite. **La presencia de `MONGO_URI` elige**, sin
+`HISTORY_DRIVER` ni nada que lo parezca (`src/di-container.test.ts` se pone rojo si
+aparece). `vitest.setup.ts` **borra** `MONGO_URI`: la suite no depende de ningún servicio
+externo, y eso tiene que ser una propiedad del repo y no del shell de quien lo corre.
+**Baseline actual: 276 tests / 42 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
