@@ -4,10 +4,13 @@ import { rootContainer } from "../../../../di-container.js";
 import { env } from "../../../../env.js";
 import type { Logger } from "../../../../logger.js";
 import type { Clock } from "../../core/engine/clock.js";
-import type { MemoryHistory } from "../../network/transports/memory-history.js";
+import type { HistoryReader } from "../../network/history.js";
 import { type MatchConfigResponse, MatchRegistry } from "../match-registry.js";
 
 const INTERNAL_KEY_HEADER = "X-Internal-Key";
+// En una const para que el aviso de arranque y el `app.get` no puedan divergir: el warn
+// existe para que el operador encuentre ESTA ruta, no una parecida.
+const HISTORY_ROUTE = "/internal/matches/:matchId/history";
 
 // Comparación en tiempo CONSTANTE. Un `===` sobre un secreto corta en el primer byte que
 // difiere, así que el tiempo de respuesta filtra la llave carácter a carácter y se la
@@ -66,9 +69,14 @@ export function registerInternalHistoryHttp(
   // registrarla igual y dejar el guard comparando contra vacío— es peor que no tenerla,
   // porque el operador la ve responder y cree que está protegida.
   if (!internalApiKey) {
+    // La RUTA va en el mensaje, no solo la causa y la variable. El que llega a este log
+    // llega desde un 404 inexplicable, y busca por path: sin el path acá, el aviso que
+    // explica el 404 es justamente el que no encuentra.
     rootContainer
       .resolve<Logger>("Logger")
-      .warn("API interna deshabilitada: falta INTERNAL_API_KEY");
+      .warn(
+        `API interna deshabilitada: falta INTERNAL_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
+      );
     return;
   }
 
@@ -83,12 +91,13 @@ export function registerInternalHistoryHttp(
   // pasa a ser `string | string[] | undefined`. Vitest no lo ve (esbuild borra los tipos);
   // `tsc --noEmit` sí.
   app.get<{ matchId: string }>(
-    "/internal/matches/:matchId/history",
+    HISTORY_ROUTE,
     requireInternalKey(internalApiKey),
     (request, response) => {
-      const entries = (rootContainer.resolve("HistoryPort") as MemoryHistory).of(
-        request.params.matchId,
-      );
+      // Contra `HistoryReader` y no contra la implementación: el cast a `MemoryHistory`
+      // que estaba acá compilaba una promesa que el token no hacía.
+      const reader = rootContainer.resolve<HistoryReader>("HistoryReader");
+      const entries = reader.of(request.params.matchId);
       if (entries.length === 0) {
         response.status(404).json({ error: "NOT_FOUND" });
         return;
