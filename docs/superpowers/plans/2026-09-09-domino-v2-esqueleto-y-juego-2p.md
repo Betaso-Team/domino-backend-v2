@@ -8575,7 +8575,7 @@ describe("partida 2P completa", () => {
     ]);
   });
 
-  it("cada DEADLINE_EXPIRED es del sistema, y el de turno trae detrás el retiro", async () => {
+  it("cada DEADLINE_EXPIRED quedó registrado como evento del sistema", async () => {
     const entries = historyOf("m-g1-g2");
     const expirations = entries.filter((entry) => entry.type === "DEADLINE_EXPIRED");
     expect(expirations.length).toBeGreaterThan(0);
@@ -8584,8 +8584,14 @@ describe("partida 2P completa", () => {
       if (entry.type !== "DEADLINE_EXPIRED") return;
       expect(entry.source).toBe("SYSTEM");
       expect(entry.kind).toBe("EVENT");
-      // Solo el plazo del TURNO tiene un verbo detrás: al vencer, el sistema retira al
-      // que no jugó. Los de las presentaciones no ejecutan verbo ninguno —arrancan la
+      // ESTA RAMA NO SE EJERCE ACÁ, y el título del test no la promete. La relación
+      // existe en producción —`MatchDriver.timeout()` con `kind === "TURN"` retira al
+      // que no jugó y emite el ABANDON del sistema (match/driver.ts:70-80)—, pero en una
+      // corrida sana de este E2E el bot juega siempre a tiempo y NINGÚN plazo de turno
+      // vence: los vencimientos reales de esta partida son 6 PRESENTING_ROUND y 1
+      // PRESENTING_MATCH, cero TURN. Queda como red por si el bot se atrasa; la
+      // cobertura de verdad de ese camino es la Tarea 22, con un jugador que se cuelga
+      // a propósito. Los de las presentaciones no ejecutan verbo ninguno —arrancan la
       // ronda siguiente o apagan la mesa—, así que exigirles uno sería inventar el
       // contrato en vez de medirlo.
       if (entry.payload.kind !== "TURN") return;
@@ -8615,6 +8621,15 @@ siempre el mismo asiento (revisar `turnOrderFrom`).
 
 Si en cambio lo que revienta es un `waitUntil` de un turno suelto, la sospecha es la señal, no el
 motor: esperar a que cambie el conteo total de fichas NO sirve, porque los tres verbos lo conservan.
+
+Y saber qué NO cubre esta tarea: el guard de `payload.kind === "TURN"` del tercer test **queda
+vacío en una corrida sana**. Los vencimientos reales de esta partida son 6 `PRESENTING_ROUND` y 1
+`PRESENTING_MATCH` —cero `TURN`—, porque el bot juega siempre a tiempo. Las dos líneas de adentro
+no se ejecutan ni una vez, así que lo único que el test mide de verdad es que todo
+`DEADLINE_EXPIRED` es `SYSTEM`/`EVENT`; el título dice eso y nada más. La relación
+`DEADLINE_EXPIRED(TURN) → ABANDON` existe en producción (`MatchDriver.timeout()`, rama `TURN`) y su
+cobertura de verdad es la **Tarea 22**, que sí sienta a un jugador que se cuelga a propósito. Acá el
+guard queda como red por si el bot se atrasa, no como aserción cumplida.
 
 - [ ] **Step 6: Commit**
 
