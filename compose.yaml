@@ -18,8 +18,11 @@ services:
       # `.env` de al lado, que compose interpola solo; no es una variable de `src/env.ts` y por
       # eso no está en `.env.example` —ese archivo documenta al único lector de `process.env`—.
       - "${MONGO_PORT:-27017}:27017"
-    # Con volumen nombrado: sin él, `docker compose down` se lleva el historial, que es
-    # exactamente lo que este servicio existe para que sobreviva.
+    # CON VOLUMEN NOMBRADO, que truco no tiene. La imagen declara `VOLUME /data/db`, así que
+    # sin esto cada contenedor se lleva un volumen ANÓNIMO: `docker compose down` deja el de
+    # ayer huérfano y el siguiente `up` arranca con una base vacía. Nombrarlo es lo que hace
+    # que el historial sobreviva al ciclo, que es lo único que este servicio existe para dar.
+    # Medido: `up` → partida → `down` → `up` y el documento seguía ahí.
     volumes:
       - mongo-data:/data/db
     restart: unless-stopped
