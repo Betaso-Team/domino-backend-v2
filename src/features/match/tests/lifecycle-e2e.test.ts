@@ -167,17 +167,32 @@ describe("ciclo de vida de una partida", () => {
   // La llave NO es opcional ni "cuando exista": el matchId es enumerable y esto sirve el
   // registro completo de una mesa. Sin credencial es 401 —el recurso existe, lo que falta
   // es la llave— y el cuerpo no dice nada de si la partida existe o no.
-  it("el endpoint interno rechaza sin llave y con la llave equivocada", async () => {
+  //
+  // Las DOS llaves malas son dos ramas distintas del guard, y una sola no cubre la otra:
+  // la corta muere en el `a.length === b.length` —que existe porque `timingSafeEqual` LANZA
+  // con buffers de distinto largo—, y la del MISMO LARGO es la única que llega a la
+  // comparación en tiempo constante. Se deriva de `env.internalApiKey` y no se escribe a
+  // mano: una constante literal deja de medir el largo real el día que la llave de
+  // vitest.setup.ts cambie, y el test seguiría verde midiendo la rama equivocada. Así
+  // estaba antes —37 caracteres contra una llave de 42— y por eso se corrigió.
+  it("el endpoint interno rechaza sin llave, con una corta y con una del mismo largo", async () => {
     const match = await seatPair(server, ["k1", "k2"]);
     await revealHands(match);
 
+    const mismoLargo = "x".repeat(env.internalApiKey?.length ?? 0);
     const sinLlave = await fetch(HISTORY_URL("m-k1-k2"));
-    const conLlaveMala = await fetch(HISTORY_URL("m-k1-k2"), {
-      headers: { "X-Internal-Key": "llave-equivocada-pero-del-mismo-largo" },
+    const conLlaveCorta = await fetch(HISTORY_URL("m-k1-k2"), {
+      headers: { "X-Internal-Key": "corta" },
+    });
+    const conLlaveDelMismoLargo = await fetch(HISTORY_URL("m-k1-k2"), {
+      headers: { "X-Internal-Key": mismoLargo },
     });
 
+    expect(mismoLargo).toHaveLength(env.internalApiKey?.length ?? 0);
+    expect(mismoLargo).not.toBe(env.internalApiKey);
     expect(sinLlave.status).toBe(401);
     expect(await sinLlave.json()).toEqual({ error: "UNAUTHORIZED" });
-    expect(conLlaveMala.status).toBe(401);
+    expect(conLlaveCorta.status).toBe(401);
+    expect(conLlaveDelMismoLargo.status).toBe(401);
   });
 });
