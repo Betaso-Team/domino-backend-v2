@@ -8303,7 +8303,15 @@ un agujero de privacidad real; cambiarle la fuente a `serverState` lo pone verde
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state/index.js";
-import { bootServer, rejoinAs, revealHands, seatPair, waitUntil } from "./e2e-harness.js";
+import {
+  type SeatedMatch,
+  bootServer,
+  legalPlayFor,
+  rejoinAs,
+  revealHands,
+  seatPair,
+  waitUntil,
+} from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
@@ -8316,27 +8324,33 @@ afterAll(async () => {
 });
 
 // Lee el estado TAL COMO LO RECIBIÓ el cliente, ya filtrado por su StateView.
-const clientState = (match: Awaited<ReturnType<typeof seatPair>>, userId: string) =>
-  match.clients[userId]?.state as MatchState;
-
-const handTilesSeenBy = (
-  match: Awaited<ReturnType<typeof seatPair>>,
-  viewer: string,
-  owner: string,
-) => [...(clientState(match, viewer).players.find((p) => p.playerId === owner)?.hand.tiles ?? [])];
+const clientState = (match: SeatedMatch, userId: string): MatchState => {
+  const client = match.clients[userId];
+  if (!client) throw new Error(`sin cliente para ${userId}`);
+  return client.state as MatchState;
+};
 
 const tilesSeenBy = (state: MatchState, owner: string) => [
-  ...(state.players.find((p) => p.playerId === owner)?.hand.tiles ?? []),
+  ...(state.players.find((player) => player.playerId === owner)?.hand.tiles ?? []),
 ];
+
+// Espera a que a CADA uno le haya llegado su propia mano. Se espera sobre la vista que el
+// test va a leer: afirmar sobre la de un cliente después de sincronizar la del otro deja
+// una ventana en la que el cero que se mide es el patch que todavía no llegó.
+const awaitDealtHands = async (match: SeatedMatch, viewers: readonly string[]) => {
+  for (const viewer of viewers) {
+    await waitUntil(() => tilesSeenBy(clientState(match, viewer), viewer).length === 7);
+  }
+};
 
 describe("visibilidad — el rival no ve fichas ajenas", () => {
   it("cada jugador ve SU mano completa", async () => {
     const match = await seatPair(server, ["v1", "v2"]);
     await revealHands(match);
-    await waitUntil(() => handTilesSeenBy(match, "v1", "v1").length === 7);
+    await awaitDealtHands(match, ["v1", "v2"]);
 
-    expect(handTilesSeenBy(match, "v1", "v1")).toHaveLength(7);
-    expect(handTilesSeenBy(match, "v2", "v2")).toHaveLength(7);
+    expect(tilesSeenBy(clientState(match, "v1"), "v1")).toHaveLength(7);
+    expect(tilesSeenBy(clientState(match, "v2"), "v2")).toHaveLength(7);
   });
 
   // EL AGUJERO DEL V1. Allí `players` era un MapSchema completo con las fichas
@@ -8344,25 +8358,25 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   it("NINGÚN jugador ve las fichas del rival", async () => {
     const match = await seatPair(server, ["w1", "w2"]);
     await revealHands(match);
-    await waitUntil(() => handTilesSeenBy(match, "w1", "w1").length === 7);
+    await awaitDealtHands(match, ["w1", "w2"]);
 
-    expect(handTilesSeenBy(match, "w1", "w2")).toHaveLength(0);
-    expect(handTilesSeenBy(match, "w2", "w1")).toHaveLength(0);
+    expect(tilesSeenBy(clientState(match, "w1"), "w2")).toHaveLength(0);
+    expect(tilesSeenBy(clientState(match, "w2"), "w1")).toHaveLength(0);
   });
 
   it("pero SÍ ve cuántas le quedan: tileCount es público", async () => {
     const match = await seatPair(server, ["x1", "x2"]);
     await revealHands(match);
-    await waitUntil(() => handTilesSeenBy(match, "x1", "x1").length === 7);
+    await awaitDealtHands(match, ["x1"]);
 
-    const rival = clientState(match, "x1").players.find((p) => p.playerId === "x2");
+    const rival = clientState(match, "x1").players.find((player) => player.playerId === "x2");
     expect(rival?.hand.tileCount).toBe(7);
   });
 
   it("NADIE ve el pozo", async () => {
     const match = await seatPair(server, ["y1", "y2"]);
     await revealHands(match);
-    await waitUntil(() => handTilesSeenBy(match, "y1", "y1").length === 7);
+    await awaitDealtHands(match, ["y1", "y2"]);
 
     for (const viewer of ["y1", "y2"]) {
       expect([...(clientState(match, viewer).currentRound?.boneyard?.tiles ?? [])]).toHaveLength(0);
@@ -8374,24 +8388,23 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   it("una ficha jugada pasa a ser pública para los dos", async () => {
     const match = await seatPair(server, ["z1", "z2"]);
     await revealHands(match);
-    await waitUntil(() => handTilesSeenBy(match, "z1", "z1").length === 7);
+    await awaitDealtHands(match, ["z1", "z2"]);
 
-    const turnHolder = match.serverState.currentRound?.currentTurn?.playerId as string;
-    const own = handTilesSeenBy(match, turnHolder, turnHolder);
-    const chosen = own[0];
-    if (!chosen) throw new Error("mano vacía");
+    const turnHolder = match.serverState.currentRound?.currentTurn?.playerId;
+    if (!turnHolder) throw new Error("sin turno en curso");
+    // La jugada se elige sobre la vista DEL QUE JUEGA: si el cliente no pudiera derivarla
+    // de lo que recibió, este test no tendría de dónde sacarla — que es la otra mitad de
+    // lo que el smoke afirma.
+    const play = legalPlayFor(clientState(match, turnHolder), turnHolder);
+    if (!play) throw new Error("sin jugada legal");
 
-    match.clients[turnHolder]?.send("PLAY_TILE", {
-      left: chosen.left,
-      right: chosen.right,
-      side: "RIGHT",
-    });
+    match.clients[turnHolder]?.send("PLAY_TILE", play);
 
     await waitUntil(() => match.serverState.currentRound?.board.tiles.length === 1);
     for (const viewer of ["z1", "z2"]) {
       await waitUntil(() => clientState(match, viewer).currentRound?.board.tiles.length === 1);
       const placed = clientState(match, viewer).currentRound?.board.tiles.at(0);
-      expect([placed?.tile.left, placed?.tile.right]).toEqual([chosen.left, chosen.right]);
+      expect([placed?.tile.left, placed?.tile.right]).toEqual([play.left, play.right]);
     }
   });
 
@@ -8401,24 +8414,30 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   it("lo revelado mientras estaba fuera le espera al volver", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
     await revealHands(match);
-    await waitUntil(() => handTilesSeenBy(match, "r1", "r1").length === 7);
+    await awaitDealtHands(match, ["r1"]);
 
     await match.clients.r1?.leave(false);
     await waitUntil(
-      () => match.serverState.players.find((p) => p.playerId === "r1")?.connected === false,
+      () =>
+        match.serverState.players.find((player) => player.playerId === "r1")?.connected === false,
     );
 
     const back = await rejoinAs(server, match.roomId, "r1");
-    await waitUntil(() => (back.state as MatchState).players.length === 2);
+    await waitUntil(() => back.state.players.length === 2);
 
-    expect(tilesSeenBy(back.state as MatchState, "r1")).toHaveLength(7);
+    expect(tilesSeenBy(back.state, "r1")).toHaveLength(7);
     // Y sigue sin ver la del rival.
-    expect(tilesSeenBy(back.state as MatchState, "r2")).toHaveLength(0);
+    expect(tilesSeenBy(back.state, "r2")).toHaveLength(0);
   });
 });
 ```
 
-- [ ] **Step 2: Añadir `revealHands` y `rejoinAs` al arnés**
+- [ ] **Step 2: Añadir `revealHands`, `rejoinAs` y `legalPlayFor` al arnés**
+
+Las tres las usan las DOS suites de esta tarea, y `legalPlayFor` la vuelve a pedir la Tarea 22
+—ahí ya estaba escrita como función local del test de concurrencia—, así que nace en el arnés y no
+duplicada. Suma al encabezado del archivo `import type { Room } from "@colyseus/sdk"`,
+`boardEndsOf`, `playableSides` y `BoardSide`.
 
 ```ts
 // añadir a src/features/match/tests/e2e-harness.ts
@@ -8443,11 +8462,43 @@ export async function revealHands(match: SeatedMatch): Promise<void> {
 // llega un viaje después, así que el llamador lee un `state` con los campos en `undefined`
 // y no puede distinguir "todavía no llegó" de "la vista no me lo muestra" — que es
 // justamente lo que este arnés existe para medir.
-export async function rejoinAs(server: ColyseusTestServer, roomId: string, userId: string) {
+export async function rejoinAs(
+  server: ColyseusTestServer,
+  roomId: string,
+  userId: string,
+): Promise<Room<unknown, MatchState>> {
   server.sdk.auth.token = mintToken(userId);
-  const room = await server.sdk.joinById(roomId);
+  // El parámetro de tipo elige el overload que devuelve el estado tipado. Sin él,
+  // `joinById` resuelve al de `State = any` y el llamador termina casteando `back.state`
+  // en cada línea — casts que no verifican nada y que se quedarían mudos si el árbol
+  // cambiara de forma.
+  const room = await server.sdk.joinById<MatchState>(roomId);
   await room.waitForInitialState();
   return room;
+}
+
+// La PRIMERA jugada legal del que la pide, ya en la forma del payload de `PLAY_TILE`.
+// Devuelve `undefined` cuando no hay ninguna, que es el caso en que toca robar o pasar.
+//
+// El lado NO se puede hardcodear en "RIGHT" aunque el tablero esté vacío: que ahí funcione
+// es una NORMALIZACIÓN de `playableSides` —con la cadena sin extremos, la primera ficha
+// entra por un solo lado para que el mismo tablero no tenga dos representaciones—, no una
+// regla del dominó. Derivarlo es lo que hace que el helper siga sirviendo en la jugada 2.
+export function legalPlayFor(
+  state: MatchState,
+  playerId: string,
+): { left: number; right: number; side: BoardSide } | undefined {
+  const round = state.currentRound;
+  if (!round) return undefined;
+  const hand = state.players.find((player) => player.playerId === playerId)?.hand;
+  if (!hand) return undefined;
+
+  const ends = boardEndsOf(round.board);
+  for (const tile of hand.tiles) {
+    const side = playableSides(tile, ends).at(0);
+    if (side) return { left: tile.left, right: tile.right, side };
+  }
+  return undefined;
 }
 ```
 
@@ -8475,24 +8526,50 @@ siguen verdes, el smoke no está leyendo la vista del cliente y no mide nada.
 // src/features/match/tests/game-2p-e2e.test.ts
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { boardEndsOf } from "../core/engine/round/board-ends.js";
-import { playableSides } from "../core/engine/round/playable.js";
 import { boneyardCountOf } from "../core/engine/state-projections.js";
 import {
   type SeatedMatch,
   act,
   bootServer,
   historyOf,
+  legalPlayFor,
   revealHands,
   seatPair,
   waitUntil,
 } from "./e2e-harness.js";
 
-let server: ColyseusTestServer;
+const MATCH_ID = "m-g1-g2";
 
+let server: ColyseusTestServer;
+let match: SeatedMatch;
+
+// La partida se juega UNA vez, en el hook, y los cuatro `it` afirman sobre lo que quedó.
+// Jugarla dentro del primero ataría a los otros tres a su orden: `vitest -t "historial"`
+// correría solo y leería un historial vacío, y una caída del primero se manifestaría como
+// tres fallos más que no señalan la causa.
 beforeAll(async () => {
   server = await bootServer(2587);
-});
+  match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
+  await revealHands(match);
+
+  // Tope de seguridad: una partida a 100 puntos no debería pasar de esto, y si
+  // lo pasa es un bucle. No se corta acá con un throw: agotar la vuelta deja la fase
+  // sin terminar y el primer test la reporta como lo que es, un fallo con su aserción.
+  for (let turns = 0; turns < 3_000; turns += 1) {
+    if (match.serverState.phase === "FINISHED") break;
+    const played = await playOneTurn(match);
+    if (!played) {
+      // Fuera de PLAYING: o es la pausa de la mano, o la de la partida. Los dos
+      // plazos son cortos en test, así que se espera a que el reloj los venza.
+      await waitUntil(
+        () =>
+          match.serverState.currentRound?.phase === "PLAYING" ||
+          match.serverState.phase === "FINISHED",
+        3_000,
+      );
+    }
+  }
+}, 30_000);
 
 afterAll(async () => {
   await server.shutdown();
@@ -8505,64 +8582,37 @@ afterAll(async () => {
 // de señal: jugar mueve una de la mano al tablero y robar la mueve del pozo a la mano, así
 // que board + hand + boneyard es un invariante de la ronda y nunca se mueve. La firma, en
 // cambio, incluye el plazo vigente, y los tres verbos lo re-estampan.
-async function playOneTurn(match: SeatedMatch): Promise<boolean> {
-  const round = match.serverState.currentRound;
+async function playOneTurn(seated: SeatedMatch): Promise<boolean> {
+  const round = seated.serverState.currentRound;
   if (!round || round.phase !== "PLAYING") return false;
 
   const playerId = round.currentTurn?.playerId;
   if (!playerId) return false;
-  const hand = match.serverState.players.find((p) => p.playerId === playerId)?.hand;
-  if (!hand) return false;
 
-  const ends = boardEndsOf(round.board);
-  const candidate = [...hand.tiles]
-    .map((tile) => ({ tile, side: playableSides(tile, ends).at(0) }))
-    .find((entry) => entry.side !== undefined);
-
-  if (candidate?.side) {
-    await act(match, playerId, "PLAY_TILE", {
-      left: candidate.tile.left,
-      right: candidate.tile.right,
-      side: candidate.side,
-    });
+  const play = legalPlayFor(seated.serverState, playerId);
+  if (play) {
+    await act(seated, playerId, "PLAY_TILE", play);
   } else if (boneyardCountOf(round) > 0) {
-    await act(match, playerId, "DRAW_TILE");
+    await act(seated, playerId, "DRAW_TILE");
   } else {
-    await act(match, playerId, "PASS");
+    await act(seated, playerId, "PASS");
   }
   return true;
 }
 
 describe("partida 2P completa", () => {
-  it("se juega de punta a punta hasta que hay veredicto", async () => {
-    const match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
-    await revealHands(match);
-
-    // Tope de seguridad: una partida a 100 puntos no debería pasar de esto, y si
-    // lo pasa es un bucle y hay que verlo como fallo, no como cuelgue.
-    for (let turns = 0; turns < 3_000; turns += 1) {
-      if (match.serverState.phase === "FINISHED") break;
-      const played = await playOneTurn(match);
-      if (!played) {
-        // Fuera de PLAYING: o es la pausa de la mano, o la de la partida. Los dos
-        // plazos son cortos en test, así que se espera a que el reloj los venza.
-        await waitUntil(
-          () =>
-            match.serverState.currentRound?.phase === "PLAYING" ||
-            match.serverState.phase === "FINISHED",
-          3_000,
-        );
-      }
-    }
-
+  it("se jugó de punta a punta hasta que hubo veredicto", async () => {
     expect(match.serverState.phase).toBe("FINISHED");
-    const { teamA, teamB } = match.serverState.scoreboard ?? { teamA: 0, teamB: 0 };
-    expect(Math.max(teamA, teamB)).toBeGreaterThanOrEqual(match.serverState.pointsToWin);
+    const scoreboard = match.serverState.scoreboard;
+    expect(scoreboard).toBeDefined();
+    expect(Math.max(scoreboard?.teamA ?? 0, scoreboard?.teamB ?? 0)).toBeGreaterThanOrEqual(
+      match.serverState.pointsToWin,
+    );
     expect(match.serverState.pastRounds.length).toBeGreaterThan(0);
   });
 
   it("el historial de esa partida cierra con el veredicto y sin huecos de seq", async () => {
-    const entries = historyOf("m-g1-g2");
+    const entries = historyOf(MATCH_ID);
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.map((entry) => entry.seq)).toEqual(entries.map((_, index) => index + 1));
     // El veredicto NO es la última línea: `MATCH_RESOLVED` abre la presentación de la
@@ -8576,7 +8626,7 @@ describe("partida 2P completa", () => {
   });
 
   it("cada DEADLINE_EXPIRED quedó registrado como evento del sistema", async () => {
-    const entries = historyOf("m-g1-g2");
+    const entries = historyOf(MATCH_ID);
     const expirations = entries.filter((entry) => entry.type === "DEADLINE_EXPIRED");
     expect(expirations.length).toBeGreaterThan(0);
 
@@ -8602,7 +8652,9 @@ describe("partida 2P completa", () => {
   });
 
   it("ningún comando quedó registrado con source SYSTEM ni al revés", async () => {
-    for (const entry of historyOf("m-g1-g2")) {
+    const entries = historyOf(MATCH_ID);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
       if (entry.kind === "COMMAND") expect(entry.source).toBe("PLAYER");
       if (entry.kind === "EVENT") expect(entry.source).toBe("SYSTEM");
     }
@@ -9082,14 +9134,15 @@ es el que verifica que el `unlock()` de `onDrop` no es teórico.
 
 - [ ] **Step 1: Escribir el test del semáforo**
 
+`legalPlayFor` ya vive en el arnés desde la Tarea 20, así que acá se importa y no se reescribe. Del
+mismo arnés sale `revealHands`, y hace falta: la mesa arranca con la ventana de reparto encendida,
+la ronda nace en `DEALING` y no hay turno que spamear hasta que los dos levantan sus fichas.
+
 ```ts
 // src/features/match/tests/concurrency-e2e.test.ts
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { boardEndsOf } from "../core/engine/round/board-ends.js";
-import { playableSides } from "../core/engine/round/playable.js";
-import type { MatchState } from "../core/state/index.js";
-import { bootServer, historyOf, seatPair, waitUntil } from "./e2e-harness.js";
+import { bootServer, historyOf, legalPlayFor, seatPair, waitUntil } from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
@@ -9100,19 +9153,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await server.shutdown();
 });
-
-function legalPlayFor(state: MatchState, playerId: string) {
-  const round = state.currentRound;
-  if (!round) return undefined;
-  const hand = state.players.find((player) => player.playerId === playerId)?.hand;
-  if (!hand) return undefined;
-  const ends = boardEndsOf(round.board);
-  for (const tile of hand.tiles) {
-    const sides = playableSides(tile, ends);
-    if (sides[0]) return { left: tile.left, right: tile.right, side: sides[0] };
-  }
-  return undefined;
-}
 
 describe("concurrencia — no hay ventana para saltarse una validación", () => {
   // LA PREGUNTA ORIGINAL. El camino del comando es síncrono de punta a punta: sin
