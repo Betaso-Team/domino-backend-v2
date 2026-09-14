@@ -1,16 +1,19 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { Room } from "@colyseus/sdk";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
 import { testConfig } from "../../../app.config.js";
 import { rootContainer } from "../../../di-container.js";
 import { env } from "../../../env.js";
+import type { GlobalDominoConfig } from "../core/config.js";
 import { boardEndsOf } from "../core/engine/round/board-ends.js";
 import { playableSides } from "../core/engine/round/playable.js";
 import type { MatchState } from "../core/state/index.js";
 import type { BoardSide } from "../core/state/tile.js";
 import type { HistoryEntry } from "../network/history.js";
 import type { MemoryHistory } from "../network/transports/memory-history.js";
-import type { DominoRoomOptions } from "../transports/match-contract.js";
+import { type DominoRoomOptions, configOf } from "../transports/match-contract.js";
 
 export function mintToken(userId: string): string {
   return jwt.sign({ sub: userId }, env.jwtSecret, { algorithm: "HS256", expiresIn: "1h" });
@@ -57,6 +60,8 @@ export function signatureOf(state: MatchState): string {
 
 export interface SeatedMatch {
   readonly roomId: string;
+  /** Las opciones con las que la sala se creó. Es de dónde sale el config real de la partida. */
+  readonly options: DominoRoomOptions;
   readonly serverState: MatchState;
   readonly clients: Record<string, Awaited<ReturnType<ColyseusTestServer["connectTo"]>>>;
 }
@@ -66,13 +71,14 @@ export async function seatPair(
   seats: [string, string],
   seed?: string,
 ): Promise<SeatedMatch> {
-  const room = await server.createRoom("domino", casualTable([...seats], seed));
+  const options = casualTable([...seats], seed);
+  const room = await server.createRoom("domino", options);
   const clients: SeatedMatch["clients"] = {};
   for (const userId of seats) {
     server.sdk.auth.token = mintToken(userId);
     clients[userId] = await server.connectTo(room);
   }
-  return { roomId: room.roomId, serverState: room.state as MatchState, clients };
+  return { roomId: room.roomId, options, serverState: room.state as MatchState, clients };
 }
 
 // LA MESA ARRANCA TAPADA. `configOf` enciende la ventana de reparto en TODA mesa
@@ -151,4 +157,34 @@ export function historyOf(matchId: string): readonly HistoryEntry[] {
 
 export function linesOf(matchId: string): string[] {
   return historyOf(matchId).map((entry) => `${entry.source} ${entry.type}`);
+}
+
+const GOLDEN_DIR = fileURLToPath(new URL("fixtures", import.meta.url));
+
+// Captura una partida REAL entera —config, historial y árbol final— como fixture de
+// regresión del replay. Nada se escribe a mano: el `meta` sale de las mismas opciones con
+// las que la sala se creó y el `globalConfig` del mismo container, así que el fixture no
+// puede describir una partida distinta de la que se jugó.
+//
+// `startedAt` viaja aparte porque NO está en el historial: `begin()` no emite nada, así
+// que la primera entrada grabada es posterior al arranque. Sin él el replay inventa el
+// instante y el árbol reconstruido difiere del real en ese campo.
+//
+// Solo escribe si se pide con WRITE_GOLDEN=1. En una corrida normal es no-op, así que el
+// fixture no se regenera por accidente y una regresión no se auto-aprueba. El flag entra
+// por `env`, nunca leyendo el entorno a mano: env.ts es el único lector permitido de la
+// configuración del proceso, y env-single-reader.test.ts se pone rojo si alguien lo saltea
+// —incluso escribiendo el nombre de esa variable global en un comentario como éste—.
+export function writeGolden(name: string, match: SeatedMatch): void {
+  if (!env.writeGolden) return;
+  const meta = configOf(match.options);
+  const payload = {
+    meta,
+    globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
+    startedAt: match.serverState.startedAt,
+    entries: historyOf(meta.matchId),
+    finalState: match.serverState.toJSON(),
+  };
+  mkdirSync(GOLDEN_DIR, { recursive: true });
+  writeFileSync(`${GOLDEN_DIR}/${name}.json`, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }

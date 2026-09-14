@@ -10,6 +10,7 @@ import {
   revealHands,
   seatPair,
   waitUntil,
+  writeGolden,
 } from "./e2e-harness.js";
 
 const MATCH_ID = "m-g1-g2";
@@ -43,6 +44,12 @@ beforeAll(async () => {
       );
     }
   }
+
+  // El golden se captura ACÁ y no dentro de un `it`: es el único punto donde el árbol
+  // final y su historial están los dos completos y en alcance, y desde la Tarea 20 jugar
+  // la partida ya no pertenece a ningún test en particular. En una corrida normal es
+  // no-op — solo escribe con WRITE_GOLDEN=1.
+  writeGolden("golden-2p", match);
 }, 30_000);
 
 afterAll(async () => {

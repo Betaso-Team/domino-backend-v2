@@ -1,23 +1,10 @@
 import type { DependencyContainer } from "tsyringe";
-import {
-  AbandonCommand,
-  DrawTileCommand,
-  PassCommand,
-  PlayTileCommand,
-  RevealTilesCommand,
-} from "../../../core/commands/index.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config.js";
 import type { Clock } from "../../../core/engine/clock.js";
-import { Dealer } from "../../../core/engine/dealer.js";
-import { MatchDriver, MatchPlayer, MatchReferee } from "../../../core/engine/match/index.js";
-import { Player } from "../../../core/engine/player-facade.js";
-import { PlayerRepository } from "../../../core/engine/player-repository.js";
-import { Referee } from "../../../core/engine/referee-facade.js";
-import { RoundDriver, RoundPlayer, RoundReferee } from "../../../core/engine/round/index.js";
-import { Scorer } from "../../../core/engine/scorer.js";
 import type { TimeoutScheduler } from "../../../core/engine/timeout-scheduler.js";
 import type { SchemaVisibilityController } from "../../../core/engine/visibility.js";
 import type { MatchState } from "../../../core/state/index.js";
+import { buildEngineGraph } from "../../../history/engine-factory.js";
 import {
   type HistoryPort,
   type MatchEventSink,
@@ -31,69 +18,33 @@ export type MatchStarter = () => void;
 export type MatchSeatGuard = (playerId: string) => boolean;
 export type MatchHasOutcome = () => boolean;
 
+// Este archivo ya NO arma el grafo: lo pide a `buildEngineGraph` y solo decide qué queda
+// alcanzable desde el container. La génesis y el orden de construcción viven en UN solo
+// lugar, compartido con el replay; mientras estuvieron duplicados, cambiar una regla
+// obligaba a acordarse del otro sitio —el bug que truco documenta—.
 export function registerIndividualCommands(child: DependencyContainer): void {
-  const match = child.resolve<MatchState>("MatchState");
   const config = child.resolve<DominoMatchConfig>("Config");
   const globalConfig = child.resolve<GlobalDominoConfig>("GlobalDominoConfig");
   const clock = child.resolve<Clock>("Clock");
   const scheduler = child.resolve<TimeoutScheduler>("TimeoutScheduler");
-
   const visibility = child.resolve<SchemaVisibilityController>("SchemaVisibilityController");
-  const matchReferee = new MatchReferee(match);
-  const roundReferee = new RoundReferee(match);
-  const scorer = new Scorer(match);
-  const dealer = new Dealer(match, config, globalConfig);
-  const repository = new PlayerRepository(
-    config.seats,
-    (playerId) => new MatchPlayer(playerId, match),
-    (playerId) => new RoundPlayer(playerId, match, visibility),
-  );
-  const players = new Player(repository);
-  const referee = new Referee(matchReferee, roundReferee);
-  const roundDriver = new RoundDriver(
-    match,
-    clock,
-    globalConfig,
-    config,
-    roundReferee,
-    dealer,
-    scorer,
-    (playerId) => repository.round(playerId),
-  );
-  const matchDriver = new MatchDriver(
-    match,
-    clock,
-    scheduler,
-    globalConfig,
-    matchReferee,
-    players,
-    roundDriver,
-  );
 
-  child.register<Referee>("Referee", { useValue: referee });
-  child.register<MatchStarter>("MatchStarter", { useValue: () => matchDriver.begin() });
-  child.register<MatchHasOutcome>("MatchHasOutcome", {
-    useValue: () => matchReferee.outcome() !== undefined,
-  });
+  const graph = buildEngineGraph(config, globalConfig, { clock, scheduler, visibility });
+
+  // El árbol lo crea la fábrica, no la sala: la génesis es una regla del juego y tenerla
+  // de los dos lados era la duplicación que este refactor cierra.
+  child.register<MatchState>("MatchState", { useValue: graph.match });
+  child.register("Referee", { useValue: graph.referee });
+  child.register<MatchStarter>("MatchStarter", { useValue: () => graph.matchDriver.begin() });
+  child.register<MatchHasOutcome>("MatchHasOutcome", { useValue: () => graph.hasOutcome() });
   child.register<MatchSeatGuard>("MatchSeatGuard", {
-    useValue: (playerId) =>
-      !match.players.find((player) => player.playerId === playerId)?.hasAbandoned,
+    useValue: (playerId) => graph.isStillPlaying(playerId),
   });
-  child.register("Command:ABANDON", {
-    useValue: new AbandonCommand(referee, players, matchDriver),
-  });
-  child.register("Command:PLAY_TILE", {
-    useValue: new PlayTileCommand(referee, players, matchDriver),
-  });
-  child.register("Command:DRAW_TILE", {
-    useValue: new DrawTileCommand(referee, players, matchDriver),
-  });
-  child.register("Command:PASS", {
-    useValue: new PassCommand(referee, matchDriver),
-  });
-  child.register("Command:REVEAL_TILES", {
-    useValue: new RevealTilesCommand(referee, players, matchDriver),
-  });
+  child.register("Command:ABANDON", { useValue: graph.commands.ABANDON });
+  child.register("Command:PLAY_TILE", { useValue: graph.commands.PLAY_TILE });
+  child.register("Command:DRAW_TILE", { useValue: graph.commands.DRAW_TILE });
+  child.register("Command:PASS", { useValue: graph.commands.PASS });
+  child.register("Command:REVEAL_TILES", { useValue: graph.commands.REVEAL_TILES });
 
   // MatchDriver no se registra: la sala puede iniciar la partida por MatchStarter, pero
   // no puede alcanzar advance/timeout y saltarse los comandos.

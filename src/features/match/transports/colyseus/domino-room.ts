@@ -14,7 +14,6 @@ import type { Logger } from "../../../../logger.js";
 import { InvalidTokenError, type TokenVerifier } from "../../../auth/index.js";
 import type { GlobalDominoConfig } from "../../core/config.js";
 import { RuleViolationError } from "../../core/engine/errors.js";
-import { createMatchState } from "../../core/engine/genesis.js";
 import type { SchemaVisibilityController } from "../../core/engine/visibility.js";
 import type { PlayerId } from "../../core/ids.js";
 import type { MatchState } from "../../core/state/index.js";
@@ -77,10 +76,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.maxClients = this.seats.length * 2;
 
     const config = configOf(options);
-    const match = createMatchState(config);
     const child = rootContainer.createChildContainer();
     child.register("Config", { useValue: config });
-    child.register("MatchState", { useValue: match });
 
     // La vista es del asiento, no del socket: existe antes de que el dueño se conecte y
     // conserva las revelaciones privadas si el socket se reemplaza o se reconecta.
@@ -95,7 +92,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // El scheduler tiene que estar registrado antes de armar los actores: el conductor
     // del motor recibe solo el puerto y nunca debe conocer la sala.
     child.register("TimeoutScheduler", { useValue: this.scheduler });
+    // El árbol nace acá adentro: la génesis es del motor, no de la sala. `MatchState`
+    // queda registrado por el wiring y la sala lo recibe ya armado.
     registerIndividualCommands(child);
+    const match = child.resolve<MatchState>("MatchState");
     this.catalog = buildCatalog(child);
 
     const pieces = buildPieces(child, (events: readonly NetworkMatchEvent[]) =>

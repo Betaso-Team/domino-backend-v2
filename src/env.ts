@@ -17,6 +17,15 @@ const schema = z.object({
   SEATING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   // Compartido con el backend principal. El dominó verifica y NUNCA firma.
   JWT_SECRET: z.string().min(16, "JWT_SECRET debe tener al menos 16 caracteres"),
+  /**
+   * Interruptor de HERRAMIENTA, no de producto: regenera los fixtures golden del replay
+   * (`writeGolden` en features/match/tests/e2e-harness.ts). El servidor nunca lo mira.
+   * Vive acá igual porque este archivo es el único lector de la configuración del proceso
+   * —invariante con test propio en env-single-reader.test.ts—, y un guardarraíl con una
+   * excepción por conveniencia deja de ser un guardarraíl.
+   * Cualquier valor distinto de "1" lo deja apagado, así que no hay entorno que rechazar.
+   */
+  WRITE_GOLDEN: z.string().optional(),
 });
 
 export interface Env {
@@ -29,6 +38,7 @@ export interface Env {
   readonly presentingMatchMs: number;
   readonly seatingTimeoutMs: number;
   readonly logLevel: "debug" | "info";
+  readonly writeGolden: boolean;
 }
 
 export function parseEnv(source: Record<string, string | undefined>): Env {
@@ -50,6 +60,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     presentingMatchMs: parsed.PRESENTING_MATCH_MS,
     seatingTimeoutMs: parsed.SEATING_TIMEOUT_MS,
     logLevel: parsed.NODE_ENV === "production" ? "info" : "debug",
+    writeGolden: parsed.WRITE_GOLDEN === "1",
   };
 }
 
