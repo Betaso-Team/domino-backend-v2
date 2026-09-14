@@ -86,8 +86,7 @@ export async function seatPair(
 // (es control de presencia anti-fraude), así que la ronda 1 nace en `DEALING` y las
 // manos están ocultas incluso para su dueño hasta que él dice `REVEAL_TILES`. Todo
 // test que quiera una ronda EN JUEGO pasa por acá; sin esto la espera se cuelga los
-// 15 s de `dealingTimeoutMs` —el único plazo que no es configurable por entorno— y
-// termina retirando a los dos por no levantar las fichas.
+// el plazo de `dealingTimeoutMs` y termina retirando a los dos por no levantar las fichas.
 export async function revealHands(match: SeatedMatch): Promise<void> {
   for (const client of Object.values(match.clients)) client.send("REVEAL_TILES", {});
   await waitUntil(() => match.serverState.currentRound?.phase === "PLAYING");

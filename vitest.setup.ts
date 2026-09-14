@@ -13,6 +13,7 @@ process.env.PRESENTING_MATCH_MS ??= "120";
 process.env.PRESENTING_ROUND_MS ??= "120";
 process.env.TURN_TIMEOUT_MS ??= "600";
 process.env.EXTRA_TIME_RESERVE_MS ??= "300";
+process.env.DEALING_TIMEOUT_MS ??= "800";
 process.env.SEATING_TIMEOUT_MS ??= "3000";
 // Tres segundos: el camino de la ventana vencida tiene que poder testearse. Es el plazo
 // más largo que queda en test, y sigue siendo mucho más que los 200 ms que tarda el SDK

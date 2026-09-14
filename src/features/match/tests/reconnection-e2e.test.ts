@@ -1,17 +1,28 @@
 import { CloseCode } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { rootContainer } from "../../../di-container.js";
+import { type GlobalDominoConfig, globalConfigWith } from "../core/config.js";
 import type { MatchState } from "../core/state/index.js";
 import { bootServer, clientOf, linesOf, rejoinAs, seatPair, waitUntil } from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
+let originalGlobalConfig: GlobalDominoConfig;
 
 beforeAll(async () => {
+  originalGlobalConfig = rootContainer.resolve("GlobalDominoConfig");
+  rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
+    useValue: globalConfigWith({
+      ...originalGlobalConfig,
+      dealingTimeoutMs: (originalGlobalConfig.reconnectionWindowSeconds + 1) * 1_000,
+    }),
+  });
   server = await bootServer(2589);
 });
 
 afterAll(async () => {
   await server.shutdown();
+  rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
 const connectedOf = (state: MatchState, playerId: string) =>
@@ -20,11 +31,12 @@ const connectedOf = (state: MatchState, playerId: string) =>
 // NINGUNO DE LOS TRES CAMINOS REVELA LAS DOS MANOS, y no es un olvido: con la ronda en
 // PLAYING el plazo del turno son 600 ms + 300 de reserva en test, así que un jugador caído
 // al que le toca jugar lo retira el motor antes de que alcance a volver, y el test mediría
-// esa carrera y no la reconexión. Tapada, la mesa espera los 15 s de la ventana de reparto
-// —el único plazo que no es configurable por entorno— y eso es margen de sobra para los
-// 3 s de la ventana de reconexión. El camino 2, que sí necesita ver una mano, levanta las
-// fichas de UN solo jugador: alcanza para que su vista tenga las siete y la ronda sigue
-// en DEALING porque falta el otro.
+// esa carrera y no la reconexión. Tapada, esta suite mantiene `dealingTimeoutMs` un segundo
+// por encima de los 3 s de la ventana de reconexión para que haya margen de sobra. Ese
+// override local evita que el default E2E de 800 ms cambie lo que está bajo prueba acá:
+// cada test mide reconexión, no el retiro por reparto. El camino 2, que sí necesita ver
+// una mano, levanta las fichas de UN solo jugador: alcanza para que su vista tenga las
+// siete y la ronda sigue en DEALING porque falta el otro.
 describe("reconexión — los tres caminos", () => {
   // CAMINO 1: bache de red. El SDK reintenta solo sobre la MISMA instancia de Room,
   // con los callbacks intactos.

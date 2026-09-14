@@ -17,6 +17,7 @@ rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
   useValue: globalConfigWith({
     turnTimeoutMs: env.turnTimeoutMs,
     extraTimeReserveMs: env.extraTimeReserveMs,
+    dealingTimeoutMs: env.dealingTimeoutMs,
     presentingRoundMs: env.presentingRoundMs,
     presentingMatchMs: env.presentingMatchMs,
     seatingTimeoutMs: env.seatingTimeoutMs,

@@ -12,6 +12,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(2567),
   TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   EXTRA_TIME_RESERVE_MS: z.coerce.number().int().positive().default(30_000),
+  DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   PRESENTING_ROUND_MS: z.coerce.number().int().positive().default(6_000),
   PRESENTING_MATCH_MS: z.coerce.number().int().positive().default(6_000),
   SEATING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
@@ -60,6 +61,7 @@ export interface Env {
   readonly internalApiKey: string | undefined;
   readonly turnTimeoutMs: number;
   readonly extraTimeReserveMs: number;
+  readonly dealingTimeoutMs: number;
   readonly presentingRoundMs: number;
   readonly presentingMatchMs: number;
   readonly seatingTimeoutMs: number;
@@ -84,6 +86,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     internalApiKey: parsed.INTERNAL_API_KEY,
     turnTimeoutMs: parsed.TURN_TIMEOUT_MS,
     extraTimeReserveMs: parsed.EXTRA_TIME_RESERVE_MS,
+    dealingTimeoutMs: parsed.DEALING_TIMEOUT_MS,
     presentingRoundMs: parsed.PRESENTING_ROUND_MS,
     presentingMatchMs: parsed.PRESENTING_MATCH_MS,
     seatingTimeoutMs: parsed.SEATING_TIMEOUT_MS,
