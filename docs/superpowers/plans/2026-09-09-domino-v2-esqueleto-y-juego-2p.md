@@ -9368,7 +9368,48 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 Los dos criterios de "hecho" del spec que no caen en ninguna tarea anterior. El primero es el que
 contesta la pregunta original —¿se puede spamear una acción y saltarse una validación?—; el segundo
-es el que verifica que el asiento reservado para la reconexión no le cierre la puerta a su dueño.
+es el que verifica que el `unlock()` de `onDrop` no es teórico.
+
+> ### ⛔ CRITERIO NO CUMPLIDO: el `unlock()` de `onDrop` sigue sin test
+>
+> El texto de arriba es el criterio ORIGINAL y se deja tal cual, porque un criterio de "hecho" que
+> ninguna tarea cumple es un faltante que el que sigue tiene que ver — no una frase que se ajusta
+> hasta que lo implementado la cumpla. La primera redacción de este parche lo reescribió; eso era
+> mover el poste, y se revirtió.
+>
+> **Estado.** Con `void this.unlock()` comentado en `domino-room.ts`, la suite da **249/249 verdes**.
+> Ningún test del repo ejerce esa línea.
+>
+> **Por qué es inalcanzable hoy.** `unlock()` deshace un lock, y con el
+> `maxClients = seats.length * 2` de `onCreate` la sala nunca se lockea:
+> `hasReachedMaxClients()` es `clients + reservedSeats >= maxClients`
+> (`@colyseus/core` `Room.mjs:434`), y en una mesa de 2 con 4 cupos el máximo alcanzable tras una
+> caída es `1 + 1 = 2`. Medido instrumentando la sala: `locked` vale `false` antes y después del
+> drop. El otro lockeador, el `this.lock()` de `onReconnect` (`domino-room.ts`), exige 4 sockets
+> vivos en una mesa de 2.
+>
+> **La explicación que dio la primera redacción de este parche era falsa** —y de la misma familia
+> que el defecto 4 de más abajo: describía una API de terceros de memoria—. Decía que `unlock()`
+> abre el *listing* y no toca el `joinById`. `joinById` chequea `room.locked` **antes que nada**
+> (`@colyseus/core` `MatchMaker.mjs:157-158`), así que sí lo toca. Reproducido: con `maxClients` en
+> factor 1 **y** `unlock()` comentado el error es `room "..." is locked`; con `unlock()` presente
+> pasa a ser `is already full`.
+>
+> **Se eligió (b): documentar la condición, no escribir el test.** Forzar un lock a mano para tener
+> cobertura mediría el andamio del test y no la sala. La condición exacta bajo la cual esa línea
+> vuelve a importar queda escrita arriba del propio `unlock()` en `domino-room.ts`, y es:
+>
+> - con `maxClients = seats.length`, la sala se auto-lockea al ocuparse el último asiento;
+> - `joinById` muere entonces en `room.locked`, antes de mirar la reserva;
+> - el auto-unlock del core NO salva, porque cuelga de `#_decrementClientCount`, que con una
+>   reconexión pendiente queda encadenado al rechazo de esa promesa (`Room.mjs:1461-1463`) — o sea
+>   recién cuando la ventana vence. Durante toda la ventana, sin `unlock()`, el dueño del asiento
+>   rebota con "room is locked";
+> - y es además el único que limpia el lock EXPLÍCITO de `onReconnect`: el automático se abstiene
+>   si `_lockedExplicitly` está puesto (`Room.mjs:1495`).
+>
+> **Quien toque `maxClients` destapa esto.** Si el factor 2 se va, el criterio deja de ser teórico
+> y hay que escribirle el test.
 
 > **Corregido durante la ejecución.** Esta tarea traía seis defectos, todos de la misma familia: el
 > plan describe el sistema como quedará al final, no como está a su propia altura.
@@ -9397,11 +9438,10 @@ es el que verifica que el asiento reservado para la reconexión no le cierre la 
 >    - `back.hasJoined` **no existe** en `@colyseus/sdk` 0.18, y sobra: `rejoinAs` ya hace
 >      `waitForInitialState()` por dentro desde la Tarea 21.
 > 5. **"ESTE es el test que verifica el `unlock()` de `onDrop`" es falso.** Comentar el `unlock()`
->    deja el camino 2 verde. Lo que lo sostiene es el `maxClients = seats.length * 2` de `onCreate`:
->    `hasReachedMaxClients()` suma `clients + reservedSeats`, y con el doble de cupos la sala nunca
->    llegó a auto-lockearse, así que el `unlock()` es un no-op. Verificado en los dos sentidos:
->    bajando el factor a 1 el `joinById` lanza `is already full`. El `unlock()` abre el LISTING, que
->    es el camino del matchmaking por nombre y no el del `joinById`.
+>    deja la suite entera verde. Lo que sostiene al camino 2 es el `maxClients = seats.length * 2`
+>    de `onCreate`; verificado bajando el factor a 1, donde el `joinById` lanza. El criterio del
+>    `unlock()` queda **NO CUMPLIDO** — ver el recuadro del encabezado de la tarea, que además
+>    corrige la explicación equivocada que este punto traía en su primera redacción.
 > 6. **El `git add src` del Step 6 no incluye `vitest.setup.ts`**, que está en la raíz y que el
 >    Step 4 manda editar. Sin él la ventana queda en 120 s en la próxima corrida limpia.
 
@@ -9786,7 +9826,11 @@ El diff tiene que ser solo los timestamps y el campo nuevo: si cambia una jugada
 Run: `npx vitest run src/features/match/tests/concurrency-e2e.test.ts src/features/match/tests/reconnection-e2e.test.ts`
 Expected: 3 + 3 tests PASAN.
 
-Lo que no se negocia es el camino 2: es el que prueba que el asiento reservado no expulse a su dueño.
+Lo que no se negocia es el camino 2: es el que prueba el `unlock()`.
+
+> **No lo prueba.** Ver el recuadro del encabezado de la tarea: el camino 2 mide que el asiento
+> reservado no expulse a su dueño —que es real y vale—, pero el `unlock()` queda sin ejercer. La
+> salida del Step 5 se deja con su texto original, sin cumplir.
 
 - [ ] **Step 6: Correr la suite completa y commitear**
 
@@ -9807,10 +9851,11 @@ Lo acompaña un test de arquitectura que prohíbe await y async en core/commands
 core/engine: el test prueba el comportamiento de hoy, el grep impide que mañana
 alguien reabra la ventana en silencio.
 
-El camino del token perdido es el que verifica que el asiento reservado para la
-reconexión no le cierre la puerta a su propio dueño: hasReachedMaxClients() suma
-clientes más reservas, así que con un solo cupo por asiento el matchmaker rechaza
-el joinById y el jugador queda fuera de su propia partida.
+El camino del token perdido verifica que el asiento reservado para la reconexión
+no le cierre la puerta a su propio dueño: hasReachedMaxClients() suma clientes más
+reservas, así que con un solo cupo por asiento el matchmaker rechaza el joinById y
+el jugador queda fuera de su propia partida. NO cubre el unlock() de onDrop, que
+queda sin test — ver el recuadro del encabezado de la tarea.
 
 La ventana de reconexión pasa a salir de env para poder testear su vencimiento.
 

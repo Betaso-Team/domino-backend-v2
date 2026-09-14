@@ -19,6 +19,9 @@ Los otros dos documentos:
   hacía el sistema anterior.
 
 **Estado: Tareas 0–22 hechas. La próxima es la 23.** Para confirmarlo, `git log --oneline`.
+**Deuda abierta**: la Tarea 22 dejó UN criterio sin cumplir —el `unlock()` de `onDrop` no tiene
+test y es inalcanzable bajo el `maxClients` de hoy—. Está en el recuadro ⛔ del encabezado de esa
+tarea en el plan, con la condición exacta que lo vuelve a activar. **Si tocás `maxClients`, leelo.**
 Esta línea se quedó stale doce tareas seguidas: **actualizala al cerrar la tuya**, o el que
 sigue arranca desorientado.
 
