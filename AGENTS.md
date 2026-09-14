@@ -6,7 +6,8 @@ estar en cómo lo resolvió truco.
 
 ## El plan es la autoridad
 
-`docs/superpowers/plans/2026-09-09-domino-v2-esqueleto-y-juego-2p.md` — 23 tareas, cada
+`docs/superpowers/plans/2026-09-09-domino-v2-esqueleto-y-juego-2p.md` — 24 tareas (la 0 a la
+23), cada
 una con sus Steps, su código y sus tests escritos. **No improvises el diseño**: el plan ya
 decidió, y las decisiones están argumentadas en los comentarios del propio código.
 
@@ -20,6 +21,11 @@ Los otros dos documentos:
 
 **Estado: plan completo, Tareas 0–23 hechas.** La Tarea 22 cerró sus correcciones de calidad en
 `f6fdb3d`; la Tarea 23 cerró implementación, E2E y golden en `11d20f5` con **253 tests verdes**.
+
+Después del plan entró una tanda de correcciones portadas de truco (`078a2af` y anteriores):
+la Regla 3 no veía los imports locales del container, el transporte HTTP resolvía del root en
+vez de recibir, faltaba el manejador de errores de Express y `.env.example` estaba ocho
+variables atrás de `src/env.ts`. **Baseline actual: 258 tests / 39 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
@@ -115,9 +121,15 @@ guía de estilo: el test se pone rojo.
    `core/`; la restricción es solo saliente.
 2. **core-no-runtime** — el core no importa paquetes de runtime. Excepción única:
    `@colyseus/schema`, porque el estado ES el Schema.
-3. **tsyringe-only-in-roots** — solo en `src/di-container.ts`,
-   `.../colyseus/domino-room.ts` y `.../colyseus/commands/di-wiring.ts`. Esos tres nombres
-   están escritos en el config; los archivos llegan en las Tareas 10–12.
+3. **tsyringe-only-in-roots** + **di-container-only-in-roots** — son DOS reglas porque hay
+   dos puertas: importar el paquete `tsyringe`, y importar `rootContainer` de
+   `src/di-container.ts`. La segunda es la que se usa de verdad, y durante tres tareas no
+   estaba escrita: depcruise evalúa ARISTAS, no alcanzabilidad, así que la condición sobre
+   `^node_modules/tsyringe/` miraba un camino que nadie toma y el test daba verde sobre una
+   violación viva (`fdd99b6`). Composition roots: `src/di-container.ts`,
+   `src/app.config.ts`, `src/replay.ts`, `.../colyseus/domino-room.ts` y
+   `.../colyseus/commands/di-wiring.ts`. Los tests quedan afuera por categoría
+   (`*.test.ts`, `/tests/`), con el argumento en el comentario del config.
 4. **feature-boundary** — una feature importa de otra solo vía su `index.ts`.
 
 Más `no-circular`, que no es regla de imports sino invariante del grafo.
