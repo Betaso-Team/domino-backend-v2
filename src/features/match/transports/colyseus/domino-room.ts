@@ -39,10 +39,13 @@ import {
 import { RoomTimeoutScheduler } from "./timeout-scheduler.js";
 import { StateViewVisibilityController } from "./visibility.js";
 
-const RECONNECTION_WINDOW_SECONDS = 120;
-
 export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private seats: readonly PlayerId[] = [];
+  // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
+  // El default repite el del env a propósito: si algún día `onDrop` corriera antes de que
+  // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
+  // perdería el asiento en el acto.
+  private reconnectionWindowSeconds = 120;
   private catalog!: CommandCatalog;
   private notifier!: MatchEventNotifier;
   private scheduler!: RoomTimeoutScheduler;
@@ -69,6 +72,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
   override onCreate(options: DominoRoomOptions): void {
     const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
+    this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
     this.seats = options.seats;
     // Colyseus cuenta las reservas de reconexión aunque unlock() abra el listing. Dos
     // cupos por asiento permiten conservar el token viejo mientras entra un reemplazo,
@@ -165,7 +169,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // Colyseus finaliza esta promesa cuando vence o se usa el token. Capturar solo su
     // rechazo evita un unhandled rejection al disponer la sala sin interceptar ese flujo.
     this.cancelPendingReconnection(playerId);
-    const pending = this.allowReconnection(client, RECONNECTION_WINDOW_SECONDS);
+    const pending = this.allowReconnection(client, this.reconnectionWindowSeconds);
     this.pendingReconnections.set(playerId, pending);
     void pending.then(
       () => this.forgetPendingReconnection(playerId, pending),

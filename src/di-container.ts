@@ -20,6 +20,7 @@ rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
     presentingRoundMs: env.presentingRoundMs,
     presentingMatchMs: env.presentingMatchMs,
     seatingTimeoutMs: env.seatingTimeoutMs,
+    reconnectionWindowSeconds: env.reconnectionWindowSeconds,
   }),
 });
 rootContainer.register<Clock>("Clock", { useValue: { now: () => Date.now() } satisfies Clock });

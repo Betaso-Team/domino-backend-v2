@@ -15,6 +15,15 @@ const schema = z.object({
   PRESENTING_ROUND_MS: z.coerce.number().int().positive().default(6_000),
   PRESENTING_MATCH_MS: z.coerce.number().int().positive().default(6_000),
   SEATING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * Cuánto se le guarda el asiento al que se cayó (`allowReconnection`). Va en SEGUNDOS
+   * porque esa es la unidad de la API de Colyseus, y convertir acá sería dejar dos números
+   * distintos para el mismo plazo.
+   *
+   * Sale del entorno por la misma razón que las duraciones de fase: el camino de la
+   * ventana VENCIDA no se puede testear esperando dos minutos.
+   */
+  RECONNECTION_WINDOW_SECONDS: z.coerce.number().int().positive().default(120),
   // Compartido con el backend principal. El dominó verifica y NUNCA firma.
   JWT_SECRET: z.string().min(16, "JWT_SECRET debe tener al menos 16 caracteres"),
   /**
@@ -54,6 +63,7 @@ export interface Env {
   readonly presentingRoundMs: number;
   readonly presentingMatchMs: number;
   readonly seatingTimeoutMs: number;
+  readonly reconnectionWindowSeconds: number;
   readonly logLevel: "debug" | "info";
   readonly writeGolden: boolean;
 }
@@ -77,6 +87,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     presentingRoundMs: parsed.PRESENTING_ROUND_MS,
     presentingMatchMs: parsed.PRESENTING_MATCH_MS,
     seatingTimeoutMs: parsed.SEATING_TIMEOUT_MS,
+    reconnectionWindowSeconds: parsed.RECONNECTION_WINDOW_SECONDS,
     logLevel: parsed.NODE_ENV === "production" ? "info" : "debug",
     writeGolden: parsed.WRITE_GOLDEN === "1",
   };

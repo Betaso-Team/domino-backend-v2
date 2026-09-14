@@ -104,6 +104,51 @@ describe("reglas de arquitectura", () => {
     expect(output).toContain("feature-boundary");
   });
 
+  // El camino del comando es SÍNCRONO POR CONTRATO. Un await acá reabre la ventana
+  // de interleaving que el test del semáforo cierra: dos mensajes del mismo cliente
+  // pasarían la validación antes de que el primero mute el turno o la mano, y la misma
+  // ficha se jugaría dos veces. Es el complemento estructural de
+  // features/match/tests/concurrency-e2e.test.ts — ese prueba el comportamiento de hoy,
+  // este impide que mañana alguien lo rompa en silencio.
+  //
+  // Esta regla NO la puede aplicar dependency-cruiser: mira el grafo de imports, y la
+  // asincronía es sintaxis del cuerpo del archivo. Por eso es un test de arquitectura sin
+  // depcruise detrás, y de paso no le suma un segundo a los ~17 s que ya cuestan los otros.
+  it("no hay await ni async en el core del engine ni en los comandos", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((entry) => {
+        const path = `${dir}/${entry}`;
+        if (statSync(path).isDirectory()) return walk(path);
+        return path.endsWith(".ts") && !path.endsWith(".test.ts") ? [path] : [];
+      });
+
+    const scanned = [
+      ...walk("src/features/match/core/commands"),
+      ...walk("src/features/match/core/engine"),
+    ].filter((path) => !path.includes("/tests/"));
+
+    // La red tiene que estar tendida sobre algo: si un refactor mueve estas carpetas, el
+    // walk devuelve vacío y `offenders` sale vacío por la razón equivocada.
+    expect(scanned.length).toBeGreaterThan(20);
+
+    // Se miden PALABRAS CLAVE, no menciones: los comentarios se borran antes de buscar.
+    // No es relajar la regla, es apuntarla — `core/command.ts` ya documenta el contrato con
+    // la frase "si no hay await", y el día que ese párrafo se mude a `core/commands/` el
+    // grep crudo se pondría rojo sin que exista una sola espera real. Un guardarraíl que
+    // falla por prosa es un guardarraíl que alguien termina borrando.
+    const withoutComments = (source: string): string =>
+      source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+    const offenders = scanned.filter((path) => {
+      const source = withoutComments(readFileSync(path, "utf8"));
+      return /\bawait\b/.test(source) || /\basync\b/.test(source);
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
   it("no-circular: dos módulos que se importan mutuamente forman un ciclo prohibido", () => {
     writeFile(
       `${FEATURE_A_DIR}/circular-a.ts`,

@@ -43,6 +43,17 @@ export interface GlobalDominoConfig {
   readonly presentingRoundMs: number;
   readonly presentingMatchMs: number;
   readonly seatingTimeoutMs: number;
+  /**
+   * Cuánto se le guarda el asiento al que se cayó. En SEGUNDOS —no en ms como los
+   * demás— porque es la unidad de `allowReconnection`, y traducir en el medio dejaría
+   * dos números para el mismo plazo.
+   *
+   * Es el único plazo de esta config que el MOTOR no lee: lo consume la sala. Vive acá
+   * igual porque `GlobalDominoConfig` es el sobre en el que la partida recibe sus plazos
+   * y la sala ya lo resuelve para `seatingTimeoutMs`; un segundo canal para un solo
+   * número sería una vía paralela de configuración que nadie recordaría mantener.
+   */
+  readonly reconnectionWindowSeconds: number;
   readonly tilesPerPlayer: number;
 }
 
@@ -58,6 +69,7 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   presentingRoundMs: 6_000,
   presentingMatchMs: 6_000,
   seatingTimeoutMs: 30_000,
+  reconnectionWindowSeconds: 120,
   tilesPerPlayer: 7,
 };
 
