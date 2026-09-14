@@ -11,8 +11,7 @@ import { boardEndsOf } from "../core/engine/round/board-ends.js";
 import { playableSides } from "../core/engine/round/playable.js";
 import type { MatchState } from "../core/state/index.js";
 import type { BoardSide } from "../core/state/tile.js";
-import type { HistoryEntry } from "../network/history.js";
-import type { MemoryHistory } from "../network/transports/memory-history.js";
+import type { HistoryEntry, HistoryReader } from "../network/history.js";
 import { type DominoRoomOptions, configOf } from "../transports/match-contract.js";
 
 export function mintToken(userId: string): string {
@@ -152,7 +151,7 @@ export async function act(
 }
 
 export function historyOf(matchId: string): readonly HistoryEntry[] {
-  return (rootContainer.resolve("HistoryPort") as MemoryHistory).of(matchId);
+  return rootContainer.resolve<HistoryReader>("HistoryReader").of(matchId);
 }
 
 export function linesOf(matchId: string): string[] {

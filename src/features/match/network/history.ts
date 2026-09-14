@@ -38,6 +38,25 @@ export interface HistoryPort {
   record(entries: readonly HistoryEntry[]): void;
 }
 
+// El lado de LECTURA, separado del de escritura porque tiene otros dueños: escribe la sala
+// en el camino caliente, lee el operador de soporte —el endpoint interno y el CLI de
+// replay—. Un adaptador puede implementar los dos, y `MemoryHistory` lo hace.
+//
+// Existe como puerto y no como un cast porque el cast era una MENTIRA que tsc no podía
+// ver: `resolve("HistoryPort") as MemoryHistory` afirma la implementación concreta sobre
+// un token cuyo tipo declarado solo promete `record`. El día que "HistoryPort" quede
+// registrado contra el adaptador de Mongo —que es el plan, ver arriba—, el cast sigue
+// compilando y el endpoint revienta en runtime con `of is not a function`. Con el puerto
+// aparte, ese día el que no compila es el registro, que es donde está la decisión.
+//
+// Devuelve el arreglo YA GRABADO, sin promesa, por la misma razón que `record`: los dos
+// llamadores de hoy son sincrónicos. Cuando Mongo entre, el que cambia de forma es este
+// —y sus dos llamadores, que están contados— y no `record`, que corre en el camino del
+// comando y no puede esperar a nadie.
+export interface HistoryReader {
+  of(matchId: string): readonly HistoryEntry[];
+}
+
 // Grabador PER-PARTIDA. Lo arma el wiring; la sala solo lo usa.
 export class MatchHistory {
   private seq = 0;

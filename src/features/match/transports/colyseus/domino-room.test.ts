@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testConfig } from "../../../../app.config.js";
 import { rootContainer } from "../../../../di-container.js";
 import { env } from "../../../../env.js";
-import type { MemoryHistory } from "../../network/transports/memory-history.js";
+import type { HistoryReader } from "../../network/history.js";
 import type { DominoRoomOptions } from "../match-contract.js";
 import type { DominoRoom } from "./domino-room.js";
 
@@ -169,7 +169,8 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<v
 }
 
 function historyTypes(matchId: string): string[] {
-  return (rootContainer.resolve("HistoryPort") as MemoryHistory)
+  return rootContainer
+    .resolve<HistoryReader>("HistoryReader")
     .of(matchId)
     .map((entry) => entry.type);
 }
