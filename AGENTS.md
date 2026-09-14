@@ -18,7 +18,9 @@ Los otros dos documentos:
   referencias a archivo:línea del backend viejo. Es la fuente cuando hay que saber qué
   hacía el sistema anterior.
 
-**Estado: Tareas 0–9 hechas. La próxima es la 10.** Para confirmarlo, `git log --oneline`.
+**Estado: Tareas 0–21 hechas. La próxima es la 22.** Para confirmarlo, `git log --oneline`.
+Esta línea se quedó stale doce tareas seguidas: **actualizala al cerrar la tuya**, o el que
+sigue arranca desorientado.
 
 ## Cómo se ejecuta una tarea
 
@@ -42,21 +44,46 @@ tarea mirando solo la suite, el error aparece dos tareas después atribuido a ot
 `npm run lint` falla por formato. Corré `npm run format` antes de commitear o el commit
 queda con el lint rojo.
 
+**Si el lint se pone rojo solo, sin que nadie toque una línea**, no es biome: es el
+checkout. `core.autocrlf=true` rematerializa en CRLF blobs que están en LF, y el default de
+biome es LF, así que el archivo entero cuenta como mal formateado. Lo cierra el
+`.gitattributes` con `* text=auto eol=lf` (commit `3c18a2b`) — del lado de git y no de
+biome a propósito: fijar `lineEnding: "crlf"` metería CRLF en el repo y rompería el lint de
+cualquiera que no esté en Windows.
+
 Antes de cerrar cualquier tarea: `npm run typecheck && npm test && npm run lint`.
 
 ## El plan tiene defectos. Corregilos y documentalos
 
-Ya aparecieron tres, y **dos son el mismo patrón**: los tests del plan están escritos
-contra el vocabulario FINAL del juego, no contra el de su propia tarea.
+Aparecen en **todas** las tareas: van más de quince. La causa es estructural — el plan se
+escribió de corrido, así que cada tarea describe el sistema tal como quedará al final, no
+como está a su propia altura.
 
 | Tarea | Defecto | Commit |
 |---|---|---|
 | 7 | `MatchDriver.advance` con un parámetro contra una interfaz que pide dos | `e2d981f` |
 | 8 | El test del decoder contradecía al `.strict()` de su propio `payloads.ts` | `cf2e9b9` |
 | 9 | Tests del historial usando `PLAY_TILE`/`PASS`, verbos que llegan en la Tarea 19 | dentro de la Tarea 9 |
+| 20 | Los tests esperaban `phase === "PLAYING"` con la mesa tapada; cuelgue de 15 s | `d399f62` |
+| 20 | Dos aserciones del historial describían un contrato inexistente | `d399f62` |
+| 21 | El grafo del plan no era el que la sala construye (firmas corridas) | `04f169b` |
+| 21 | El replay inventaba `startedAt`: `begin()` no emite, el instante no está grabado | `70af3db` |
+| 21 | El endpoint interno nacía **sin autorización**, diferida a una tarea inexistente | `fc5e18d` |
+| 21 | Seis defectos de código venían escritos en el plan, no de la ejecución | `36eb6c3` |
 
-Esperá encontrarlo otra vez. El catálogo de verbos **crece de a uno** (`CommandPayloads`
-en `src/features/match/core/command.ts`): hoy solo existe `ABANDON`. Si un test del plan
+Esperá encontrarlo otra vez. Dos formas concretas que ya se repitieron:
+
+- **La mesa arranca TAPADA.** `configOf` enciende `isDealWindowEnabled` en toda mesa, la
+  ronda nace en `DEALING` y las manos están ocultas hasta que cada jugador manda
+  `REVEAL_TILES`. Los tests del plan que esperan `phase === "PLAYING"` y después leen fichas
+  se cuelgan 15 s contra `dealingTimeoutMs` —que **no** es overridable por entorno— y el
+  sistema retira a los dos. Usá `revealHands` del arnés.
+- **Un TODO diferido a una tarea que no existe es un defecto, no una nota.** El endpoint del
+  historial nacía con el comentario "detrás de la API key interna cuando exista": nadie iba a
+  cobrar ese TODO. Si el plan difiere una decisión de seguridad, resolvela en la tarea.
+
+El catálogo de verbos **crece de a uno** (`CommandPayloads`
+en `src/features/match/core/command.ts`). Si un test del plan
 nombra un verbo que todavía no está, reescribilo con el vocabulario de la altura — no
 adelantes el catálogo para que el test compile.
 
