@@ -28,7 +28,14 @@ import type { MatchState } from "../core/state/index.js";
 
 export interface EngineGraph {
   readonly match: MatchState;
-  readonly matchDriver: MatchDriver;
+  /**
+   * ARRANCAR la partida, y nada más. Antes acá salía el `MatchDriver` entero, y con él
+   * `advance`/`timeout`: la sala podía hacer avanzar el juego sin pasar por un comando, y
+   * el replay sin pasar por el historial. Es exactamente la protección que `di-wiring.ts`
+   * se toma el trabajo de escribir —"MatchDriver no se registra"— y que esta interfaz
+   * cedía por atrás; los dos consumidores solo llamaban `begin()`.
+   */
+  begin(): void;
   readonly referee: Referee;
   readonly commands: { readonly [N in CommandName]: Command<N, MatchEvent> };
   /** ¿Ya hay veredicto de partida? Lo pregunta la sala al disponerse, para no abortar lo ya dictaminado. */
@@ -89,7 +96,7 @@ export function buildEngineGraph(
 
   return {
     match,
-    matchDriver,
+    begin: () => matchDriver.begin(),
     referee,
     hasOutcome: () => matchReferee.outcome() !== undefined,
     isStillPlaying: (playerId) =>

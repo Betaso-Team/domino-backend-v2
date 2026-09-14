@@ -35,7 +35,7 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   // de los dos lados era la duplicación que este refactor cierra.
   child.register<MatchState>("MatchState", { useValue: graph.match });
   child.register("Referee", { useValue: graph.referee });
-  child.register<MatchStarter>("MatchStarter", { useValue: () => graph.matchDriver.begin() });
+  child.register<MatchStarter>("MatchStarter", { useValue: () => graph.begin() });
   child.register<MatchHasOutcome>("MatchHasOutcome", { useValue: () => graph.hasOutcome() });
   child.register<MatchSeatGuard>("MatchSeatGuard", {
     useValue: (playerId) => graph.isStillPlaying(playerId),
@@ -47,7 +47,8 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   child.register("Command:REVEAL_TILES", { useValue: graph.commands.REVEAL_TILES });
 
   // MatchDriver no se registra: la sala puede iniciar la partida por MatchStarter, pero
-  // no puede alcanzar advance/timeout y saltarse los comandos.
+  // no puede alcanzar advance/timeout y saltarse los comandos. Ahora tampoco puede
+  // hacerlo por atrás: `EngineGraph` ya no publica el conductor, solo `begin()`.
 }
 
 export function buildCatalog(child: DependencyContainer): CommandCatalog {

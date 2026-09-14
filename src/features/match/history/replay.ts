@@ -31,9 +31,18 @@ export interface ReplayInput {
 }
 
 export function replay(input: ReplayInput): MatchState {
+  // SE ORDENA UNA SOLA VEZ, y las dos cosas que dependen del orden salen de acá: el
+  // instante de arranque y el bucle de reaplicación. Antes el fallback leía
+  // `input.entries.at(0)` —el arreglo CRUDO— mientras el bucle sí ordenaba por `seq`, así
+  // que un historial que no llegara ordenado (Mongo sin `sort`, un merge de dos lotes)
+  // arrancaba el reloj en el `at` de una entrada que no era la primera. El orden es `seq`
+  // y no `at` a propósito: `seq` es lo único monótono por partida —lo dice `HistoryEntry`—
+  // y dos entradas del mismo milisegundo comparten `at`.
+  const ordered = [...input.entries].sort((a, b) => a.seq - b.seq);
+
   // El reloj avanza con los timestamps del historial, así que los deadlines que se
   // estampan son los mismos que la partida real tuvo.
-  const clockBox = { now: input.startedAt ?? input.entries.at(0)?.at ?? 0 };
+  const clockBox = { now: input.startedAt ?? ordered.at(0)?.at ?? 0 };
   const clock: Clock = { now: () => clockBox.now };
 
   // No hay timers: los vencimientos ya están EN el historial como DEADLINE_EXPIRED,
@@ -66,9 +75,9 @@ export function replay(input: ReplayInput): MatchState {
   // no existir. Eso es lo que convierte un verbo desconocido en un error con su `seq`.
   const commands: Readonly<Partial<Record<string, Command<CommandName, MatchEvent>>>> =
     graph.commands;
-  graph.matchDriver.begin();
+  graph.begin();
 
-  for (const entry of [...input.entries].sort((a, b) => a.seq - b.seq)) {
+  for (const entry of ordered) {
     clockBox.now = entry.at;
 
     if (entry.kind === "COMMAND") {
