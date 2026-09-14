@@ -59,6 +59,47 @@ module.exports = {
       },
     },
     {
+      name: "di-container-only-in-roots",
+      // LA OTRA MITAD DE LA REGLA 3, y la que de verdad muerde. `tsyringe-only-in-roots`
+      // prohíbe la arista hacia el PAQUETE, pero nadie llega a tsyringe por el paquete:
+      // se llega importando `rootContainer` de src/di-container.ts, que es un import LOCAL.
+      // Depcruise evalúa ARISTAS, no alcanzabilidad transitiva, así que esa regla nunca
+      // miraba el camino real y el test de arquitectura daba verde sobre una violación
+      // viva (transports/http/register-http.ts resolvía cuatro dependencias del root).
+      // Un archivo que importa el container SABE que el container existe, que es
+      // exactamente lo que la Regla 3 prohíbe — da igual por qué puerta entró.
+      comment: "Regla 3: nadie fuera de un composition root nombra el container.",
+      severity: "error",
+      from: {
+        pathNot: [
+          // El container no puede violarse a sí mismo.
+          "^src/di-container\\.ts$",
+          // Colyseus instancia las salas él mismo, así que una sala o no necesita
+          // dependencias o es composition root. Ídem su cableado de comandos.
+          "^src/features/match/transports/colyseus/domino-room\\.ts$",
+          "^src/features/match/transports/colyseus/commands/di-wiring\\.ts$",
+          // ENTRYPOINT: el CLI de replay arma el proceso entero, y componer es su trabajo
+          // —el mismo criterio con el que truco deja src/index.ts fuera de la lista—.
+          "^src/replay\\.ts$",
+          // LOS TESTS QUEDAN AFUERA, y es una decisión, no un olvido. La Regla 3 existe
+          // para que el código que se DESPLIEGA reciba sus dependencias sin saber quién las
+          // armó; un test no tiene llamador del que recibirlas, y los que resuelven del root
+          // (e2e-harness, reconnection-e2e, domino-room.test) lo hacen para AFIRMAR sobre el
+          // cableado de producción: el container es el sujeto de la medición, no un
+          // acoplamiento accidental. La alternativa era nombrar esos tres archivos acá, y
+          // una allowlist que crece con cada e2e nuevo es una allowlist que nadie lee.
+          "\\.test\\.ts$",
+          "/tests/",
+        ],
+      },
+      to: {
+        // "local": el import es de un archivo del repo, no de node_modules. La ruta es la
+        // RESUELTA (src/di-container.ts), no el specifier ("../../../../di-container.js").
+        dependencyTypes: ["local"],
+        path: "^src/di-container\\.ts$",
+      },
+    },
+    {
       name: "feature-boundary",
       comment: "Regla 4: una feature solo importa de otra vía su index.ts.",
       severity: "error",

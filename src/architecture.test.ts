@@ -145,6 +145,20 @@ describe("reglas de arquitectura", () => {
     expect(output).toContain("tsyringe-only-in-roots");
   });
 
+  // El hueco que tapa esta regla: a tsyringe NADIE llega por el paquete, se llega
+  // importando `rootContainer` de src/di-container.ts — un import LOCAL, que la condición
+  // sobre `^node_modules/tsyringe/` no mira. Sin este caso la Regla 3 vuelve a quedar verde
+  // sobre cualquier archivo que resuelva del root, que es como llegó acá.
+  it("Regla 3: nadie fuera de un composition root importa el container", () => {
+    writeFile(
+      `${OUTSIDE_DIR}/container-user.ts`,
+      `import { rootContainer } from "../../../di-container";\nexport const c = rootContainer;\n`,
+    );
+    const { ok, output } = depcruise();
+    expect(ok).toBe(false);
+    expect(output).toContain("di-container-only-in-roots");
+  });
+
   it("Regla 4: feature-boundary — una feature no puede importar de otra salvo por su index.ts", () => {
     writeFile(`${PEER_CORE_DIR}/thing.ts`, "export const peerThing = 1;\n");
     writeFile(
