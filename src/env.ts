@@ -152,13 +152,47 @@ const schema = z.object({
    * hay ningún `CLUSTER_DRIVER` ni lo va a haber: un interruptor que nombra la implementación
    * deja escribir "redis" sin URL, y `src/di-container.test.ts` se pone rojo si aparece.
    *
-   * LA BASE VIAJA EN LA URL, y ahí está el aislamiento: dos productos sobre el mismo servidor de
-   * Redis —el caso del operador que corre el truco al lado— van en índices distintos. No se
-   * portó el `REDIS_KEY_PREFIX` de truco: allá existe por una sola razón, que sus archivos de
-   * test corren EN PARALELO contra el mismo Redis y se pelearían la contabilidad de salas, y acá
-   * la suite no toca Redis (ver `vitest.setup.ts`, que borra esta variable).
+   * LA BASE VIAJA EN LA URL (el `/1` del final) Y AHÍ ESTÁ EL AISLAMIENTO entre dos productos
+   * que comparten un servidor de Redis — el operador que corre el truco al lado. Eso no se
+   * deduce, SE MIDIÓ, porque truco pagó la versión equivocada de esta decisión (`48ac4bc`: su
+   * prefijo default era el de v1 y los dos motores compartían el registro de salas).
    *
-   * NO tiene default, ni siquiera `redis://127.0.0.1:6379`: un default haría que una instancia
+   *   · LOS DOS CLIENTES RESPETAN EL ÍNDICE. `RedisPresence` y `RedisDriver` le entregan la URL
+   *     entera a ioredis —`@colyseus/redis-presence/build/index.mjs:29` y
+   *     `@colyseus/redis-driver/build/RedisDriver.mjs:15`, los dos `new Redis(options)`— y
+   *     ioredis hace el `SELECT` al conectar. O sea que TODA clave de los dos cae en el índice,
+   *     incluidas las que escribe Colyseus y que nosotros no elegimos.
+   *   · MEDIDO con dos instancias contra el mismo Redis del compose, una en `/0` y otra en `/1`:
+   *     `redis-cli -n 0 KEYS '*'` y `-n 1 KEYS '*'` devuelven cada una su propio juego completo
+   *     —`roomcaches`, `roomcount`, `ch:domino`, `match_config:<roomId>`, `player_match:<userId>`—
+   *     con los MISMOS NOMBRES en las dos. En un solo índice serían la misma clave. Y no se ven:
+   *     `GET /config/<sala ajena>` da 404 y `joinById` cruzado da 522, mientras que una tercera
+   *     instancia en `/0` contesta 200 por la sala de la primera y se une. El índice es lo único
+   *     que cambia entre las dos mediciones.
+   *
+   * POR ESO NO SE PORTA EL `REDIS_KEY_PREFIX` de truco, y la razón ya no es "allá lo necesita su
+   * suite": el índice cubre TODO lo que cubriría un prefijo y además sin un segundo lugar que
+   * mantener sincronizado.
+   *
+   * LO QUE EL ÍNDICE NO CUBRE —y un prefijo TAMPOCO, que es lo que hace que no sea un argumento
+   * para portarlo—: PUB/SUB EN REDIS NO TIENE BASE. Medido las dos cosas: `PUBSUB CHANNELS '*'`
+   * desde una conexión en `/3` lista los canales de las instancias de `/0` y `/1`; y con un
+   * `keyPrefix` de ioredis la CLAVE sale prefijada y el CANAL no (`truco-v2:clave` contra
+   * `p:canal`, porque para ioredis un canal no es una clave). Lo que viaja por ahí es el IPC de
+   * Colyseus, y se salva por los NOMBRES: `p:<processId>` e `ipc:<requestId>` llevan ids
+   * aleatorios. Los únicos canales de nombre fijo son `$lobby`
+   * (`@colyseus/core/build/matchmaker/Lobby.mjs:3`) y `concurrent:<nombre de sala>:<clave>`
+   * (`MatchMaker.mjs:106`) — el dominó no usa lobby, y la sala se llama `domino`: si algún día
+   * convive con otro Colyseus que tenga una sala con ESE nombre, ahí sí hay que mirar.
+   *
+   * EL ÍNDICE DOCUMENTADO ES EL `/1` Y NO EL `/0` A PROPÓSITO: el `0` es donde cae todo el que no
+   * eligió, y truco no elige —arma sus clientes con `{host, port, password, keyPrefix}` y sin
+   * `db` (`truco-backend-v2/src/di-container.ts:102` y `:113`)—, así que sus conexiones están en
+   * el `0`. Hoy no chocaríamos porque sus claves van prefijadas, pero eso es una propiedad de la
+   * configuración DEL VECINO: nuestras `roomcaches` y `roomcount` van sin prefijo, y cualquier
+   * Colyseus sin prefijo en el `0` es la colisión que truco ya pagó, con otro nombre.
+   *
+   * NO tiene default, ni siquiera `redis://127.0.0.1:6379/1`: un default haría que una instancia
    * mal configurada arranque creyendo que forma parte de un clúster.
    */
   REDIS_URL: z.string().min(1).optional(),

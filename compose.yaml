@@ -81,12 +81,17 @@ services:
       # Dejarla en el `.env` obligaría a editarla para ir de un modo al otro. `environment` le
       # gana a `env_file`, así que una `MONGO_URI` suelta en el `.env` no rompe esto.
       - MONGO_URI=mongodb://mongo:27017/domino
-      # LA MISMA REGLA que la de Mongo: el host es el nombre del servicio. EL `/0` DEL FINAL ES EL
-      # ÍNDICE DE BASE, y es el aislamiento: dos productos sobre el mismo servidor de Redis —el
-      # operador que corre el truco al lado— van en índices distintos, y eso es un carácter de esta
-      # línea y no una variable más. Es lo que reemplaza al `REDIS_KEY_PREFIX` de truco, que allá
-      # existe por una razón que acá no aplica (ver `src/env.ts`).
-      - REDIS_URL=redis://redis:6379/0
+      # LA MISMA REGLA que la de Mongo: el host es el nombre del servicio. EL `/1` DEL FINAL ES EL
+      # ÍNDICE DE BASE, y es el aislamiento entre dos productos sobre el mismo servidor de Redis
+      # —el operador que corre el truco al lado—: un carácter de esta línea y no una variable más.
+      # Es lo que reemplaza al `REDIS_KEY_PREFIX` de truco, y está MEDIDO —dos instancias, una en
+      # cada índice, cada una ciega a las salas de la otra— en el comentario de `src/env.ts`.
+      #
+      # ES `/1` Y NO `/0`: el `0` es donde cae todo el que no eligió, empezando por truco, que
+      # arma sus clientes de Redis sin `db`. Este servicio tiene su propio Redis, así que el
+      # número acá no cambia nada — y por eso mismo vale que diga el correcto, que es el que se
+      # copia el día que haya un solo Redis para los dos.
+      - REDIS_URL=redis://redis:6379/1
     # CON `depends_on`, al revés que truco, y la diferencia es el porqué de allá: truco lo omite
     # porque depender de un servicio apagado por perfil rompe el compose entero y dejaría los
     # perfiles decorativos. Acá no hay perfiles, así que ese costo no existe.

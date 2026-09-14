@@ -19,7 +19,8 @@ docker compose up --build
 registra** y responde 404 — es fail closed, y es el 404 que más se investiga al pedo.
 
 `MONGO_URI` y `REDIS_URL` **no las pongas en el `.env`**: las fija el compose apuntando a los
-servicios (`mongodb://mongo:27017/domino` y `redis://redis:6379/0`). Lo que sí acepta el
+servicios (`mongodb://mongo:27017/domino` y `redis://redis:6379/1` — el `/1` es el índice de
+base, y es el aislamiento contra otro producto en el mismo Redis; ver `src/env.ts`). Lo que sí acepta el
 `.env` son tres variables que solo entiende el compose (no están en `.env.example`, que
 documenta a `src/env.ts`): `DOMINO_PORT`, `MONGO_PORT` y `REDIS_PORT`, los puertos del
 **host**, por si ya hay algo escuchando — pasa seguido si el mismo operador corre truco al

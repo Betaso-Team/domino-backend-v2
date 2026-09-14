@@ -20,6 +20,12 @@ export interface MatchConfigResponse extends PublicMatchConfig {
 // prefijo acá solo cubriría estas dos y dejaría aquéllas afuera: media solución, en dos lugares
 // que tienen que coincidir.
 //
+// Medido sobre dos instancias contra el mismo Redis, una en cada índice: estas dos claves salen
+// con el MISMO nombre en las dos bases —`match_config:<roomId>` y `player_match:<userId>`— y
+// ninguna ve la de la otra. Que `player_match:<userId>` lleve un id de usuario COMPARTIDO entre
+// los productos del Betaso es justamente lo que haría de una base compartida una colisión real, y
+// no teórica. El detalle de la medición está en el comentario de `REDIS_URL` en `src/env.ts`.
+//
 // Tampoco se comparten con nadie: son el estado de EJECUCIÓN de un clúster, no un dato que dos
 // sistemas tengan que ver igual.
 const configKey = (roomId: string) => `match_config:${roomId}`;
