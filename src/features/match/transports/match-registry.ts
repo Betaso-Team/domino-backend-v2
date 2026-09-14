@@ -13,10 +13,15 @@ export interface MatchConfigResponse extends PublicMatchConfig {
   readonly serverNow: number;
 }
 
-// LAS DOS CLAVES. Sin prefijo de producto adentro del template a propósito: el prefijo lo pone
-// el cliente de Redis (`keyPrefix` de `RedisPresence`, ver `src/di-container.ts`), que es el
-// mismo mecanismo con el que Colyseus aísla su propio registro de salas. Meterlo acá dejaría dos
-// lugares que tienen que coincidir.
+// LAS DOS CLAVES, sin prefijo de producto adentro del template a propósito. El aislamiento entre
+// productos que comparten un servidor de Redis —el operador que corre truco al lado— viaja en el
+// ÍNDICE DE BASE de `REDIS_URL`, que es donde ya está y donde también aísla las claves que
+// Colyseus escribe por su cuenta (`roomcaches`, `roomcount`) y que nosotros no controlamos. Un
+// prefijo acá solo cubriría estas dos y dejaría aquéllas afuera: media solución, en dos lugares
+// que tienen que coincidir.
+//
+// Tampoco se comparten con nadie: son el estado de EJECUCIÓN de un clúster, no un dato que dos
+// sistemas tengan que ver igual.
 const configKey = (roomId: string) => `match_config:${roomId}`;
 const playerKey = (playerId: string) => `player_match:${playerId}`;
 
@@ -59,10 +64,10 @@ export class MatchRegistry {
   // descuido el día que alguien cambie lo que se estampa.
   private readonly byRoomId = new Map<string, PublicMatchConfig>();
 
-  constructor(
-    private readonly store: KeyValueStore,
-    private readonly ttlSeconds: number = TTL_SECONDS,
-  ) {}
+  // EL PLAZO NO SE INYECTA, y es a propósito: truco lo deja como segundo parámetro con default y
+  // nadie se lo pasa nunca. Acá los tests mueven el RELOJ del almacén, que es la otra mitad del
+  // mismo vencimiento y la que además prueba la implementación de memoria de verdad.
+  constructor(private readonly store: KeyValueStore) {}
 
   // Nace la sala. Es el PRIMER LATIDO y nada más: todo lo que escribe lo vuelve a escribir cada
   // `HEARTBEAT_MS`, así que no hay un camino de alta distinto del de mantenimiento — y un camino
@@ -87,9 +92,9 @@ export class MatchRegistry {
     const config = this.byRoomId.get(roomId);
     if (!config) return;
 
-    await this.store.setex(configKey(roomId), JSON.stringify(config), this.ttlSeconds);
+    await this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS);
     for (const playerId of config.seats) {
-      await this.store.setex(playerKey(playerId), roomId, this.ttlSeconds);
+      await this.store.setex(playerKey(playerId), roomId, TTL_SECONDS);
     }
   }
 

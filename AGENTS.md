@@ -37,7 +37,22 @@ elige no persistir, y la que usa la suite. **La presencia de `MONGO_URI` elige**
 `HISTORY_DRIVER` ni nada que lo parezca (`src/di-container.test.ts` se pone rojo si
 aparece). `vitest.setup.ts` **borra** `MONGO_URI`: la suite no depende de ningún servicio
 externo, y eso tiene que ser una propiedad del repo y no del shell de quien lo corre.
-**Baseline actual: 277 tests / 43 archivos.**
+
+Y después el **escalamiento horizontal**, portado de truco (`874a778`/`909217a`/`a3bb6dd`) —
+primero de dos incrementos; el segundo (pm2, apagado ordenado, sondas) todavía no está. El
+registro de partidas vivas dejó de ser un `Map` del proceso y pasó al almacén compartido
+(`src/shared/kv.ts`, un puerto con la forma de la `Presence` de Colyseus, así que **el
+adaptador de Redis son cero líneas propias**); Colyseus recibe el driver y el presence
+compartidos, anuncia `publicAddress` y reparte las salas con el balanceador de
+`transports/colyseus/load-balancer.ts`. **`matchOf` se volvió un índice invertido** que la sala
+escribe, y toda clave tiene plazo (120 s) con un latido de la sala que lo renueva (30 s).
+**La presencia de `REDIS_URL` elige**, igual que `MONGO_URI`: sin ella Colyseus usa su driver y
+su presence locales —que es lo que él mismo hace por default— y el registro usa el almacén de
+memoria. `vitest.setup.ts` **también borra `REDIS_URL`**, así que la suite sigue sin depender de
+ningún servicio externo. Verificado con dos instancias reales sobre el compose: `/config`
+contesta desde las dos por una sala de cualquiera, `joinById` cruza de proceso, las salas se
+reparten y el latido renueva el plazo.
+**Baseline actual: 295 tests / 45 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
