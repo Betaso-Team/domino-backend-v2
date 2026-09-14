@@ -1,15 +1,36 @@
 services:
-  # SIN PERFILES, que es lo primero que el dominó decide distinto que truco. Allá los perfiles
-  # existen porque hay DOS almacenamientos (Redis para el antifraude y el registro de salas,
-  # Mongo para el historial, el libro mayor y el catálogo) y cada operador quiere un subconjunto.
-  # Acá el único servicio es Mongo: un perfil `mongo` sobre un compose de un solo servicio de
-  # almacenamiento no ofrece ninguna elección que `docker compose up mongo` no dé ya, y sumaría
-  # un `COMPOSE_PROFILES` más que acordarse de poner.
+  # SIN PERFILES, que es lo que el dominó decide distinto que truco. Allá los perfiles existen
+  # porque cada operador quiere un subconjunto de los almacenamientos, y acá también hay dos
+  # —Mongo para el historial, Redis para el clúster—; la diferencia es que la ELECCIÓN YA ESTÁ
+  # TOMADA EN OTRO LADO Y CON OTRO MECANISMO: la presencia de `MONGO_URI` elige la implementación
+  # del historial, y la de `REDIS_URL` elige si este proceso es un clúster de uno o parte de uno
+  # más grande (ver `.env.example` y `src/di-container.ts`). Un perfil sería un SEGUNDO
+  # interruptor para cada una de esas decisiones, y dos interruptores para una decisión es la
+  # combinación incoherente que ese diseño vino a impedir.
   #
-  # La elección que sí existe —persistir o no— ya está tomada en otro lado y con otro mecanismo:
-  # LA PRESENCIA DE `MONGO_URI` ELIGE la implementación del historial (ver `.env.example` y
-  # `src/di-container.ts`). Un perfil sería un segundo interruptor para lo mismo, y dos
-  # interruptores para una decisión es la combinación incoherente que ese diseño vino a impedir.
+  # Y el subconjunto que el perfil daría, esto ya lo da: `docker compose up mongo` levanta uno
+  # solo, sin un `COMPOSE_PROFILES` más que acordarse de poner.
+
+  # REDIS, y no es una optimización: es lo que hace que DOS PROCESOS SEAN UN SERVIDOR. Del otro
+  # lado viven el registro de salas de Colyseus —sin él, `joinById` contra una sala de otro
+  # proceso no encuentra nada—, el presence con el que los procesos se enteran unos de otros, y
+  # el registro de partidas vivas del dominó, que es de donde sale que `GET /config/:roomId`
+  # conteste por una sala que abrió la otra instancia.
+  #
+  # SIN VOLUMEN, al revés que Mongo, y la asimetría es la decisión: acá adentro no hay ningún
+  # dato que deba sobrevivir al ciclo. Todo lo que se escribe es estado de EJECUCIÓN —qué salas
+  # hay vivas, qué procesos están arriba— y todo tiene plazo. Un volumen solo serviría para
+  # rearrancar con la lista de salas de un clúster que ya no existe.
+  redis:
+    image: redis:7-alpine
+    ports:
+      # El puerto del HOST es configurable por la misma razón que el de Mongo: es fácil que ya
+      # haya otro Redis escuchando en el 6379, sobre todo si el mismo operador corre truco al
+      # lado. `REDIS_PORT` sale del `.env` de al lado, que compose interpola solo; no es una
+      # variable de `src/env.ts` y por eso no está en `.env.example`.
+      - "${REDIS_PORT:-6379}:6379"
+    restart: unless-stopped
+
   mongo:
     image: mongo:7
     ports:
@@ -47,6 +68,12 @@ services:
       # Dejarla en el `.env` obligaría a editarla para ir de un modo al otro. `environment` le
       # gana a `env_file`, así que una `MONGO_URI` suelta en el `.env` no rompe esto.
       - MONGO_URI=mongodb://mongo:27017/domino
+      # LA MISMA REGLA que la de Mongo: el host es el nombre del servicio. EL `/0` DEL FINAL ES EL
+      # ÍNDICE DE BASE, y es el aislamiento: dos productos sobre el mismo servidor de Redis —el
+      # operador que corre el truco al lado— van en índices distintos, y eso es un carácter de esta
+      # línea y no una variable más. Es lo que reemplaza al `REDIS_KEY_PREFIX` de truco, que allá
+      # existe por una razón que acá no aplica (ver `src/env.ts`).
+      - REDIS_URL=redis://redis:6379/0
     # CON `depends_on`, al revés que truco, y la diferencia es el porqué de allá: truco lo omite
     # porque depender de un servicio apagado por perfil rompe el compose entero y dejaría los
     # perfiles decorativos. Acá no hay perfiles, así que ese costo no existe.
@@ -60,8 +87,12 @@ services:
     # Lo que sí compra, gratis: `docker compose up domino` se trae Mongo, el apagado va en
     # orden, y la ventana en la que un lote de historial se pierde queda lo más corta posible
     # —`MongoHistory.record` es `void` por contrato y un fallo se LOGUEA, no se reintenta—.
+    #
+    # REDIS ENTRA EN LA MISMA LISTA y con la misma advertencia: ordena el arranque, no garantiza
+    # que Redis conteste. Que el orden no importe lo da ioredis, que reintenta la conexión sola.
     depends_on:
       - mongo
+      - redis
     restart: unless-stopped
 
 volumes:
