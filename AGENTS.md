@@ -18,7 +18,7 @@ Los otros dos documentos:
   referencias a archivo:línea del backend viejo. Es la fuente cuando hay que saber qué
   hacía el sistema anterior.
 
-**Estado: Tareas 0–21 hechas. La próxima es la 22.** Para confirmarlo, `git log --oneline`.
+**Estado: Tareas 0–22 hechas. La próxima es la 23.** Para confirmarlo, `git log --oneline`.
 Esta línea se quedó stale doce tareas seguidas: **actualizala al cerrar la tuya**, o el que
 sigue arranca desorientado.
 
@@ -70,6 +70,7 @@ como está a su propia altura.
 | 21 | El replay inventaba `startedAt`: `begin()` no emite, el instante no está grabado | `70af3db` |
 | 21 | El endpoint interno nacía **sin autorización**, diferida a una tarea inexistente | `fc5e18d` |
 | 21 | Seis defectos de código venían escritos en el plan, no de la ejecución | `36eb6c3` |
+| 22 | Seis defectos: `revealHands` pedido en prosa y no llamado, `currentTurn` sin `?.`, un `it` leyendo el historial de otro, tres promesas del SDK que 0.18 no cumple, el `unlock()` que no era lo medido, y un `git add` que se comía `vitest.setup.ts` | (ver abajo) |
 
 Esperá encontrarlo otra vez. Dos formas concretas que ya se repitieron:
 
@@ -81,6 +82,13 @@ Esperá encontrarlo otra vez. Dos formas concretas que ya se repitieron:
 - **Un TODO diferido a una tarea que no existe es un defecto, no una nota.** El endpoint del
   historial nacía con el comentario "detrás de la API key interna cuando exista": nadie iba a
   cobrar ese TODO. Si el plan difiere una decisión de seguridad, resolvela en la tarea.
+- **El plan describe las APIs de terceros de memoria.** En la Tarea 22, tres afirmaciones seguidas
+  sobre `@colyseus/sdk` 0.18 eran falsas (`leave(false)` esperable, `onReconnect` disparando con los
+  defaults, `room.hasJoined`). El `node_modules` es la fuente: `build/*.d.ts` para las firmas y
+  `build/*.mjs` para el comportamiento. Leelo ANTES de escribir el test, no cuando falle.
+- **Si tocás `GlobalDominoConfig`, regenerá el fixture golden.** `replay()` lo recibe entero, así
+  que un campo nuevo deja `golden-2p.json` sin compilar — y vitest sigue verde.
+  `WRITE_GOLDEN=1 npx vitest run src/features/match/tests/game-2p-e2e.test.ts`.
 
 El catálogo de verbos **crece de a uno** (`CommandPayloads`
 en `src/features/match/core/command.ts`). Si un test del plan

@@ -9368,7 +9368,42 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 Los dos criterios de "hecho" del spec que no caen en ninguna tarea anterior. El primero es el que
 contesta la pregunta original —¿se puede spamear una acción y saltarse una validación?—; el segundo
-es el que verifica que el `unlock()` de `onDrop` no es teórico.
+es el que verifica que el asiento reservado para la reconexión no le cierre la puerta a su dueño.
+
+> **Corregido durante la ejecución.** Esta tarea traía seis defectos, todos de la misma familia: el
+> plan describe el sistema como quedará al final, no como está a su propia altura.
+>
+> 1. **Step 1 pedía `revealHands` en prosa y no lo llamaba en el código.** `phase` es la fase de la
+>    PARTIDA y ya vale `PLAYING` con la ronda todavía en `DEALING`; ahí `currentTurn.playerId` no
+>    está asignado. El test no se colgaba: fallaba en seco con `sin jugada legal`, porque
+>    `legalPlayFor` no encuentra mano para un `playerId` `undefined`. Se descubrió corriendo el
+>    bloque tal cual.
+> 2. **`currentRound?.currentTurn.playerId` no compila.** `currentTurn` es `.optional()` en
+>    `core/state/round.ts`, así que tsc da `TS18048: possibly 'undefined'`. El `as string` de la
+>    línea siguiente no lo tapa: se aplica después del acceso. Lo cazó `npm run typecheck`, no
+>    vitest.
+> 3. **El tercer `it` del Step 1 leía el historial que escribía el segundo.** Estado compartido
+>    entre tests: `vitest -t "rastro antifraude"` pasaba en vacío. Es la misma corrección que la
+>    Tarea 20 le hizo al E2E de la partida completa — la ráfaga se dispara en un `beforeAll`.
+> 4. **El Step 3 esperaba `leave(false)` de tres maneras que el SDK 0.18 no cumple.** Verificado
+>    contra `node_modules/@colyseus/sdk/build/Room.mjs` y `Reconnection.mjs`:
+>    - `await leave(false)` **cuelga** cuando el reintento automático está armado: la promesa
+>      resuelve por `onLeave`, y una caída dispara `onDrop`.
+>    - `onReconnect` **no dispara nunca** con los defaults: `reconnection.minUptime` son 5 s y una
+>      mesa de test vive 200 ms, así que el SDK ni intenta.
+>    - `CloseCode.FAILED_TO_RECONNECT` **no llega** por cerrar el socket: con `minUptime` sin tocar
+>      el cierre es `ABNORMAL_CLOSURE` (1006), y cuando la ventana del servidor vence no hay socket
+>      al que mandarle un código. Se alcanza solo si el CLIENTE agota sus reintentos.
+>    - `back.hasJoined` **no existe** en `@colyseus/sdk` 0.18, y sobra: `rejoinAs` ya hace
+>      `waitForInitialState()` por dentro desde la Tarea 21.
+> 5. **"ESTE es el test que verifica el `unlock()` de `onDrop`" es falso.** Comentar el `unlock()`
+>    deja el camino 2 verde. Lo que lo sostiene es el `maxClients = seats.length * 2` de `onCreate`:
+>    `hasReachedMaxClients()` suma `clients + reservedSeats`, y con el doble de cupos la sala nunca
+>    llegó a auto-lockearse, así que el `unlock()` es un no-op. Verificado en los dos sentidos:
+>    bajando el factor a 1 el `joinById` lanza `is already full`. El `unlock()` abre el LISTING, que
+>    es el camino del matchmaking por nombre y no el del `joinById`.
+> 6. **El `git add src` del Step 6 no incluye `vitest.setup.ts`**, que está en la raíz y que el
+>    Step 4 manda editar. Sin él la ventana queda en 120 s en la próxima corrida limpia.
 
 **Files:**
 - Create: `src/features/match/tests/concurrency-e2e.test.ts`, `src/features/match/tests/reconnection-e2e.test.ts`
@@ -9376,14 +9411,24 @@ es el que verifica que el `unlock()` de `onDrop` no es teórico.
 - [ ] **Step 1: Escribir el test del semáforo**
 
 `legalPlayFor` ya vive en el arnés desde la Tarea 20, así que acá se importa y no se reescribe. Del
-mismo arnés sale `revealHands`, y hace falta: la mesa arranca con la ventana de reparto encendida,
-la ronda nace en `DEALING` y no hay turno que spamear hasta que los dos levantan sus fichas.
+mismo arnés sale `revealHands`, y **hay que llamarlo**: la mesa arranca con la ventana de reparto
+encendida, la ronda nace en `DEALING` y no hay turno que spamear hasta que los dos levantan sus
+fichas.
 
 ```ts
 // src/features/match/tests/concurrency-e2e.test.ts
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bootServer, historyOf, legalPlayFor, seatPair, waitUntil } from "./e2e-harness.js";
+import {
+  type SeatedMatch,
+  act,
+  bootServer,
+  historyOf,
+  legalPlayFor,
+  revealHands,
+  seatPair,
+  waitUntil,
+} from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
@@ -9401,18 +9446,23 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
   // primero muta el turno y los demás rebotan leyendo el estado YA mutado.
   it("N envíos de la misma jugada en el mismo tick aplican exactamente uno", async () => {
     const match = await seatPair(server, ["c1", "c2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    // La mesa arranca TAPADA: `phase` es la de la PARTIDA y ya vale PLAYING con la ronda
+    // todavía en DEALING, donde `currentTurn.playerId` no está asignado.
+    await revealHands(match);
 
-    const playerId = match.serverState.currentRound?.currentTurn.playerId as string;
+    const playerId = turnHolderOf(match);
     const play = legalPlayFor(match.serverState, playerId);
     if (!play) throw new Error("sin jugada legal");
 
+    const actor = match.clients[playerId];
+    if (!actor) throw new Error(`sin cliente para el asiento ${playerId}`);
+
     const illegal: { code: string }[] = [];
-    match.clients[playerId]?.onMessage("illegal", (payload) => illegal.push(payload));
+    actor.onMessage("illegal", (payload) => illegal.push(payload));
 
     // Veinte veces, sin await entre medio: todos salen en el mismo tick.
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      match.clients[playerId]?.send("PLAY_TILE", play);
+      actor.send("PLAY_TILE", play);
     }
 
     await waitUntil(() => illegal.length >= 19, 5_000);
@@ -9422,42 +9472,63 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
     const plays = historyOf("m-c1-c2").filter((entry) => entry.type === "PLAY_TILE");
     expect(plays).toHaveLength(1);
 
-    // Los 19 restantes rebotaron por regla de dominio, no por throttle.
+    // Los 19 restantes rebotaron por regla de dominio, no por throttle:
+    // `maxMessagesPerSecond` de la sala es `Infinity`.
     expect(illegal).toHaveLength(19);
     for (const rejection of illegal) {
       expect(["NOT_YOUR_TURN", "TILE_NOT_IN_HAND"]).toContain(rejection.code);
     }
   });
 
-  it("una ráfaga durante la pausa de la mano no toca el estado", async () => {
-    const match = await seatPair(server, ["k1", "k2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
-
-    // Abandonar abre PRESENTING_MATCH, que es una fase de pausa: nada de juego es
-    // legal ahí. Es el equivalente al hueco que el v1 dejaba con sleep(6000).
-    match.clients.k1?.send("ABANDON", {});
-    await waitUntil(() => match.serverState.phase === "PRESENTING_MATCH");
-
+  // La ráfaga se dispara UNA vez, en el hook, y los dos `it` afirman sobre lo que quedó.
+  describe("una ráfaga durante la pausa de la partida", () => {
+    const MATCH_ID = "m-k1-k2";
+    let match: SeatedMatch;
     const illegal: { code: string }[] = [];
-    match.clients.k2?.onMessage("illegal", (payload) => illegal.push(payload));
-    const before = match.serverState.currentRound?.board.tiles.length ?? 0;
+    let tilesBefore = 0;
 
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      match.clients.k2?.send("PLAY_TILE", { left: 6, right: 6, side: "RIGHT" });
-    }
+    beforeAll(async () => {
+      match = await seatPair(server, ["k1", "k2"]);
 
-    await waitUntil(() => illegal.length >= 10, 5_000);
-    expect(match.serverState.currentRound?.board.tiles.length).toBe(before);
-    for (const rejection of illegal) {
-      expect(rejection.code).toBe("MATCH_NOT_IN_PROGRESS");
-    }
-  });
+      // Abandonar abre PRESENTING_MATCH, que es una fase de pausa. Se espera con `act`
+      // —que compara la firma del estado— y no con un `waitUntil` sobre la fase: esa
+      // ventana dura 120 ms en test y un poll cada 10 ms puede llegar tarde. La ráfaga
+      // rebota igual en PRESENTING_MATCH y en FINISHED.
+      await act(match, "k1", "ABANDON");
 
-  it("los rechazos NO entran al historial: son rastro antifraude", async () => {
-    const rejected = historyOf("m-k1-k2").filter((entry) => entry.type === "PLAY_TILE");
-    expect(rejected).toHaveLength(0);
+      match.clients.k2?.onMessage("illegal", (payload) => illegal.push(payload));
+      tilesBefore = match.serverState.currentRound?.board.tiles.length ?? 0;
+
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        match.clients.k2?.send("PLAY_TILE", { left: 6, right: 6, side: "RIGHT" });
+      }
+
+      await waitUntil(() => illegal.length >= 10, 5_000);
+    });
+
+    it("no toca el estado y rebota entera por regla de dominio", async () => {
+      expect(match.serverState.currentRound?.board.tiles.length).toBe(tilesBefore);
+      expect(illegal).toHaveLength(10);
+      for (const rejection of illegal) {
+        expect(rejection.code).toBe("MATCH_NOT_IN_PROGRESS");
+      }
+    });
+
+    it("los rechazos NO entran al historial: son rastro antifraude", async () => {
+      // El historial de ESTA mesa existe —el abandono lo escribió—, así que el cero dice
+      // "no se grabó ninguna jugada" y no "no encontré la partida".
+      const entries = historyOf(MATCH_ID);
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.filter((entry) => entry.type === "PLAY_TILE")).toHaveLength(0);
+    });
   });
 });
+
+function turnHolderOf(match: SeatedMatch): string {
+  const playerId = match.serverState.currentRound?.currentTurn?.playerId;
+  if (!playerId) throw new Error("la ronda no tiene turno asignado");
+  return playerId;
+}
 ```
 
 - [ ] **Step 2: Verificar por grep que el camino del comando no tiene un solo `await`**
@@ -9470,7 +9541,7 @@ Añadir a `src/architecture.test.ts`:
 ```ts
   // El camino del comando es SÍNCRONO POR CONTRATO. Un await acá reabre la ventana
   // de interleaving que el test del semáforo cierra.
-  it("no hay await en el core del engine ni en los comandos", async () => {
+  it("no hay await ni async en el core del engine ni en los comandos", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
 
     const walk = (dir: string): string[] =>
@@ -9480,12 +9551,23 @@ Añadir a `src/architecture.test.ts`:
         return path.endsWith(".ts") && !path.endsWith(".test.ts") ? [path] : [];
       });
 
-    const offenders = [
+    const scanned = [
       ...walk("src/features/match/core/commands"),
       ...walk("src/features/match/core/engine"),
-    ].filter((path) => {
-      if (path.includes("/tests/")) return false;
-      const source = readFileSync(path, "utf8");
+    ].filter((path) => !path.includes("/tests/"));
+
+    // La red tiene que estar tendida sobre algo: si un refactor mueve estas carpetas, el
+    // walk devuelve vacío y `offenders` sale vacío por la razón equivocada.
+    expect(scanned.length).toBeGreaterThan(20);
+
+    // Se miden PALABRAS CLAVE, no menciones: los comentarios se borran antes de buscar.
+    // `core/command.ts` ya documenta el contrato con la frase "si no hay await", y ese
+    // párrafo mudado a `core/commands/` pondría rojo un guardarraíl que nadie rompió.
+    const withoutComments = (source: string): string =>
+      source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+    const offenders = scanned.filter((path) => {
+      const source = withoutComments(readFileSync(path, "utf8"));
       return /\bawait\b/.test(source) || /\basync\b/.test(source);
     });
 
@@ -9499,13 +9581,29 @@ puerta o a un listener.
 
 - [ ] **Step 3: Escribir el test de los tres caminos de reconexión**
 
+NINGUNO de los tres caminos revela las dos manos. Con la ronda en `PLAYING` el plazo del turno son
+600 ms + 300 de reserva en test, así que al caído le toca jugar y el motor lo retira antes de que
+alcance a volver: el test mediría esa carrera y no la reconexión. Tapada, la mesa espera los 15 s de
+la ventana de reparto. El camino 2, que sí necesita ver una mano, levanta las fichas de UN solo
+jugador: alcanza para que su vista tenga las siete, y la ronda sigue en `DEALING` porque falta el otro.
+
+Los tres tocan `client.reconnection`, que es configuración pública del SDK. No es forzar el test: los
+defaults están calibrados para un navegador con una sala de minutos, y acá la mesa vive 200 ms.
+
 ```ts
 // src/features/match/tests/reconnection-e2e.test.ts
 import { CloseCode } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state/index.js";
-import { bootServer, linesOf, rejoinAs, seatPair, waitUntil } from "./e2e-harness.js";
+import {
+  type SeatedMatch,
+  bootServer,
+  linesOf,
+  rejoinAs,
+  seatPair,
+  waitUntil,
+} from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
@@ -9527,42 +9625,61 @@ describe("reconexión — los tres caminos", () => {
     const match = await seatPair(server, ["n1", "n2"]);
     await waitUntil(() => match.serverState.phase === "PLAYING");
 
+    const client = clientOf(match, "n1");
+    // El SDK se NIEGA a reintentar sobre una sala más joven que `minUptime` (5 s por
+    // defecto). Con el default este camino mide la heurística, no la reconexión.
+    client.reconnection.minUptime = 0;
+
     let dropped = false;
     let reconnected = false;
-    match.clients.n1?.onDrop(() => { dropped = true; });
-    match.clients.n1?.onReconnect(() => { reconnected = true; });
+    client.onDrop(() => {
+      dropped = true;
+    });
+    client.onReconnect(() => {
+      reconnected = true;
+    });
 
-    // Cierre NO consentido: es lo que Colyseus trata como caída.
-    await match.clients.n1?.leave(false);
+    // Cierre NO consentido: es lo que Colyseus trata como caída. SIN AWAIT: la promesa de
+    // `leave()` resuelve por `onLeave`, y una caída con reintento armado dispara `onDrop`.
+    void client.leave(false);
 
     await waitUntil(() => dropped, 3_000);
-    expect(connectedOf(match.serverState, "n1")).toBe(false);
+    // El corte lo ve primero el cliente; el servidor se entera un viaje después.
+    await waitUntil(() => connectedOf(match.serverState, "n1") === false, 3_000);
     // La partida sigue viva, y el reloj del juego no se pausó.
     expect(match.serverState.phase).toBe("PLAYING");
     expect(match.serverState.activeDeadline).toBeGreaterThan(0);
 
     await waitUntil(() => reconnected, 5_000);
-    expect(connectedOf(match.serverState, "n1")).toBe(true);
+    await waitUntil(() => connectedOf(match.serverState, "n1") === true, 3_000);
     expect(linesOf("m-n1-n2")).toContain("SYSTEM PLAYER_RECONNECTED");
   });
 
-  // CAMINO 2: token perdido. ESTE es el test que verifica el unlock() de onDrop.
-  // Sin él, la sala cuenta el asiento reservado en hasReachedMaxClients(), el
-  // matchmaker rechaza el joinById, y el jugador queda fuera de SU propia partida.
+  // CAMINO 2: token perdido. ESTE es el test que verifica que el asiento reservado para la
+  // reconexión no le cierre la puerta a su propio dueño: `hasReachedMaxClients()` suma
+  // `clients + reservedSeats`, así que con un solo cupo por asiento el matchmaker rechaza
+  // el joinById con "is already full". Lo sostiene el `maxClients = seats.length * 2` de
+  // `onCreate`, no el `unlock()` de `onDrop`.
   it("quien perdió su token vuelve por roomId", async () => {
     const match = await seatPair(server, ["t1", "t2"]);
     await waitUntil(() => match.serverState.phase === "PLAYING");
 
-    await match.clients.t1?.leave(false);
+    const client = clientOf(match, "t1");
+    // Solo t1 levanta sus fichas: su vista queda con las siete y la ronda sigue en DEALING.
+    client.send("REVEAL_TILES", {});
+    await waitUntil(() => seenTilesOf(match.serverState, "t1") === true, 3_000);
+
+    // Perder el token ES no poder reintentar con él.
+    client.reconnection.enabled = false;
+    await client.leave(false);
     await waitUntil(() => connectedOf(match.serverState, "t1") === false, 3_000);
 
-    // Sin el unlock() esta línea lanza.
+    // Con un solo cupo por asiento, esta línea lanza.
     const back = await rejoinAs(server, match.roomId, "t1");
-    await waitUntil(() => back.hasJoined === true, 5_000);
 
     await waitUntil(() => connectedOf(match.serverState, "t1") === true, 3_000);
     // Ve su mano completa: la vista es del ASIENTO y le esperó.
-    const own = [...((back.state as MatchState).players.find((p) => p.playerId === "t1")?.hand.tiles ?? [])];
+    const own = [...(back.state.players.find((p) => p.playerId === "t1")?.hand.tiles ?? [])];
     expect(own).toHaveLength(7);
   });
 
@@ -9572,19 +9689,40 @@ describe("reconexión — los tres caminos", () => {
     const match = await seatPair(server, ["e1", "e2"]);
     await waitUntil(() => match.serverState.phase === "PLAYING");
 
-    let leaveCode: number | undefined;
-    match.clients.e1?.onLeave((code) => { leaveCode = code; });
-    await match.clients.e1?.leave(false);
+    const client = clientOf(match, "e1");
+    // Un cliente que AGOTA sus reintentos: `maxRetries = 0` lo hace rendirse en el primer
+    // intento y avisar con FAILED_TO_RECONNECT. `minUptime = 0` es lo que deja que llegue
+    // hasta ahí — con el default ni intenta y cierra con ABNORMAL_CLOSURE, que es otro caso.
+    client.reconnection.minUptime = 0;
+    client.reconnection.maxRetries = 0;
 
-    // La ventana de producción son 120 s; para este test se baja por env.
-    await waitUntil(() => leaveCode !== undefined, 20_000);
+    let leaveCode: number | undefined;
+    client.onLeave((code) => {
+      leaveCode = code;
+    });
+    await client.leave(false);
+
+    await waitUntil(() => leaveCode !== undefined, 3_000);
     expect(leaveCode).toBe(CloseCode.FAILED_TO_RECONNECT);
 
-    expect(linesOf("m-e1-e2")).toContain("SYSTEM PLAYER_DISCONNECTED");
-    // NO fue expulsado del juego: sigue siendo jugador.
+    // La ventana de producción son 120 s; para este test se baja por env. Hay que
+    // ESPERARLA: hasta que vence, el asiento sigue reservado y no hay desconexión que leer.
+    await waitUntil(() => linesOf("m-e1-e2").includes("SYSTEM PLAYER_DISCONNECTED"), 10_000);
+
+    // NO fue expulsado del juego: sigue siendo jugador, y la partida sigue en pie.
     expect(match.serverState.players.find((p) => p.playerId === "e1")?.hasAbandoned).toBe(false);
+    expect(match.serverState.phase).toBe("PLAYING");
   });
 });
+
+function clientOf(match: SeatedMatch, playerId: string): SeatedMatch["clients"][string] {
+  const client = match.clients[playerId];
+  if (!client) throw new Error(`sin cliente para el asiento ${playerId}`);
+  return client;
+}
+
+const seenTilesOf = (state: MatchState, playerId: string) =>
+  state.players.find((player) => player.playerId === playerId)?.hasSeenTiles;
 ```
 
 - [ ] **Step 4: Hacer configurable la ventana de reconexión**
@@ -9633,23 +9771,31 @@ En `vitest.setup.ts`:
 process.env.RECONNECTION_WINDOW_SECONDS ??= "3";
 ```
 
-Y bajar el plazo de espera del camino 3 a `10_000`.
+**El fixture golden hay que regenerarlo.** `replay()` recibe el `globalConfig` ENTERO
+(`globalConfig?: GlobalDominoConfig`), así que sumarle un campo deja `golden-2p.json` sin compilar —
+y vitest no lo nota, porque esbuild borra los tipos. Lo caza `npm run typecheck`:
+
+```bash
+WRITE_GOLDEN=1 npx vitest run src/features/match/tests/game-2p-e2e.test.ts
+```
+
+El diff tiene que ser solo los timestamps y el campo nuevo: si cambia una jugada, el motor se movió.
 
 - [ ] **Step 5: Correr los dos tests hasta que pasen**
 
 Run: `npx vitest run src/features/match/tests/concurrency-e2e.test.ts src/features/match/tests/reconnection-e2e.test.ts`
 Expected: 3 + 3 tests PASAN.
 
-Si el camino 1 nunca dispara `onReconnect`, es que `leave(false)` en el SDK de test no simula una
-caída: usar el mecanismo que la referencia de `@colyseus/testing` ofrezca para cortar el transporte, y
-si no existe, marcar ese caso como verificación **manual** de la tabla del spec y dejar en el test solo
-los caminos 2 y 3. Lo que no se negocia es el camino 2: es el que prueba el `unlock()`.
+Lo que no se negocia es el camino 2: es el que prueba que el asiento reservado no expulse a su dueño.
 
 - [ ] **Step 6: Correr la suite completa y commitear**
 
+`vitest.setup.ts` está en la RAÍZ, así que `git add src` a secas se lo deja afuera y la ventana
+vuelve a 120 s en la próxima corrida limpia.
+
 ```bash
 npm run typecheck && npm run lint && npm test
-git add src
+git add src vitest.setup.ts
 git commit -m "test: el semáforo y los tres caminos de reconexión
 
 El test del semáforo contesta la pregunta que originó el rediseño: veinte envíos
@@ -9661,9 +9807,10 @@ Lo acompaña un test de arquitectura que prohíbe await y async en core/commands
 core/engine: el test prueba el comportamiento de hoy, el grep impide que mañana
 alguien reabra la ventana en silencio.
 
-El camino del token perdido es el que verifica que el unlock() de onDrop no es
-teórico: sin él la sala cuenta el asiento reservado, el matchmaker rechaza el
-joinById y el jugador queda fuera de su propia partida.
+El camino del token perdido es el que verifica que el asiento reservado para la
+reconexión no le cierre la puerta a su propio dueño: hasReachedMaxClients() suma
+clientes más reservas, así que con un solo cupo por asiento el matchmaker rechaza
+el joinById y el jugador queda fuera de su propia partida.
 
 La ventana de reconexión pasa a salir de env para poder testear su vencimiento.
 
