@@ -33,9 +33,14 @@ proceso es un clúster de uno — correcto con una instancia, y roto en silencio
 `GET /config/:roomId` devuelve 404 para cualquier sala del otro proceso y `joinById` no la
 encuentra.
 
-Con varias instancias hace falta además `SERVER_ADDRESS` (el host, sin puerto): cada proceso
-anuncia `SERVER_ADDRESS/PORT` en la reserva de asiento para que el jugador se conecte al que
-hospeda **su** sala. El puerto va como path porque es el esquema que el proxy de v1 ya rutea.
+Con varias instancias hace falta además `SERVER_ADDRESS` (el host, **sin** puerto): cada proceso
+anuncia `SERVER_ADDRESS/{su puerto}` en la reserva de asiento para que el jugador se conecte al
+que hospeda **su** sala. El puerto va como path porque es el esquema que el proxy de v1 ya rutea.
+
+Y `PORT` es el puerto **base**, no el puerto: `@colyseus/tools` le suma `NODE_APP_INSTANCE`
+adentro de su `listen()`, así que con `PORT=2567` y dos instancias de pm2 escuchan en 2567 y 2568
+—y cada una anuncia el suyo—. Con una sola instancia no hay índice y la dirección se anuncia
+plana, sin puerto: un proceso solo no necesita que el proxy rutee por path.
 
 Para mirar lo que quedó grabado:
 

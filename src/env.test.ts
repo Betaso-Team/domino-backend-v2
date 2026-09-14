@@ -77,17 +77,59 @@ describe("parseEnv", () => {
     expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).redisUrl).toBeUndefined();
   });
 
+  // `PORT` ES LA BASE Y NO EL PUERTO, y no es una convención nuestra: `@colyseus/tools` le suma
+  // `NODE_APP_INSTANCE` ADENTRO de `listen()` (`build/index.mjs`, `port += processNumber`, medido
+  // sobre la 0.18.3 instalada). pm2 en modo fork es quien pone esa variable, así que con base
+  // 2567 la instancia 1 escucha en 2568 mientras su entorno sigue diciendo 2567.
+  //
+  // Éste es el número que hay que ANUNCIAR y el que hay que loguear. El que se le pasa a
+  // `listen()` es el otro: pasarle éste contaría el índice dos veces —con base 2567 la instancia
+  // 1 ataría 2569— y el síntoma es un puerto al que no llega nadie.
+  it("el puerto efectivo le suma el índice de instancia a la base", () => {
+    const env = parseEnv({ JWT_SECRET: "s".repeat(16), PORT: "2567", NODE_APP_INSTANCE: "1" });
+
+    expect(env.port).toBe(2567);
+    expect(env.instanceIndex).toBe(1);
+    expect(env.listeningPort).toBe(2568);
+  });
+
+  // `undefined` NO es la instancia 0: es que esto no lo levantó pm2, y ése es un caso distinto
+  // —una sola instancia, que se anuncia SIN puerto en el path—.
+  it("sin pm2 no hay índice y el puerto efectivo es la base", () => {
+    const env = parseEnv({ JWT_SECRET: "s".repeat(16), PORT: "2567" });
+
+    expect(env.instanceIndex).toBeUndefined();
+    expect(env.listeningPort).toBe(2567);
+  });
+
   // EL PUERTO VA COMO PATH, que es el esquema de v1: es lo que hace que el proxy que ya rutea v1
   // rutee esto sin aprender nada nuevo. Si esto se escribiera `host:puerto`, el cliente recibiría
   // en la reserva de asiento una dirección que el proxy no sabe resolver.
-  it("arma la dirección pública con el puerto como path", () => {
+  //
+  // Y EL PUERTO QUE VA ES EL EFECTIVO. Anunciar la base manda al jugador al proceso equivocado, y
+  // es la única falla de esta pieza que aparece en el cliente y no en el servidor: el nodo que se
+  // lleva la conexión contesta con total confianza que esa sala no es suya.
+  it("con pm2 anuncia el host y el puerto EFECTIVO como path", () => {
+    const env = parseEnv({
+      JWT_SECRET: "s".repeat(16),
+      SERVER_ADDRESS: "domino.betaso.com",
+      PORT: "2567",
+      NODE_APP_INSTANCE: "1",
+    });
+
+    expect(env.publicAddress).toBe("domino.betaso.com/2568");
+  });
+
+  // SIN pm2 SE ANUNCIA PLANO, que es lo que hace v1: un solo proceso no necesita el puerto en el
+  // path, y ponérselo exigiría un proxy que rutee por prefijo para un despliegue que no lo pide.
+  it("sin pm2 anuncia la dirección tal cual, sin puerto", () => {
     const env = parseEnv({
       JWT_SECRET: "s".repeat(16),
       SERVER_ADDRESS: "domino.betaso.com",
       PORT: "2568",
     });
 
-    expect(env.publicAddress).toBe("domino.betaso.com/2568");
+    expect(env.publicAddress).toBe("domino.betaso.com");
   });
 
   // Sin SERVER_ADDRESS no se anuncia NADA, y no una dirección a medias: el cliente vuelve al host

@@ -9,7 +9,31 @@ import { z } from "zod";
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  /**
+   * El puerto BASE, que con varias instancias no es el puerto de ninguna salvo la primera.
+   *
+   * QUIEN SUMA NO SOMOS NOSOTROS NI pm2: es `@colyseus/tools`, adentro de su `listen()`
+   * (`node_modules/@colyseus/tools/build/index.mjs`: `port += Number(process.env.NODE_APP_INSTANCE
+   * || "0")`, medido sobre la 0.18.3 instalada). pm2 en modo fork solo aporta la variable.
+   *
+   * Por eso a `listen()` se le pasa ÉSTE y no `listeningPort`: sumarle el índice antes lo contaría
+   * dos veces —con base 2567 la instancia 1 ataría 2569— y el síntoma es un puerto al que no llega
+   * nadie.
+   */
   PORT: z.coerce.number().int().positive().default(2567),
+  /**
+   * QUÉ INSTANCIA ES ÉSTA, según pm2 en modo fork. No la ponemos nosotros ni se configura: la
+   * exporta pm2 al arrancar cada proceso.
+   *
+   * AUSENTE NO ES LA INSTANCIA 0: es que esto NO lo levantó pm2, y ése es un caso distinto —un
+   * solo proceso, que se anuncia SIN puerto en el path (ver `publicAddress`)—. Por eso el campo
+   * derivado es `number | undefined` y no un `0` por default.
+   *
+   * Se lee por acá, y no con un `process.env` suelto en `main.ts`, porque `src/env.ts` es el
+   * único lector permitido de la configuración del proceso (`src/env-single-reader.test.ts`) — y
+   * de paso es lo que hace que los dos casos se puedan testear sin tocar el entorno real.
+   */
+  NODE_APP_INSTANCE: z.coerce.number().int().nonnegative().optional(),
   TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   EXTRA_TIME_RESERVE_MS: z.coerce.number().int().positive().default(30_000),
   DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
@@ -89,12 +113,21 @@ const schema = z.object({
    * la reserva de asiento, y por eso cada instancia anuncia la SUYA: con las salas repartidas, el
    * jugador tiene que conectarse al proceso que hospeda la suya, no a cualquiera.
    *
-   * El esquema es el de v1 —un host y el PUERTO COMO PREFIJO DE PATH, `dominio.com/2567`—, así
-   * que el proxy que ya rutea v1 sirve igual sin aprender nada nuevo. Lo arma `publicAddress` más
-   * abajo con `PORT`, que es el otro valor que el proxy necesita.
+   * TRES CASOS Y NO DOS, que es lo que hace v1 y lo que cuesta una línea entender:
    *
-   * Ausente ⇒ no se anuncia nada, y eso es LO CORRECTO con una instancia sola: el cliente vuelve
-   * al host al que ya le habló.
+   *   · SIN esta variable no se anuncia nada y el cliente sigue hablándole a donde ya llegó. Es lo
+   *     correcto con una instancia sola.
+   *   · CON esta variable y SIN pm2 se anuncia TAL CUAL: hay un solo proceso y no hay a quién
+   *     distinguir, así que meterle un puerto en el path exigiría un proxy que no hace falta.
+   *   · CON pm2 se anuncia `host/{puerto EFECTIVO}` —el esquema de v1—, y eso SÍ da por supuesto
+   *     un proxy que rutea por prefijo de path. Es la advertencia a confirmar con infraestructura
+   *     antes de subir a dos instancias: si el proxy no lo hace, el que no llega es el cliente y
+   *     el servidor no se entera.
+   *
+   * EL PUERTO QUE VA ES EL EFECTIVO Y NO `PORT` (ver `listeningPort`). Anunciar la base manda al
+   * jugador al proceso equivocado, y es la única falla de esta pieza que aparece en el cliente y
+   * no en el servidor: el nodo que se lleva la conexión contesta con total confianza que esa sala
+   * no es suya.
    */
   SERVER_ADDRESS: z.string().min(1).optional(),
   /**
@@ -110,7 +143,16 @@ const schema = z.object({
 
 export interface Env {
   readonly nodeEnv: z.infer<typeof schema>["NODE_ENV"];
+  /** El puerto BASE, el que se le pasa a `listen()`. NO es el que esta instancia ata. Ver PORT. */
   readonly port: number;
+  /** `undefined` ⇒ esto no lo levantó pm2. NO es la instancia 0. Ver NODE_APP_INSTANCE. */
+  readonly instanceIndex: number | undefined;
+  /**
+   * EL PUERTO QUE ESTA INSTANCIA ATA DE VERDAD: `PORT + instanceIndex`, porque `@colyseus/tools`
+   * le suma el índice adentro de `listen()`. Es el número que hay que ANUNCIAR y el que hay que
+   * loguear; el que se le PASA a `listen()` es `port`.
+   */
+  readonly listeningPort: number;
   readonly jwtSecret: string;
   /** `undefined` ⇒ esta instancia no expone la API interna. Ver INTERNAL_API_KEY. */
   readonly internalApiKey: string | undefined;
@@ -140,17 +182,26 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     throw new Error(`Entorno inválido — ${detail}`);
   }
   const parsed = result.data;
+  const instanceIndex = parsed.NODE_APP_INSTANCE;
+  const listeningPort = parsed.PORT + (instanceIndex ?? 0);
   return {
     nodeEnv: parsed.NODE_ENV,
     port: parsed.PORT,
+    instanceIndex,
+    listeningPort,
     jwtSecret: parsed.JWT_SECRET,
     internalApiKey: parsed.INTERNAL_API_KEY,
     mongoUri: parsed.MONGO_URI,
     redisUrl: parsed.REDIS_URL,
-    // El puerto va COMO PATH y no como `host:puerto`: es el esquema de v1 y es lo que hace que
-    // el proxy que ya rutea v1 rutee esto sin aprender nada. Se arma acá —el único lector del
-    // entorno— y no en el composition root, para que el formato tenga UN dueño.
-    publicAddress: parsed.SERVER_ADDRESS ? `${parsed.SERVER_ADDRESS}/${parsed.PORT}` : undefined,
+    // TRES CASOS (ver SERVER_ADDRESS). El puerto va COMO PATH y no como `host:puerto` —es el
+    // esquema de v1, lo que hace que el proxy que ya rutea v1 rutee esto sin aprender nada— y es
+    // el EFECTIVO, no la base. Se arma acá —el único lector del entorno— y no en el composition
+    // root, para que el formato tenga UN dueño.
+    publicAddress: !parsed.SERVER_ADDRESS
+      ? undefined
+      : instanceIndex === undefined
+        ? parsed.SERVER_ADDRESS
+        : `${parsed.SERVER_ADDRESS}/${listeningPort}`,
     turnTimeoutMs: parsed.TURN_TIMEOUT_MS,
     extraTimeReserveMs: parsed.EXTRA_TIME_RESERVE_MS,
     dealingTimeoutMs: parsed.DEALING_TIMEOUT_MS,

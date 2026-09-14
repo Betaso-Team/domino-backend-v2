@@ -27,4 +27,21 @@ process.on("unhandledRejection", (reason) => {
   logger.error("unhandledRejection", { reason: String(reason) });
 });
 
+// A `listen()` SE LE PASA EL PUERTO BASE, y acá está la trampa que solo se ve corriéndolo:
+// `@colyseus/tools` le suma `NODE_APP_INSTANCE` ADENTRO (`build/index.mjs`: `port +=
+// processNumber`, medido sobre la 0.18.3 instalada). Sumárselo antes lo contaría dos veces —con
+// base 2567 la instancia 1 ataría 2569— y el síntoma es un puerto al que no llega nadie.
+//
+// Lo que se LOGUEA es el otro: el puerto efectivo, junto con la dirección que esta instancia
+// anuncia. Es para que un desfase entre las dos cosas se vea en el arranque y no cuando un cliente
+// no conecta — que es donde este error aparece, porque el servidor equivocado contesta con total
+// confianza que esa sala no es suya.
+//
+// El `process.send('ready')` que pm2 espera (`wait_ready`) NO se manda acá: ya lo manda
+// `@colyseus/tools` al final de su `listen()`, y mandarlo dos veces sería ruido, no una red.
 await listen(app, env.port);
+logger.info("servidor escuchando", {
+  instancia: env.instanceIndex ?? "única",
+  puerto: env.listeningPort,
+  anuncia: env.publicAddress ?? "(nada: el cliente vuelve al host al que ya le habló)",
+});
