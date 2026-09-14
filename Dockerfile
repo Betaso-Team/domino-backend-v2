@@ -19,6 +19,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 EXPOSE 2567
-# `dist/index.js` y no `dist/main.js`: el dominó no tiene el split `index.ts`/`main.ts` de
-# truco. Es el mismo entrypoint que `npm start` y el único `entry` de `tsup.config.ts`.
-CMD ["node", "dist/index.js"]
+# `dist/main.js`: el archivo que SE EJECUTA, separado del que se importa (ver la cabecera de
+# `src/main.ts`). Es el mismo entrypoint que `npm start`, que el `script` de `ecosystem.config.cjs`
+# y que el único `entry` de `tsup.config.ts` — los cuatro los pinea `src/entrypoint.test.ts`,
+# porque ninguno de ellos rompe el gate al desincronizarse.
+CMD ["node", "dist/main.js"]

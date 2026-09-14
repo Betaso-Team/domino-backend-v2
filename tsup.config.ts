@@ -1,7 +1,10 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  // EL ARCHIVO QUE SE EJECUTA (ver la cabecera de `src/main.ts`). `app.config.ts` entra solo,
+  // por el grafo de imports; empaquetarlo como segundo `entry` produciría un `dist/` con dos
+  // copias del mismo servidor.
+  entry: ["src/main.ts"],
   format: ["esm"],
   target: "node22",
   clean: true,
