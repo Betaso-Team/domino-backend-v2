@@ -9,16 +9,17 @@ import { type Collection, type Db, type Document, MongoClient } from "mongodb";
 // nombres de colección a partir del nombre del modelo adivina justo lo que acá se quiere dicho.
 // Acá el nombre se pasa por constructor y se lee en el composition root.
 //
-// PORTADA DE `truco-backend-v2` (`src/shared/mongo.ts`) SIN DOS MÉTODOS, y las dos ausencias
-// son decisiones:
+// PORTADA DE `truco-backend-v2` (`src/shared/mongo.ts`) SIN UN MÉTODO, y la ausencia es una
+// decisión:
 //   - `announce()`, que cuenta los documentos de cada colección al arrancar. Allá es la
 //     contramedida a que los nombres de colección sean CONFIGURABLES —se escribe en colecciones
 //     de v1, cuyos nombres son implícitos, y un nombre mal puesto sería un catálogo vacío que
 //     se descubre cuando un jugador no puede jugar—. Acá el nombre es una constante del código
 //     (`HISTORY_COLLECTION`), así que no hay nada que verificar al arrancar: no existe el
 //     entorno que pueda equivocarlo.
-//   - `ping()`, cuyo único consumidor allá es el chequeo de LISTO. El dominó no expone
-//     `/health` ni `/ready`, así que sería un método sin llamador.
+// (La otra ausencia era `ping()`, "un método sin llamador porque el dominó no expone `/health`
+// ni `/ready`". Ahora los expone —son la sonda del balanceador delante de varias instancias— y
+// el método está más abajo.)
 export class Mongo {
   private client?: MongoClient;
   private db?: Db;
@@ -46,6 +47,18 @@ export class Mongo {
 
   async collection<T extends Document>(name: string): Promise<Collection<T>> {
     return (await this.ready()).collection<T>(name);
+  }
+
+  // ¿CONTESTA? Un `ping` y no una consulta: lo que se pregunta es si la base está del otro
+  // lado, no si tiene datos. Su único llamador es el chequeo de LISTO (`shared/http/health.ts`).
+  //
+  // Pasa por `ready()` a propósito, así que el primer `/ready` de un proceso recién levantado
+  // paga la conexión. Es correcto: "¿le mando jugadores nuevos?" con la conexión sin abrir es
+  // exactamente la pregunta que este método contesta, y una conexión que no se puede abrir es
+  // un no. Lo que impide que ese camino cuelgue treinta segundos —el plazo de selección de
+  // servidor del driver— es el PLAZO POR CHEQUEO del lado del endpoint, no algo de acá.
+  async ping(): Promise<void> {
+    await (await this.ready()).command({ ping: 1 });
   }
 
   async close(): Promise<void> {

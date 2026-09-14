@@ -1,7 +1,7 @@
 import config from "@colyseus/tools";
 import { type ServerOptions, defineRoom, defineServer } from "colyseus";
 import express, { type Application } from "express";
-import { driver, presence, rootContainer } from "./di-container.js";
+import { driver, mongo, presence, rootContainer } from "./di-container.js";
 import { env } from "./env.js";
 import {
   type Clock,
@@ -13,6 +13,7 @@ import {
 } from "./features/match/index.js";
 import type { Logger } from "./logger.js";
 import { httpErrorHandler } from "./shared/http/error-handler.js";
+import { type DependencyChecks, registerHealth } from "./shared/http/health.js";
 
 const rooms = { domino: defineRoom(DominoRoom) };
 
@@ -51,9 +52,46 @@ const rooms = { domino: defineRoom(DominoRoom) };
 // Ese chequeo vive en una dependencia y un bump de versión puede invertir el orden sin
 // avisar, dejando una raíz nuestra ignorada sin un solo error. Lo pinea
 // `src/http-root-route.test.ts`, que levanta el servidor con un `GET /` puesto y lo pide.
+// LAS DEPENDENCIAS DURAS DE ESTA INSTANCIA, que las sabe el composition root y nadie más. Se
+// arman acá y no en `shared/http/health.ts` porque ese archivo no conoce —ni tiene que conocer—
+// ni a Mongo ni a Redis.
+//
+// UNA DEPENDENCIA QUE ESTA INSTANCIA ELIGIÓ NO TENER NO ENTRA AL MAPA, y eso es el corazón de
+// la decisión: sin `MONGO_URI` el historial es el de memoria, sin `REDIS_URL` este proceso es un
+// clúster de uno, y las dos son decisiones del operador, no fallas (§`src/di-container.ts`). Un
+// `/ready` que las contara como faltantes sacaría de rotación para siempre a la instancia única,
+// que es el despliegue por default de este repo.
+//
+// A Redis se le pide una LECTURA CUALQUIERA: lo que se mide es el viaje de ida y vuelta, no el
+// valor. El `presence` es el mismo objeto que el almacén compartido —encaja por estructura, ver
+// `shared/kv.ts`—, así que preguntarle a él es preguntarle exactamente a la conexión que usan
+// el registro de salas y el registro de partidas vivas.
+//
+// LO QUE ESTE CHEQUEO NO PUEDE CUBRIR, medido y no supuesto: si Redis está caído AL ARRANCAR, el
+// proceso no llega a escuchar. ioredis reintenta la conexión para siempre, `matchMaker.setup()`
+// nunca resuelve y `listen()` no termina, así que no hay `/ready` que contestar —ni un `ready`
+// que mandarle a pm2, que lo reiniciaría en bucle al vencer su `listen_timeout`—. Es
+// comportamiento de Colyseus y no algo que se decida acá; lo que este chequeo cubre es el otro
+// caso, que es el común: Redis que se cae con el proceso ya levantado.
+// Los dos alias locales NO son cosmética: tsc no estrecha un binding IMPORTADO adentro de una
+// clausura —no puede probar que el módulo de origen no lo reasigne— así que `mongo.ping()`
+// dentro de la flecha no compila aunque el ternario de afuera ya lo haya descartado. Con la
+// copia local sí, y el gate lo cazó con la suite en verde, que es el modo de falla de siempre.
+const mongoConnection = mongo;
+const sharedStore = presence;
+const hardDependencies: DependencyChecks = {
+  ...(mongoConnection ? { mongo: () => mongoConnection.ping() } : {}),
+  ...(sharedStore ? { redis: () => sharedStore.get("readiness") } : {}),
+};
+
 const registerHttp = (app: Application) => {
   const logger = rootContainer.resolve<Logger>("Logger");
   app.use(express.json());
+  // LOS DOS CHEQUEOS DEL BALANCEADOR, y van ANTES de las rutas de la feature por nada
+  // profundo: no se solapan con ninguna. Son dos a propósito y la diferencia está argumentada
+  // en `shared/http/health.ts` — `/health` no consulta nada porque "reiniciame" es la única
+  // respuesta que destruye partidas en curso.
+  registerHealth(app, hardDependencies);
   registerMatchHttp(app, {
     registry: rootContainer.resolve(MatchRegistry),
     clock: rootContainer.resolve<Clock>("Clock"),
