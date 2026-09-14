@@ -8287,8 +8287,14 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 El primer test de esta tarea es **el que habría atrapado el agujero del v1**. Contra el v1 falla;
 contra el v2 tiene que pasar.
 
+Y afirma sobre `match.clients[id].state` —el árbol TAL COMO SALIÓ por el socket, ya filtrado por el
+`StateView` del asiento—, no sobre `serverState`. La distinción es la tarea entera: en el árbol del
+servidor las fichas del rival están, y tienen que estar. Si un test de visibilidad se pone rojo, es
+un agujero de privacidad real; cambiarle la fuente a `serverState` lo pone verde sin arreglar nada.
+
 **Files:**
 - Create: `src/features/match/tests/visibility.smoke.test.ts`, `src/features/match/tests/game-2p-e2e.test.ts`
+- Modify: `src/features/match/tests/e2e-harness.ts`
 
 - [ ] **Step 1: Escribir el smoke de visibilidad**
 
@@ -8297,7 +8303,7 @@ contra el v2 tiene que pasar.
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state/index.js";
-import { bootServer, seatPair, waitUntil } from "./e2e-harness.js";
+import { bootServer, rejoinAs, revealHands, seatPair, waitUntil } from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
@@ -8313,13 +8319,20 @@ afterAll(async () => {
 const clientState = (match: Awaited<ReturnType<typeof seatPair>>, userId: string) =>
   match.clients[userId]?.state as MatchState;
 
-const handTilesSeenBy = (match: Awaited<ReturnType<typeof seatPair>>, viewer: string, owner: string) =>
-  [...(clientState(match, viewer).players.find((p) => p.playerId === owner)?.hand.tiles ?? [])];
+const handTilesSeenBy = (
+  match: Awaited<ReturnType<typeof seatPair>>,
+  viewer: string,
+  owner: string,
+) => [...(clientState(match, viewer).players.find((p) => p.playerId === owner)?.hand.tiles ?? [])];
+
+const tilesSeenBy = (state: MatchState, owner: string) => [
+  ...(state.players.find((p) => p.playerId === owner)?.hand.tiles ?? []),
+];
 
 describe("visibilidad — el rival no ve fichas ajenas", () => {
   it("cada jugador ve SU mano completa", async () => {
     const match = await seatPair(server, ["v1", "v2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await waitUntil(() => handTilesSeenBy(match, "v1", "v1").length === 7);
 
     expect(handTilesSeenBy(match, "v1", "v1")).toHaveLength(7);
@@ -8330,7 +8343,7 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   // reales, así que cualquier cliente leía la mano exacta de su rival en cada patch.
   it("NINGÚN jugador ve las fichas del rival", async () => {
     const match = await seatPair(server, ["w1", "w2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await waitUntil(() => handTilesSeenBy(match, "w1", "w1").length === 7);
 
     expect(handTilesSeenBy(match, "w1", "w2")).toHaveLength(0);
@@ -8339,16 +8352,16 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
 
   it("pero SÍ ve cuántas le quedan: tileCount es público", async () => {
     const match = await seatPair(server, ["x1", "x2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await waitUntil(() => handTilesSeenBy(match, "x1", "x1").length === 7);
 
     const rival = clientState(match, "x1").players.find((p) => p.playerId === "x2");
-    expect(rival?.tileCount ?? rival?.hand.tileCount).toBe(7);
+    expect(rival?.hand.tileCount).toBe(7);
   });
 
   it("NADIE ve el pozo", async () => {
     const match = await seatPair(server, ["y1", "y2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await waitUntil(() => handTilesSeenBy(match, "y1", "y1").length === 7);
 
     for (const viewer of ["y1", "y2"]) {
@@ -8360,10 +8373,10 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
 
   it("una ficha jugada pasa a ser pública para los dos", async () => {
     const match = await seatPair(server, ["z1", "z2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await waitUntil(() => handTilesSeenBy(match, "z1", "z1").length === 7);
 
-    const turnHolder = match.serverState.currentRound?.currentTurn.playerId as string;
+    const turnHolder = match.serverState.currentRound?.currentTurn?.playerId as string;
     const own = handTilesSeenBy(match, turnHolder, turnHolder);
     const chosen = own[0];
     if (!chosen) throw new Error("mano vacía");
@@ -8377,10 +8390,8 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     await waitUntil(() => match.serverState.currentRound?.board.tiles.length === 1);
     for (const viewer of ["z1", "z2"]) {
       await waitUntil(() => clientState(match, viewer).currentRound?.board.tiles.length === 1);
-      expect(clientState(match, viewer).currentRound?.board.tiles.at(0)?.tile.toJSON()).toEqual({
-        left: chosen.left,
-        right: chosen.right,
-      });
+      const placed = clientState(match, viewer).currentRound?.board.tiles.at(0);
+      expect([placed?.tile.left, placed?.tile.right]).toEqual([chosen.left, chosen.right]);
     }
   });
 
@@ -8389,35 +8400,54 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   // vista y volvería CIEGO — sin su propia mano de la ronda nueva.
   it("lo revelado mientras estaba fuera le espera al volver", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await waitUntil(() => handTilesSeenBy(match, "r1", "r1").length === 7);
 
     await match.clients.r1?.leave(false);
-    await waitUntil(() => match.serverState.players.find((p) => p.playerId === "r1")?.connected === false);
+    await waitUntil(
+      () => match.serverState.players.find((p) => p.playerId === "r1")?.connected === false,
+    );
 
-    const { rejoinAs } = await import("./e2e-harness.js");
     const back = await rejoinAs(server, match.roomId, "r1");
-    await waitUntil(() => back.state !== undefined && (back.state as MatchState).players.length === 2);
+    await waitUntil(() => (back.state as MatchState).players.length === 2);
 
-    const ownAfter = [...((back.state as MatchState).players.find((p) => p.playerId === "r1")?.hand.tiles ?? [])];
-    expect(ownAfter).toHaveLength(7);
+    expect(tilesSeenBy(back.state as MatchState, "r1")).toHaveLength(7);
     // Y sigue sin ver la del rival.
-    const rivalAfter = [...((back.state as MatchState).players.find((p) => p.playerId === "r2")?.hand.tiles ?? [])];
-    expect(rivalAfter).toHaveLength(0);
+    expect(tilesSeenBy(back.state as MatchState, "r2")).toHaveLength(0);
   });
 });
 ```
 
-- [ ] **Step 2: Añadir `rejoinAs` al arnés**
+- [ ] **Step 2: Añadir `revealHands` y `rejoinAs` al arnés**
 
 ```ts
 // añadir a src/features/match/tests/e2e-harness.ts
+
+// LA MESA ARRANCA TAPADA. `configOf` enciende la ventana de reparto en TODA mesa
+// (es control de presencia anti-fraude), así que la ronda 1 nace en `DEALING` y las
+// manos están ocultas incluso para su dueño hasta que él dice `REVEAL_TILES`. Todo
+// test que quiera una ronda EN JUEGO pasa por acá; sin esto la espera se cuelga los
+// 15 s de `dealingTimeoutMs` —el único plazo que no es configurable por entorno— y
+// termina retirando a los dos por no levantar las fichas.
+export async function revealHands(match: SeatedMatch): Promise<void> {
+  for (const client of Object.values(match.clients)) client.send("REVEAL_TILES", {});
+  await waitUntil(() => match.serverState.currentRound?.phase === "PLAYING");
+}
+
 // El camino del que perdió su token: vuelve por roomId. Es lo que verifica que el
 // unlock() de onDrop funciona — sin él, el matchmaker rechaza este join porque la
 // sala cuenta el asiento reservado.
+//
+// El `waitForInitialState()` no es adorno: `connectTo` del arnés de testing lo hace por
+// dentro y `joinById` no. Sin él, `join()` resuelve con el handshake y el estado completo
+// llega un viaje después, así que el llamador lee un `state` con los campos en `undefined`
+// y no puede distinguir "todavía no llegó" de "la vista no me lo muestra" — que es
+// justamente lo que este arnés existe para medir.
 export async function rejoinAs(server: ColyseusTestServer, roomId: string, userId: string) {
   server.sdk.auth.token = mintToken(userId);
-  return server.sdk.joinById(roomId);
+  const room = await server.sdk.joinById(roomId);
+  await room.waitForInitialState();
+  return room;
 }
 ```
 
@@ -8426,9 +8456,18 @@ export async function rejoinAs(server: ColyseusTestServer, roomId: string, userI
 Run: `npx vitest run src/features/match/tests/visibility.smoke.test.ts`
 Expected: los 6 tests PASAN.
 
-Si el test de `tileCount` falla, es porque `Hand` es un sub-nodo y el campo público vive en
-`player.hand.tileCount` y no en `player.tileCount`: ajustar la aserción a la estructura real y quitar
-el `??`.
+`tileCount` se lee en `player.hand.tileCount`: `Hand` es un sub-nodo y el campo público vive ahí,
+no en `PlayerState`.
+
+Y esperar `match.serverState.phase === "PLAYING"` NO alcanza para tener una ronda en juego: esa es
+la fase de la PARTIDA, que `MatchDriver.begin()` estampa antes de repartir. La de la RONDA arranca
+en `DEALING` con las manos tapadas para todos —su dueño incluido—, así que el `waitUntil` de las 7
+fichas se cuelga hasta que vence `dealingTimeoutMs` y el sistema retira a los dos por no levantarlas.
+De ahí `revealHands`.
+
+Ver el rojo de verdad: invertir la audiencia de `RoundPlayer.revealTiles` a `{ kind: "ALL" }` y
+correr la suite. Dos de los seis tienen que ponerse rojos —el del rival y el del que vuelve—. Si
+siguen verdes, el smoke no está leyendo la vista del cliente y no mide nada.
 
 - [ ] **Step 4: Escribir el E2E de partida completa**
 
@@ -8436,11 +8475,18 @@ el `??`.
 // src/features/match/tests/game-2p-e2e.test.ts
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { MatchState } from "../core/state/index.js";
 import { boardEndsOf } from "../core/engine/round/board-ends.js";
 import { playableSides } from "../core/engine/round/playable.js";
 import { boneyardCountOf } from "../core/engine/state-projections.js";
-import { bootServer, historyOf, seatPair, waitUntil } from "./e2e-harness.js";
+import {
+  type SeatedMatch,
+  act,
+  bootServer,
+  historyOf,
+  revealHands,
+  seatPair,
+  waitUntil,
+} from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 
@@ -8454,49 +8500,43 @@ afterAll(async () => {
 
 // Juega una jugada legal del que tiene el turno, o roba, o pasa. Devuelve false
 // cuando la ronda dejó de estar en PLAYING.
-async function playOneTurn(match: Awaited<ReturnType<typeof seatPair>>): Promise<boolean> {
-  const state = match.serverState;
-  const round = state.currentRound;
+//
+// Espera con `act`, que compara la FIRMA del estado. El conteo total de fichas NO sirve
+// de señal: jugar mueve una de la mano al tablero y robar la mueve del pozo a la mano, así
+// que board + hand + boneyard es un invariante de la ronda y nunca se mueve. La firma, en
+// cambio, incluye el plazo vigente, y los tres verbos lo re-estampan.
+async function playOneTurn(match: SeatedMatch): Promise<boolean> {
+  const round = match.serverState.currentRound;
   if (!round || round.phase !== "PLAYING") return false;
 
-  const playerId = round.currentTurn.playerId;
-  const hand = state.players.find((p) => p.playerId === playerId)?.hand;
+  const playerId = round.currentTurn?.playerId;
+  if (!playerId) return false;
+  const hand = match.serverState.players.find((p) => p.playerId === playerId)?.hand;
   if (!hand) return false;
 
   const ends = boardEndsOf(round.board);
   const candidate = [...hand.tiles]
-    .map((tile) => ({ tile, sides: playableSides(tile, ends) }))
-    .find((entry) => entry.sides.length > 0);
+    .map((tile) => ({ tile, side: playableSides(tile, ends).at(0) }))
+    .find((entry) => entry.side !== undefined);
 
-  const before = round.board.tiles.length + hand.tiles.length + boneyardCountOf(round);
-  if (candidate) {
-    match.clients[playerId]?.send("PLAY_TILE", {
+  if (candidate?.side) {
+    await act(match, playerId, "PLAY_TILE", {
       left: candidate.tile.left,
       right: candidate.tile.right,
-      side: candidate.sides[0],
+      side: candidate.side,
     });
   } else if (boneyardCountOf(round) > 0) {
-    match.clients[playerId]?.send("DRAW_TILE", {});
+    await act(match, playerId, "DRAW_TILE");
   } else {
-    match.clients[playerId]?.send("PASS", {});
+    await act(match, playerId, "PASS");
   }
-
-  // Espera a que el servidor procesó algo: cualquiera de los tres verbos mueve al
-  // menos uno de los tres conteos, o cambia de fase.
-  await waitUntil(() => {
-    const now = match.serverState.currentRound;
-    if (!now || now.phase !== "PLAYING") return true;
-    const nowHand = match.serverState.players.find((p) => p.playerId === playerId)?.hand;
-    return now.board.tiles.length + (nowHand?.tiles.length ?? 0) + now.boneyard.count !== before
-      || now.currentTurn.playerId !== playerId;
-  });
   return true;
 }
 
 describe("partida 2P completa", () => {
   it("se juega de punta a punta hasta que hay veredicto", async () => {
     const match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
 
     // Tope de seguridad: una partida a 100 puntos no debería pasar de esto, y si
     // lo pasa es un bucle y hay que verlo como fallo, no como cuelgue.
@@ -8516,27 +8556,42 @@ describe("partida 2P completa", () => {
     }
 
     expect(match.serverState.phase).toBe("FINISHED");
-    const { teamA, teamB } = match.serverState.scoreboard;
+    const { teamA, teamB } = match.serverState.scoreboard ?? { teamA: 0, teamB: 0 };
     expect(Math.max(teamA, teamB)).toBeGreaterThanOrEqual(match.serverState.pointsToWin);
     expect(match.serverState.pastRounds.length).toBeGreaterThan(0);
   });
 
-  it("el historial de esa partida cierra con MATCH_RESOLVED y sin huecos de seq", async () => {
+  it("el historial de esa partida cierra con el veredicto y sin huecos de seq", async () => {
     const entries = historyOf("m-g1-g2");
     expect(entries.length).toBeGreaterThan(0);
-    expect(entries.map((entry) => entry.seq)).toEqual(
-      entries.map((_, index) => index + 1),
-    );
-    expect(entries.at(-1)?.type).toBe("MATCH_RESOLVED");
+    expect(entries.map((entry) => entry.seq)).toEqual(entries.map((_, index) => index + 1));
+    // El veredicto NO es la última línea: `MATCH_RESOLVED` abre la presentación de la
+    // partida, y lo último que queda escrito es el vencimiento de ESA ventana — el mismo
+    // que apaga la mesa. Afirmar solo sobre `at(-1)` diría que el registro se corta antes
+    // del apagado, que es justo el hueco que el historial existe para no dejar.
+    expect(entries.slice(-2).map((entry) => entry.type)).toEqual([
+      "MATCH_RESOLVED",
+      "DEADLINE_EXPIRED",
+    ]);
   });
 
-  it("cada DEADLINE_EXPIRED tiene detrás el verbo que el sistema ejecutó", async () => {
+  it("cada DEADLINE_EXPIRED es del sistema, y el de turno trae detrás el retiro", async () => {
     const entries = historyOf("m-g1-g2");
+    const expirations = entries.filter((entry) => entry.type === "DEADLINE_EXPIRED");
+    expect(expirations.length).toBeGreaterThan(0);
+
     entries.forEach((entry, index) => {
       if (entry.type !== "DEADLINE_EXPIRED") return;
+      expect(entry.source).toBe("SYSTEM");
+      expect(entry.kind).toBe("EVENT");
+      // Solo el plazo del TURNO tiene un verbo detrás: al vencer, el sistema retira al
+      // que no jugó. Los de las presentaciones no ejecutan verbo ninguno —arrancan la
+      // ronda siguiente o apagan la mesa—, así que exigirles uno sería inventar el
+      // contrato en vez de medirlo.
+      if (entry.payload.kind !== "TURN") return;
       const next = entries[index + 1];
-      expect(next).toBeDefined();
       expect(next?.source).toBe("SYSTEM");
+      expect(next?.type).toBe("ABANDON");
     });
   });
 
@@ -8558,6 +8613,9 @@ Si el bucle se agota sin llegar a `FINISHED`, casi siempre es una de dos: la pau
 re-arranca la ronda siguiente (revisar `MatchDriver.afterRound`), o `nextPlayerAfter` devuelve
 siempre el mismo asiento (revisar `turnOrderFrom`).
 
+Si en cambio lo que revienta es un `waitUntil` de un turno suelto, la sospecha es la señal, no el
+motor: esperar a que cambie el conteo total de fichas NO sirve, porque los tres verbos lo conservan.
+
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -8571,8 +8629,9 @@ ve las fichas del rival ni el pozo, que sí ve el conteo, y que lo revelado
 mientras estaba fuera le espera al volver.
 
 El E2E juega una partida entera contra el wiring de producción y afirma sobre el
-historial: seq sin huecos, cierra con MATCH_RESOLVED, cada DEADLINE_EXPIRED tiene
-detrás el verbo del sistema, y ningún comando quedó marcado como SYSTEM.
+historial: seq sin huecos, el veredicto y el apagado al final, cada
+DEADLINE_EXPIRED con source SYSTEM, el del turno con su retiro detrás, y ningún
+comando marcado como SYSTEM.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
