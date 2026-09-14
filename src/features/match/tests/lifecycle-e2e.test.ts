@@ -143,6 +143,44 @@ describe("ciclo de vida de una partida", () => {
     expect(body.serverNow).toBeLessThanOrEqual(after);
   });
 
+  // EL PAR es lo que prueba que el schema hace el trabajo, no una de las dos mitades sola.
+  // 400 y 404 dicen cosas distintas y el cliente las trata distinto: uno es "pediste mal",
+  // el otro "eso no existe". Sin schema las dos formas caían en el mismo 404 —el id iba
+  // derecho al `Map.get` del registry—, y el cliente no tenía cómo distinguir un id que
+  // escribió mal de una mesa que ya murió.
+  it("un roomId inexistente es 404 y uno de forma imposible es 400", async () => {
+    const inexistente = await fetch("http://localhost:2585/config/no-existe");
+    const conPuntos = await fetch("http://localhost:2585/config/tiene.puntos");
+    const larguisimo = await fetch(`http://localhost:2585/config/${"x".repeat(65)}`);
+
+    expect(inexistente.status).toBe(404);
+    expect(conPuntos.status).toBe(400);
+    expect(await conPuntos.json()).toMatchObject({ code: "MALFORMED" });
+    expect(larguisimo.status).toBe(400);
+  });
+
+  // El matchId entra del cliente y SALE en la respuesta (`{ matchId, entries }`): sin
+  // schema es entrada cruda reflejada. El salto de línea es el caso que importa —viaja
+  // como `%0A`, Express lo decodifica, y un id con control adentro termina en el log y en
+  // el cuerpo—, así que se corta antes de leer el historial.
+  it("un matchId con caracteres de control es 400 en el endpoint interno", async () => {
+    const response = await fetch(HISTORY_URL("m-con%0Asalto"), { headers: INTERNAL_HEADERS });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "MALFORMED" });
+  });
+
+  // EL ORDEN es el contrato: primero se prueba quién sos, después qué mandaste. Si la
+  // validación corriera antes del guard, un anónimo podría distinguir "forma inválida" de
+  // "forma válida" en una ruta que no tiene derecho a tocar — un oráculo gratis sobre el
+  // formato de los ids internos.
+  it("sin llave, un matchId inválido sigue siendo 401 y no 400", async () => {
+    const response = await fetch(HISTORY_URL("m-con%0Asalto"));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "UNAUTHORIZED" });
+  });
+
   // El endpoint de SOPORTE: es de dónde sale el historial que después se rebobina.
   // Se indexa por matchId y no por roomId a propósito — la sala muere y la partida no.
   it("el endpoint interno devuelve el historial de la partida", async () => {

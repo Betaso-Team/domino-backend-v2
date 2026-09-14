@@ -25,7 +25,9 @@ Los otros dos documentos:
 Después del plan entró una tanda de correcciones portadas de truco (`078a2af` y anteriores):
 la Regla 3 no veía los imports locales del container, el transporte HTTP resolvía del root en
 vez de recibir, faltaba el manejador de errores de Express y `.env.example` estaba ocho
-variables atrás de `src/env.ts`. **Baseline actual: 258 tests / 39 archivos.**
+variables atrás de `src/env.ts`. Después vino la validación de la entrada HTTP con zod
+(`validated` en `features/match/transports/http/`, gemelo del decoder del wire).
+**Baseline actual: 266 tests / 40 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
