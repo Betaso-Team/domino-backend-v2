@@ -24,21 +24,34 @@ services:
   redis:
     image: redis:7-alpine
     ports:
+      # ATADO A LOOPBACK, y el prefijo `127.0.0.1:` no es cosmético. Sin él compose publica en
+      # `0.0.0.0`, o sea que este Redis —que no pide contraseña— queda alcanzable desde
+      # cualquier máquina de la red. Un Redis abierto no es solo lectura de datos: `CONFIG SET
+      # dir` + `dbfilename` lo convierten en escritura de archivos arbitrarios, que es el
+      # camino conocido a ejecución remota. Se publica igual porque inspeccionarlo con
+      # `redis-cli` desde el host es parte de operarlo; lo que no hace falta es que lo alcance
+      # la LAN del café.
+      #
       # El puerto del HOST es configurable por la misma razón que el de Mongo: es fácil que ya
       # haya otro Redis escuchando en el 6379, sobre todo si el mismo operador corre truco al
       # lado. `REDIS_PORT` sale del `.env` de al lado, que compose interpola solo; no es una
       # variable de `src/env.ts` y por eso no está en `.env.example`.
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     restart: unless-stopped
 
   mongo:
     image: mongo:7
     ports:
+      # ATADO A LOOPBACK por lo mismo que Redis: sin el `127.0.0.1:` esto es un Mongo sin
+      # autenticación escuchando a la red entera, y adentro está el historial de las partidas
+      # —quién jugó qué y contra quién—. Se publica igual porque `mongosh` desde el host es
+      # como se audita una partida; lo que no hace falta es que la LAN lo lea.
+      #
       # El puerto del HOST es configurable porque es fácil que ya haya otro Mongo escuchando en
       # el 27017, sobre todo si el mismo operador corre truco al lado. `MONGO_PORT` sale del
       # `.env` de al lado, que compose interpola solo; no es una variable de `src/env.ts` y por
       # eso no está en `.env.example` —ese archivo documenta al único lector de `process.env`—.
-      - "${MONGO_PORT:-27017}:27017"
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
     # CON VOLUMEN NOMBRADO, que truco no tiene. La imagen declara `VOLUME /data/db`, así que
     # sin esto cada contenedor se lleva un volumen ANÓNIMO: `docker compose down` deja el de
     # ayer huérfano y el siguiente `up` arranca con una base vacía. Nombrarlo es lo que hace
