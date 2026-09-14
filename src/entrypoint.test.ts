@@ -37,7 +37,15 @@ describe("el entrypoint se llama igual en todos lados", () => {
     expect(scripts.dev).toContain(ENTRYPOINT_SOURCE);
   });
 
-  it("la imagen arranca el mismo bundle", () => {
+  it("la imagen y pm2 arrancan el mismo bundle", () => {
     expect(read("Dockerfile")).toContain(ENTRYPOINT_BUNDLE);
+    expect(read("ecosystem.config.cjs")).toContain(ENTRYPOINT_BUNDLE);
+  });
+
+  // `.cjs` Y NO `.js`, y no es preferencia: el paquete es `"type": "module"`, así que un `.js`
+  // se lee como ESM y ahí `module.exports` NO EXISTE. pm2 lee su configuración con `require`.
+  // El síntoma sería un despliegue que no arranca, en la máquina de producción.
+  it("la configuración de pm2 es CommonJS", () => {
+    expect(read("ecosystem.config.cjs")).toContain("module.exports");
   });
 });

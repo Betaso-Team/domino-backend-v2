@@ -49,6 +49,56 @@ docker compose exec mongo mongosh domino --eval 'db.match_history.find().limit(1
 curl -H "X-Internal-Key: <la del .env>" http://localhost:2567/internal/matches/<matchId>/history
 ```
 
+## Levantar N instancias con pm2
+
+Docker es **desarrollo local**; producción y pruebas corren con pm2.
+
+```bash
+npm run build
+PM2_INSTANCES=2 pm2 start ecosystem.config.cjs
+```
+
+`PM2_INSTANCES` (y `PM2_APP_NAME`, el nombre del proceso) las lee **pm2**, no `src/env.ts`, así
+que no están en `.env.example` — ese archivo documenta al único lector de `process.env`. Todo lo
+demás sale del `.env` de al lado, que el proceso carga solo.
+
+Modo `fork` y no `cluster`: cada instancia tiene que escuchar en **su** puerto y anunciar **su**
+dirección, porque el jugador se conecta al proceso que hospeda su sala. Con `PORT=2567` y dos
+instancias, escuchan en 2567 y 2568.
+
+### Lo que el proxy de adelante tiene que hacer
+
+**Rutear por prefijo de path.** Cada instancia se anuncia como `SERVER_ADDRESS/{su puerto}`, así
+que `domino.betaso.com/2568/...` tiene que llegar al proceso que escucha en 2568 — WebSocket
+incluido. Es el esquema de v1: el proxy que ya rutea v1 sirve sin aprender nada.
+
+Confirmalo **antes** de subir a dos instancias. Si el proxy no lo hace, el que no llega es el
+**cliente** y el servidor no se entera: el nodo equivocado contesta con total confianza que esa
+sala no es suya, y en el log no hay nada raro que mirar.
+
+Delante de eso van las dos sondas:
+
+| | pregunta | acción del que pregunta | consulta las bases |
+|---|---|---|---|
+| `GET /health` | ¿el proceso está roto sin arreglo? | reiniciarlo | **no** |
+| `GET /ready` | ¿le mando jugadores nuevos? | sacarlo de rotación | sí, con plazo |
+
+Son dos a propósito: reiniciar no arregla una base caída, y es lo único que destruye partidas en
+curso. `/ready` contesta `503 {"status":"not-ready","missing":["mongo"]}` diciendo **cuál** falta,
+y cada chequeo tiene 2 s — una base caída no falla, cuelga. Una dependencia que esta instancia
+eligió no tener (sin `MONGO_URI`, sin `REDIS_URL`) no cuenta como faltante.
+
+### El apagado
+
+`pm2 reload` manda un **mensaje** `shutdown` —no una señal— y da `kill_timeout` (5 s) para drenar.
+En ese rato el servidor corta el emparejamiento, cierra las salas, espera a que el historial en
+vuelo termine de escribirse y recién ahí cierra Mongo. Redis lo cierra Colyseus dentro del mismo
+paso.
+
+Lo que **no** hay es migración de salas: la instancia que se apaga se lleva sus partidas, igual
+que en v1. Y un `kill -9` no drena nada — las claves del registro quedan hasta que vence su TTL
+de 120 s, que es para lo que el TTL existe.
+
 ## Los tests
 
 **No necesitan Docker, ni Mongo, ni Redis.** `vitest.setup.ts` **borra** `MONGO_URI` y
