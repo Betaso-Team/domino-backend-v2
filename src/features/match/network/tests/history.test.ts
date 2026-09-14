@@ -7,7 +7,14 @@ import { MatchHistory } from "../history.js";
 
 function build() {
   const recorded: HistoryEntry[] = [];
-  const port: HistoryPort = { record: (entries) => recorded.push(...entries) };
+  // `drain` acá no mide nada —este doble escribe en un arreglo, así que nunca tiene nada en
+  // vuelo—: está porque el puerto lo pide, y que lo pida es lo que hace que un adaptador
+  // nuevo no pueda olvidarse de implementarlo. Lo cazó `tsc` y no vitest, que es el motivo
+  // por el que el gate de este repo es el typecheck.
+  const port: HistoryPort = {
+    record: (entries) => recorded.push(...entries),
+    drain: () => Promise.resolve(),
+  };
   const clockBox = { now: 5_000 };
   const clock: Clock = { now: () => clockBox.now };
   const match = createMatchState({

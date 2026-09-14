@@ -59,6 +59,15 @@ export interface MatchHistoryDocument {
 }
 
 export class MongoHistory implements HistoryPort, HistoryReader {
+  // LOS LOTES QUE TODAVÍA ESTÁN VIAJANDO. Es lo único que hace falta para que el apagado
+  // pueda esperarlos, y es un `Set` y no un contador porque lo que se espera son las
+  // promesas mismas.
+  //
+  // No crece sin control: cada entrada se borra cuando su escritura termina, bien o mal. En
+  // régimen tiene el tamaño de la concurrencia real —una escritura por lote en vuelo—, no
+  // el del historial.
+  private readonly inFlight = new Set<Promise<void>>();
+
   constructor(
     private readonly store: HistoryStore,
     private readonly logger: Logger,
@@ -78,13 +87,31 @@ export class MongoHistory implements HistoryPort, HistoryReader {
     // caso que la clase de arriba no puede producir.
     const matchId = entries[0]?.matchId;
     if (!matchId) return;
-    void this.append(matchId, entries).catch((error) =>
+    // La promesa que se ANOTA es la que ya tiene el `catch` puesto, y ese orden importa:
+    // anotar la cruda dejaría en el `Set` una promesa rechazada, y el `Promise.all` de
+    // `drain()` se rompería con el primer lote fallido en vez de esperar a todos.
+    const writing = this.append(matchId, entries).catch((error) =>
       this.logger.error("historial: no se pudo grabar el lote", {
         matchId,
         entries: entries.length,
         error: String(error),
       }),
     );
+    this.inFlight.add(writing);
+    void writing.finally(() => this.inFlight.delete(writing));
+  }
+
+  // Ver el comentario de `HistoryPort.drain`. EN BUCLE y no una sola pasada: nada impide que
+  // un lote que estaba en vuelo dispare otro —el `finally` que limpia el `Set` corre después
+  // de que la promesa resuelve—, y un drenado que espera una sola tanda dejaría justo al
+  // último afuera. Termina porque durante el apagado ya no hay salas que graben: la sala se
+  // dispone ANTES de que esto corra (§`src/main.ts`).
+  async drain(): Promise<void> {
+    while (this.inFlight.size > 0) {
+      // `all` y no `allSettled` porque ninguna de estas promesas puede rechazar: son las que
+      // salieron del `catch` de arriba.
+      await Promise.all([...this.inFlight]);
+    }
   }
 
   async of(matchId: string): Promise<readonly HistoryEntry[]> {

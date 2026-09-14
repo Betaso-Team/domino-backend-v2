@@ -83,6 +83,22 @@ const cluster: ServerOptions = {
   driver,
   publicAddress: env.publicAddress,
   selectProcessIdToCreateRoom,
+  // EL APAGADO ES NUESTRO. Con el default, Colyseus registra por su cuenta las señales y
+  // `uncaughtException` (`registerGracefulShutdown`, `@colyseus/core/build/Server.mjs`) y lo que
+  // hace ahí es cerrar las salas y llamar a `process.exit` — sin esperar a que el historial
+  // termine de escribir. Con las dos cosas registradas, una señal dispara los dos caminos a la
+  // vez y el que termina primero le corta la mano al otro: el último lote de cada partida se
+  // pierde en una carrera.
+  //
+  // Lo que se apaga por nuestra cuenta está en `src/main.ts`, y ahí se reponen las dos redes que
+  // esto saca: las señales y `uncaughtException`. Lo que NO se saca es el
+  // `server.gracefullyShutdown(false)` en sí —seguimos llamándolo, y es él quien dispone las
+  // salas y cierra Redis—: lo único que este `false` apaga es que Colyseus decida CUÁNDO.
+  //
+  // VA EN LAS DOS SUPERFICIES, como las otras cuatro. En la de test es de hecho lo correcto por
+  // partida doble: un worker de vitest no quiere a Colyseus interceptándole el SIGINT, y como
+  // `main.ts` no lo importa nadie, en test no queda nadie registrado.
+  gracefullyShutdown: false,
 };
 
 // @colyseus/testing solo respeta el puerto pedido cuando recibe opciones, no un

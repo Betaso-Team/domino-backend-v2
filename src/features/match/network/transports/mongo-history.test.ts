@@ -186,3 +186,60 @@ describe("MongoHistory: lectura", () => {
     expect(collection).toHaveBeenCalledWith(HISTORY_COLLECTION);
   });
 });
+
+// LO QUE SE PIERDE SI EL APAGADO NO ESPERA. `record` devuelve `void` por contrato —lo llaman
+// el camino de un comando y el de un timer, y ninguno espera— y NO reintenta: un lote que
+// todavía está viajando cuando alguien cierra la conexión no se vuelve a intentar nunca. Y el
+// último lote de una partida es justamente el que lleva su desenlace.
+//
+// `drain()` es la contrapartida del `void`: el único llamador es el apagado ordenado, que lo
+// espera ANTES de cerrar Mongo.
+describe("MongoHistory: el drenado del apagado", () => {
+  it("espera a los lotes que todavía están viajando", async () => {
+    let liberar: (() => void) | undefined;
+    const { store, updateOne } = storeWith();
+    updateOne.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          liberar = () => resolve();
+        }),
+    );
+    const history = new MongoHistory(store, fakeLogger());
+    history.record([entry(1)]);
+    await settle();
+
+    let drenado = false;
+    const drain = history.drain().then(() => {
+      drenado = true;
+    });
+
+    // Todavía no: el lote sigue en vuelo. Si `drain()` resolviera acá, cerrar Mongo a
+    // continuación mataría la escritura a mitad de camino.
+    await settle();
+    expect(drenado).toBe(false);
+
+    liberar?.();
+    await drain;
+    expect(drenado).toBe(true);
+  });
+
+  // Un lote que FALLA tampoco puede dejar el apagado colgado: ya se logueó (es lo único que
+  // se le debe al operador) y lo que queda es cerrar. Un `drain()` que se propaga con el
+  // rechazo cortaría el resto del apagado, que es peor que perder el lote.
+  it("un lote que falla lo deja drenado igual, no colgado ni roto", async () => {
+    const { store, updateOne } = storeWith();
+    updateOne.mockRejectedValue(new Error("mongo caído"));
+    const history = new MongoHistory(store, fakeLogger());
+    history.record([entry(1)]);
+
+    await expect(history.drain()).resolves.toBeUndefined();
+  });
+
+  // Sin nada en vuelo resuelve de una: el apagado de una instancia que no grabó nada no paga
+  // ni un tick.
+  it("sin lotes en vuelo resuelve de inmediato", async () => {
+    const { store } = storeWith();
+
+    await expect(new MongoHistory(store, fakeLogger()).drain()).resolves.toBeUndefined();
+  });
+});

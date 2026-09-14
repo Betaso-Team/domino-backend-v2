@@ -30,6 +30,18 @@ export class MemoryHistory implements HistoryPort, HistoryReader {
   }
 
   /**
+   * NO HAY NADA QUE DRENAR, y eso no es un stub: escribir acá es asignar en un `Map`, o sea
+   * que cuando `record` vuelve ya terminó. La implementación vacía es la respuesta VERDADERA
+   * de esta implementación, no un hueco — la que tiene algo que esperar es la de Mongo.
+   *
+   * Se escribe con la promesa ya resuelta y no como `async`, por el mismo motivo que `of` de
+   * más abajo: un `async` sin un solo `await` adentro invita a leer una espera que no existe.
+   */
+  drain(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /**
    * `HistoryReader`: para tests y para la consola de soporte. No es API de producto.
    *
    * El cuerpo es SINCRÓNICO y la promesa se arma ya resuelta —no es un método `async`—

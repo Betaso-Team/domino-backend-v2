@@ -36,6 +36,20 @@ export interface HistoryEntry {
 // hacer si Mongo falla SIN FRENAR LA PARTIDA— quedan de este lado.
 export interface HistoryPort {
   record(entries: readonly HistoryEntry[]): void;
+  /**
+   * LA CONTRAPARTIDA DEL `void` DE ARRIBA, y existe por el apagado. `record` no espera y no
+   * reintenta: un lote que todavía está viajando cuando alguien cierra la conexión no se vuelve
+   * a intentar nunca, y el último lote de una partida es justamente el que lleva su desenlace.
+   *
+   * Un solo llamador, y no es una sala: el apagado ordenado (`src/di-container.ts`), que lo
+   * espera ANTES de cerrar Mongo. Que esto SÍ prometa no afloja el contrato de `record` —el
+   * camino caliente sigue sin tener nada que esperar—, lo COMPLETA: alguien tiene que poder
+   * preguntar "¿terminaste?" y hasta ahora nadie podía.
+   *
+   * NUNCA RECHAZA. Un lote que falló ya se logueó, que es lo único que se le debe al operador;
+   * propagarlo acá cortaría el resto del apagado, que es peor que perder el lote.
+   */
+  drain(): Promise<void>;
 }
 
 // El lado de LECTURA, separado del de escritura porque tiene otros dueños: escribe la sala

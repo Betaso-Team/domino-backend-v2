@@ -85,6 +85,13 @@ module.exports = {
           // ENTRYPOINT: el CLI de replay arma el proceso entero, y componer es su trabajo
           // —el mismo criterio con el que truco deja src/index.ts fuera de la lista—.
           "^src/replay\\.ts$",
+          // EL OTRO ENTRYPOINT, el del servidor. Es el que ESCUCHA y el que APAGA, y apagar es
+          // composición: el orden —salas, después el historial, después Mongo— solo se puede
+          // escribir desde donde se ven las dos mitades. Está acá y no en `app.config.ts` por
+          // una razón que no es de estilo: `app.config.ts` lo importan cuarenta y cinco
+          // archivos de test, y registrar manejadores de señal ahí dejaría a cada worker de
+          // vitest con un apagado propio peleándose el proceso.
+          "^src/main\\.ts$",
           // EL COMPOSITION ROOT de la superficie Express y de Colyseus: arma las dos
           // configuraciones (la real y la de test) y le pasa al transporte HTTP sus
           // dependencias ya resueltas. Es el `src/index.ts` de truco con otro nombre.

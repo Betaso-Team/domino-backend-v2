@@ -102,3 +102,30 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
 rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
 rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
+
+// CERRAR LO QUE ESTE ARCHIVO ABRIÓ, que es la deuda que el incremento del clúster dejó
+// anotada: nadie cerraba nada y `SIGTERM` cortaba en seco. Lo llama el apagado ordenado
+// (`src/main.ts`) DESPUÉS de que las salas se disponen, y ese orden es el contrato entero.
+//
+// EL ORDEN DE ADENTRO:
+//
+//   1. DRENAR EL HISTORIAL. `record` es `void` por contrato y NO reintenta, así que un lote
+//      que todavía está viajando cuando se cierra la conexión se pierde para siempre — y el
+//      último lote de una partida es el que lleva su desenlace. Con `MemoryHistory` no hay
+//      nada que esperar y esto resuelve de una.
+//   2. CERRAR MONGO, y recién ahí. Al revés se pierde exactamente lo que el paso 1 esperó.
+//
+// LO QUE NO ESTÁ ACÁ ES REDIS, y la ausencia es una MEDICIÓN, no un olvido: `presence` y
+// `driver` los cierra el propio Colyseus adentro de `server.gracefullyShutdown()`
+// (`@colyseus/core/build/Server.mjs`: `this.presence?.shutdown()` y `await
+// this.driver?.shutdown()`, justo después de disponer las salas). Cerrarlos también acá los
+// cerraría DOS veces, y un `quit()` de ioredis sobre una conexión ya cerrada rechaza — o sea
+// que el precio de la redundancia sería una promesa rechazada en cada apagado, que es ruido
+// en el único log que alguien mira cuando un deploy sale mal.
+//
+// Nadie más que el entrypoint puede llamar a esto: una sala que cierre Mongo se lleva puesto
+// el historial de las otras cuarenta que siguen jugando.
+export async function shutdown(): Promise<void> {
+  await history.drain();
+  await mongo?.close();
+}
