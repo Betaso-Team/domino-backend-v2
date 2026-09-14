@@ -25,6 +25,63 @@ tarea en el plan, con la condición exacta que lo vuelve a activar. **Si tocás 
 Esta línea se quedó stale doce tareas seguidas: **actualizala al cerrar la tuya**, o el que
 sigue arranca desorientado.
 
+## Traspaso abierto — leé esto ANTES de arrancar la Tarea 23
+
+Las Tareas 20, 21 y 22 se ejecutaron con un ciclo de dos revisiones por tarea: primero
+cumplimiento de spec, después calidad de código. **La 20 y la 21 cerraron las dos. La 22
+tiene la revisión de calidad hecha pero SIN APLICAR** — el ciclo se cortó ahí.
+
+Nada está roto: `f8b1882`, árbol limpio, typecheck limpio, **249 tests verdes**. Lo que sigue
+es deuda conocida, no sorpresas.
+
+### Lo pendiente de la Tarea 22 (aplicalo antes de la 23)
+
+Los dos primeros tocan el arnés compartido, así que la Tarea 23 los hereda si no se arreglan:
+
+1. **`e2e-harness.ts:94-96` miente.** El comentario de `rejoinAs` todavía dice que ese test
+   *"verifica que el `unlock()` de `onDrop` funciona"*. Es exactamente la afirmación que la
+   Tarea 22 desmontó en `reconnection-e2e.test.ts`, en `domino-room.ts` y en tres commits.
+   Lo que sostiene el `joinById` es `maxClients = seats.length * 2`, no el `unlock()`.
+   Reescribilo: es el archivo que la 23 importa primero.
+2. **`clientOf` duplicado** entre `concurrency-e2e.test.ts:43-44` y
+   `reconnection-e2e.test.ts:148-152`, y sin usar en `concurrency-e2e.test.ts:93,103` —
+   justo donde el comentario de `:40-42` lo exige. Subilo al arnés junto con `turnHolderOf`
+   (`:132-136`), que duplica la guarda de `visibility.smoke.test.ts:91-92`. Si no, la 23 lo
+   clona una tercera vez.
+3. **`concurrency-e2e.test.ts:79` puede parpadear.** `phaseAtBurst` compara contra una
+   ventana de 120 ms observada por un poll de 10 ms; si el worker se traba más que eso, la
+   aserción se pone roja sin que nada esté mal. Acumulá las fases en un `seen: string[]`
+   desde antes del `ABANDON` y afirmá `toContain("PRESENTING_MATCH")`.
+4. **Colisión de matchIds**: `c1/c2` y `k1/k2` generan `m-c1-c2` y `m-k1-k2`, los mismos que
+   `lifecycle-e2e.test.ts:119` y `:179`. Hoy no chocan solo por el aislamiento de módulos de
+   vitest; un `isolate: false` futuro mezcla los historiales. Prefijos propios por suite.
+
+Menores: el `out += " "` de `architecture.test.ts:166,175` es **load-bearing** (sin ese
+espacio `x/*c*/async` se fusiona en `xasync` y escapa del `\basync\b`) y no está comentado;
+el stripper vive dentro del `it` en vez de a nivel de módulo; `domino-room.ts:48` tiene la
+tercera copia del `120` (usá `DEFAULT_GLOBAL_CONFIG.reconnectionWindowSeconds`);
+`architecture.test.ts:118` hace `await import("node:fs")` con el import estático ya arriba;
+los dos `it` de `concurrency-e2e.test.ts:109,118` son `async` sin `await`; `onMessage` sin
+tipar en `:47,93`; y el reparto de puertos (2585-2589) no está registrado en ningún lado.
+
+### Defectos de la Tarea 23 ya detectados, sin arreglar
+
+Los vi leyendo el plan, antes de ejecutarla:
+
+- **Colisión de puerto**: pide 2588, que la Tarea 22 ya tomó para `concurrency-e2e`. Usá 2590.
+- **`seatPair(server, seats, undefined, { skipDealWindow: true })`** — ese cuarto parámetro
+  no existe en el arnés, y el nombre está al revés: estos tests **quieren** la ventana de
+  reparto, no saltearla. La ventana ya viene encendida por `configOf`.
+- **`historyOf` se usa en el último test pero falta en el import** (el plan lo aclara en
+  prosa debajo del bloque, no en el código).
+- **`git add src` se come `vitest.setup.ts`**, que está en la raíz. Es el mismo defecto que
+  la Tarea 22 ya documentó.
+
+Y verificá que existan de verdad antes de escribir el test: `hasSeenTiles`, `abortReason()`,
+y `MATCH_ABORTED { reason: "NEVER_PLAYED" }`. El Step 2 agrega `DEALING_TIMEOUT_MS` a `env.ts`
+—hoy está hardcodeado en 15 s y **no** es overridable—, así que tocás `GlobalDominoConfig`:
+**regenerá el golden** (ver abajo).
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
@@ -75,7 +132,7 @@ como está a su propia altura.
 | 21 | Seis defectos de código venían escritos en el plan, no de la ejecución | `36eb6c3` |
 | 22 | Seis defectos: `revealHands` pedido en prosa y no llamado, `currentTurn` sin `?.`, un `it` leyendo el historial de otro, tres promesas del SDK que 0.18 no cumple, el `unlock()` que no era lo medido, y un `git add` que se comía `vitest.setup.ts` | (ver abajo) |
 
-Esperá encontrarlo otra vez. Dos formas concretas que ya se repitieron:
+Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 
 - **La mesa arranca TAPADA.** `configOf` enciende `isDealWindowEnabled` en toda mesa, la
   ronda nace en `DEALING` y las manos están ocultas hasta que cada jugador manda
@@ -85,10 +142,11 @@ Esperá encontrarlo otra vez. Dos formas concretas que ya se repitieron:
 - **Un TODO diferido a una tarea que no existe es un defecto, no una nota.** El endpoint del
   historial nacía con el comentario "detrás de la API key interna cuando exista": nadie iba a
   cobrar ese TODO. Si el plan difiere una decisión de seguridad, resolvela en la tarea.
-- **El plan describe las APIs de terceros de memoria.** En la Tarea 22, tres afirmaciones seguidas
-  sobre `@colyseus/sdk` 0.18 eran falsas (`leave(false)` esperable, `onReconnect` disparando con los
-  defaults, `room.hasJoined`). El `node_modules` es la fuente: `build/*.d.ts` para las firmas y
-  `build/*.mjs` para el comportamiento. Leelo ANTES de escribir el test, no cuando falle.
+- **El plan describe las APIs de terceros de memoria.** En la Tarea 22, cuatro afirmaciones seguidas
+  sobre `@colyseus/sdk` 0.18 eran falsas (`await leave(false)` resoluble, `onReconnect` disparando con
+  los defaults, `FAILED_TO_RECONNECT` llegando por cerrar el socket, y `room.hasJoined`). El
+  `node_modules` es la fuente: `build/*.d.ts` para las firmas y `build/*.mjs` para el comportamiento.
+  Leelo ANTES de escribir el test, no cuando falle.
 - **Si tocás `GlobalDominoConfig`, regenerá el fixture golden.** `replay()` lo recibe entero, así
   que un campo nuevo deja `golden-2p.json` sin compilar — y vitest sigue verde.
   `WRITE_GOLDEN=1 npx vitest run src/features/match/tests/game-2p-e2e.test.ts`.
