@@ -37,7 +37,7 @@ elige no persistir, y la que usa la suite. **La presencia de `MONGO_URI` elige**
 `HISTORY_DRIVER` ni nada que lo parezca (`src/di-container.test.ts` se pone rojo si
 aparece). `vitest.setup.ts` **borra** `MONGO_URI`: la suite no depende de ningún servicio
 externo, y eso tiene que ser una propiedad del repo y no del shell de quien lo corre.
-**Baseline actual: 276 tests / 42 archivos.**
+**Baseline actual: 277 tests / 43 archivos.**
 
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva

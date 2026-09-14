@@ -37,6 +37,19 @@ const rooms = { domino: defineRoom(DominoRoom) };
 // el `req` crudo; solo delega en `expressApp.handle()` cuando NO lo es. Verificado además
 // contra el servidor levantado: el mismo `POST /matchmake/*` responde idéntico con y sin
 // estas líneas, y los e2e —que se reconectan por `joinById`, o sea por HTTP— siguen verdes.
+//
+// Y LA RAÍZ `/` TAMBIÉN ES DE ACÁ el día que alguien la registre, aunque Colyseus tenga un
+// banner propio en esa misma ruta. Medido, no deducido: `Server.listen()` hace
+// `await this._bootForListen()` —el que llama a esta función (`Server.mjs:257`)— ANTES de
+// `bindRoutes()` (`Server.mjs:68` y `:93`), así que cuando `bindRouterToTransport` pregunta
+// si ya hay una raíz (`router/index.mjs:21-28`) las rutas de acá YA están en el stack de
+// Express y el `Colyseus x.y.z` no llega a registrarse. Sin endpoint `/` en su router, el
+// `findRoute` del listener antepuesto no matchea y la request cae en `expressApp.handle()`
+// (`router/index.mjs:39` y `:45`).
+//
+// Ese chequeo vive en una dependencia y un bump de versión puede invertir el orden sin
+// avisar, dejando una raíz nuestra ignorada sin un solo error. Lo pinea
+// `src/http-root-route.test.ts`, que levanta el servidor con un `GET /` puesto y lo pide.
 const registerHttp = (app: Application) => {
   const logger = rootContainer.resolve<Logger>("Logger");
   app.use(express.json());

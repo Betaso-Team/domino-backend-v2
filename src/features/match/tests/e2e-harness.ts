@@ -31,7 +31,8 @@ export function casualTable(seats: string[], seed = "seed-e2e"): DominoRoomOptio
 }
 
 // Puertos E2E reservados: lifecycle 2585, game-2p 2586, visibility 2587,
-// concurrency 2588, reconnection 2589. Deal-window usará 2590 en la Tarea 23.
+// concurrency 2588, reconnection 2589, deal-window 2590. Fuera de esta carpeta,
+// `src/http-root-route.test.ts` levanta su propio servidor en el 2591.
 export async function bootServer(port: number): Promise<ColyseusTestServer> {
   return boot(testConfig, port);
 }
