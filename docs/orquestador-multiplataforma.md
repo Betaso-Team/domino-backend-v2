@@ -43,6 +43,85 @@ Cada plataforma es responsable de:
 - ejecutar cobros, recompensas y reembolsos;
 - aceptar una clave de idempotencia o permitir consultar una transacción anterior.
 
+## Cómo funciona hoy Betaso con Domino v1
+
+Se revisó el flujo real de `Betaso-Backend` y `Betaso-Domino-Backend`. La integración actual está
+partida en dos caminos porque tienen necesidades distintas:
+
+| Operación                  | Transporte actual  | Contrato actual                                     | Motivo                                                                       |
+| -------------------------- | ------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Cobro de entrada (`CUT`)   | HTTP síncrono      | `POST /wallet-movements/betaso-game-movement`       | La partida necesita saber inmediatamente si hay saldo suficiente.            |
+| Premio o reembolso (`ADD`) | RabbitMQ asíncrono | cola `transactions_queue`, patrón `domino.movement` | El resultado puede entregarse y reintentarse después de terminar la partida. |
+
+Domino v1 convierte primero las UC a la unidad menor de la moneda y envía a Betaso el importe ya
+convertido. El request HTTP contiene `userId`, `tokenId`, `reason`, `amount`, `bet`, `currency`,
+`transactionType` y `gameMovementType`. Betaso reparte un `CUT` entre las wallets disponibles de esa
+moneda; un `ADD` se acredita en la wallet `REAL`.
+
+Para RabbitMQ, Domino v1 envía un mensaje persistente con el wrapper de NestJS:
+
+```ts
+{
+  pattern: "domino.movement",
+  data: {
+    roomId,
+    userId,
+    amount,
+    transactionType,
+    currency,
+    walletType,
+    gameType,
+    gameMovementType,
+    reason,
+    username,
+    profilePicture,
+    bet
+  },
+  id
+}
+```
+
+Betaso consume `domino.movement`, selecciona el servicio por `gameType`, crea el movimiento y hace
+`ack`. Si falla, hace `nack(requeue: false)`; por tanto, la recuperación depende de que la topología
+del broker tenga un dead-letter exchange, algo que ese handler no garantiza por sí solo.
+
+La deduplicación actual de Domino en Betaso calcula un SHA-256 con:
+
+```text
+gameMovementType | roomId | userId | transactionType | reason | walletType
+```
+
+Eso evita repetir el mismo movimiento semántico, pero `amount` y `currency` no forman parte de la
+huella. Un reintento conflictivo con la misma identidad y distinto importe podría devolver el
+movimiento anterior sin denunciar el conflicto. El orquestador debe conservar y comparar además la
+huella canónica completa de la operación.
+
+### Defectos actuales que no deben copiarse
+
+- el endpoint HTTP de movimiento no declara un guard en la propia ruta;
+- su DTO no recibe una clave de idempotencia proporcionada por el llamador;
+- el publisher de Domino v1 no espera confirmación de RabbitMQ;
+- el consumidor descarta el mensaje fallido de la cola activa con `requeue: false`;
+- la interfaz Rabbit de Betaso está tipada para `ADD`, no como un contrato monetario bidireccional;
+- una API key estática o una allowlist de IP no autentican cada request ni impiden replay.
+
+Estos puntos describen el código actual; no cambian el comportamiento que el adaptador inicial de
+Betaso deba conservar.
+
+Archivos usados para verificar este flujo:
+
+```text
+Betaso-Backend/src/modules/wallets/controllers/wallet-movements.controller.ts
+Betaso-Backend/src/modules/wallets/dto/create-betaso-movement.dto.ts
+Betaso-Backend/src/modules/queues-manager/controllers/queues-manager.controller.ts
+Betaso-Backend/src/modules/queues-manager/services/queues-manager.service.ts
+Betaso-Backend/src/modules/wallets/service/game-movement-services/domino-game-movement/domino-game-movement.service.ts
+Betaso-Backend/src/modules/wallets/service/wallet-movement.service.ts
+Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts
+Betaso-Domino-Backend/src/rooms/domino-two-room.ts
+Betaso-Domino-Backend/src/rooms/domino-four-room.ts
+```
+
 ## Identidad común
 
 La identidad global es la pareja:
@@ -137,7 +216,9 @@ interface PlatformAdapter {
   charge(operation: MoneyOperation): Promise<PlatformTransaction>;
   refund(operation: MoneyOperation): Promise<PlatformTransaction>;
   reward(operation: MoneyOperation): Promise<PlatformTransaction>;
-  transactionOf(idempotencyKey: string): Promise<PlatformTransaction | undefined>;
+  transactionOf(
+    idempotencyKey: string,
+  ): Promise<PlatformTransaction | undefined>;
 }
 
 interface PlatformProfile {
@@ -158,6 +239,99 @@ interface PlatformConfig {
   enabled: boolean;
 }
 ```
+
+### Adaptador inicial de Betaso
+
+El orquestador debe esconder el contrato legado detrás de `PlatformAdapter`; ningún juego nuevo debe
+conocer `betaso-game-movement`, `transactions_queue` ni `domino.movement`.
+
+La migración mínima es:
+
+1. `charge` llama al HTTP actual porque necesita una respuesta definitiva antes de crear la mesa;
+2. `reward` y `refund` pueden publicar temporalmente el movimiento Rabbit actual, pero permanecen
+   `PENDING` porque esa cola no devuelve el resultado contable;
+3. el orquestador guarda antes su propia operación e `idempotencyKey`;
+4. si un timeout deja resultado ambiguo, pasa a `RECONCILIATION_REQUIRED` y no reenvía a ciegas;
+5. el adaptador compara `amount`, `currency`, usuario y tipo contra la operación original antes de
+   aceptar una deduplicación de Betaso.
+
+El destino estable debería ser una API interna de movimientos de Betaso que acepte la misma
+`idempotencyKey` del orquestador y permita consultarla:
+
+```text
+POST /internal/orchestrator/money-movements
+GET  /internal/orchestrator/money-movements/:idempotencyKey
+```
+
+No hace falta cambiar de una vez la contabilidad interna de Betaso. Ese endpoint puede traducir al
+servicio actual, pero debe responder uno de estos resultados explícitos:
+
+```text
+APPLIED | ALREADY_APPLIED | REJECTED | PENDING | CONFLICT
+```
+
+`CONFLICT` significa que la clave ya existe con otro usuario, moneda, importe o tipo. Esto cierra el
+hueco que tiene hoy el hash legado.
+
+## Seguridad plataforma-orquestador sin JWT
+
+La recomendación es **HTTPS + HTTP Message Signatures con HMAC-SHA256**, una credencial diferente por
+plataforma. Los secretos viven únicamente en el backend de cada plataforma y en el orquestador;
+nunca en el navegador ni en la aplicación móvil.
+
+Cada request incluye, siguiendo RFC 9421 y RFC 9530:
+
+```http
+Content-Digest: sha-256=:BASE64_SHA256_DEL_BODY:
+Idempotency-Key: 7b718f8f-...
+Signature-Input: sig1=("@method" "@authority" "@target-uri" "content-digest" "idempotency-key");created=1789502400;expires=1789502700;nonce="uuid";keyid="partner-x/key-2026-09";alg="hmac-sha256"
+Signature: sig1=:BASE64_HMAC:
+```
+
+`keyid` identifica a la plataforma y la llave; por eso el orquestador no confía en un `platformId`
+libre del body. La firma cubre método, host, URI completa, digest del body e idempotencia: no puede
+reutilizarse para otro endpoint, payload u operación.
+
+Validación obligatoria del orquestador:
+
+1. exigir TLS y rechazar HTTP;
+2. buscar la credencial por `keyid` y derivar de ella el `platformId` y los permisos;
+3. recalcular `Content-Digest` sobre los bytes recibidos;
+4. verificar el HMAC en tiempo constante;
+5. exigir `created` y `expires`, con una ventana máxima de cinco minutos;
+6. registrar `keyid + nonce` con unicidad hasta que expire para impedir replay;
+7. aplicar idempotencia de negocio por separado: el nonce protege el request, la
+   `Idempotency-Key` protege el movimiento monetario;
+8. limitar rutas, juegos, monedas y tasa de requests por plataforma;
+9. permitir dos llaves activas por plataforma para rotarlas sin corte y revocarlas por `keyid`.
+
+No se recomienda una API key sola: si se filtra, permite fabricar requests y repetirlos. Tampoco se
+recomienda usar IP como identidad; puede mantenerse únicamente como una defensa adicional.
+
+Para plataformas de alto riesgo puede añadirse **mTLS** como segundo factor de máquina. El
+certificado identifica la conexión y el HMAC sigue protegiendo el request exacto incluso detrás de
+proxies que terminan TLS. No es requisito para la primera integración porque su operación y rotación
+son más costosas que una llave HMAC.
+
+### Inicio de juego desde navegador o app
+
+El secreto HMAC nunca se instala en un cliente. El flujo público es:
+
+1. la plataforma autentica al usuario por su mecanismo habitual;
+2. su backend firma `POST /launches` al orquestador con `userUuid`, juego y modo;
+3. el orquestador devuelve un código opaco aleatorio, de un solo uso y con vida máxima de 60 s;
+4. la plataforma abre el juego pasando únicamente ese código;
+5. el cliente canjea el código y el orquestador lo invalida atómicamente.
+
+El código no contiene identidad ni dinero y no es un JWT. Puede generarse con 32 bytes aleatorios y
+guardarse sólo como hash. El `platformId` y `userUuid` salen del registro server-side creado por el
+request HMAC, no de parámetros confiados al navegador.
+
+Referencias normativas:
+
+- [RFC 9421 — HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421.html)
+- [RFC 9530 — Digest Fields](https://www.rfc-editor.org/rfc/rfc9530.html)
+- [RFC 8446 — TLS 1.3](https://www.rfc-editor.org/rfc/rfc8446.html)
 
 ## Adaptador de juego
 
@@ -281,6 +455,10 @@ Domino actualmente valida JWT `HS256` y requiere:
 El orquestador emite un token corto por jugador y devuelve al cliente `roomId`, dirección del juego y
 token. El secreto de firma sólo se comparte entre el orquestador y Domino.
 
+Este JWT es el ticket interno que Domino ya sabe validar; no autentica a una plataforma ante el
+orquestador. La comunicación B2B usa la firma HMAC anterior. Cambiar también el ticket interno por
+uno opaco requeriría agregar introspección a Domino y no aporta nada a la primera integración.
+
 ## Instrucción económica emitida por un juego
 
 Contrato común recomendado:
@@ -346,9 +524,9 @@ interface MoneyOperation {
   userUuid: string;
   currency: string;
   rateId: string;
-  amountUc: number;       // entero
+  amountUc: number; // entero
   rate: number;
-  amountMinor: number;    // Math.round(amountUc * rate * 100)
+  amountMinor: number; // Math.round(amountUc * rate * 100)
   idempotencyKey: string;
 }
 ```
@@ -388,6 +566,41 @@ Garantías necesarias:
 
 El exchange `betaso` y los eventos `game_mode.*` de Domino son compatibilidad del catálogo v1. Los
 desenlaces económicos deberían viajar por un contrato cuyo nombre no dependa de Betaso.
+
+### RabbitMQ entre juegos y orquestador
+
+El Rabbit nuevo termina en el orquestador, no en Betaso:
+
+```text
+Domino u otro juego
+  → exchange del orquestador
+  → evento game.settlement.v1
+  → inbox idempotente del orquestador
+  → PlatformAdapter correspondiente
+  → Betaso u otra plataforma
+```
+
+Cada juego usa su propio usuario Rabbit, TLS y permisos limitados a su routing key. El publisher usa
+confirm channel; mensajes y colas son durables; el juego marca su outbox como enviado sólo después
+del confirm. El consumidor confirma únicamente después de persistir el evento en su inbox. Un fallo
+va a retry/dead-letter con alerta, nunca a descarte silencioso.
+
+Envelope común recomendado:
+
+```ts
+interface GameEvent<T> {
+  eventId: string;
+  version: 1;
+  gameId: string;
+  type: "game.settlement";
+  occurredAt: string;
+  data: T;
+}
+```
+
+La unicidad `(gameId, eventId)` hace inocua la entrega al menos una vez. El wrapper
+`{ pattern, data, id }` de NestJS puede aceptarse durante la transición, pero no debe ser el contrato
+común de todos los juegos.
 
 ## Administración de modos
 
@@ -458,3 +671,7 @@ El `settlementOf` actual ya proyecta `REWARD` y `REFUND`, pero nadie lo entrega 
 8. Rabbit caído no pierde una recompensa o reembolso.
 9. Cambiar la tasa o moneda después del cobro no altera la partida.
 10. Un cliente no puede ocupar un asiento reservado a otra pareja `{platformId, userUuid}`.
+11. Un request B2B sin firma, vencido o con body alterado se rechaza.
+12. Repetir el mismo `keyid + nonce` se rechaza aunque la firma sea válida.
+13. Repetir una `Idempotency-Key` con el mismo contenido devuelve el resultado anterior.
+14. Repetir una `Idempotency-Key` con distinto usuario, moneda, importe o tipo devuelve `CONFLICT`.
