@@ -324,8 +324,8 @@ Autoridad operativa:
 
 Estado: **Tareas 1, 2, 3, 4, 5, 6, 7, 8 y 9 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
 `348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de la
-revisión, `dd16258`). Baseline **637 tests / 65 archivos**, con `typecheck`, suite, lint, `format` y
-`depcruise` (**202 módulos / 778 dependencias**) en verde.
+revisión, `dd16258`+`075900c`). Baseline **640 tests / 65 archivos**, con `typecheck`, suite, lint,
+`format` y `depcruise` (**202 módulos / 778 dependencias**) en verde.
 Primer paso pendiente: **Tarea 10, resolver el modo de juego al crear una partida**.
 
 Lo que dejó la Tarea 9:
@@ -373,9 +373,12 @@ Lo que dejó la Tarea 9:
   del botón de recuperación no encola nada y contesta éxito igual — y el número de la respuesta no
   lo delata, porque `sync` devuelve los modos recorridos y no los insertados. El test lo mide
   drenando el outbox por `next()`/`sent()`, que es la única ventana que el puerto tiene.
-- **Doce mutaciones verificadas a mano**, cada una roja en el test que dice medirla. Las dos que
+- **Trece mutaciones verificadas a mano**, cada una roja en el test que dice medirla. Las dos que
   corrigieron un test decorativo: el `batchId` fijo pasaba verde contra una aserción sobre `synced`
   (ver arriba), y el orden de rutas no lo puede medir ningún request.
+- **El defecto que encontró la autorrevisión y no la suite** (`075900c`): el `/sync` era la única de
+  las cinco mutaciones sin traducción de errores, así que el catálogo ocupado salía 500. El test del
+  503 sólo ejercitaba dos rutas; ahora ejercita las cinco.
 
 Lo que dejó la Tarea 8:
 
