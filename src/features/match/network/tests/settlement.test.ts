@@ -205,6 +205,28 @@ describe("settlementOf", () => {
     ).toThrow(/no son de la misma mesa/);
   });
 
+  // EL MISMO FALLO PERO ENTRE DOS MESAS DEL MISMO TAMAÑO, que es el caso realista: dos 2P
+  // tienen los mismos `seat-1`/`seat-2`, así que la forma coincide y solo la identidad
+  // congelada de cada asiento las distingue. Sin comparar la pareja, esto pagaba los 250 a
+  // alguien de la otra mesa con una instrucción impecable.
+  it("rechaza otro estado del mismo tamaño y nombra la identidad que no coincide", () => {
+    const otherTable = configOf({
+      ...options,
+      matchId: "money-2",
+      participants: [
+        { platformId: "betaso", userUuid: "ada", displayName: "Ada", currency: "VES" },
+        { platformId: "partner", userUuid: "rex", displayName: "Rex", currency: "USD" },
+      ],
+    });
+    expect(() =>
+      settlementOf(
+        { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
+        createMatchState(otherTable),
+        config,
+      ),
+    ).toThrow(/seat-1 es \["betaso","ada"\] en el estado y \["betaso","same"\] en el snapshot/);
+  });
+
   // La mesa GRATIS emite igual, con sus entradas en cero: es la decisión escrita en
   // `settlement.ts`, y sin test alguien la "optimiza" y deja a una liquidación sin rastro.
   it("emite el reembolso de una mesa gratis con las entradas en cero", () => {

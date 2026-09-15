@@ -71,28 +71,37 @@ const entryOf = (
  * internamente coherente, con el `matchId` y el `rateId` correctos, que le paga el premio a
  * otra persona. El fallo más caro de este archivo es el que no hace ruido.
  *
- * ⚠ LO QUE ESTA GUARDA NO PUEDE VER: dos mesas del MISMO TAMAÑO son indistinguibles, porque
- * `MatchState` no lleva `matchId` y no hay un solo campo con el que cruzarlas. Cubre el
- * desajuste de FORMA (2P contra 4P, un estado a medio construir), que es todo lo que el
- * árbol permite hoy. El día que el estado lleve la mesa de la que es, esta función se
- * vuelve exacta con una línea; hasta entonces, nombrar lo que cubre importa más que
- * aparentar que cubre todo.
+ * POR ESO NO ALCANZA CON COMPARAR LA FORMA. Dos mesas 2P tienen los mismos `seat-N`, así
+ * que el largo y la pertenencia coinciden y el cruce pasaría. Lo que las distingue es la
+ * IDENTIDAD que cada asiento lleva: `PlayerState` guarda la pareja congelada
+ * (`core/state/player.ts`), escrita una sola vez desde el asiento en `genesis.ts` y sin
+ * ninguna otra ruta de escritura en el repo. Comparar la pareja asiento por asiento vuelve
+ * la guarda exacta hoy, sin tocar el schema y sin costo de wire: esos campos son `noSync()`
+ * y no salen al cliente.
  */
 const assertSameTable = (match: MatchState, config: DominoMatchConfig): void => {
-  const seated = new Set(config.seats.map(({ playerId }) => playerId));
-  const strangers = match.players
-    .map(({ playerId }) => playerId)
-    .filter((playerId) => !seated.has(playerId));
-  if (strangers.length === 0 && match.players.length === seated.size) return;
-
+  const seatsById = new Map(config.seats.map((seat) => [seat.playerId, seat]));
   // Nombra el DESAJUSTE y no el conteo de ganadores: «recibió 0 ganadores» manda a soporte
   // a investigar el veredicto de una partida que se jugó bien, cuando lo que está mal es
   // quién llamó con qué.
-  const shape = `${match.players.length} jugadores contra ${seated.size} asientos`;
-  const detail = strangers.length > 0 ? ` y ${JSON.stringify(strangers)} sin asiento` : "";
-  throw new InvariantViolationError(
-    `el estado y el snapshot no son de la misma mesa ${config.matchId}: ${shape}${detail}`,
-  );
+  const reject = (detail: string): never => {
+    throw new InvariantViolationError(
+      `el estado y el snapshot no son de la misma mesa ${config.matchId}: ${detail}`,
+    );
+  };
+
+  if (match.players.length !== config.seats.length) {
+    reject(`${match.players.length} jugadores contra ${config.seats.length} asientos`);
+  }
+  for (const player of match.players) {
+    const seat = seatsById.get(player.playerId);
+    if (!seat) reject(`${player.playerId} no tiene asiento`);
+    else if (seat.platformId !== player.platformId || seat.userUuid !== player.userUuid) {
+      reject(
+        `${player.playerId} es ${JSON.stringify([player.platformId, player.userUuid])} en el estado y ${JSON.stringify([seat.platformId, seat.userUuid])} en el snapshot`,
+      );
+    }
+  }
 };
 
 function rewardOf(
@@ -172,9 +181,16 @@ export function settlementOf(
     case "PLAYER_DISCONNECTED":
     case "PLAYER_RECONNECTED":
       return undefined;
+    // El `never` chequea en COMPILACIÓN; el `throw` chequea en EJECUCIÓN, y hacen falta los
+    // dos. `return unhandled` devolvería el evento mismo tipado como instrucción: un objeto
+    // sin `entries`, sin `kind` y sin `matchId` llegándole al que paga. La unión es una
+    // promesa del tipo, no del dato — los eventos que la Task 3 arma vienen del historial en
+    // Mongo—, así que acá se rechaza en vez de dejar pasar algo con forma de pago.
     default: {
       const unhandled: never = event;
-      return unhandled;
+      throw new InvariantViolationError(
+        `evento de plataforma desconocido: ${JSON.stringify(unhandled)}`,
+      );
     }
   }
 }

@@ -171,7 +171,7 @@ Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
 Estado: **Tareas 1 y 2 completas y revisadas** (`b930b75`…`ce8a895` la 1; `d3617cb`, `8239ca1`,
-`0339dca`, `a55fa53` la 2); baseline **356 tests / 50 archivos**; siguiente: **Task 3, Step 1**
+`0339dca`, `a55fa53`, `bfd4ac0` la 2); baseline **357 tests / 50 archivos**; siguiente: **Task 3, Step 1**
 —el cliente smoke, que consume `settlementOf`—. **Acá se paró el incremento**: de la Task 3 en
 adelante no se ejecutó nada, y las dos correcciones que la revisión ya le encontró al plan de esa
 tarea están aplicadas al texto del plan y anotadas en la tabla de defectos.
@@ -228,10 +228,13 @@ Lo que dejó la Tarea 2:
   archivo.** Como los `playerId` son posicionales, `seat-1` existe en todas las mesas: cruzar el
   estado de una con el snapshot de otra **no** da cero ganadores ni dos —que harían ruido—, da
   exactamente UNO, y emite una instrucción impecable que le paga a alguien que no jugó esa
-  partida. Compara forma (largo y pertenencia) y **nombra el desajuste, no el conteo de
-  ganadores**. Lo que NO puede ver, y está escrito: dos mesas del mismo tamaño son
-  indistinguibles, porque `MatchState` no lleva `matchId`. El día que lo lleve, la función se
-  vuelve exacta con una línea.
+  partida. **Compara la PAREJA asiento por asiento y no la forma**, y ahí está el hallazgo: dos
+  mesas 2P tienen los mismos `seat-N`, así que largo y pertenencia coinciden y una guarda de forma
+  las deja pasar. Lo que las distingue es la identidad congelada que `PlayerState` ya lleva desde
+  la Tarea 1 —escrita una sola vez en `genesis.ts`, `noSync()`, sin costo de wire—, así que la
+  guarda es **exacta hoy y no necesita que el estado lleve `matchId`**. El error **nombra el
+  desajuste, no el conteo de ganadores**: «recibió 0 ganadores» manda a soporte a auditar un
+  veredicto sano.
 - **El `switch` es exhaustivo con `never` en el default, y eso es el gate.** Un evento de
   plataforma nuevo que también devuelva plata —una cancelación, una expulsión por fraude—
   compilaría contra un `if`, devolvería `undefined`, y nadie cobraría sin una línea roja.
