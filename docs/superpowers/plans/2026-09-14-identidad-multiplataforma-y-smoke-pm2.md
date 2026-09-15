@@ -1033,8 +1033,26 @@ describe("settlementOf", () => {
       settlementOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
     ).toThrow(/exactamente un ganador/);
   });
+
+  // LA OTRA MITAD DE LA GUARDA, y es la que puede pasar de verdad: `configOf` acepta cuatro
+  // participantes, así que una mesa con dos ganadores del mismo equipo es alcanzable hoy.
+  // Sin esta aserción el guard podía ser `=== 0` y la suite seguía verde — pagando el premio
+  // ENTERO a cada uno de los dos, o sea el doble de lo que la mesa cobró.
+  it("rechaza varios ganadores en vez de pagarle el premio entero a cada uno", () => {
+    const match = matchOf();
+    for (const player of match.players) player.teamId = "A";
+    expect(() =>
+      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
+    ).toThrow(/exactamente un ganador, recibió 2/);
+  });
 });
 ```
+
+⚠ **El tercer `it` del plan original decía "rechaza un ganador imposible" y solo medía CERO
+ganadores**: con el guard cambiado a `winners.length === 0` los tres tests seguían verdes, y el
+caso que la guarda existe para cubrir —varios ganadores, o sea el 4P que `configOf` ya acepta—
+pagaba el premio entero a cada uno. El cuarto `it` es el que mide esa rama; se descubrió mutando
+el guard a mano y viendo que la suite no se inmutaba.
 
 - [x] **Step 2: Ejecutar el rojo**
 

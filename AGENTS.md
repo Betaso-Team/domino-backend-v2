@@ -170,7 +170,7 @@ Autoridad operativa:
 Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
-Estado: **Tarea 2 completa**; baseline **349 tests / 50 archivos**; siguiente:
+Estado: **Tarea 2 completa**; baseline **350 tests / 50 archivos**; siguiente:
 **Task 3, Step 1**.
 La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
 queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
@@ -296,6 +296,7 @@ Y del plan del incremento activo (`2026-09-14-identidad-multiplataforma-y-smoke-
 | 1 | Seis defectos: la lista `Files:` se olvidaba de `round/tests/round-fixture.ts` y `round/tests/block.test.ts` —que también arman un `DominoMatchConfig` a mano—, `InvalidTokenError` perdía su `reason` en silencio, el snippet de visibilidad leía `Room.state` (tipado `object`) sin el cast, los dos `it.each` no compilaban sin tupla explícita, y `lifecycle-e2e` quedaba con tres `mintToken("<uuid>")` y dos aserciones de ids globales que el plan no nombraba | `b930b75` + el `docs:` siguiente |
 | 1 | El séptimo, de la revisión: el snippet del Step 6 leía `payload.platformId` sin estrechar `string \| jwt.JwtPayload` (TS2339) y lanzaba `new InvalidTokenError()` sin argumento contra la firma que ese mismo Step dice conservar (TS2554) | el `fix:` de la revisión |
 | 1 | Y el octavo, encontrado al escribir el test que pinea el cableado: desde que `configOf` valida, `onCreate` puede lanzar ANTES de que `this.log` exista, así que `crash()` moría con «Cannot read properties of undefined (reading 'error')» en vez de nombrar el campo inválido — y después lanzaba otra vez adentro del manejador, porque Colyseus rechaza `disconnect()` durante `onCreate` | el `fix:` de la revisión |
+| 2 | Uno solo, y del lado del TEST: el `it` «rechaza un ganador imposible» solo armaba el caso de CERO ganadores, así que con el guard mutado a `winners.length === 0` los tres tests seguían verdes mientras el 4P —que `configOf` ya acepta— pagaba el premio entero a cada ganador. Se descubrió mutando el guard a mano; el cuarto `it` es el que mide esa rama | `8239ca1` + el `docs:` siguiente |
 
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 
