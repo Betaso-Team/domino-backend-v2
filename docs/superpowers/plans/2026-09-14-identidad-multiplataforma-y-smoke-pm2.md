@@ -1604,6 +1604,8 @@ git commit -m "test(smoke): juega el protocolo público hasta el veredicto" -m "
 - Create: `scripts/run-engine-smoke.mjs`
 - Modify: `Dockerfile`
 - Modify: `package.json`
+- Modify: `src/features/match/core/engine/round/player.ts`
+- Modify: `src/features/match/core/engine/round/tests/player.test.ts`
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`
 
@@ -1827,7 +1829,23 @@ npm run test:deploy
 
 Expected: tests, lint y build código 0; el último comando código distinto de cero con `test:deploy requiere RUN_ENGINE_SMOKE=1` y sin crear contenedores.
 
-- [ ] **Step 8: Ejecutar el smoke real**
+- [ ] **Step 8: Medir y cerrar la visibilidad de una ficha robada**
+
+El primer smoke real encontró un agujero anterior: hacer visible `hand.tiles` no vuelve visible
+automáticamente una referencia `Tile` añadida después. Escribir primero un test en
+`round/tests/player.test.ts` que espere `makePublic(drawn, { kind: "PLAYER", playerId })`, correrlo
+y verlo fallar. Después, en `RoundPlayer.drawTile`, publicar al dueño la ficha recién movida:
+
+```ts
+this.visibility.makePublic(tile, { kind: "PLAYER", playerId: this.playerId });
+```
+
+Run: `npx vitest run src/features/match/core/engine/round/tests/player.test.ts`
+
+Expected: rojo antes de la línea y verde después. El smoke Docker de abajo es la prueba de que el
+adaptador `StateView` cumple esa llamada en el wire real.
+
+- [ ] **Step 9: Ejecutar el smoke real**
 
 PowerShell:
 
@@ -1841,12 +1859,12 @@ válidos, `smoke-client` sale 0 y Compose elimina contenedores/red/volúmenes.
 
 Si falla por una API real de PM2, Nginx o Colyseus distinta de la asumida, corregir primero el plan en un commit `docs:` separado, explicando el comportamiento medido, y recién después ajustar código/config.
 
-- [ ] **Step 9: Registrar continuidad y commit**
+- [ ] **Step 10: Registrar continuidad y commit**
 
 Actualizar `AGENTS.md` con salida real del smoke, versión de Docker/PM2 observada, baseline y `siguiente: Task 5, Step 1`; marcar Task 4 completa.
 
 ```bash
-git add Dockerfile compose.smoke.yaml smoke/nginx.conf scripts/run-engine-smoke.mjs package.json src/deploy-smoke.test.ts AGENTS.md docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md
+git add Dockerfile compose.smoke.yaml smoke/nginx.conf scripts/run-engine-smoke.mjs package.json src/deploy-smoke.test.ts src/features/match/core/engine/round/player.ts src/features/match/core/engine/round/tests/player.test.ts AGENTS.md docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md
 git commit -m "test(deploy): certifica PM2 y Nginx con una partida real" -m "Ejecuta el bundle que se despliega en dos procesos y sigue los publicAddress por el proxy. Los E2E embebidos no podían detectar un puerto anunciado al proceso equivocado ni un Dockerfile que arrancara otro archivo.\n\nCo-Authored-By: GPT-5 <noreply@anthropic.com>"
 ```
 
