@@ -322,12 +322,60 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3, 4, 5, 6, 7 y 8 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
+Estado: **Tareas 1, 2, 3, 4, 5, 6, 7, 8 y 9 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
 `348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de la
-revisión). Baseline **546 tests / 63 archivos**, con `typecheck`, suite, lint, `format` y `depcruise`
-(**198 módulos / 751 dependencias**) en verde.
-Primer paso pendiente: **Tarea 9, escribir el rojo del contrato HTTP en
-`src/features/game-mode/transports/http/`**.
+revisión, `dd16258`). Baseline **637 tests / 65 archivos**, con `typecheck`, suite, lint, `format` y
+`depcruise` (**202 módulos / 778 dependencias**) en verde.
+Primer paso pendiente: **Tarea 10, resolver el modo de juego al crear una partida**.
+
+Lo que dejó la Tarea 9:
+
+- **LAS SIETE RUTAS DE v1, Y LO QUE CAMBIA ES QUIÉN AUTORIZA.** Allá cada mutación llevaba
+  `isAuthenticated()` + `isAuthorized('admin')`; acá el panel no autentica administradores contra
+  domino, así que el orquestador valida al admin y llama con `X-Internal-Key`
+  (`shared/http/internal-key.ts`, la comparación constante que ya existía). **Sin llave configurada
+  las cinco mutaciones NO SE REGISTRAN** —`reactive/:uuid` cuenta como mutación aunque conserve el
+  verbo GET—, y el `warn` de arranque nombra los cinco paths apagados: el que llega a ese log llega
+  desde un 404 inexplicable y busca por path.
+- ⚠ **EL ORDEN DE LAS RUTAS NO ES LOAD-BEARING CON ESTOS PATHS, y el plan decía que sí.** Medido
+  contra la express 5.2 instalada: `/game-modes/:uuid` matchea UN segmento, así que no puede tapar a
+  `/game-modes/reactive/x`, y no existe ningún `POST /game-modes/:uuid` que pueda tapar a
+  `POST /game-modes/sync`. Invertirlos deja verde cualquier test de comportamiento. El orden se
+  conserva igual —es el de v1 y es lo único que protege a `reactive` el día que aparezca un
+  `GET /game-modes/:a/:b`— pero **lo pinea una aserción sobre la lista de registros en orden**, con
+  un doble de `Application` que sólo anota método y path.
+- ⚠ **EL CUERPO DE EDICIÓN NO PUEDE SER `CREATE_BODY.partial()`, y es el defecto más caro de la
+  tarea.** Medido sobre la zod 4 instalada: `.partial()` deja los defaults VIVOS, así que un `PUT`
+  que sólo cambia el premio le reescribe al modo el multiplicador, los puntos y la sala gratis con
+  los valores de fábrica. Edición destructiva silenciosa sobre un catálogo con dinero configurado.
+  Los campos se declaran una vez sin envolver y cada cuerpo los envuelve.
+- **EL TECHO DE MAGNITUD DE LOS MONTOS SE REPITE ACÁ** (`.max(Number.MAX_SAFE_INTEGER)`), porque
+  `configOf` no es la única frontera por la que entra plata: el catálogo la CONFIGURA. Sin el techo,
+  `2 ** 53` es una inscripción válida y dos precios distintos son el mismo número. Sigue sin
+  escribirse `.safe()`, que implica entero y rechazaría el `1.5`.
+- **`enableBots` VIAJA, Y `enableBots` NO LLEVA DEFAULT EN LA FRONTERA.** Lo primero es el bug de v1
+  que no se porta —se perdía en la desestructuración de las rutas (`routes.ts:92-93`), así que el
+  panel no podía encenderlo en una mesa de dos ni apagarlo en una de cuatro—; lo segundo es que su
+  default depende de `playersQuantity` y lo completa el repositorio, así que uno fijo acá dejaría
+  toda mesa de cuatro con los bots apagados sin que nadie escribiera ese valor.
+- **DOS RESPUESTAS MEJORAN A PROPÓSITO, y no se declara compatibilidad que no hay.** Un cuerpo
+  inválido es **400** y no el 500 de v1 —sus rutas nunca llaman al `.parse()` de su propio DTO, así
+  que lo único que validaba era Mongoose, después de la consulta de duplicados—; repetir una baja es
+  **409** y no 500, que es para lo que la Tarea 8 agregó el cuarto error. **El 400 sale con
+  `{code:"MALFORMED",detail}`** y no con el envelope histórico, porque lo emite `shared/http/
+  validated.ts` y ése es el mismo vocabulario que el del socket; copiar el validador para cambiarle
+  el cuerpo es justo la divergencia que su promoción vino a evitar, y v1 no contesta 400 en ninguna
+  ruta. Los otros tres códigos sí llevan `{status:"error",message}`.
+- **LO DESCONOCIDO SE RELANZA** al manejador compartido en vez de traducirse: convertirlo en 404 le
+  diría al panel que el modo no existe cuando lo que pasa es que la base no contesta, y manda al
+  operador a auditar el modo equivocado.
+- **EL `batchId` DEL `/sync` LO GENERA LA RUTA, uno por request.** Con uno fijo, el segundo apretón
+  del botón de recuperación no encola nada y contesta éxito igual — y el número de la respuesta no
+  lo delata, porque `sync` devuelve los modos recorridos y no los insertados. El test lo mide
+  drenando el outbox por `next()`/`sent()`, que es la única ventana que el puerto tiene.
+- **Doce mutaciones verificadas a mano**, cada una roja en el test que dice medirla. Las dos que
+  corrigieron un test decorativo: el `batchId` fijo pasaba verde contra una aserción sobre `synced`
+  (ver arriba), y el orden de rutas no lo puede medir ningún request.
 
 Lo que dejó la Tarea 8:
 
@@ -696,6 +744,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 9 | Cinco: el snippet del Step 3 escribía los montos `finite().nonnegative()` **sin el techo** que la Tarea 1 acababa de poner en `configOf` (`2 ** 53` volvía a ser una inscripción válida); «el update usa `.partial()` sin aplicar defaults» es **imposible en zod 4** —`.partial()` los deja vivos, medido— y produce un `PUT` parcial que reescribe con valores de fábrica lo que no viajó; `.transform(Number)` devuelve `number` y no `2 \| 4`, así que el snippet no compila contra la entidad y el gate es `typecheck`; el Step 4 llama `syncAll()` **sin el `batchId`** que la Tarea 8 exige y sin decir que va uno por request; y el orden de rutas que el Step 1 declara load-bearing **no lo es** con estos paths (medido contra express 5.2: `/:uuid` matchea un solo segmento), así que el test que lo mide tiene que ser el de la lista de registros y no un request | `dd16258` + este `docs:` |
 | 8 | Tres: la Tarea 3 declaró **tres** errores y «repetir delete/reactivate devuelve el error específico» no tiene con qué expresarse —v1 lanza «El modo ya está inactivo»/«ya está activo» (`game-mode.service.ts:148-150`, `:203-205`) y ninguno de los tres sirve: `NotFound` diría 404 sobre un modo que el panel está listando y `Duplicate` comparte el código pero no la causa—, así que la lista `Files:` tampoco tenía dónde poner el cuarto; «con lease en memoria» y «si el lease no se obtiene» son **mutuamente insatisfacibles** (`MemoryLease` es pasa-manos y nunca devuelve `undefined`), el mismo defecto que ya se había pagado en la Tarea 7; y el Step 3 da por hecho que `lease.within` serializa las mutaciones cuando **excluye procesos y no llamadas**, o sea que la regla de unicidad queda sin proteger contra dos `POST` a la misma instancia | `bed7e88` + este `docs:` |
 | 7 | Y el tercero, que lo encontró la revisión y es el más caro del incremento: **la corrección del segundo estuvo mal**. `revisionKeysOf` devolvía las dos claves SIEMPRE, y como la del `created` no lleva revisión y no hay TTL, existe para siempre: el modo daba «cubierto» en la v1, la v5 y la v50, o sea **el reconciliador apagado para todos los modos que crea el panel**. Sobre-corregir un defecto real es su propio defecto. El `created` sólo cuenta en la revisión cero. Ningún test lo vio porque ninguno combinaba un `created` con una revisión posterior: el hueco tenía la forma exacta del bug | `cf8fe11` + este `docs:` |
 | 7 | Dos: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores ni el test del de memoria —el mismo defecto que la Tarea 4, y `MemoryGameModeOutbox` tampoco es un doble—; y el Step 3 declaraba la clave de `ensureUpdated` y la de `sync` pero **no la de `enqueueCreated` ni contra qué compara `reconcile`**. La lectura ingenua («reconcile llama a `ensureUpdated`») le agrega un `updated` espurio a TODA alta del panel en el primer tick posterior, para siempre, y nada falla | `1f03cd7` + este `docs:` |

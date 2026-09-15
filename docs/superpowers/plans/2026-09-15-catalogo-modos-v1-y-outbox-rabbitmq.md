@@ -941,6 +941,26 @@ git commit -m "feat(game-mode): administra el catalogo compatible con v1"
 - Create: `src/features/game-mode/transports/http/register-http.test.ts`
 - Modify: `src/features/game-mode/index.ts`
 
+⚠ **Cinco correcciones (ejecución de la Tarea 9).** Las cuatro primeras están abajo, pegadas al Step
+que las produce. La quinta es del Step 1 y va acá porque no hay snippet que corregir: **el orden de
+las rutas NO es load-bearing con estos paths, y el test que dice medirlo tiene que ser otro.** El
+plan afirma que sin registrar `reactive/:uuid` antes que `/:uuid` Express matchea `reactive` como
+uuid. Medido contra la express 5.2 instalada: es falso. `/game-modes/:uuid` compila a un patrón de
+UN segmento, así que `/game-modes/reactive/x` —que son dos— no le matchea nunca, y `POST
+/game-modes` tampoco puede tapar a `POST /game-modes/sync` porque no existe ningún `POST
+/game-modes/:uuid`. Invertir el orden deja la suite entera verde si lo único que se escribe son
+tests de comportamiento. El orden SE CONSERVA igual —es el del archivo de v1 y es lo único que
+protege a `reactive` el día que aparezca un `GET /game-modes/:a/:b`— pero lo pinea una aserción
+sobre la LISTA DE REGISTROS en orden, con un doble de `Application` que sólo anota método y path.
+
+Y una decisión de contrato que la spec y el repo contestan distinto, resuelta a favor del repo: el
+400 por forma inválida sale con `{ code: "MALFORMED", detail }` y no con el `{ status: "error",
+message }` que declara §6 de la spec, porque lo emite `shared/http/validated.ts` —la costura
+compartida que la Tarea 2 promovió— y su cuerpo es el MISMO vocabulario que el del socket. Copiar el
+validador para cambiarle el envelope es la divergencia que esa promoción vino a evitar, y v1 no
+contesta 400 en ninguna ruta, así que no hay cliente cuya expectativa se rompa. Los otros tres
+códigos (404/409/503) sí llevan el envelope histórico.
+
 - [ ] **Step 1: escribir tests rojos del contrato completo**
 
 Levantar Express en puerto efímero y probar literalmente las siete rutas. Afirmar, como mínimo:
@@ -982,13 +1002,24 @@ Expected: FAIL por rutas inexistentes.
 - [ ] **Step 3: implementar schemas y DTO**
 
 ```ts
+// ⚠ CORREGIDO en tres lugares respecto del snippet original.
+const ucAmount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
 const createBody = z.strictObject({
   name: z.string().min(1),
   multiplier: z.number().finite().min(1).default(1),
-  prize: z.number().finite().nonnegative(),
-  entryFee: z.number().finite().nonnegative(),
+  // 1) EL TECHO DE MAGNITUD. El snippet escribía `.finite().nonnegative()` a secas, que es el
+  // agujero que la Tarea 1 acababa de cerrar en `configOf`: sin `.max(Number.MAX_SAFE_INTEGER)`,
+  // `2 ** 53` es una inscripción válida y de ahí para arriba dos importes DISTINTOS son el mismo
+  // `number`. No se escribe `.safe()`: en zod 4 implica ENTERO y rechazaría el `1.5`, que es un UC
+  // y medio y es un monto legítimo desde que la Tarea 1 sacó el sufijo `*UcMinor`.
+  prize: ucAmount,
+  entryFee: ucAmount,
+  // 2) `.transform(Number)` DEVUELVE `number` Y NO `2 | 4`, así que no compila contra
+  // `CreateGameMode`/`UpdateGameMode` — y el gate de este repo es `typecheck`, no el verde de
+  // vitest. El transform decide por valor; un `as 2 | 4` prometería por el schema.
   playersQuantity: z.union([z.literal(2), z.literal(4), z.literal("2"), z.literal("4")])
-    .transform(Number),
+    .transform((value): 2 | 4 => (value === 2 || value === "2" ? 2 : 4)),
   pointsToWin: z.number().finite().max(100).default(25),
   isActive: z.boolean().default(true),
   isFreeRoom: z.boolean().default(false),
@@ -996,8 +1027,22 @@ const createBody = z.strictObject({
 });
 ```
 
-El update usa `.partial()` sobre los mismos campos sin aplicar defaults a campos omitidos. `toDTO`
-mapea `id→_id` y `version→__v`; no devuelve nombres internos.
+⚠ 3) **EL UPDATE NO PUEDE SER `.partial()` DEL CREATE, y las dos mitades de la frase original son
+incompatibles en zod.** Medido sobre la 4 instalada: `.partial()` deja los defaults VIVOS
+—`z.strictObject({ m: z.number().default(1) }).partial().parse({})` devuelve `{ m: 1 }`—, así que un
+`PUT` que sólo cambia el premio le reescribe al modo el multiplicador, los puntos y la sala gratis
+con los valores de fábrica. Sobre un catálogo que configura dinero real es una edición destructiva
+que nadie pidió y que ninguna respuesta de error señala. Los campos se declaran UNA vez sin envolver
+y cada cuerpo los envuelve: el de creación con sus defaults, el de edición con `.optional()`.
+
+`enableBots` es el único que NO lleva default en la frontera, y no es un olvido: el suyo depende de
+otro campo (`playersQuantity === 4`) y lo completa el repositorio, que lo tiene escrito para los dos
+adaptadores. Uno fijo acá deja toda mesa de cuatro con los bots apagados sin que nadie haya escrito
+ese valor.
+
+`toDTO` mapea `id→_id` y `version→__v`; no devuelve nombres internos. Se escribe campo por campo y
+no con un spread del modo: con `{ ...mode, _id: mode.id }` cualquier campo que el core agregue
+mañana sale publicado sin que nadie lo decida.
 
 - [ ] **Step 4: registrar rutas con el envelope histórico**
 
@@ -1020,6 +1065,19 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
 llave y siempre antes de `/:uuid`. El create acepta el campo histórico `isActive`, pero lo ignora y
 fuerza `true`, igual que v1. Los handlers reciben `GameModeService`; no resuelven container ni leen
 env.
+
+⚠ 4) **EL `sync` NECESITA UN `batchId` Y EL SNIPPET NO DICE DE DÓNDE SALE.** La firma que dejó la
+Tarea 8 es `syncAll(batchId: string)`, y la clave de deduplicación del outbox lo lleva
+(`["game_mode.sync", batchId, uuid]`) justamente para que este botón fuerce el evento aunque esa
+revisión ya se haya publicado. Lo genera la RUTA, con `randomUUID()`, UNO POR REQUEST: con un id
+fijo, el segundo apretón del botón de recuperación no encola nada y contesta éxito igual. Y el
+número de la respuesta no alcanza para medirlo —`sync` devuelve los modos recorridos, no los
+insertados—, así que el test lo mide drenando el outbox.
+
+`GameModeHttpDeps` lleva además un `logger`, que el snippet no nombra: sin llave configurada el
+panel recibe 404 en las cinco mutaciones, y el aviso de arranque que NOMBRA los paths apagados es lo
+único que explica ese 404 al que lo va a buscar. Es la misma pieza —y el mismo argumento— que
+`registerInternalHistoryHttp`.
 
 - [ ] **Step 5: verde y commit**
 
