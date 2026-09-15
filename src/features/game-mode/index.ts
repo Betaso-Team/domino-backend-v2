@@ -7,7 +7,7 @@
 // quien los consume adentro es el servicio de la feature (Tarea 8). Exportar `GameModeRepository`
 // hoy sería un tipo que nadie de afuera puede nombrar para nada.
 //
-// Lo que NO sale, y por qué: los tres errores los atrapan la frontera HTTP y el outbox de esta
+// Lo que NO sale, y por qué: los cuatro errores los atrapan la frontera HTTP y el outbox de esta
 // misma feature (Tareas 7 y 9), y el contrato Rabbit (`GAME_MODE_EXCHANGE`, las claves,
 // `createdEventOf`/`updatedEventOf`) lo consume el outbox, que también vive acá adentro.
 // Exportarlos ahora sería una superficie que nadie usa —y una superficie que nadie usa es una que
