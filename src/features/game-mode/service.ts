@@ -83,7 +83,9 @@ export class GameModeService {
       // (`game-mode.service.ts:58`), o sea el PAR y no el nombre solo. Una regla más estricta
       // —nombre a secas— rechazaría modos que el panel crea hoy: el catálogo productivo puede tener
       // «Clásica» de dos y «Clásica» de cuatro, que son mesas distintas con premios distintos.
-      if (await this.taken((mode) => mode.playersQuantity === input.playersQuantity, input.name)) {
+      if (
+        await this.nameTakenBy(input.name, (mode) => mode.playersQuantity === input.playersQuantity)
+      ) {
         throw new DuplicateGameModeError(
           `ya existe un modo "${input.name}" de ${input.playersQuantity} jugadores`,
         );
@@ -113,7 +115,7 @@ export class GameModeService {
       // cambia SÓLO `playersQuantity` no dispara ninguna consulta, así que puede fabricar el par
       // duplicado que `create` prohíbe. Cerrarlo pide decidir primero cuál de las dos reglas vale.
       if (input.name !== undefined && input.name !== current.name) {
-        if (await this.taken((mode) => mode.uuid !== uuid, input.name)) {
+        if (await this.nameTakenBy(input.name, (mode) => mode.uuid !== uuid)) {
           throw new DuplicateGameModeError(`ya existe un modo "${input.name}"`);
         }
       }
@@ -160,7 +162,7 @@ export class GameModeService {
   // —agregárselo obliga a los dos adaptadores y a su contrato— y el catálogo son decenas de modos.
   // ponytail: si algún día fueran miles, lo que cambia es el puerto (un `findOne` indexado del lado
   // de Mongo), no esta función.
-  private async taken(extra: (mode: GameMode) => boolean, name: string): Promise<boolean> {
+  private async nameTakenBy(name: string, extra: (mode: GameMode) => boolean): Promise<boolean> {
     // Sin filtro por `isActive`, igual que las dos consultas de v1: un modo dado de baja sigue
     // ocupando su nombre, porque reactivarlo es una operación de un click y ahí aparecería el par
     // repetido.
