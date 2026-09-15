@@ -21,8 +21,20 @@ import type { Logger } from "../logger.js";
 // Y con una diferencia que NO es una omisión, medida sobre la `amqplib` 2.0.1 instalada: truco, al
 // soltar el canal, vuelve a llamar `connect()`. Con `recovery: true` eso abandona un
 // `RecoveringChannelModel` que sigue reconectándose solo para siempre (`maxRetries: Infinity` por
-// default, `node_modules/amqplib/lib/recovery.js:7`), o sea un zombi por cada caída del broker. Acá
+// default, `node_modules/amqplib/lib/recovery.js:8`), o sea un zombi por cada caída del broker. Acá
 // la conexión y el canal se memoizan por separado: el canal se suelta, la conexión se reusa.
+//
+// ⚠ **CON EL BROKER CAÍDO, `connect()` NO RECHAZA: CUELGA**, y eso lo heredan los llamadores de esta
+// clase. Ese mismo `maxRetries: Infinity` deja muerta la única rama que rechaza la conexión inicial
+// (`_scheduleReconnect` sólo llama `_rejectInitialConnection` cuando se agotaron los reintentos,
+// `lib/recovery.js:290-294`), así que la promesa de `connect()` se queda esperando mientras el
+// modelo reintenta con backoff. **Acá no se acota, y es deliberado**: el plazo tiene que ser del que
+// llama, que es quien sabe cuánto puede esperar. Son dos, y ya existen o están planificados:
+//   - la sonda de LISTO, con su plazo POR CHEQUEO de 2 s (`shared/http/health.ts`). Es la misma
+//     propiedad que AGENTS.md ya tiene escrita para Mongo: «una base caída no falla: CUELGA».
+//   - el dispatcher del outbox (Tarea 7), que publica con un plazo de 5 s y agenda el reintento.
+// O sea: **`ping()` no se rechaza solo**. Quien cablee la Tarea 11 no puede asumir que sí — sin el
+// plazo del lado del endpoint, un Rabbit caído deja `/ready` sin contestar en vez de contestar 503.
 
 // NO SE PUDO ENTREGAR. Es el único error que sale de acá, y es NEUTRO a propósito: quien publica lo
 // traduce al vocabulario de su feature, porque un error que hable de modos de juego no tiene nada
@@ -159,7 +171,12 @@ export class AmqpPublisher implements AmqpDelivery {
       this.channel = channel;
       return channel;
     } catch (error) {
-      throw new AmqpDeliveryError(`no se pudo conectar: ${String(error)}`);
+      // EL MENSAJE CUBRE LAS DOS MITADES del bloque —conectar y abrir el canal—, porque el `catch`
+      // también. Decir "no se pudo conectar" cuando lo que falló fue `createConfirmChannel` manda a
+      // soporte a mirar la red con la conexión sana.
+      throw new AmqpDeliveryError(
+        `no se pudo preparar el canal de confirmaciones: ${String(error)}`,
+      );
     }
   }
 
@@ -167,10 +184,18 @@ export class AmqpPublisher implements AmqpDelivery {
     const connection = await connect(this.url, { recovery: true });
     // UN OYENTE DE `error` SOBRE LA CONEXIÓN, y no es opcional: `RecoveringChannelModel` es un
     // `EventEmitter` y reemite el `error` del modelo de abajo (`lib/recovery.js:221`, `:375`). Node
-    // LANZA cuando un evento `error` no tiene a quién ir, así que sin esta línea un broker que
-    // rechaza las credenciales tumba el servidor entero, con todas sus partidas en curso. No se
-    // suelta la conexión acá: la recuperación de la librería sigue su curso y el canal ya se suelta
-    // solo por su propio `close`.
+    // LANZA cuando un evento `error` no tiene a quién ir, así que sin esta línea ese error tumba el
+    // servidor entero, con todas sus partidas en curso.
+    //
+    // EL CASO ES EL SOCKET QUE SE MUERE DESPUÉS de haberse establecido —el broker que se reinicia, la
+    // red que se corta, un heartbeat vencido—, y conviene tenerlo derecho porque el caso que parece
+    // obvio NO pasa por acá: un rechazo de credenciales ocurre durante el handshake, o sea adentro
+    // del `try` de `_connect()`, y sale por su `catch` como `connect-failed` más un reintento
+    // agendado (`lib/recovery.js:275-279`) sin tocar nunca este `error`. Este `emit` es sólo para un
+    // modelo YA ENLAZADO (`_bindModel`, `:221`).
+    //
+    // No se suelta la conexión acá: la recuperación de la librería sigue su curso y el canal ya se
+    // suelta solo por su propio `close`.
     connection.on("error", (error) => {
       this.log.warn("la conexión con el broker falló", { error: String(error) });
     });

@@ -341,14 +341,24 @@ Lo que dejó la Tarea 6:
   así que un duplicado es el costo correcto.
 - **La conexión se REUSA al soltar el canal, y es lo que este archivo decide distinto que truco.**
   `connect(url, {recovery:true})` devuelve un `RecoveringChannelModel` que se reconecta solo y sin
-  plazo de renuncia (`maxRetries: Infinity`, `node_modules/amqplib/lib/recovery.js:7`), y sus canales
+  plazo de renuncia (`maxRetries: Infinity`, `node_modules/amqplib/lib/recovery.js:8`), y sus canales
   se piden sobre el MODELO. Truco vuelve a llamar `connect()` al soltar el canal: eso abandona un
   modelo que igual sigue reintentando para siempre, **un zombi por cada caída del broker**. Acá se
   memoizan por separado conexión y canal.
+- ⚠ **CON EL BROKER CAÍDO, `connect()` NO RECHAZA: CUELGA, y eso lo heredan las Tareas 7 y 11.** Ese
+  mismo `maxRetries: Infinity` deja muerta la única rama que rechaza la conexión inicial
+  (`_scheduleReconnect` sólo llama `_rejectInitialConnection` con los reintentos agotados,
+  `lib/recovery.js:290-294`). **`AmqpPublisher` no lo acota a propósito**: el plazo es del que llama,
+  que es quien sabe cuánto puede esperar — 2 s POR CHEQUEO en la sonda de LISTO
+  (`shared/http/health.ts`, la misma propiedad que ya está escrita para Mongo: «una base caída no
+  falla: CUELGA») y 5 s en el dispatcher del outbox. O sea: **`ping()` no se rechaza solo**, y sin el
+  plazo del endpoint un Rabbit caído deja `/ready` sin contestar en vez de contestar 503.
 - **SE ESCUCHA `error` EN LA CONEXIÓN, no sólo en el canal, y sin eso el proceso se cae.**
   `RecoveringChannelModel` es un `EventEmitter` y reemite el `error` del modelo de abajo
-  (`lib/recovery.js:221`); Node LANZA cuando un `error` no tiene a quién ir, así que un broker que
-  rechaza las credenciales tumba el servidor con todas sus partidas en curso. **Por eso los dos
+  (`lib/recovery.js:221`); Node LANZA cuando un `error` no tiene a quién ir. **El caso es el socket
+  que se muere DESPUÉS de establecido** —broker reiniciado, red cortada, heartbeat vencido—, y no el
+  que parece obvio: un rechazo de credenciales pasa en el handshake y sale como `connect-failed` más
+  un reintento agendado (`lib/recovery.js:275-279`) sin tocar nunca ese `error`. **Por eso los dos
   dobles del test son `EventEmitter` de verdad** y no objetos con un `on: vi.fn()`: es lo único que
   puede poner roja esa falta.
 - **`close()` espera el intento de conexión EN VUELO** antes de soltar las referencias, y tolera la

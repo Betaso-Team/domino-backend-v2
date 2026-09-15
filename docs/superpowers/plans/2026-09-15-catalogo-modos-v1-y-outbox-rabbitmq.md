@@ -603,19 +603,41 @@ archivo tal cual deja dos defectos vivos y no se nota en ninguna aserción:
 1. **La conexión se REUSA al soltar el canal; sólo el canal se reabre.** Truco, al soltar el canal,
    vuelve a llamar `connect()`. Con `recovery: true` eso devuelve un `RecoveringChannelModel` que se
    reconecta SOLO y sin plazo de renuncia (`maxRetries: Infinity`,
-   `node_modules/amqplib/lib/recovery.js:7`), y sus canales se piden sobre el MODELO y no sobre el
+   `node_modules/amqplib/lib/recovery.js:8`), y sus canales se piden sobre el MODELO y no sobre el
    socket: volver a conectar abandona un modelo que igual sigue reintentando para siempre, o sea un
    zombi por cada caída del broker. La memoización tiene que ser de dos piezas separadas —conexión y
    canal—, y el test lo pinea con `connect` en 1 y `createConfirmChannel` en 2.
 2. **Hay que escuchar `error` en la CONEXIÓN, no sólo en el canal.** `RecoveringChannelModel` es un
    `EventEmitter` y reemite el `error` del modelo de abajo (`lib/recovery.js:221`), y Node LANZA
-   cuando un evento `error` no tiene a quién ir. Sin ese oyente, un broker que rechaza las
-   credenciales tumba el servidor entero con todas sus partidas en curso. No se suelta la conexión
-   ahí: la recuperación de la librería sigue su curso y el canal ya se suelta por su propio `close`.
+   cuando un evento `error` no tiene a quién ir: sin ese oyente el proceso se cae con todas sus
+   partidas en curso. El caso real es **el socket que se muere DESPUÉS de establecido** —broker
+   reiniciado, red cortada, heartbeat vencido—; un rechazo de credenciales NO pasa por ahí, porque
+   ocurre en el handshake y sale como `connect-failed` más un reintento agendado
+   (`lib/recovery.js:275-279`). No se suelta la conexión ahí: la recuperación de la librería sigue su
+   curso y el canal ya se suelta por su propio `close`.
 3. **`close()` tiene que esperar el intento de conexión EN VUELO** antes de soltar las referencias.
    Sin eso, un apagado disparado mientras una entrega está conectando deja el socket abriéndose
    DESPUÉS del cierre y sin nadie que lo cierre —y con `recovery: true` ese modelo reintenta para
    siempre—, así que el proceso no termina de salir nunca.
+
+⚠ **Y un hecho que no es de esta tarea sino de las Tareas 7 y 11: con el broker caído, `connect()` no
+rechaza, CUELGA.** El mismo `maxRetries: Infinity` deja muerta la única rama que rechaza la conexión
+inicial —`_scheduleReconnect` sólo llama `_rejectInitialConnection` cuando se agotaron los reintentos
+(`lib/recovery.js:290-294`)—, así que la promesa se queda esperando mientras el modelo reintenta con
+backoff. **`AmqpPublisher` no lo acota, y es deliberado**: el plazo es del que llama, que es quien
+sabe cuánto puede esperar. Las dos puntas ya están previstas y hay que respetarlas:
+
+- **Tarea 11**: `rabbit: () => amqp.ping()` va dentro del chequeo de LISTO, que aplica un plazo POR
+  CHEQUEO de 2 s (`src/shared/http/health.ts`). **`ping()` NO se rechaza solo** — sin ese plazo, un
+  Rabbit caído deja `/ready` sin contestar en vez de contestar 503 nombrando la dependencia. Es la
+  misma propiedad que AGENTS.md ya tiene escrita para Mongo: «una base caída no falla: CUELGA».
+- **Tarea 7**: el dispatcher publica con su plazo de 5 s, que es lo que convierte el cuelgue en un
+  reintento agendado en vez de un tick que no vuelve nunca.
+
+Por eso los dos tests que usan `connect.mockRejectedValue(...)` se llaman por lo que miden —que un
+rechazo al abrir SALGA traducido a `AmqpDeliveryError`— y no "el broker está caído": ese camino el
+doble lo finge más amable que la realidad. El `try/catch` sigue valiendo para todo lo que sí rechaza
+(`createConfirmChannel`, una URL inválida, un modelo ya cerrado).
 
 Lo que el `node_modules` sí confirma del plan: `amqplib@2` trae sus propios tipos (`index.d.ts`), así
 que **no hace falta `@types/amqplib`**; `connect(url, {recovery: true})` devuelve

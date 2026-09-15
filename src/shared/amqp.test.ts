@@ -183,10 +183,18 @@ describe("AmqpPublisher: la entrega sólo cuenta si el broker la confirma", () =
     ).rejects.toBeInstanceOf(AmqpDeliveryError);
   });
 
-  // NEUTRO Y NO LA EXCEPCIÓN CRUDA de amqplib: el único error que sale de `shared/` tiene que poder
-  // traducirlo quien publica, y un `ECONNREFUSED` pelado obligaría a cada llamador a conocer la
-  // librería.
-  it("no poder conectarse es un fallo de entrega", async () => {
+  // LO QUE SE MIDE ACÁ ES LA TRADUCCIÓN, y hay que leer el nombre con cuidado: que un rechazo al
+  // abrir SALGA como `AmqpDeliveryError` y no como la excepción cruda de amqplib. El único error que
+  // sale de `shared/` tiene que poder traducirlo quien publica, y un `ECONNREFUSED` pelado obligaría
+  // a cada llamador a conocer la librería.
+  //
+  // ⚠ NO MIDE "el broker está caído", y el doble es más amable que la realidad: con `recovery: true`
+  // y `maxRetries: Infinity`, un `connect()` contra un broker caído **CUELGA, no rechaza** (la rama
+  // que rechaza la conexión inicial está muerta, `lib/recovery.js:290-294`). Ese camino lo acota el
+  // plazo de quien llama —2 s en la sonda de LISTO, 5 s en el dispatcher de la Tarea 7—, no esta
+  // clase. El `try/catch` que este test ejercita sigue valiendo para todo lo que sí rechaza:
+  // `createConfirmChannel`, una URL inválida, un modelo ya cerrado.
+  it("un rechazo al abrir sale traducido a AmqpDeliveryError", async () => {
     const { publisher } = harness();
     connect.mockRejectedValue(new Error("sin broker"));
 
@@ -265,7 +273,12 @@ describe("AmqpPublisher: el ciclo de vida", () => {
     expect(channels[0]?.assertExchange).not.toHaveBeenCalled();
   });
 
-  it("ping propaga como fallo de entrega que el broker no esté", async () => {
+  // Misma advertencia que arriba, y acá es la que más importa: esto mide que `ping()` TRADUZCA un
+  // rechazo, no que un Rabbit caído lo haga rechazar. **`ping()` no se rechaza solo**: contra un
+  // broker caído se queda esperando mientras el modelo reintenta. Quien cablee la Tarea 11 tiene que
+  // poner el `rabbit: () => amqp.ping()` detrás del plazo POR CHEQUEO de `/ready`, que es lo que
+  // convierte el cuelgue en un 503 que nombra la dependencia.
+  it("ping traduce un rechazo al abrir a AmqpDeliveryError", async () => {
     const { publisher } = harness();
     connect.mockRejectedValue(new Error("sin broker"));
 
