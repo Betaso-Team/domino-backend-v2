@@ -171,8 +171,8 @@ Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
 Estado: **incremento completo; Tareas 0–5 cerradas** (`8a88229` la 0; `b930b75`…`ce8a895` la 1;
-`d3617cb`…`922d85d` la 2; `60d7c19`, `dc151be` la 3; `6a10918`…`7e5d286` la 4; el commit
-siguiente la 5). Baseline **366 tests / 52 archivos**. Verificados con código 0:
+`d3617cb`…`922d85d` la 2; `60d7c19`, `dc151be` la 3; `6a10918`…`7e5d286` la 4; `f66ab13`
+la 5). Baseline **366 tests / 52 archivos**. Verificados con código 0:
 `typecheck`, suite, lint, build y depcruise (**163 módulos / 617 dependencias**). El smoke real
 quedó verde con Docker Desktop 4.35.1 / Engine 27.3.1 / Compose 2.29.7, PM2 7.0.4 y Nginx
 1.30.4: ambas instancias escucharon en 2567/2568, la partida terminó por `SCORE` con 119 entradas
