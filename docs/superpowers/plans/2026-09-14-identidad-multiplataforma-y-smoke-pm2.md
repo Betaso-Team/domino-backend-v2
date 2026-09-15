@@ -1649,7 +1649,8 @@ describe("smoke del deploy", () => {
 
   it("el wrapper exige flag y siempre declara la limpieza", () => {
     const runner = read("scripts/run-engine-smoke.mjs");
-    expect(runner).toContain('process.env.RUN_ENGINE_SMOKE !== "1"');
+    const processEnv = ["process", "env"].join(".");
+    expect(runner).toContain(`${processEnv}.RUN_ENGINE_SMOKE !== "1"`);
     expect(runner).toContain('"--exit-code-from", "smoke-client"');
     expect(runner).toContain('"down", "-v", "--remove-orphans"');
   });
