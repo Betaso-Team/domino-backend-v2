@@ -322,10 +322,46 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3 y 4 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`). Baseline
-**427 tests / 57 archivos**, con `typecheck`, suite, lint, `format` y `depcruise` (**183 módulos /
-682 dependencias**) en verde. Primer paso pendiente: **Tarea 5, escribir el rojo de dos dueños del
-lease en `src/shared/mongo-lease.test.ts`**.
+Estado: **Tareas 1, 2, 3, 4 y 5 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`, `348f527`).
+Baseline **441 tests / 58 archivos**, con `typecheck`, suite, lint, `format` y `depcruise`
+(**185 módulos / 687 dependencias**) en verde. Primer paso pendiente: **Tarea 6, escribir el rojo del
+publicador AMQP con confirms en `src/shared/amqp.test.ts`**.
+
+Lo que dejó la Tarea 5:
+
+- **`Lease.within` devuelve `T | undefined`, y ese `undefined` es un desenlace NORMAL**: la Tarea 8 lo
+  convierte en 503 (`GameModeWriteBusyError`) y la 7 se saltea el tick. Un `within` que lanzara haría
+  que un catálogo ocupado se viera como una caída.
+- **v1 NO SERIALIZA NADA de esto, así que el lease es pieza nueva y no un port.** `create` hace
+  `findOne({name, playersQuantity})` y después `create(...)` sin lock, sin transacción y sin índice
+  que lo respalde (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:57-69`); los únicos
+  `Mutex` de v1 (`async-mutex`) son de PROCESO y son de las salas y del matchmaking del lobby, no del
+  catálogo. v2 es estrictamente más fuerte acá.
+- **La adquisición es UN `findOneAndUpdate`**, nunca "leo, decido, escribo": entre la lectura y la
+  escritura hay un turno del event loop. El **E11000 del upsert competido no es una rareza de carrera
+  sino el camino ORDINARIO de "lo tiene otro"** —Mongo deriva el `_id` del insert de la igualdad del
+  filtro y choca con el documento que está—, y se reconoce por el CÓDIGO numérico: un `/E11000/`
+  sobre el mensaje pasa la suite y se rompe el día que el servidor reescriba la frase.
+- **La liberación lleva el `owner` en el filtro y es la línea más peligrosa del archivo.** Con
+  `deleteOne({ _id: name })` a secas, un proceso cuyo lease venció mientras trabajaba le borra al
+  salir el lease que ya tomó otro: un tercero entra creyendo que está libre y quedan dos escritores
+  del catálogo sin que nada falle.
+- **NO HAY RENOVACIÓN, a propósito.** Si `work()` tarda más que `ttlMs`, otro proceso puede entrar en
+  paralelo. La contramedida es que adentro del lease no vayan trabajos largos —el dispatcher toma UNA
+  entrada por tick y no un bucle—, no un renovador con su propio temporizador y su propia carrera.
+- **El dueño es por PROCESO y no por llamada**, y hay que saber el precio: **este lease excluye
+  PROCESOS, no llamadas concurrentes del mismo proceso.** Dos mutaciones que lleguen a la misma
+  instancia entran las dos, y un `within` anidado libera al salir del de adentro dejando al de afuera
+  sin lease. A favor: un `release` que no llegó a la base no deja al proceso esperando su propio
+  vencimiento.
+- **`MemoryLease` vive en el mismo archivo** (criterio de `shared/kv.ts`, que también lleva puerto e
+  implementación de memoria juntos) y **corre siempre**: un proceso sin almacén compartido no tiene a
+  quién excluir, que es exactamente lo que el adaptador Mongo hace contra un solo dueño. Un `Map` de
+  leases simularía una negación que ni el real produce.
+- **Ocho mutaciones verificadas a mano**, cada una roja en su test y en ningún otro. La que decidió el
+  diseño del test: lanzar los dos `within` EN EL MISMO TURNO. Esperar a que el primero entre deja
+  pasar verde a un adaptador de "leo, decido, escribo", que es justo lo que este archivo existe para
+  prohibir.
 
 Lo que dejó la Tarea 4:
 
@@ -494,6 +530,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 5 | Uno, y de los que se cobran dos tareas después: falta el lease DE MEMORIA y no tiene archivo. La Tarea 8 pide "repositorio/outbox/lease en memoria" y la 11 "registrar repository/outbox/lease de memoria sin URI", pero ninguna de las dos crea un archivo donde pueda vivir y la lista `Files:` de la 5 tiene dos. Va junto al puerto en `src/shared/mongo-lease.ts`, por el criterio de `src/shared/kv.ts` | `348f527` + este `docs:` |
 | 4 | Tres: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores, y cuatro archivos sueltos producen justo la deriva que el propio Step 3 dice evitar (`MemoryGameModeRepository` no es un doble); el snippet de los índices los asertaba como pares `[clave, opciones]`, que es la forma de `createIndex` y no la de `createIndexes`, que el mismo Step pide; y «update que no borra campos omitidos» no alcanza —medido por mutación: un `$set: { ...input }` crudo pasa verde, y la forma que de verdad llega desde las rutas de v1 es el `undefined` EXPLÍCITO— | `ce54f9e` + este `docs:` |
 | 3 | Uno, y de los que rompen en silencio del OTRO lado: ni el plan ni la spec decían si el `id` del payload Rabbit es el `uuid` o el hex del `_id` —la entidad tiene los dos y §9.1 sólo declara `id: string`—. Lo resolvió el v1 productivo (`game-mode.publisher.ts:43`, `id: mode.uuid`), no el nombre del campo. El fixture del test lleva los dos identificadores distintos para que la aserción mida el mapeo | `ec63d71` + este `docs:` |
 | 1 | Tres: el Step 4 regeneraba el golden con `replay.test.ts`, que solo LO LEE —el único llamador de `writeGolden` es `game-2p-e2e.test.ts`—, así que `WRITE_GOLDEN=1` no escribía nada y el fixture quedaba sin compilar con vitest en verde; la lista `Files:` se olvidaba de cinco archivos que también arman un `DominoRoomOptions` a mano (`match-registry.test.ts`, `replay.test.ts` del match, `history.test.ts`, `domino-room.test.ts`, `lobby-e2e.test.ts`) y del `README.md`; y el `ucAmount` del snippet dejaba `2 ** 53` como monto válido, porque `.safe()` —como estaba expresada la guarda vieja— implica entero en zod 4 y no se puede reusar | `ca9e68a` + este `docs:` |

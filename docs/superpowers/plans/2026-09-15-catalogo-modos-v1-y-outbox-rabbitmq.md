@@ -29,7 +29,8 @@
 - `src/features/game-mode/transports/http/register-http.ts` — rutas `/game-modes`.
 - `src/features/game-mode/index.ts` — única superficie importable desde otras features.
 - `src/shared/amqp.ts` — conexión/canal confirm portable.
-- `src/shared/mongo-lease.ts` — exclusión distribuida usada por CRUD y dispatcher.
+- `src/shared/mongo-lease.ts` — exclusión distribuida usada por CRUD y dispatcher, **y el lease de
+  memoria** que registra la instancia sin `MONGO_URI` (ver el defecto anotado en la Tarea 5).
 - `src/shared/http/validated.ts` — promoción del validador HTTP al aparecer la segunda feature.
 - Tests gemelos junto a cada archivo anterior.
 - `src/smoke/game-mode-smoke.ts` — fases reales Mongo/Rabbit/HTTP dentro del smoke existente.
@@ -504,6 +505,21 @@ export interface Lease {
 Adquirir con `findOneAndUpdate` sobre lease vencido/del mismo dueño; tratar `E11000` de un upsert
 competido como “no adquirido”; liberar sólo con `{_id:name,owner}`. No crear un lock por modo: el
 catálogo administrativo tiene bajo volumen y el lock global preserva las reglas de v1.
+
+⚠ **Defecto del plan, corregido al ejecutar: falta el lease DE MEMORIA y no tiene archivo.** La
+Tarea 8 dice “con repositorio/outbox/lease en memoria” y la Tarea 11 “registrar repository/outbox/
+lease de memoria sin URI”, pero ninguna de las dos crea un archivo donde pueda vivir y esta lista
+tiene dos. Va en `src/shared/mongo-lease.ts`, junto al puerto, por el criterio de `src/shared/kv.ts`
+—que también lleva `KeyValueStore` y `MemoryKeyValueStore` en un archivo—. Y no es un doble de test:
+es lo que despliega la instancia sin `MONGO_URI`, igual que `MemoryHistory`.
+
+⚠ **`MemoryLease` corre SIEMPRE, y eso no es un atajo.** Como el `owner` es por PROCESO —el filtro
+de adquisición matchea `{ owner: this.owner }`—, el lease excluye procesos y no llamadas: contra un
+solo dueño, el propio `MongoLease` adquiere siempre. Un `Map` de leases en memoria simularía una
+negación que ni el adaptador real produce, y la suite certificaría una exclusión que producción no
+tiene. La consecuencia que la Tarea 8 tiene que conocer: **dos mutaciones concurrentes en la MISMA
+instancia entran las dos**, así que el lease no cubre por sí solo la carrera de la regla de
+unicidad dentro de un proceso; si hace falta, es una cola en memoria ENCIMA del lease.
 
 - [ ] **Step 4: verificar y commit**
 
