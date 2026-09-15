@@ -145,7 +145,13 @@ export class MongoLease implements Lease {
         // aparece el E11000: cuando el documento YA existe y el `$or` no lo eligió, Mongo deriva el
         // `_id` del insert de la igualdad del filtro y choca con el que está. O sea que el duplicado
         // no es una rareza de carrera — es el camino ORDINARIO de "lo tiene otro".
-        { upsert: true, returnDocument: "after" },
+        //
+        // SIN `returnDocument`, y la ausencia es la decisión: el documento devuelto no se lee. Lo
+        // que decide si se adquirió es que la operación NO HAYA LANZADO —el `$set` acaba de escribir
+        // este mismo `owner`, así que inspeccionarlo sería preguntar por lo que se acaba de
+        // afirmar—. Pedir `after` "por las dudas" es configuración muerta: parece que alguien mira
+        // el resultado, y el que venga a cambiar esta línea va a buscar al lector que no existe.
+        { upsert: true },
       );
       return true;
     } catch (error) {

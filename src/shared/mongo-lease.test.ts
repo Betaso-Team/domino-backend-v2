@@ -89,14 +89,17 @@ function fakeLeases() {
       async (
         filter: Filter<LeaseDocument>,
         update: UpdateFilter<LeaseDocument>,
-        options?: { upsert?: boolean; returnDocument?: "after" | "before" },
+        options?: { upsert?: boolean },
       ) => {
         const id = (filter as { _id?: string })._id;
         const current = id === undefined ? undefined : documents.get(id);
         if (current && matches(current, filter as Record<string, unknown>)) {
           const after = { ...current, ...(update.$set ?? {}) } as Stored;
           documents.set(after._id, after);
-          return options?.returnDocument === "after" ? after : current;
+          // El doble NO modela `returnDocument`, porque el adaptador no lo manda: lo que decide si
+          // se adquirió es que esto no haya lanzado. Un doble que ramificara sobre una opción que
+          // nadie pasa es código que puede estar mal sin que nada lo note.
+          return after;
         }
         if (!options?.upsert) return null;
         // EL INSERT DEL UPSERT DERIVA EL `_id` DE LA IGUALDAD DEL FILTRO, así que cuando el
@@ -114,7 +117,7 @@ function fakeLeases() {
         }
         const inserted = { _id: id as string, ...(update.$set ?? {}) } as Stored;
         documents.set(inserted._id, inserted);
-        return options?.returnDocument === "after" ? inserted : null;
+        return inserted;
       },
     ),
     deleteOne: vi.fn(async (filter: Filter<LeaseDocument>) => {
@@ -324,7 +327,11 @@ describe("MongoLease: el cable con la base", () => {
       owner: expect.any(String),
       until: new Date(BASE_INSTANT + TTL),
     });
-    expect(options).toMatchObject({ upsert: true });
+    // `toEqual` y no `toMatchObject`: `upsert` es lo único que se manda, y lo que se mide es que no
+    // sobre nada. Un `returnDocument: "after"` agregado "por las dudas" es configuración muerta —el
+    // documento devuelto no se lee nunca, porque lo que decide la adquisición es que no haya
+    // lanzado— y con `toMatchObject` entraría sin ponerse rojo.
+    expect(options).toEqual({ upsert: true });
   });
 
   // EL DUPLICADO SE RECONOCE POR EL CÓDIGO NUMÉRICO, no por el texto del mensaje: el mensaje trae
