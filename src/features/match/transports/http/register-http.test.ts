@@ -1,6 +1,8 @@
-import type { Application as Express } from "express";
+import type { AddressInfo } from "node:net";
+import express, { type Application as Express } from "express";
 import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "../../../../logger.js";
+import type { HistoryEntry } from "../../network/history.js";
 import { registerInternalHistoryHttp } from "./register-http.js";
 
 // El logger entra por parámetro, así que el doble se arma acá y no hay container que
@@ -64,5 +66,44 @@ describe("registerInternalHistoryHttp", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("/internal/matches/:matchId/history"),
     );
+  });
+
+  it("responde las entradas ordenadas por seq sin mutar al lector", async () => {
+    const entries = [3, 1, 2].map(
+      (seq): HistoryEntry => ({
+        matchId: "history-order",
+        seq,
+        at: seq,
+        roundNumber: 1,
+        source: "PLAYER",
+        kind: "COMMAND",
+        type: "PASS",
+        payload: { playerId: "seat-1" },
+      }),
+    );
+    const app = express();
+    registerInternalHistoryHttp(app, {
+      logger: fakeLogger(),
+      history: { of: () => Promise.resolve(entries) },
+      internalApiKey: "k".repeat(16),
+    });
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+
+    try {
+      const { port } = server.address() as AddressInfo;
+      const response = await fetch(
+        `http://127.0.0.1:${port}/internal/matches/history-order/history`,
+        {
+          headers: { "X-Internal-Key": "k".repeat(16) },
+        },
+      );
+      const body = (await response.json()) as { entries: readonly HistoryEntry[] };
+
+      expect(body.entries.map(({ seq }) => seq)).toEqual([1, 2, 3]);
+      expect(entries.map(({ seq }) => seq)).toEqual([3, 1, 2]);
+    } finally {
+      server.close();
+    }
   });
 });

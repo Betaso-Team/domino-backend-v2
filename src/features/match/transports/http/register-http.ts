@@ -162,7 +162,7 @@ export function registerInternalHistoryHttp(
       // `next` y `httpErrorHandler` responde 500. Tragarlo acá devolvería el mismo 404 que
       // "esa partida no existe", y en un endpoint de soporte confundir "la base no
       // contesta" con "no hay nada" manda al operador a investigar la mesa equivocada.
-      const entries = await history.of(params.matchId);
+      const entries = [...(await history.of(params.matchId))].sort((a, b) => a.seq - b.seq);
       if (entries.length === 0) {
         response.status(404).json({ error: "NOT_FOUND" });
         return;
