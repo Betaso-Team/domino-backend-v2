@@ -171,7 +171,7 @@ Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
 Estado: **Tareas 1 y 2 completas y revisadas** (`b930b75`…`ce8a895` la 1; `d3617cb`, `8239ca1`,
-`0339dca`, `a55fa53`, `bfd4ac0` la 2); baseline **357 tests / 50 archivos**; siguiente: **Task 3, Step 1**
+`0339dca`, `a55fa53`, `ceb6957` la 2); baseline **357 tests / 50 archivos**; siguiente: **Task 3, Step 1**
 —el cliente smoke, que consume `settlementOf`—. **Acá se paró el incremento**: de la Task 3 en
 adelante no se ejecutó nada, y las dos correcciones que la revisión ya le encontró al plan de esa
 tarea están aplicadas al texto del plan y anotadas en la tabla de defectos.
