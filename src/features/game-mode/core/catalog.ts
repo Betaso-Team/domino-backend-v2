@@ -28,11 +28,14 @@ export interface GameModeRepository extends GameModeReader {
   update(uuid: string, input: UpdateGameMode): Promise<GameMode | undefined>;
 }
 
-// Los tres errores de APLICACIÓN del catálogo. Son tres y no uno porque la frontera HTTP los
-// traduce a tres códigos distintos —404, 409 y 503—, y un solo error con un campo `kind`
-// adentro obliga a un `switch` en cada `catch` en vez de a tres `catch` que el compilador ya
-// distingue. `override readonly name` es la convención del repo: sin él, `instanceof` sigue
-// funcionando pero el log dice "Error" y el que audita no sabe cuál de los tres fue.
+// Los CUATRO errores de APLICACIÓN del catálogo. Son cuatro y no uno porque un solo error con un
+// campo `kind` adentro obliga a un `switch` en cada `catch` en vez de a cuatro `catch` que el
+// compilador ya distingue. `override readonly name` es la convención del repo: sin él,
+// `instanceof` sigue funcionando pero el log dice "Error" y el que audita no sabe cuál fue.
+//
+// Eran TRES hasta la Tarea 8, y el cuarto no es un refinamiento sino una rama que v1 ya tenía y
+// ningún error de acá podía expresar: «el modo ya está inactivo»/«ya está activo». Ver
+// `GameModeStateConflictError`.
 export class GameModeNotFoundError extends Error {
   override readonly name = "GameModeNotFoundError";
 }
@@ -42,6 +45,25 @@ export class GameModeNotFoundError extends Error {
 // solo el adaptador sabe leer.
 export class DuplicateGameModeError extends Error {
   override readonly name = "DuplicateGameModeError";
+}
+
+// LA BAJA DE UN MODO YA INACTIVO, O LA REACTIVACIÓN DE UNO YA ACTIVO. Es el error que v1 lanzaba
+// con `El modo ya está inactivo` / `El modo ya está activo`
+// (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:148-150` y `:203-205`), y no lo puede
+// cubrir ninguno de los otros tres:
+//
+// - `GameModeNotFoundError` diría 404, o sea "ese modo no existe", sobre un modo que el panel está
+//   viendo listado en ese mismo momento. El operador iría a buscar un uuid equivocado.
+// - `DuplicateGameModeError` comparte el código HTTP (409, porque también es un conflicto con el
+//   estado actual) pero NO la causa, y el nombre es lo que se lee en el log: "Duplicate" mandaría a
+//   auditar la regla de nombre + cantidad, que acá no intervino.
+//
+// La alternativa era volver idempotentes la baja y la reactivación —contestar 200 sin escribir—, y
+// se descartó: la baja de un modo con dinero configurado es una operación que el panel tiene que
+// poder confirmar que hizo ÉL, y un 200 silencioso sobre un modo que otro admin ya retiró es
+// exactamente el aviso que se pierde.
+export class GameModeStateConflictError extends Error {
+  override readonly name = "GameModeStateConflictError";
 }
 
 // La escritura no pudo TOMAR SU TURNO: otro proceso tiene el lease que serializa las

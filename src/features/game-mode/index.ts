@@ -18,9 +18,16 @@
 // que arranca y cierra el despachador, porque su ciclo de vida es el del proceso. El puerto
 // `GameModeOutbox` NO sale: quien lo consume adentro es el servicio de esta misma feature (Tarea 8), y
 // el root no necesita nombrarlo para pasar el adaptador que acaba de construir.
+//
+// `GameModeService` sale como VALOR y sus cuatro dependencias no: el root lo construye con los
+// adaptadores que ya salen por acá arriba, más el lease de `shared/` y el `wake()` del despachador.
+// Los CUATRO ERRORES tampoco salen todavía — quien los traduce a 404/409/503 es la frontera HTTP de
+// la Tarea 9, que vive adentro de esta misma feature. El día que un consumidor de afuera necesite
+// distinguirlos, salen; exportarlos antes es superficie que nadie puede podar después.
 export type { GameModeReader } from "./core/catalog.js";
 export type { GameMode } from "./core/game-mode.js";
 export { OutboxDispatcher } from "./outbox.js";
+export { GameModeService } from "./service.js";
 export { MemoryGameModeOutbox } from "./transports/memory-outbox.js";
 export { MemoryGameModeRepository } from "./transports/memory-repository.js";
 export { MongoGameModeOutbox } from "./transports/mongo-outbox.js";
