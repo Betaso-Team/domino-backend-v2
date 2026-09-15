@@ -311,6 +311,36 @@ mantenimiento vive en Redis cuando está configurado —en memoria con una sola 
 por `POST /internal/lobby/maintenance`, bloquea únicamente mesas nuevas y falla cerrado ante un valor
 corrupto. `entryFee` y `prize` son UC minor: `125` significa `1,25 UC`; el front presenta y convierte.
 
+## Incremento planificado — catálogo v1 y entrega RabbitMQ durable
+
+Diseño aprobado:
+`docs/superpowers/specs/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md`.
+Autoridad operativa:
+`docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
+
+Estado: **diseño y plan completos; implementación no iniciada**. Baseline previo:
+**373 tests / 54 archivos**. Primer paso pendiente: **Tarea 1, escribir el rojo que corrige la
+semántica monetaria**.
+
+Este incremento reemplaza completamente el catálogo de v1: conserva la colección
+`game_modes_domino`, sus campos, defaults, índices, `_id`/`__v`/timestamps, las siete rutas HTTP y
+los eventos `game_mode.created`/`game_mode.updated` del exchange `betaso`. Domino v2 será el único
+writer. El panel no autentica administradores contra Domino: el futuro orquestador valida el admin y
+llama las mutaciones con `X-Internal-Key`; los GET continúan públicos.
+
+La compatibilidad productiva corrige la convención actual de dinero: en v1 `entryFee: 10` significa
+**10 UC**, no `0,10 UC`. La Tarea 1 renombra `entryFeeUcMinor`/`prizeUcMinor`/`amountUcMinor` a
+`entryFee`/`prize`/`amount` y acepta números finitos no negativos, incluidos decimales. Hasta que esa
+tarea se implemente, el párrafo histórico anterior describe correctamente el código actual.
+
+Rabbit no participa en el request administrativo: la mutación escribe Mongo y un outbox durable; un
+dispatcher con confirmaciones, retry ilimitado y lease Mongo publica después. No se exige replica
+set: un reconciliador compara `__v` para reparar la ventana modo→outbox y puede recuperar un `created` perdido como
+`updated`, igual que el `/sync` de v1. La entrega es al menos una vez, por lo que consumidores deben
+deduplicar. `multiplier`, `isFreeRoom` y `enableBots` se preservan en Mongo/HTTP; Rabbit conserva su
+payload v1 y no añade los dos últimos. Este incremento no implementa bots, torneos, multiplicador
+dinámico ni 4P; las mesas 4P se rechazan explícitamente antes de génesis.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
