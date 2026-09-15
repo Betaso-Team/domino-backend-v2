@@ -295,10 +295,14 @@ Autoridad operativa:
 `docs/superpowers/plans/2026-09-14-lobby-y-montos-publicos.md`.
 
 Estado: **Tareas 0–4 completas** (`ba84fa1`, `df3cdb2`, `be443ee`, `2198f07`, `e781896`).
-Baseline **372 tests / 54 archivos**. Verificados con código 0:
-`typecheck`, suite, lint, build y depcruise (**172 módulos / 652 dependencias**). El grafo fue
+Baseline **373 tests / 54 archivos**. Verificados con código 0:
+`typecheck`, suite, lint, build y depcruise (**173 módulos / 654 dependencias**). El grafo fue
 reindexado y el smoke Docker/PM2/Nginx terminó una partida 2P con 119 entradas de historial; el
 compose quedó vacío.
+
+Corrección posterior (`3074e2c`): el HTTP interno ordena una copia del historial por `seq`. Mongo
+puede aplicar fuera de orden los lotes que `record()` envía concurrentemente; el replay ya ordenaba,
+pero el endpoint devolvía el orden físico (`1,3,2,…`). El test cubre además que no se mute al lector.
 
 Se portó el contrato de lobby del dominó v1 y se recuperaron los nombres públicos
 `entryFee`/`prize`; no se añadió matchmaking ni catálogo. El lobby es una `Room` normal: consulta
