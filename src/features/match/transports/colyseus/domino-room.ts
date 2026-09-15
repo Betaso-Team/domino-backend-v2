@@ -96,7 +96,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // cuyo dinero no cierra.
   override async onCreate(options: unknown): Promise<void> {
     // EL LOG SE ARMA ANTES QUE NADA, y desde que `configOf` valida eso dejó de ser cosmético:
-    // `onCreate` ahora PUEDE lanzar, Colyseus enrutà eso a `onUncaughtException` -> `crash()`, y
+    // `onCreate` ahora PUEDE lanzar, Colyseus enruta eso a `onUncaughtException` -> `crash()`, y
     // `crash()` escribe por `this.log`. Con el logger armado recién junto al estado —donde
     // estaba—, un snapshot inválido moría con «Cannot read properties of undefined (reading
     // 'error')» en vez de nombrar el campo que vino mal. MEDIDO, no deducido: es lo que imprimía
@@ -412,7 +412,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     return "INTERRUPTED";
   }
 
-  private crash(error: unknown, method: string): void {
+  // `method` se tipa contra la unión de Colyseus y no contra `string` porque abajo DECIDE: la
+  // comparación con `"onCreate"` elige si se desconecta o no. Ensanchada, un `"oncreate"` o un
+  // rename de la unión compilarían igual y apagarían esa guarda sin que nada se ponga rojo.
+  private crash(error: unknown, method: RoomMethodName): void {
     const cause = error instanceof Error ? error : new Error(String(error));
     this.log.error("error no controlado", { method, message: cause.message, stack: cause.stack });
     // NO SE DESCONECTA LO QUE TODAVÍA NO EXISTE. Colyseus RECHAZA `disconnect()` durante
