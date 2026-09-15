@@ -374,23 +374,24 @@ DTO ni los endpoints del negocio.
 El contrato toma como referencia el flujo **Game launch** de _Vibra RGS Casino Wallet Integration_:
 la plataforma abre una URL entregada por el proveedor dentro de un `iframe` o una ventana nueva.
 Vibra incluye `siteId`, juego, usuario, moneda, idioma, canal, regreso al lobby y token en esa URL.
-El orquestador conserva el modelo de lanzamiento, pero deja en la URL pública únicamente un código
-opaco.
+El orquestador conserva sólo lo necesario para abrir el lobby del juego y deja en la URL pública
+únicamente un código opaco.
 
 Equivalencias:
 
-| Vibra                     | Orquestador                                                                             |
-| ------------------------- | --------------------------------------------------------------------------------------- |
-| `siteId`                  | `platformId`, derivado de `X-Platform-Key`                                              |
-| `gameId`                  | `gameId`                                                                                |
-| `gameMode` (`FUN`/`REAL`) | no se mezcla con `gameModeId`; se añadirá como `playMode` sólo cuando exista juego demo |
-| `userId`                  | `userUuid`, estable dentro de la plataforma                                             |
-| `currency`                | moneda de la sesión, congelada al aceptar el lanzamiento                                |
-| `locale`                  | `locale`                                                                                |
-| `channel`                 | `mobile` o `desktop`                                                                    |
-| `lobbyURL`                | `returnUrl` hacia la plataforma                                                         |
-| `lobbyTarget`             | `returnTarget`                                                                          |
-| `token`                   | `launchCode` opaco, corto y de un solo uso                                              |
+| Vibra         | Orquestador                                              |
+| ------------- | -------------------------------------------------------- |
+| `siteId`      | `platformId`, derivado de `X-Platform-Key`               |
+| `gameId`      | `game`, nombre estable como `domino` o `truco`           |
+| `userId`      | `userUuid`, estable dentro de la plataforma              |
+| `currency`    | moneda de la sesión, congelada al aceptar el lanzamiento |
+| `lobbyURL`    | `returnUrl` hacia la plataforma                          |
+| `lobbyTarget` | `returnTarget`                                           |
+| `token`       | `launchCode` opaco, corto y de un solo uso               |
+
+No se reciben modo de juego, idioma ni tipo de dispositivo. El destino siempre es el lobby del
+juego; ese lobby ya conoce su catálogo, presenta sus modos y adapta su interfaz al cliente.
+`POST /v1/launches` no selecciona modo, no crea una partida y no cobra.
 
 La API key nunca se instala en un cliente. El backend de la plataforma crea el lanzamiento:
 
@@ -402,21 +403,18 @@ X-Platform-Key: pk_live_public-id.secret-aleatorio
 Idempotency-Key: 3ccd0cf2-e995-4d5f-a926-51b3ebd4a996
 
 {
-  "gameId": "domino",
-  "gameModeId": "71ea5233-9e9d-4cbc-a155-31abf3f40a14",
+  "game": "domino",
   "userUuid": "usuario-77",
   "currency": "VES",
-  "locale": "es",
-  "channel": "mobile",
   "returnUrl": "https://partner.example.com/games",
   "returnTarget": "_top"
 }
 ```
 
 `platformId` no se recibe: sale de la API key. Tampoco se reciben nombre, avatar ni saldo; el
-orquestador los consulta al adapter autenticado de la plataforma. `gameModeId` puede omitirse cuando
-el lanzamiento abre el lobby general del juego. La moneda se valida con la plataforma y queda
-inmutable: cobro, premio y reembolso deben usar esa misma moneda.
+orquestador los consulta al adapter autenticado de la plataforma. `game` se resuelve contra el
+registro interno de juegos habilitados y siempre apunta a su lobby. La moneda se valida con la
+plataforma y queda inmutable: cobro, premio y reembolso deben usar esa misma moneda.
 
 Respuesta:
 
@@ -444,10 +442,12 @@ El flujo completo es:
 
 1. la plataforma autentica al usuario por su mecanismo habitual;
 2. su backend crea el lanzamiento con su API key;
-3. el orquestador valida plataforma, juego, modo, moneda y `returnUrl`;
+3. el orquestador valida plataforma, nombre del juego, moneda y `returnUrl`;
 4. devuelve una URL con un código aleatorio de 32 bytes, de un solo uso y válido por 60 s;
 5. el navegador abre esa URL y el orquestador consume el código atómicamente;
-6. el usuario entra al lobby o modo solicitado; el cobro ocurre después, al formar la partida.
+6. el usuario entra al lobby del juego;
+7. el propio juego muestra sus modos, recibe la selección y gestiona la entrada a partida;
+8. el cobro ocurre después, cuando el flujo del juego confirma el modo elegido.
 
 El código se guarda sólo como hash y no contiene identidad ni dinero. Un retry con la misma
 `Idempotency-Key` devuelve el mismo lanzamiento mientras siga vigente; para generar uno nuevo se usa
