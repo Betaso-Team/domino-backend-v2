@@ -294,7 +294,7 @@ quedó.
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-14-lobby-y-montos-publicos.md`.
 
-Estado: **Tareas 0–1 completas; Tarea 2 pendiente**. Se porta el contrato de lobby del dominó v1 y se recuperan los nombres
+Estado: **Tareas 0–2 completas; Tarea 3 pendiente**. Se porta el contrato de lobby del dominó v1 y se recuperan los nombres
 públicos `entryFee`/`prize`; no se añade matchmaking ni catálogo.
 
 ## Cómo se ejecuta una tarea

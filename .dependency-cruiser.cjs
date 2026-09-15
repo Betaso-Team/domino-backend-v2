@@ -51,6 +51,7 @@ module.exports = {
         pathNot: [
           "^src/di-container\\.ts$",
           "^src/features/match/transports/colyseus/domino-room\\.ts$",
+          "^src/features/lobby/transports/colyseus/lobby-room\\.ts$",
           "^src/features/match/transports/colyseus/commands/di-wiring\\.ts$",
         ],
       },
@@ -81,6 +82,7 @@ module.exports = {
           // Colyseus instancia las salas él mismo, así que una sala o no necesita
           // dependencias o es composition root. Ídem su cableado de comandos.
           "^src/features/match/transports/colyseus/domino-room\\.ts$",
+          "^src/features/lobby/transports/colyseus/lobby-room\\.ts$",
           "^src/features/match/transports/colyseus/commands/di-wiring\\.ts$",
           // ENTRYPOINT: el CLI de replay arma el proceso entero, y componer es su trabajo
           // —el mismo criterio con el que truco deja src/index.ts fuera de la lista—.

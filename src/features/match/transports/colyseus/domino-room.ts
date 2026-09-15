@@ -158,6 +158,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       gameModeId: config.gameModeId,
     });
     this.setState(match);
+    // El lobby cuenta por modo desde el listing compartido de Colyseus, igual que v1. La
+    // metadata lleva solo el identificador público; perfil, moneda, tasa y seed no salen.
+    await this.setMetadata({ gameModeId: config.gameModeId });
 
     // SE ANOTA ENTRE LAS PARTIDAS VIVAS DEL CLÚSTER, y SE ESPERA. A partir de que `onCreate`
     // devuelve, la sala ya puede recibir gente y su `roomId` ya circula en la reserva de asiento:

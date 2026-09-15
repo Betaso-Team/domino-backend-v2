@@ -3,6 +3,7 @@ import { type ServerOptions, defineRoom, defineServer } from "colyseus";
 import express, { type Application } from "express";
 import { driver, mongo, presence, rootContainer } from "./di-container.js";
 import { env } from "./env.js";
+import { LobbyRoom } from "./features/lobby/index.js";
 import {
   type Clock,
   DominoRoom,
@@ -15,7 +16,7 @@ import type { Logger } from "./logger.js";
 import { httpErrorHandler } from "./shared/http/error-handler.js";
 import { type DependencyChecks, registerHealth } from "./shared/http/health.js";
 
-const rooms = { domino: defineRoom(DominoRoom) };
+const rooms = { lobby: defineRoom(LobbyRoom), domino: defineRoom(DominoRoom) };
 
 // EL COMPOSITION ROOT de la superficie Express. Acá —y solo acá— se resuelve del container
 // y se lee `env`: el transporte recibe las cinco dependencias ya armadas y no sabe que

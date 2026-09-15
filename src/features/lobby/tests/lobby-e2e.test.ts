@@ -1,0 +1,100 @@
+import type { ColyseusTestServer } from "@colyseus/testing";
+import { boot } from "@colyseus/testing";
+import jwt from "jsonwebtoken";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { testConfig } from "../../../app.config.js";
+import { env } from "../../../env.js";
+import type { PlayerRef } from "../../../shared/player-ref.js";
+
+const participantOf = (userUuid: string) => ({
+  platformId: "betaso",
+  userUuid,
+  displayName: `Jugador ${userUuid}`,
+  currency: "VES",
+});
+
+const mintToken = (player: PlayerRef): string =>
+  jwt.sign({ sub: player.userUuid, platformId: player.platformId }, env.jwtSecret, {
+    algorithm: "HS256",
+    expiresIn: "1h",
+  });
+
+const casualTable = (userUuids: readonly [string, string]) => ({
+  mode: "CASUAL",
+  matchId: `m-${userUuids.join("-")}`,
+  gameModeId: "clasica-2p",
+  participants: userUuids.map(participantOf),
+  seed: "lobby-e2e",
+  pointsToWin: 100,
+  teamAssignment: "SHUFFLED",
+  rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+  entryFeeUcMinor: 125,
+  prizeUcMinor: 250,
+});
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("waitUntil: se agotó el plazo");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+interface LobbyStateDTO {
+  readonly totalPlayers: number;
+  readonly playersInLobby: number;
+  readonly isUnderMaintenance: boolean;
+  readonly maintenanceMessage: string;
+  readonly gameModesCount: readonly {
+    readonly gameModeName: string;
+    readonly playerCount: number;
+  }[];
+}
+
+let server: ColyseusTestServer;
+
+beforeAll(async () => {
+  server = await boot(testConfig, 2592);
+});
+
+afterAll(async () => {
+  await server.shutdown();
+});
+
+describe("lobby", () => {
+  it("exige la misma identidad autenticada que una mesa", async () => {
+    const room = await server.createRoom("lobby", {});
+    await server.sdk.auth.signOut();
+
+    await expect(server.connectTo(room)).rejects.toThrow();
+  });
+
+  it("sincroniza mantenimiento y contadores por modo", async () => {
+    const table = await server.createRoom("domino", casualTable(["lobby-a", "lobby-b"]));
+    server.sdk.auth.token = mintToken(participantOf("lobby-a"));
+    await server.connectTo(table);
+    server.sdk.auth.token = mintToken(participantOf("lobby-b"));
+    await server.connectTo(table);
+
+    const room = await server.createRoom("lobby", {});
+    server.sdk.auth.token = mintToken(participantOf("observer-a"));
+    const first = await server.connectTo(room);
+    server.sdk.auth.token = mintToken(participantOf("observer-b"));
+    await server.connectTo(room);
+    const state = first.state as LobbyStateDTO;
+
+    await waitUntil(
+      () =>
+        state.totalPlayers === 2 &&
+        state.playersInLobby === 2 &&
+        state.gameModesCount.some(
+          ({ gameModeName, playerCount }) => gameModeName === "clasica-2p" && playerCount === 2,
+        ),
+    );
+
+    expect(state.isUnderMaintenance).toBe(false);
+    expect(state.maintenanceMessage).toBe(
+      "El juego de dominó está en mantenimiento. Vuelve pronto.",
+    );
+  });
+});
