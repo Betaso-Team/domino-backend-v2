@@ -1263,6 +1263,7 @@ import { ColyseusSDK, type Room } from "@colyseus/sdk";
 import jwt from "jsonwebtoken";
 import { env } from "../env.js";
 import type { DominoMatchConfig } from "../features/match/core/config.js";
+import { createMatchState } from "../features/match/core/engine/genesis.js";
 import { boardEndsOf } from "../features/match/core/engine/round/board-ends.js";
 import { playableSides } from "../features/match/core/engine/round/playable.js";
 import { boneyardCountOf } from "../features/match/core/engine/state-projections.js";
@@ -1401,7 +1402,22 @@ function assertSettlements(
   assert.ok(winnerTeamId === "A" || winnerTeamId === "B", "winnerTeamId inválido");
   assert.ok(reason === "SCORE" || reason === "ABANDONMENT", "reason inválido");
 
-  const reward = settlementOf({ type: "MATCH_RESOLVED", winnerTeamId, reason }, state, config);
+  // El estado del SDK no trae `platformId`/`userUuid`: son `noSync()` a propósito. Se
+  // reconstruye únicamente ese snapshot privado desde el mismo config y se copian los equipos
+  // que sí llegaron del deploy. Así el ganador viene de la partida real sin fingir que el wire
+  // puede alimentar la guarda privada de `settlementOf`.
+  const settlementState = createMatchState(config);
+  for (const player of settlementState.players) {
+    const deployed = state.players.find(({ playerId }) => playerId === player.playerId);
+    assert.ok(deployed, `el deploy no devolvió ${player.playerId}`);
+    player.teamId = deployed.teamId;
+  }
+
+  const reward = settlementOf(
+    { type: "MATCH_RESOLVED", winnerTeamId, reason },
+    settlementState,
+    config,
+  );
   const winnerId = state.players.find(({ teamId }) => teamId === winnerTeamId)?.playerId;
   const winner = config.seats.find(({ playerId }) => playerId === winnerId);
   assert.ok(winner, "config sin asiento ganador");
@@ -1425,7 +1441,11 @@ function assertSettlements(
     ],
   });
 
-  const refund = settlementOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, state, config);
+  const refund = settlementOf(
+    { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
+    settlementState,
+    config,
+  );
   assert.equal(refund?.kind, "REFUND");
   assert.deepEqual(
     refund?.entries.map(({ platformId, currency, amountUcMinor }) => ({
