@@ -648,7 +648,13 @@ describe("la infraestructura administrativa", () => {
   // es la respuesta correcta.
   it.each([
     ["POST", "/game-modes"],
+    ["PUT", "/game-modes/mode-1"],
     ["DELETE", "/game-modes/mode-1"],
+    ["GET", "/game-modes/reactive/mode-1"],
+    // EL `/sync` TAMBIÉN, y es el que se olvidaba: va adentro del lease aunque no toque el catálogo
+    // —escribe el outbox—, así que el operador que aprieta "republicar todo" mientras otro proceso
+    // edita tiene que leer "reintentá" y no una caída.
+    ["POST", "/game-modes/sync"],
   ])("%s %s contesta 503 si el catálogo está ocupado", async (method, path) => {
     const app = harness({
       lease: {
@@ -661,11 +667,15 @@ describe("la infraestructura administrativa", () => {
     const response =
       method === "DELETE"
         ? await app.del(path, KEY)
-        : await app.post(
-            path,
-            { name: "Clásica", prize: 18, entryFee: 10, playersQuantity: 2 },
-            KEY,
-          );
+        : method === "GET"
+          ? await app.get(path, KEY)
+          : method === "PUT"
+            ? await app.put(path, { prize: 20 }, KEY)
+            : await app.post(
+                path,
+                { name: "Clásica", prize: 18, entryFee: 10, playersQuantity: 2 },
+                KEY,
+              );
 
     expect(response.status).toBe(503);
     expect(response.body).toMatchObject({ status: "error" });

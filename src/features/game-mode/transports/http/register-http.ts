@@ -186,11 +186,19 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
     `${BASE}/sync`,
     requireInternalKey(internalApiKey),
     validated({}, async (_input, response) => {
-      // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
-      // outbox lleva el `batchId` (`["game_mode.sync", batchId, uuid]`) justamente para que este
-      // botón fuerce el evento aunque esa revisión ya se haya publicado. Con un id fijo, el segundo
-      // apretón del botón de recuperación no encolaría NADA y contestaría éxito igual.
-      sendData(response, 200, await service.syncAll(randomUUID()));
+      try {
+        // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
+        // outbox lleva el `batchId` (`["game_mode.sync", batchId, uuid]`) justamente para que este
+        // botón fuerce el evento aunque esa revisión ya se haya publicado. Con un id fijo, el
+        // segundo apretón del botón de recuperación no encolaría NADA y contestaría éxito igual.
+        sendData(response, 200, await service.syncAll(randomUUID()));
+      } catch (error) {
+        // TAMBIÉN VA ADENTRO DEL LEASE aunque no toque el catálogo —escribe el outbox—, así que
+        // también puede salir ocupado. Sin este `catch`, el único desenlace que este botón tiene
+        // además del éxito se vería como un 500: el operador que aprieta "republicar todo" mientras
+        // otro proceso edita leería una caída donde hay un "reintentá".
+        sendError(response, error);
+      }
     }),
   );
 
