@@ -1155,6 +1155,31 @@ git add src/features/match AGENTS.md docs/superpowers/plans/2026-09-14-identidad
 git commit -m "feat(liquidacion): proyecta premio y reembolso por plataforma" -m "Devuelve la pareja y moneda congeladas junto al mismo rateId sin convertir ni mover dinero. Resolver la wallet desde playerId o permitir varios ganadores 2P haría ambiguo quién cobra.\n\nCo-Authored-By: GPT-5 <noreply@anthropic.com>"
 ```
 
+**Lo que la revisión agregó, y que los snippets de arriba NO tienen** (el código que corre está
+en `network/settlement.ts` y su test; esto es el índice de las diferencias):
+
+1. **`assertSameTable` antes de cualquier instrucción.** Los `playerId` son posicionales, así que
+   `settlementOf(evento, estadoDeLaMesaA, configDeLaMesaB)` **no** da 0 ni 2 ganadores: da
+   exactamente 1, y emite una instrucción coherente que le paga a otra persona. La guarda compara
+   forma (largo y pertenencia) y nombra el desajuste, no el conteo de ganadores. No puede
+   distinguir dos mesas del mismo tamaño: `MatchState` no lleva `matchId`.
+2. **`switch` exhaustivo con `const unhandled: never = event`** en vez de
+   `if (type !== "MATCH_RESOLVED") return undefined`. Un evento de plataforma nuevo que también
+   devuelva plata compilaría, devolvería `undefined` y nadie cobraría; con el `never` lo frena
+   `typecheck`.
+3. **Tres contratos que estaban solo en prosa, ahora medidos**: `it.each` sobre los tres
+   `AbortReason`, igualdad COMPLETA del `SettlementInstruction` del reembolso (con
+   `objectContaining` de tres campos, cambiar el `kind` del `REFUND` a `"REWARD"` dejaba la suite
+   verde y la clave del reembolso del ganador quedaba idéntica a la de su premio) y un `REFUND` de
+   cuatro entradas.
+4. **`entryOf` recibe el `matchId` pelado**, no la `config` entera: con la config adentro podría
+   leer los montos y el "cuánto" dejaría de decidirse en un solo lugar.
+5. **La superficie exporta también `NetworkMatchEvent`, `DominoMatchConfig` y `MatchState`**: el
+   primer parámetro de `settlementOf` ES un evento del catálogo, así que sin esos tipos el
+   consumidor puede pasar literales pero no declarar la variable ni escribir el `switch`.
+6. **Las claves de idempotencia se assertan como literal**, no recalculadas con el mismo
+   `JSON.stringify` del código bajo prueba.
+
 ### Task 3: Construir el cliente smoke contra el protocolo público
 
 **Files:**
@@ -1243,7 +1268,7 @@ import { playableSides } from "../features/match/core/engine/round/playable.js";
 import { boneyardCountOf } from "../features/match/core/engine/state-projections.js";
 import { MatchState } from "../features/match/core/state/index.js";
 import type { BoardSide } from "../features/match/core/state/tile.js";
-import { settlementOf } from "../features/match/network/settlement.js";
+import { settlementOf } from "../features/match/index.js";
 import {
   type DominoRoomOptions,
   configOf,
@@ -1380,6 +1405,11 @@ function assertSettlements(
   const winnerId = state.players.find(({ teamId }) => teamId === winnerTeamId)?.playerId;
   const winner = config.seats.find(({ playerId }) => playerId === winnerId);
   assert.ok(winner, "config sin asiento ganador");
+  // La clave va como LITERAL. Recalcularla acá con el mismo `JSON.stringify` que usa
+  // `settlementOf` mide que dos expresiones idénticas dan lo mismo —una tautología—: si
+  // mañana el código serializa distinto, esta aserción lo acompaña sin ponerse roja. El
+  // smoke verifica las PROPIEDADES del pago (quién, cuánto, en qué moneda) y el formato
+  // exacto de la clave, que es la única defensa del pagador contra el pago doble.
   assert.deepEqual(reward, {
     matchId: config.matchId,
     rateId: config.rateId,
@@ -1390,12 +1420,7 @@ function assertSettlements(
         userUuid: winner.userUuid,
         currency: winner.currency,
         amountUcMinor: config.prizeUcMinor,
-        idempotencyKey: JSON.stringify([
-          config.matchId,
-          "REWARD",
-          winner.platformId,
-          winner.userUuid,
-        ]),
+        idempotencyKey: `["${config.matchId}","REWARD","${winner.platformId}","${winner.userUuid}"]`,
       },
     ],
   });
@@ -1931,7 +1956,13 @@ El incremento se cierra únicamente si se cumplen juntos:
 - `(platformId, userUuid)` autentica y localiza el asiento; UUID iguales entre plataformas no colisionan.
 - El estado servidor conserva perfil/moneda, pero el wire solo entrega presentación e id opaco.
 - `currency`, `rateId`, `entryFeeUcMinor` y `prizeUcMinor` no tienen ninguna ruta de mutación posterior a `configOf`.
-- `settlementOf` devuelve la misma pareja y moneda para premio/reembolso y rechaza el ganador 2P ambiguo.
+- `settlementOf` devuelve la misma pareja y moneda para premio/reembolso, rechaza el ganador 2P ambiguo y rechaza el estado que no es de la mesa del snapshot.
+- ⚠ **Deuda que este incremento NO cierra: el 4P.** `configOf` acepta cuatro participantes y
+  `settlementOf` lanza contra cualquier final de mesa de cuatro, porque no existe la regla escrita
+  de cómo se parte el premio entre compañeros. Hoy es inofensivo —nadie liquida—; el día que exista
+  el orquestador, ese throw cae DESPUÉS del veredicto y esa mesa se queda sin premio (tiró) y sin
+  reembolso (hubo desenlace): plata trabada. Abrir el 4P empieza por la regla del reparto, no por
+  borrar la guarda. Está escrito también en `configOf` y en `network/settlement.ts`.
 - `npm run typecheck`, suite, lint, build y depcruise pasan.
 - `RUN_ENGINE_SMOKE=1 npm run test:deploy` termina una partida real y limpia el stack.
 - CI ejecuta ese smoke antes de empaquetar.

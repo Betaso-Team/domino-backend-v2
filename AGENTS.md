@@ -170,8 +170,11 @@ Autoridad operativa:
 Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
-Estado: **Tarea 2 completa**; baseline **350 tests / 50 archivos**; siguiente:
-**Task 3, Step 1**.
+Estado: **Tareas 1 y 2 completas y revisadas** (`b930b75`…`ce8a895` la 1; `d3617cb`, `8239ca1`,
+`0339dca`, `a55fa53` la 2); baseline **356 tests / 50 archivos**; siguiente: **Task 3, Step 1**
+—el cliente smoke, que consume `settlementOf`—. **Acá se paró el incremento**: de la Task 3 en
+adelante no se ejecutó nada, y las dos correcciones que la revisión ya le encontró al plan de esa
+tarea están aplicadas al texto del plan y anotadas en la tabla de defectos.
 La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
 queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
 `*UcMinor` son enteros seguros: los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
@@ -221,6 +224,28 @@ Lo que dejó la Tarea 2:
   y sin esa regla repartirlo es inventarla al liquidar. **Si alguna vez se liquida una mesa de
   cuatro, esta guarda es el primer lugar que hay que tocar** —y hay que traer la regla, no
   borrarla—.
+- **`assertSameTable` corre ANTES de cualquier instrucción, y es la guarda menos obvia del
+  archivo.** Como los `playerId` son posicionales, `seat-1` existe en todas las mesas: cruzar el
+  estado de una con el snapshot de otra **no** da cero ganadores ni dos —que harían ruido—, da
+  exactamente UNO, y emite una instrucción impecable que le paga a alguien que no jugó esa
+  partida. Compara forma (largo y pertenencia) y **nombra el desajuste, no el conteo de
+  ganadores**. Lo que NO puede ver, y está escrito: dos mesas del mismo tamaño son
+  indistinguibles, porque `MatchState` no lleva `matchId`. El día que lo lleve, la función se
+  vuelve exacta con una línea.
+- **El `switch` es exhaustivo con `never` en el default, y eso es el gate.** Un evento de
+  plataforma nuevo que también devuelva plata —una cancelación, una expulsión por fraude—
+  compilaría contra un `if`, devolvería `undefined`, y nadie cobraría sin una línea roja.
+- **La superficie exporta los tipos de los tres parámetros** (`NetworkMatchEvent`,
+  `DominoMatchConfig`, `MatchState`, los tres como tipo): una firma cuyos parámetros no se pueden
+  nombrar obliga a importar hondo, que es lo que la Regla 4 evita. **El smoke de la Task 3 tiene
+  que importar de `features/match/index.js`**, no de `network/settlement.js`.
+- **Las claves de idempotencia se assertan como literal** (`'["money-1","REWARD","betaso","same"]'`)
+  y no recalculadas con el mismo `JSON.stringify` del código: recalcularlas mide que dos
+  expresiones idénticas dan lo mismo, y acompaña cualquier cambio de formato sin ponerse roja.
+- **Las guardas están medidas por mutación, no por argumento.** Se verificó a mano que sacar
+  `assertSameTable`, cambiar el `kind` del `REFUND` a `"REWARD"` y suprimir el reembolso de
+  `NEVER_STARTED` rompen cada uno su test y ningún otro. Es el método que conviene repetir acá: en
+  este archivo, un test que no se pone rojo al mutar la línea que dice medir es plata sin custodia.
 
 ⚠ **Compatibilidad de schema — ruptura de wire, y no hay negociación de versión en el repo.** Los
 tres campos sincronizados nuevos (`displayName`, `username`, `profilePicture`) se insertaron
@@ -233,10 +258,28 @@ no se pueda, los campos nuevos van al FINAL en vez de al medio.
 Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y primer paso pendiente.
 No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.
 
-**Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
-inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
-está en el recuadro ⛔ de la Tarea 22 y junto al propio `unlock()`: **si tocás `maxClients`, leelo
-y agregá el test antes de cambiarlo.**
+**Si retomás por la Task 3**, leé antes el bloque «Lo que la revisión agregó» al final de la Task 2
+del plan: los snippets de esa tarea NO son el código que quedó, y el smoke se escribe contra lo que
+quedó.
+
+**Deudas abiertas — NO CUMPLIDAS:**
+
+1. El `unlock()` de `onDrop` no tiene test y es inalcanzable bajo el
+   `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva está en el recuadro
+   ⛔ de la Tarea 22 y junto al propio `unlock()`: **si tocás `maxClients`, leelo y agregá el test
+   antes de cambiarlo.**
+2. **El 4P no tiene regla de reparto del premio.** `configOf` acepta cuatro participantes y
+   `settlementOf` lanza contra cualquier final de mesa de cuatro. Hoy es inofensivo porque nadie
+   liquida; con el orquestador puesto, ese throw cae DESPUÉS del veredicto y la mesa se queda sin
+   premio (tiró) y sin reembolso (hubo desenlace): **plata trabada**. Escrito en tres lugares a
+   propósito —`configOf`, `network/settlement.ts` y el Criterio de cierre del plan—, porque el que
+   abra el 4P va a llegar por cualquiera de los tres. Empieza por la regla, no por borrar la guarda.
+3. **No existe el orquestador que cobre.** `settlementOf` es una proyección pura y exportada, y
+   nadie la llama todavía fuera de su test: no hay puerto de wallet, ni adaptador remoto, ni
+   outbox, **y es deliberado** (el plan lo dice en su Mapa de archivos). Diseñar el puerto sin un
+   consumidor es diseñarlo dos veces. Lo que falta para que el dinero se mueva de verdad —entrega
+   al menos una vez, reintentos, quién persiste la instrucción— **no está resuelto en ningún
+   lado**: es el incremento siguiente, no una omisión de éste.
 
 ## Cómo se ejecuta una tarea
 
@@ -297,6 +340,8 @@ Y del plan del incremento activo (`2026-09-14-identidad-multiplataforma-y-smoke-
 | 1 | El séptimo, de la revisión: el snippet del Step 6 leía `payload.platformId` sin estrechar `string \| jwt.JwtPayload` (TS2339) y lanzaba `new InvalidTokenError()` sin argumento contra la firma que ese mismo Step dice conservar (TS2554) | el `fix:` de la revisión |
 | 1 | Y el octavo, encontrado al escribir el test que pinea el cableado: desde que `configOf` valida, `onCreate` puede lanzar ANTES de que `this.log` exista, así que `crash()` moría con «Cannot read properties of undefined (reading 'error')» en vez de nombrar el campo inválido — y después lanzaba otra vez adentro del manejador, porque Colyseus rechaza `disconnect()` durante `onCreate` | el `fix:` de la revisión |
 | 2 | Uno solo, y del lado del TEST: el `it` «rechaza un ganador imposible» solo armaba el caso de CERO ganadores, así que con el guard mutado a `winners.length === 0` los tres tests seguían verdes mientras el 4P —que `configOf` ya acepta— pagaba el premio entero a cada ganador. Se descubrió mutando el guard a mano; el cuarto `it` es el que mide esa rama | `8239ca1` + el `docs:` siguiente |
+| 2 | Y los de la revisión, todos por lo mismo —el plan trata al tercer parámetro como si no pudiera estar mal—: `settlementOf(evento, estadoDeOtraMesa, config)` no da 0 ni 2 ganadores sino **exactamente 1**, porque los `seat-N` son posicionales, y paga una instrucción impecable a quien no jugó; el `if (type !== "MATCH_RESOLVED")` de salida acepta en silencio cualquier evento de plata futuro; el `objectContaining` del `REFUND` dejaba pasar el `kind` cambiado a `"REWARD"` (medido: suite verde); los tres `AbortReason` y el reembolso de cuatro entradas no los medía nadie; y la superficie exportaba la función sin los tipos de sus parámetros | `a55fa53` + este `docs:` |
+| 3 | **No ejecutada**, pero la revisión le encontró dos y quedan corregidas en el texto: el smoke importa `settlementOf` con un import PROFUNDO (`network/settlement.js`), salteándose la superficie que la Task 2 acaba de construir —y `depcruise` no lo ve, porque `feature-boundary` solo mira aristas que SALEN de `src/features/`, y el smoke no vive ahí—; y `assertSettlements` recalcula la `idempotencyKey` con el mismo `JSON.stringify` del código bajo prueba, o sea una aserción tautológica que acompañaría cualquier cambio de formato sin ponerse roja | este `docs:` |
 
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 
