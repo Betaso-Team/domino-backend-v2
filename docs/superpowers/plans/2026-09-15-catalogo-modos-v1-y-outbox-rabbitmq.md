@@ -560,7 +560,13 @@ Mockear `amqplib` y medir que `publishTopic("betaso","game_mode.updated",payload
 - rechaza si el callback trae error o `channel.publish()` devuelve `false`;
 - limpia el canal al recibir `close`/`error` y lo reabre después;
 - `ping()` abre el canal sin publicar;
-- `close()` tolera conexión ya cerrada.
+- `close()` tolera conexión ya cerrada;
+- `close()` alcanza también a la conexión que estaba EN VUELO (ver el Step 4).
+
+Los dos dobles —conexión y canal— tienen que ser `EventEmitter` **de verdad** y no objetos con un
+`on: vi.fn()`. Un `emit("error")` sobre un emisor sin oyentes lanza, así que es lo único que puede
+poner roja la falta del oyente de `error` de la conexión; con un `on` de mentira esa falla es
+invisible en la suite y aparece en producción como un proceso que se cae.
 
 - [ ] **Step 3: ejecutar el rojo**
 
@@ -589,6 +595,34 @@ export class AmqpPublisher implements AmqpDelivery {
 
 Portar de Truco v2 la conexión lazy, `RecoveringChannelModel`, confirm channel y manejo de cierre.
 No portar `publishPattern`: este incremento tiene un solo consumidor real y publica a topic exchange.
+`AmqpDeliveryError` recibe la causa por constructor, como en truco: el error es neutro pero no ciego.
+
+⚠ **Tres correcciones al "portar de truco", medidas sobre la `amqplib` 2.0.1 instalada.** Copiar ese
+archivo tal cual deja dos defectos vivos y no se nota en ninguna aserción:
+
+1. **La conexión se REUSA al soltar el canal; sólo el canal se reabre.** Truco, al soltar el canal,
+   vuelve a llamar `connect()`. Con `recovery: true` eso devuelve un `RecoveringChannelModel` que se
+   reconecta SOLO y sin plazo de renuncia (`maxRetries: Infinity`,
+   `node_modules/amqplib/lib/recovery.js:7`), y sus canales se piden sobre el MODELO y no sobre el
+   socket: volver a conectar abandona un modelo que igual sigue reintentando para siempre, o sea un
+   zombi por cada caída del broker. La memoización tiene que ser de dos piezas separadas —conexión y
+   canal—, y el test lo pinea con `connect` en 1 y `createConfirmChannel` en 2.
+2. **Hay que escuchar `error` en la CONEXIÓN, no sólo en el canal.** `RecoveringChannelModel` es un
+   `EventEmitter` y reemite el `error` del modelo de abajo (`lib/recovery.js:221`), y Node LANZA
+   cuando un evento `error` no tiene a quién ir. Sin ese oyente, un broker que rechaza las
+   credenciales tumba el servidor entero con todas sus partidas en curso. No se suelta la conexión
+   ahí: la recuperación de la librería sigue su curso y el canal ya se suelta por su propio `close`.
+3. **`close()` tiene que esperar el intento de conexión EN VUELO** antes de soltar las referencias.
+   Sin eso, un apagado disparado mientras una entrega está conectando deja el socket abriéndose
+   DESPUÉS del cierre y sin nadie que lo cierre —y con `recovery: true` ese modelo reintenta para
+   siempre—, así que el proceso no termina de salir nunca.
+
+Lo que el `node_modules` sí confirma del plan: `amqplib@2` trae sus propios tipos (`index.d.ts`), así
+que **no hace falta `@types/amqplib`**; `connect(url, {recovery: true})` devuelve
+`RecoveringChannelModel` y `connect(url)` a secas devuelve `ChannelModel`; `ConfirmChannel.publish`
+sigue siendo `(exchange, key, content, options, callback)` y devuelve `boolean`; y el `close` del
+canal no cuelga a nadie —el confirm channel resuelve sus callbacks pendientes con un
+`Error('channel closed')` (`lib/channel.js:36-43`)— así que no hay confirm que espere para siempre.
 
 - [ ] **Step 5: verde y commit**
 

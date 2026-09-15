@@ -322,11 +322,51 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3, 4 y 5 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`).
-Baseline **441 tests / 58 archivos**, con `typecheck`, suite, lint, `format` y `depcruise`
-(**185 módulos / 687 dependencias**) en verde. Primer paso pendiente: **Tarea 6, escribir el rojo del
-publicador AMQP con confirms en `src/shared/amqp.test.ts`**.
+Estado: **Tareas 1, 2, 3, 4, 5 y 6 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
+`348f527`+`93809c1`, `3be878f`).
+Baseline **457 tests / 59 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
+(**189 módulos / 694 dependencias**) en verde. Primer paso pendiente: **Tarea 7, escribir el rojo de
+durabilidad e idempotencia del outbox en `src/features/game-mode/outbox.test.ts`**.
+
+Lo que dejó la Tarea 6:
+
+- **`publishTopic` RESUELVE SÓLO DESPUÉS DEL CONFIRM del broker, y es la razón entera de usar un
+  confirm channel.** El dispatcher de la Tarea 7 marca `SENT` cuando esa promesa resuelve, y
+  `channel.publish()` sólo dice "lo puse en el buffer de salida": resolver ahí marcaría como
+  entregado un mensaje que el broker nunca tomó, y el evento se pierde **sin rastro y sin reintento**.
+  v1 abre un confirm channel y **nunca espera los confirms**.
+- **`publish() === false` se RECHAZA aunque sea contrapresión** (buffer de salida lleno) y no un
+  fallo. El mensaje puede terminar saliendo, pero quien espera no tiene cómo enterarse: darlo por
+  bueno es el mismo evento perdido. El outbox reintenta y la entrega es al menos una vez por diseño,
+  así que un duplicado es el costo correcto.
+- **La conexión se REUSA al soltar el canal, y es lo que este archivo decide distinto que truco.**
+  `connect(url, {recovery:true})` devuelve un `RecoveringChannelModel` que se reconecta solo y sin
+  plazo de renuncia (`maxRetries: Infinity`, `node_modules/amqplib/lib/recovery.js:7`), y sus canales
+  se piden sobre el MODELO. Truco vuelve a llamar `connect()` al soltar el canal: eso abandona un
+  modelo que igual sigue reintentando para siempre, **un zombi por cada caída del broker**. Acá se
+  memoizan por separado conexión y canal.
+- **SE ESCUCHA `error` EN LA CONEXIÓN, no sólo en el canal, y sin eso el proceso se cae.**
+  `RecoveringChannelModel` es un `EventEmitter` y reemite el `error` del modelo de abajo
+  (`lib/recovery.js:221`); Node LANZA cuando un `error` no tiene a quién ir, así que un broker que
+  rechaza las credenciales tumba el servidor con todas sus partidas en curso. **Por eso los dos
+  dobles del test son `EventEmitter` de verdad** y no objetos con un `on: vi.fn()`: es lo único que
+  puede poner roja esa falta.
+- **`close()` espera el intento de conexión EN VUELO** antes de soltar las referencias, y tolera la
+  conexión ya cerrada. Lo primero evita que un apagado disparado durante una entrega deje el socket
+  abriéndose después del cierre —con `recovery: true` ese modelo reintenta para siempre y el proceso
+  no termina de salir—; lo segundo es la lección de cerrar Redis dos veces.
+- **`ping()` abre el canal y NO publica.** Su llamador es la sonda de LISTO, que corre en cada chequeo
+  del balanceador: una sonda que publicara emitiría un evento de catálogo por chequeo.
+- **No se portó `publishPattern`.** El envoltorio `{pattern,data,id}` es del camino de COLA de v1, que
+  lo consume un `@EventPattern` de NestJS; el exchange `betaso` lleva el cuerpo CRUDO
+  (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts:49-68`), y mezclarlos produce un mensaje
+  que nadie consume, en silencio.
+- **`amqplib@2` trae sus propios tipos**: no hay `@types/amqplib` que instalar. Y el `close` del canal
+  no cuelga a nadie —resuelve sus callbacks pendientes con un `Error('channel closed')`,
+  `lib/channel.js:36-43`—, así que no hay confirm esperando para siempre tras una caída.
+- **Catorce mutaciones verificadas a mano**, cada una roja en su test y en ningún otro. La que decidió
+  el diseño del test: lanzar las dos publicaciones EN EL MISMO TURNO. Esperar a que la primera
+  termine deja pasar verde a un publicador sin memoización, que es justo lo que el archivo prohíbe.
 
 Lo que dejó la Tarea 5:
 
@@ -531,6 +571,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 6 | Tres, y los tres del «portar de truco» contra la `amqplib` 2.0.1 instalada: reconectar entero al soltar el canal abandona un `RecoveringChannelModel` que sigue reintentando para siempre (un zombi por caída del broker); nadie escucha `error` en la CONEXIÓN, y un `error` sin oyente **tumba el proceso** en Node; y `close()` no espera el intento en vuelo, así que un apagado durante una entrega deja el socket abriéndose después del cierre. El Step 2 tampoco pedía que los dobles fueran `EventEmitter` de verdad, que es lo único que pone roja la segunda | `3be878f` + este `docs:` |
 | 5 | Uno, y de los que se cobran dos tareas después: falta el lease DE MEMORIA y no tiene archivo. La Tarea 8 pide "repositorio/outbox/lease en memoria" y la 11 "registrar repository/outbox/lease de memoria sin URI", pero ninguna de las dos crea un archivo donde pueda vivir y la lista `Files:` de la 5 tiene dos. Va junto al puerto en `src/shared/mongo-lease.ts`, por el criterio de `src/shared/kv.ts` | `348f527` + este `docs:` |
 | 4 | Tres: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores, y cuatro archivos sueltos producen justo la deriva que el propio Step 3 dice evitar (`MemoryGameModeRepository` no es un doble); el snippet de los índices los asertaba como pares `[clave, opciones]`, que es la forma de `createIndex` y no la de `createIndexes`, que el mismo Step pide; y «update que no borra campos omitidos» no alcanza —medido por mutación: un `$set: { ...input }` crudo pasa verde, y la forma que de verdad llega desde las rutas de v1 es el `undefined` EXPLÍCITO— | `ce54f9e` + este `docs:` |
 | 3 | Uno, y de los que rompen en silencio del OTRO lado: ni el plan ni la spec decían si el `id` del payload Rabbit es el `uuid` o el hex del `_id` —la entidad tiene los dos y §9.1 sólo declara `id: string`—. Lo resolvió el v1 productivo (`game-mode.publisher.ts:43`, `id: mode.uuid`), no el nombre del campo. El fixture del test lleva los dos identificadores distintos para que la aserción mida el mapeo | `ec63d71` + este `docs:` |
