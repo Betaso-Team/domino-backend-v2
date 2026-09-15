@@ -289,6 +289,14 @@ quedó.
    al menos una vez, reintentos, quién persiste la instrucción— **no está resuelto en ningún
    lado**: es el incremento siguiente, no una omisión de éste.
 
+## Incremento activo — lobby operativo y montos públicos
+
+Autoridad operativa:
+`docs/superpowers/plans/2026-09-14-lobby-y-montos-publicos.md`.
+
+Estado: **Tarea 0 completa; Tarea 1 pendiente**. Se porta el contrato de lobby del dominó v1 y se recuperan los nombres
+públicos `entryFee`/`prize`; no se añade matchmaking ni catálogo.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
