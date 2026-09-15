@@ -4,7 +4,9 @@ import { configOf } from "./match-contract.js";
 // LA ÚNICA FRONTERA que valida lo que matchmaking manda, y la que traduce la identidad
 // externa —la pareja `{ platformId, userUuid }`— al id opaco con el que el motor juega.
 // Todo lo que este test afirma es dinero: la moneda ya cobrada, la tasa de la mesa y los
-// montos en enteros de UC (los dos últimos dígitos son decimales: `125 = 1,25 UC`).
+// montos en UC COMPLETAS (`entryFee: 125` son 125 UC, no 1,25). El catálogo de v1 guarda
+// UC enteras o con decimales, así que el contrato acepta cualquier número finito no
+// negativo y no escala nada.
 const valid = {
   mode: "CASUAL",
   matchId: "m1",
@@ -29,8 +31,8 @@ const valid = {
   pointsToWin: 100,
   teamAssignment: "SEAT_ORDER",
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-  entryFeeUcMinor: 125,
-  prizeUcMinor: 250,
+  entryFee: 125,
+  prize: 250,
 } as const;
 
 describe("configOf", () => {
@@ -41,12 +43,23 @@ describe("configOf", () => {
     ]);
   });
 
-  it("conserva moneda, rateId y enteros UC exactamente", () => {
+  it("conserva moneda, rateId y montos UC exactamente", () => {
     const config = configOf(valid);
     expect(config.rateId).toBe(valid.rateId);
-    expect(config.entryFeeUcMinor).toBe(125);
-    expect(config.prizeUcMinor).toBe(250);
+    expect(config.entryFee).toBe(125);
+    expect(config.prize).toBe(250);
     expect(config.seats.map(({ currency }) => currency)).toEqual(["VES", "USD"]);
+  });
+
+  // EL DECIMAL ES UN MONTO VÁLIDO, y este test es el que separa la convención de v1 de la
+  // que había acá: un modo productivo con `entryFee: 1.5` son UN UC Y MEDIO, no quince
+  // centésimos. Las aserciones van como LITERAL —`1.5`, no `valid.entryFee / 100`— porque
+  // recalcularlas con la escala del código acompañaría cualquier reintroducción del `* 100`
+  // sin ponerse roja, que es exactamente el defecto que esta tarea vino a sacar.
+  it("conserva los decimales finitos sin escalarlos", () => {
+    const config = configOf({ ...valid, entryFee: 1.5, prize: 2.75 });
+    expect(config.entryFee).toBe(1.5);
+    expect(config.prize).toBe(2.75);
   });
 
   // OTRO PRINCIPAL CUALQUIERA, para armar mesas de largo distinto del válido. Cada uno es una
@@ -70,9 +83,15 @@ describe("configOf", () => {
       "cinco participantes",
       { participants: [...valid.participants, extra(1), extra(2), extra(3)] },
     ],
-    ["UC fraccionaria", { entryFeeUcMinor: 12.5 }],
-    ["UC insegura", { prizeUcMinor: Number.MAX_SAFE_INTEGER + 1 }],
-    ["UC negativa", { prizeUcMinor: -1 }],
+    // LAS CUATRO PUERTAS QUE QUEDAN ABIERTAS cuando la fracción deja de ser un error.
+    // `NaN` e `Infinity` son montos que ningún pagador puede acreditar y que sobreviven a
+    // cualquier aritmética posterior contaminándola; el negativo es un cobro al revés; y el
+    // que se pasa del rango seguro es el que hace que dos montos distintos sean el mismo
+    // número.
+    ["UC no numérica", { entryFee: Number.NaN }],
+    ["UC infinita", { prize: Number.POSITIVE_INFINITY }],
+    ["UC insegura", { prize: Number.MAX_SAFE_INTEGER + 1 }],
+    ["UC negativa", { prize: -1 }],
     [
       "currency vacía",
       { participants: [{ ...valid.participants[0], currency: " " }, valid.participants[1]] },

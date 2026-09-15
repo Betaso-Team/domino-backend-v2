@@ -7,7 +7,7 @@ export interface PublicMatchConfig {
   readonly gameModeId: string;
   readonly seats: readonly string[];
   readonly pointsToWin: number;
-  /** Enteros UC con dos decimales implícitos (`125` = `1,25 UC`). */
+  /** UC completas, tal como las guarda el catálogo: `125` son 125 UC, y `1.5` es válido. */
   readonly entryFee: number;
   readonly prize: number;
 }
@@ -102,10 +102,10 @@ export class MatchRegistry {
       gameModeId: config.gameModeId,
       seats: config.seats.map(({ playerId }) => playerId),
       pointsToWin: config.pointsToWin,
-      // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO. El sufijo `UcMinor` pertenece
-      // al snapshot contable interno; el front ya conoce la escala y convierte desde UC.
-      entryFee: config.entryFeeUcMinor,
-      prize: config.prizeUcMinor,
+      // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot:
+      // el DTO público publica el mismo número que la mesa cobró, en UC completas.
+      entryFee: config.entryFee,
+      prize: config.prize,
     });
     this.seatsByRoomId.set(
       roomId,

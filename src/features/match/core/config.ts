@@ -52,12 +52,19 @@ export interface DominoMatchConfig {
    */
   readonly rateId: string;
   /**
-   * Lo COBRADO por asiento y el premio de la mesa, en UC menores: enteros seguros donde
-   * los dos últimos dígitos son decimales (`1234 = 12,34 UC`). Enteros y no flotantes
-   * porque `0.1 + 0.2` no es `0.3`, y acá el redondeo es plata de alguien.
+   * Lo COBRADO por asiento y el premio de la mesa, en UC COMPLETAS: `entryFee: 10` son
+   * diez UC, no diez centésimos. Es la convención del catálogo de v1, que es de donde
+   * salen estos dos números, y copiarla sin escalar es lo que impide que la mesa cobre
+   * cien veces de menos.
+   *
+   * SON NÚMEROS FINITOS NO NEGATIVOS Y PUEDEN TRAER DECIMALES (`1.5` es un UC y medio):
+   * un modo productivo los tiene así. Acá NO se hace aritmética con ellos —se copian a la
+   * instrucción de liquidación tal cual—, así que el `0.1 + 0.2` que justificaría enteros
+   * no ocurre en este repo: quien convierta a la moneda del jugador con el `rateId` es el
+   * que decide el redondeo, y es el único que puede decidirlo.
    */
-  readonly entryFeeUcMinor: number;
-  readonly prizeUcMinor: number;
+  readonly entryFee: number;
+  readonly prize: number;
 }
 
 /** Los ids OPACOS de la mesa, en orden de asiento. Es lo único que el motor consume. */

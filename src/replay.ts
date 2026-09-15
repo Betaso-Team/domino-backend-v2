@@ -130,8 +130,8 @@ const options: DominoRoomOptions = {
   pointsToWin,
   teamAssignment,
   rateId: "00000000-0000-4000-8000-000000000000",
-  entryFeeUcMinor: 0,
-  prizeUcMinor: 0,
+  entryFee: 0,
+  prize: 0,
 };
 
 logger.info("rebobinando", { matchId, entries: entries.length });

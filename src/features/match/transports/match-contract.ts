@@ -25,15 +25,19 @@ const nonBlank = z.string().refine((value) => value.trim().length > 0, "no puede
 // dinero que ya se movió. Lo mismo vale para el perfil, que es presentación.
 const identityPart = nonBlank.transform((value) => value.trim());
 
-// LOS MONTOS SON ENTEROS SEGUROS, sin excepción. `Number.isSafeInteger` cierra las tres
-// puertas de un solo golpe: la fracción (`12.5` de UC no existe, los centésimos ya son la
-// unidad), el desborde de la mantisa —donde dos montos distintos son el mismo número— y
-// los no-finitos. El negativo va aparte porque es entero seguro y aun así es un cobro al
-// revés.
-const ucMinor = z
-  .number()
-  .refine(Number.isSafeInteger, "debe ser un entero seguro")
-  .refine((value) => value >= 0, "no puede ser negativo");
+// LOS MONTOS SON UC COMPLETAS Y ADMITEN DECIMALES. `entryFee: 10` son diez UC: es la
+// convención del catálogo de v1, de donde salen estos números, y un modo productivo puede
+// tener `1.5`. Rechazar la fracción —como hacía `Number.isSafeInteger`— obligaría a
+// escalar por 100 en la frontera, y el factor sobreviviría en una sola de las dos puntas
+// el día que alguien lo toque.
+//
+// Lo que se sigue cerrando es todo lo demás, y cada refine cubre un fallo distinto:
+// `.finite()` saca `NaN` e `Infinity` —montos que nadie puede acreditar y que contaminan
+// cualquier aritmética posterior—, `.nonnegative()` saca el cobro al revés, y el techo del
+// entero seguro saca el desborde de la mantisa, donde dos montos distintos son el mismo
+// número. No se expresa con `.safe()` porque en zod 4 `.safe()` IMPLICA entero y rechazaría
+// `1.5`, que es justo lo que esta frontera vino a aceptar (medido sobre la 4.6.1 instalada).
+const ucAmount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
 const participant = z.strictObject({
   platformId: identityPart,
@@ -64,8 +68,8 @@ const roomOptions = z
     pointsToWin: z.number().int().positive().safe(),
     teamAssignment: z.enum(["SHUFFLED", "SEAT_ORDER"]),
     rateId: z.uuid(),
-    entryFeeUcMinor: ucMinor,
-    prizeUcMinor: ucMinor,
+    entryFee: ucAmount,
+    prize: ucAmount,
   })
   .superRefine(({ participants }, context) => {
     // Una mesa impar no tiene parejas: `assignTeams` repartiría un equipo con un jugador
@@ -121,7 +125,7 @@ export function configOf(input: unknown): DominoMatchConfig {
     // anti-fraude, no una opción que matchmaking pueda omitir por accidente.
     isDealWindowEnabled: true,
     rateId: options.rateId,
-    entryFeeUcMinor: options.entryFeeUcMinor,
-    prizeUcMinor: options.prizeUcMinor,
+    entryFee: options.entryFee,
+    prize: options.prize,
   };
 }

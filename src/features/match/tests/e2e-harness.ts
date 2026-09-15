@@ -56,8 +56,8 @@ export function casualTable(
     pointsToWin: 100,
     teamAssignment: "SHUFFLED",
     rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-    entryFeeUcMinor: 125,
-    prizeUcMinor: 250,
+    entryFee: 125,
+    prize: 250,
   };
 }
 

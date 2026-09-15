@@ -38,8 +38,8 @@ const OPTIONS = {
   pointsToWin: 30,
   teamAssignment: "SEAT_ORDER",
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-  entryFeeUcMinor: 125,
-  prizeUcMinor: 250,
+  entryFee: 125,
+  prize: 250,
 } satisfies DominoRoomOptions;
 
 type SmokeRoom = Room<unknown, MatchState>;
@@ -164,7 +164,7 @@ function assertSettlements(
         platformId: winner.platformId,
         userUuid: winner.userUuid,
         currency: winner.currency,
-        amountUcMinor: config.prizeUcMinor,
+        amount: config.prize,
         idempotencyKey: `["${config.matchId}","REWARD","${winner.platformId}","${winner.userUuid}"]`,
       },
     ],
@@ -177,14 +177,14 @@ function assertSettlements(
   );
   assert.equal(refund?.kind, "REFUND");
   assert.deepEqual(
-    refund?.entries.map(({ platformId, currency, amountUcMinor }) => ({
+    refund?.entries.map(({ platformId, currency, amount }) => ({
       platformId,
       currency,
-      amountUcMinor,
+      amount,
     })),
     [
-      { platformId: "betaso", currency: "VES", amountUcMinor: 125 },
-      { platformId: "partner", currency: "USD", amountUcMinor: 125 },
+      { platformId: "betaso", currency: "VES", amount: 125 },
+      { platformId: "partner", currency: "USD", amount: 125 },
     ],
   );
 }

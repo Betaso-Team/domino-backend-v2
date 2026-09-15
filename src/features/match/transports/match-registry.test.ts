@@ -22,8 +22,8 @@ const roomOptions = {
   pointsToWin: 100,
   teamAssignment: "SHUFFLED",
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-  entryFeeUcMinor: 125,
-  prizeUcMinor: 250,
+  entryFee: 125,
+  prize: 250,
 } as const;
 
 const config = configOf(roomOptions);
@@ -182,25 +182,20 @@ describe("MatchRegistry", () => {
     expect(await registry.matchOf({ platformId: "third", userUuid: "same" })).toBeUndefined();
   });
 
-  // `entryFee` y `prize` son los dos montos PÚBLICOS en UC menores. Lo privado sigue siendo
-  // cómo se cobró a cada asiento: identidad, moneda y tasa. También se fijan los NOMBRES del
-  // wire para que el front no herede los sufijos contables internos de v2.
-  it("publica los montos UC sin identidad, moneda, tasa ni nombres internos", async () => {
+  // `entryFee` y `prize` son los dos montos PÚBLICOS, en las mismas UC completas que el
+  // snapshot. Lo privado sigue siendo cómo se cobró a cada asiento: identidad, moneda y
+  // tasa. Desde que el snapshot dejó los sufijos `*UcMinor`, el nombre del wire y el del
+  // campo interno son el mismo, así que acá ya no hay un nombre interno que filtrar: lo que
+  // se sigue midiendo es que el VALOR salga sin escalar y que la allowlist no deje pasar
+  // nada más.
+  it("publica los montos UC sin identidad, moneda ni tasa", async () => {
     const store = new MemoryKeyValueStore();
     const registry = new MatchRegistry(store);
     await registry.register("room-1", collidingConfig);
     const raw = await store.get("match_config:room-1");
 
     expect(raw).toBeDefined();
-    for (const secret of [
-      "betaso",
-      "partner",
-      "VES",
-      "USD",
-      collidingConfig.rateId,
-      "entryFeeUcMinor",
-      "prizeUcMinor",
-    ]) {
+    for (const secret of ["betaso", "partner", "VES", "USD", collidingConfig.rateId]) {
       expect(raw).not.toContain(secret);
     }
     expect(JSON.parse(raw ?? "{}")).toMatchObject({ entryFee: 125, prize: 250 });

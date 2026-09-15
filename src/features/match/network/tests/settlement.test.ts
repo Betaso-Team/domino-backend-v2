@@ -16,8 +16,8 @@ const options = {
   pointsToWin: 100,
   teamAssignment: "SEAT_ORDER",
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-  entryFeeUcMinor: 125,
-  prizeUcMinor: 250,
+  entryFee: 125,
+  prize: 250,
 } as const;
 
 // La mesa de CUATRO, que `configOf` acepta sin objeción. Sirve para dos cosas distintas: el
@@ -57,14 +57,14 @@ const refundOfMoney1 = {
       platformId: "betaso",
       userUuid: "same",
       currency: "VES",
-      amountUcMinor: 125,
+      amount: 125,
       idempotencyKey: refundKeys[0],
     },
     {
       platformId: "partner",
       userUuid: "same",
       currency: "USD",
-      amountUcMinor: 125,
+      amount: 125,
       idempotencyKey: refundKeys[1],
     },
   ],
@@ -87,7 +87,7 @@ describe("settlementOf", () => {
           platformId: "betaso",
           userUuid: "same",
           currency: "VES",
-          amountUcMinor: 250,
+          amount: 250,
           idempotencyKey: rewardKey,
         },
       ],
@@ -126,28 +126,28 @@ describe("settlementOf", () => {
           platformId: "betaso",
           userUuid: "u1",
           currency: "VES",
-          amountUcMinor: 125,
+          amount: 125,
           idempotencyKey: '["money-4p","REFUND","betaso","u1"]',
         },
         {
           platformId: "betaso",
           userUuid: "u2",
           currency: "VES",
-          amountUcMinor: 125,
+          amount: 125,
           idempotencyKey: '["money-4p","REFUND","betaso","u2"]',
         },
         {
           platformId: "partner",
           userUuid: "u3",
           currency: "USD",
-          amountUcMinor: 125,
+          amount: 125,
           idempotencyKey: '["money-4p","REFUND","partner","u3"]',
         },
         {
           platformId: "partner",
           userUuid: "u4",
           currency: "COP",
-          amountUcMinor: 125,
+          amount: 125,
           idempotencyKey: '["money-4p","REFUND","partner","u4"]',
         },
       ],
@@ -227,16 +227,50 @@ describe("settlementOf", () => {
     ).toThrow(/seat-1 es \["betaso","ada"\] en el estado y \["betaso","same"\] en el snapshot/);
   });
 
+  // EL DECIMAL LLEGA ENTERO HASTA LA INSTRUCCIÓN, y es la mitad de esta tarea que un
+  // renombre no alcanza a probar. Los montos son UC COMPLETAS: una mesa de `1.5` reembolsa
+  // `1.5` y paga `2.75`, sin un `* 100` en el medio. Los números van como LITERAL y no
+  // leídos de `config.entryFee`: recalcularlos con el mismo campo que la implementación
+  // copia mediría que dos lecturas del mismo dato coinciden, y seguiría verde el día que
+  // alguien reintroduzca la escala en los dos lados a la vez.
+  it("proyecta las UC decimales tal cual, sin escalarlas", () => {
+    const decimalTable = configOf({
+      ...options,
+      matchId: "money-dec",
+      participants: [
+        { platformId: "betaso", userUuid: "u1", displayName: "Ada", currency: "VES" },
+        { platformId: "partner", userUuid: "u2", displayName: "Lin", currency: "USD" },
+      ],
+      entryFee: 1.5,
+      prize: 2.75,
+    });
+    const match = createMatchState(decimalTable);
+    const winnerTeamId = match.players[0]?.teamId as "A" | "B";
+
+    expect(
+      settlementOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, match, decimalTable),
+    ).toMatchObject({
+      kind: "REFUND",
+      entries: [
+        { platformId: "betaso", userUuid: "u1", currency: "VES", amount: 1.5 },
+        { platformId: "partner", userUuid: "u2", currency: "USD", amount: 1.5 },
+      ],
+    });
+    expect(
+      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, decimalTable),
+    ).toMatchObject({ kind: "REWARD", entries: [{ amount: 2.75 }] });
+  });
+
   // La mesa GRATIS emite igual, con sus entradas en cero: es la decisión escrita en
   // `settlement.ts`, y sin test alguien la "optimiza" y deja a una liquidación sin rastro.
   it("emite el reembolso de una mesa gratis con las entradas en cero", () => {
-    const free = configOf({ ...options, matchId: "money-free", entryFeeUcMinor: 0 });
+    const free = configOf({ ...options, matchId: "money-free", entryFee: 0 });
     const result = settlementOf(
       { type: "MATCH_ABORTED", reason: "NEVER_STARTED" },
       createMatchState(free),
       free,
     );
     expect(result?.kind).toBe("REFUND");
-    expect(result?.entries.map(({ amountUcMinor }) => amountUcMinor)).toEqual([0, 0]);
+    expect(result?.entries.map(({ amount }) => amount)).toEqual([0, 0]);
   });
 });

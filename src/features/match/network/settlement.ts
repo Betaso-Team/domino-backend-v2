@@ -20,12 +20,13 @@ export type SettlementKind = "REWARD" | "REFUND";
  * resolver una billetera, y `seat-1` no nombra a nadie afuera de esta mesa.
  *
  * ⚠ `currency` ES LA MONEDA EN QUE SE COBRÓ, NO LA UNIDAD DEL MONTO, y confundirlas es la
- * ambigüedad más cara que puede tener este tipo. `amountUcMinor` está SIEMPRE en UC
- * menores —la unidad interna, dos decimales—, así que
- * `{ currency: "VES", amountUcMinor: 250 }` **no** son 250 céntimos de bolívar: son 2,50 UC
- * que este jugador pagó en VES y que en VES tiene que cobrar. Lo que traduce una cosa en la
- * otra es el `rateId` de la instrucción, y la traducción es del que PAGA: acá no se
- * convierte nada, porque convertir dos veces con dos tasas da dos pagos distintos.
+ * ambigüedad más cara que puede tener este tipo. `amount` está SIEMPRE en UC COMPLETAS —la
+ * unidad interna, la misma que guarda el catálogo—, así que
+ * `{ currency: "VES", amount: 250 }` **no** son 250 bolívares: son 250 UC que este jugador
+ * pagó en VES y que en VES tiene que cobrar. Lo que traduce una cosa en la otra es el
+ * `rateId` de la instrucción, y la traducción es del que PAGA: acá no se convierte nada,
+ * porque convertir dos veces con dos tasas da dos pagos distintos —y el redondeo a los
+ * centavos de esa moneda también es del que paga, por lo mismo—.
  *
  * `idempotencyKey` se SERIALIZA con `JSON.stringify` en vez de concatenarse, por el mismo
  * motivo que el índice del registro: `["m","a:b"]` y `["m:a","b"]` no pueden colisionar, y
@@ -33,7 +34,7 @@ export type SettlementKind = "REWARD" | "REFUND";
  */
 export interface SettlementEntry extends PlayerRef {
   readonly currency: string;
-  readonly amountUcMinor: number;
+  readonly amount: number;
   readonly idempotencyKey: string;
 }
 
@@ -45,19 +46,19 @@ export interface SettlementInstruction {
 }
 
 // Recibe el `matchId` pelado y no la `config` entera A PROPÓSITO: con la config adentro
-// podría leerse `prizeUcMinor` o `entryFeeUcMinor` desde acá, y entonces el monto de una
-// entrada dejaría de estar decidido en un solo lugar. El que llama elige cuánto; éste solo
-// sabe armar la entrada.
+// podría leerse `prize` o `entryFee` desde acá, y entonces el monto de una entrada dejaría
+// de estar decidido en un solo lugar. El que llama elige cuánto; éste solo sabe armar la
+// entrada.
 const entryOf = (
   matchId: string,
   kind: SettlementKind,
-  amountUcMinor: number,
+  amount: number,
   seat: MatchSeat,
 ): SettlementEntry => ({
   platformId: seat.platformId,
   userUuid: seat.userUuid,
   currency: seat.currency,
-  amountUcMinor,
+  amount,
   idempotencyKey: JSON.stringify([matchId, kind, seat.platformId, seat.userUuid]),
 });
 
@@ -129,7 +130,7 @@ function rewardOf(
     matchId: config.matchId,
     rateId: config.rateId,
     kind: "REWARD",
-    entries: winners.map((seat) => entryOf(config.matchId, "REWARD", config.prizeUcMinor, seat)),
+    entries: winners.map((seat) => entryOf(config.matchId, "REWARD", config.prize, seat)),
   };
 }
 
@@ -148,7 +149,7 @@ function rewardOf(
  * Los tres motivos de `MATCH_ABORTED` reembolsan IGUAL (`network/events.ts`): la diferencia
  * entre ellos es para soporte, no para la caja. Los tres están medidos en la suite.
  *
- * Un monto de cero —mesa gratis, `entryFeeUcMinor: 0`— EMITE la instrucción igual, con sus
+ * Un monto de cero —mesa gratis, `entryFee: 0`— EMITE la instrucción igual, con sus
  * entradas en cero. Suprimirla ahorraría un mensaje y costaría dos cosas: el rastro de que
  * esa mesa se liquidó, y la distinción entre "no hubo desenlace" y "el desenlace no movía
  * plata", que pasarían a ser el mismo `undefined`. Filtrar montos nulos es del que paga.
@@ -166,7 +167,7 @@ export function settlementOf(
         rateId: config.rateId,
         kind: "REFUND",
         entries: config.seats.map((seat) =>
-          entryOf(config.matchId, "REFUND", config.entryFeeUcMinor, seat),
+          entryOf(config.matchId, "REFUND", config.entryFee, seat),
         ),
       };
     }
