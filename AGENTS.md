@@ -26,7 +26,8 @@ Después del plan entró una tanda de correcciones portadas de truco (`078a2af` 
 la Regla 3 no veía los imports locales del container, el transporte HTTP resolvía del root en
 vez de recibir, faltaba el manejador de errores de Express y `.env.example` estaba ocho
 variables atrás de `src/env.ts`. Después vino la validación de la entrada HTTP con zod
-(`validated` en `features/match/transports/http/`, gemelo del decoder del wire).
+(`validated`, gemelo del decoder del wire; nació en `features/match/transports/http/` y la Tarea 2
+del incremento del catálogo lo promovió a `shared/http/` al aparecer el segundo consumidor).
 
 Y después la **persistencia del historial**, portada de truco (`124ed68`/`a483fe8`): la
 única dependencia de infraestructura del repo (`mongodb`). `HistoryReader.of` pasó a
@@ -321,9 +322,14 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tarea 1 completa** (`ca9e68a`). Baseline **376 tests / 54 archivos**, con `typecheck`,
-suite, lint y `format` en verde. Primer paso pendiente: **Tarea 2, promover el validador HTTP
-compartido a `src/shared/http/validated.ts`**.
+Estado: **Tareas 1 y 2 completas** (`ca9e68a`, `5771b1e`). Baseline **377 tests / 54 archivos**, con
+`typecheck`, suite, lint, `format` y `depcruise` (**173 módulos / 654 dependencias**) en verde.
+Primer paso pendiente: **Tarea 3, escribir el rojo del payload literal de Rabbit en
+`src/features/game-mode/events.test.ts`**.
+
+La Tarea 2 promovió `validated` a `src/shared/http/validated.ts` sin barrel. El guard de ubicación
+vive en `src/architecture.test.ts` y **no** en `.dependency-cruiser.cjs` a propósito: depcruise
+evalúa ARISTAS, y una copia del archivo que todavía nadie importa no produce ninguna.
 
 Lo que dejó la Tarea 1:
 
