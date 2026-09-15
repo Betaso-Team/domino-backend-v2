@@ -251,6 +251,12 @@ como está a su propia altura.
 | 22 | Seis defectos: `revealHands` pedido en prosa y no llamado, `currentTurn` sin `?.`, un `it` leyendo el historial de otro, tres promesas del SDK que 0.18 no cumple, el `unlock()` que no era lo medido, y un `git add` que se comía `vitest.setup.ts` | `d766384`, `f6fdb3d` |
 | 23 | Puerto repetido, cuarto argumento inexistente, import faltante, IDs globales, vista medida en servidor y esperas de 20 s que escondían el rojo | `11d20f5` |
 
+Y del plan del incremento activo (`2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`):
+
+| Tarea | Defecto | Commit |
+|---|---|---|
+| 1 | Seis defectos: la lista `Files:` se olvidaba de `round/tests/round-fixture.ts` y `round/tests/block.test.ts` —que también arman un `DominoMatchConfig` a mano—, `InvalidTokenError` perdía su `reason` en silencio, el snippet de visibilidad leía `Room.state` (tipado `object`) sin el cast, los dos `it.each` no compilaban sin tupla explícita, y `lifecycle-e2e` quedaba con tres `mintToken("<uuid>")` y dos aserciones de ids globales que el plan no nombraba | `b930b75` + el `docs:` siguiente |
+
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 
 - **La mesa arranca TAPADA.** `configOf` enciende `isDealWindowEnabled` en toda mesa, la

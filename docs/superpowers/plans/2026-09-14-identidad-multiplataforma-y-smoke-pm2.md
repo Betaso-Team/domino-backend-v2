@@ -93,6 +93,8 @@ Esta tarea es deliberadamente vertical. Separar el cambio de `DominoMatchConfig`
 - Modify: `src/features/match/transports/colyseus/domino-room.test.ts`
 - Modify: `src/features/match/core/engine/tests/build-engine.ts`
 - Modify: `src/features/match/core/engine/tests/dealer.test.ts`
+- Modify: `src/features/match/core/engine/round/tests/round-fixture.ts` *(faltaba en el plan)*
+- Modify: `src/features/match/core/engine/round/tests/block.test.ts` *(faltaba en el plan)*
 - Modify: `src/features/match/core/engine/tests/genesis.test.ts`
 - Modify: `src/features/match/core/engine/tests/match-referee.test.ts`
 - Modify: `src/features/match/core/engine/tests/scorer.test.ts`
@@ -127,7 +129,7 @@ it("verifica un token HS256 y devuelve su identidad compuesta", async () => {
   });
 });
 
-it.each([
+it.each<[string, Record<string, unknown>]>([
   ["sin platformId", { sub: "u1" }],
   ["con platformId vacío", { sub: "u1", platformId: "   " }],
 ])("rechaza un token %s", async (_name, payload) => {
@@ -196,7 +198,7 @@ describe("configOf", () => {
     expect(config.seats.map(({ currency }) => currency)).toEqual(["VES", "USD"]);
   });
 
-  it.each([
+  it.each<[string, Record<string, unknown>]>([
     ["rateId no UUID", { rateId: "actual" }],
     ["UC fraccionaria", { entryFeeUcMinor: 12.5 }],
     ["UC insegura", { prizeUcMinor: Number.MAX_SAFE_INTEGER + 1 }],
@@ -294,9 +296,11 @@ it("sincroniza presentación pero no identidad externa ni moneda", async () => {
     { platformId: "betaso", userUuid: "private-a", displayName: "Ada", currency: "VES" },
     { platformId: "partner", userUuid: "private-b", displayName: "Lin", currency: "USD" },
   ]);
-  await waitUntil(() => clientOf(match, "private-a").state.players.length === 2);
+  // `Room.state` del SDK está tipado `object`: hay que pasar por el `clientState` del
+  // propio archivo, que ya hace el `as MatchState`. Sin eso son dos TS2339.
+  await waitUntil(() => clientState(match, "private-a").players.length === 2);
 
-  const wire = JSON.stringify(clientOf(match, "private-a").state.toJSON());
+  const wire = JSON.stringify(clientState(match, "private-a").toJSON());
   expect(wire).toContain("Ada");
   expect(wire).toContain("Lin");
   for (const privateValue of ["private-a", "private-b", "betaso", "partner", "VES", "USD"]) {
@@ -337,13 +341,20 @@ export interface TokenVerifier {
   verify(token: string | undefined): Promise<Identity>;
 }
 
+// NO se toca `InvalidTokenError`: conserva su `constructor(reason: string)`.
 export class InvalidTokenError extends Error {
-  constructor() {
-    super("token inválido");
+  constructor(reason: string) {
+    super(`Token inválido: ${reason}`);
     this.name = "InvalidTokenError";
   }
 }
 ```
+
+⚠ **El plan borraba el `reason`** y con él lo único que `DominoRoom.onUncaughtException`
+loguea de un rechazo de autenticación (`"rechazo esperado"` imprime `cause.message`). Ningún
+test afirma sobre ese mensaje, así que el borrado habría pasado en verde dejando indistinguibles
+"firma inválida", "expirado" y "sin platformId" en el log de una ruta que mueve dinero. Se
+conserva la firma actual y las ramas nuevas lanzan `InvalidTokenError("sin claim platformId")`.
 
 En `JwtVerifier.verify`, después de `jwt.verify`, usar:
 
@@ -844,7 +855,16 @@ export async function rejoinAs(
 }
 ```
 
+`participantOf` se EXPORTA: `lifecycle-e2e.test.ts` tiene tres `mintToken("<uuid>")` que el
+plan no menciona y que dejan de compilar cuando `mintToken` pasa a pedir un `PlayerRef`; se
+escriben `mintToken(participantOf("d1"))` en vez de repetir `{ platformId: "betaso", … }` en
+cada test.
+
 En `visibility` y `reconnection`, cambiar cada llamada a `rejoinAs(server, match.roomId, selector)` por `rejoinAs(server, match, selector)`. En `visibility`, `deal-window`, `lifecycle` y `reconnection`, reemplazar accesos directos `match.clients.<uuid>` y comparaciones `playerId === "<uuid>"` por `clientOf(...)` y `playerIdOf(...)`. No tocar el algoritmo del juego.
+
+Y en `lifecycle` hay además dos aserciones que el plan no nombra y que pasan a ser de asientos:
+`players.map(playerId)` deja de valer `["u1", "u2"]` y el DTO de `/config` deja de traer
+`seats: ["c1", "c2"]` — las dos pasan a `["seat-1", "seat-2"]`, que es justamente el punto.
 
 - [x] **Step 12: Adaptar el CLI de replay sin fingir datos históricos**
 
