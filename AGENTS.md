@@ -322,10 +322,47 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2 y 3 completas** (`ca9e68a`, `5771b1e`, `ec63d71`). Baseline **382 tests / 55
-archivos**, con `typecheck`, suite, lint, `format` y `depcruise` (**178 módulos / 661 dependencias**)
-en verde. Primer paso pendiente: **Tarea 4, escribir los rojos del documento, defaults, orden e
-índices en `src/features/game-mode/transports/mongo-repository.test.ts`**.
+Estado: **Tareas 1, 2, 3 y 4 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`). Baseline
+**427 tests / 57 archivos**, con `typecheck`, suite, lint, `format` y `depcruise` (**183 módulos /
+682 dependencias**) en verde. Primer paso pendiente: **Tarea 5, escribir el rojo de dos dueños del
+lease en `src/shared/mongo-lease.test.ts`**.
+
+Lo que dejó la Tarea 4:
+
+- **El documento BSON vive SÓLO en el transporte** (`transports/mongo-repository.ts`), con el driver
+  oficial y sin mongoose. Es el gemelo de `mongo-history.ts`: `CollectionSource` es un recorte
+  estructural que `Mongo` satisface sin saberlo, así que la suite lo maneja sin un `as unknown as
+  Mongo` y **sin ningún servicio externo** (`vitest.setup.ts` borra `MONGO_URI` a propósito).
+- **Los defaults son los del SCHEMA de v1, no los de su DTO zod.** El DTO nunca se ejecutaba —las
+  rutas de v1 desestructuran `req.body` crudo y jamás llaman `.parse()`—, así que su
+  `pointsToWin: 10` era código muerto y los documentos productivos tienen el **25** del schema.
+  Verificado en `Betaso-Domino-Backend/src/storage/mongo/schemas/game-mode.schema.ts:51-56`.
+  `enableBots` es el único default que depende de otro campo (`:66-71`,
+  `default() { return this.playersQuantity === 4 }`) y va con `??`, no con `||`: un `false`
+  explícito sobre una mesa de cuatro es una elección del panel.
+- **`__v` ES LA REVISIÓN Y NO SALE DEL RELOJ**: `$inc: { __v: 1 }` en Mongo, `version + 1` en
+  memoria. Derivarla de `updatedAt` colapsa dos ediciones del mismo milisegundo; calcularla en el
+  proceso colapsa dos concurrentes. El outbox de la Tarea 7 deduplica por `uuid + version`, así que
+  dos cambios reales con la misma revisión son un evento publicado y otro **descartado en silencio**.
+  ⚠ En v1 el `__v` **nunca se movía** (el `versionKey` de Mongoose sólo avanza con modificaciones de
+  arreglos, y este documento no tiene ninguno): todo lo productivo está en `0`. Que v2 lo incremente
+  es un uso NUEVO de un campo que ya estaba, no una ruptura — ningún lector de v1 lo consume.
+- **`MemoryGameModeRepository` no es un doble**, es el adaptador de la instancia sin Mongo, igual que
+  `MemoryHistory`. Los dos comparten el contrato de `transports/tests/repository-contract.ts`: dos
+  suites paralelas derivan en cuanto una tarea toque un default y se acuerde de un solo archivo, y
+  entonces el catálogo sale al revés en el despliegue que no configuró `MONGO_URI`.
+- **El `Clock` se redeclara en el transporte** en vez de importarse de `features/match`. Es legal hoy
+  (sale por su `index.ts`) y es un ciclo mañana: la Tarea 12 hace que el nacimiento de una mesa
+  resuelva el modo activo.
+- **La unicidad `name + playersQuantity` NO es un índice** y sigue sin implementarse acá: es lógica
+  de servicio y la escribe la Tarea 8, que tiene anotado en el plan el hallazgo incómodo —en v1 la
+  regla es **asimétrica**, `create` compara nombre+cantidad (`game-mode.service.ts:58`) y `update`
+  compara **sólo el nombre** (`:100-103`)—.
+- **Trece mutaciones verificadas a mano.** La que importa: `$set: { ...input }` crudo pasaba VERDE
+  contra un contrato que sólo omitía claves. Las rutas de v1 desestructuran el cuerpo entero
+  (`routes.ts:117-118`), así que lo que llega es `{ name: undefined, prize: 20, … }` — y en
+  JavaScript esa clave existe, así que el spread la escribe encima y Mongo guarda un `null`. El caso
+  del `undefined` explícito es el que lo mide.
 
 Lo que dejó la Tarea 3:
 
@@ -457,6 +494,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 4 | Tres: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores, y cuatro archivos sueltos producen justo la deriva que el propio Step 3 dice evitar (`MemoryGameModeRepository` no es un doble); el snippet de los índices los asertaba como pares `[clave, opciones]`, que es la forma de `createIndex` y no la de `createIndexes`, que el mismo Step pide; y «update que no borra campos omitidos» no alcanza —medido por mutación: un `$set: { ...input }` crudo pasa verde, y la forma que de verdad llega desde las rutas de v1 es el `undefined` EXPLÍCITO— | `ce54f9e` + este `docs:` |
 | 3 | Uno, y de los que rompen en silencio del OTRO lado: ni el plan ni la spec decían si el `id` del payload Rabbit es el `uuid` o el hex del `_id` —la entidad tiene los dos y §9.1 sólo declara `id: string`—. Lo resolvió el v1 productivo (`game-mode.publisher.ts:43`, `id: mode.uuid`), no el nombre del campo. El fixture del test lleva los dos identificadores distintos para que la aserción mida el mapeo | `ec63d71` + este `docs:` |
 | 1 | Tres: el Step 4 regeneraba el golden con `replay.test.ts`, que solo LO LEE —el único llamador de `writeGolden` es `game-2p-e2e.test.ts`—, así que `WRITE_GOLDEN=1` no escribía nada y el fixture quedaba sin compilar con vitest en verde; la lista `Files:` se olvidaba de cinco archivos que también arman un `DominoRoomOptions` a mano (`match-registry.test.ts`, `replay.test.ts` del match, `history.test.ts`, `domino-room.test.ts`, `lobby-e2e.test.ts`) y del `README.md`; y el `ucAmount` del snippet dejaba `2 ** 53` como monto válido, porque `.safe()` —como estaba expresada la guarda vieja— implica entero en zod 4 y no se puede reusar | `ca9e68a` + este `docs:` |
 

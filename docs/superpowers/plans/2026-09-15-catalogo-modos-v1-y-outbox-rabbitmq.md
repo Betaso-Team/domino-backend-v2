@@ -359,7 +359,23 @@ git commit -m "feat(game-mode): define el contrato portable del catalogo"
 - Create: `src/features/game-mode/transports/mongo-repository.test.ts`
 - Create: `src/features/game-mode/transports/memory-repository.ts`
 - Create: `src/features/game-mode/transports/memory-repository.test.ts`
+- Create: `src/features/game-mode/transports/tests/repository-contract.ts`
 - Modify: `src/features/game-mode/index.ts`
+
+⚠ **Corrección (ejecución de la Tarea 4).** La lista original tenía cuatro archivos y ninguno
+compartido, y esa lista sola produce el defecto que el propio Step 3 dice evitar:
+`MemoryGameModeRepository` no es un doble sino el adaptador de la instancia sin Mongo, así que sus
+defaults y su orden tienen que ser **los mismos**, y dos suites que describen "lo mismo" derivan en
+cuanto una tarea toque un default y se acuerde de un solo archivo. El contrato del puerto se escribe
+UNA vez en `transports/tests/repository-contract.ts` y se corre contra los dos adaptadores; cada
+archivo `*.test.ts` se queda sólo con lo que su adaptador puede tener (el documento BSON, los cuatro
+índices y el nombre de la colección de un lado; la forma del `id` y las copias defensivas del otro).
+
+⚠ **Corrección: el `Clock` se redeclara en el transporte, no se importa de `features/match`.** El
+Step 3 pide un `Clock` y no dice de dónde. Traerlo de `features/match/index.ts` es legal hoy (la
+Regla 4 lo deja salir por ahí) y es un ciclo mañana: la Tarea 12 hace que el nacimiento de una mesa
+resuelva el modo activo, o sea `match → game-mode`, y `no-circular` se pondría rojo en esa tarea.
+Es una interfaz de un método y el tipado estructural la une con la de allá.
 
 - [ ] **Step 1: escribir tests rojos de documento, defaults, orden e índices**
 
@@ -381,11 +397,16 @@ expect(inserted).toEqual({
   updatedAt: now,
   __v: 0,
 });
+// CORREGIDO: la forma original era una lista de pares `[clave, opciones]`, que es la de un
+// `createIndex(key, options)` por índice — y el mismo Step 3 pide `createIndexes`, que recibe un
+// solo arreglo de `IndexDescription`. El contenido no cambia: cuatro índices, cuatro nombres y el
+// `unique` sobre `uuid`, los cuatro verificados contra el schema de v1
+// (`Betaso-Domino-Backend/src/storage/mongo/schemas/game-mode.schema.ts:20-25`, `:57-61` y `:78-79`).
 expect(indexes).toEqual([
-  [{ uuid: 1 }, { unique: true, name: "uuid_1" }],
-  [{ isActive: 1 }, { name: "isActive_1" }],
-  [{ isActive: 1, name: 1 }, { name: "isActive_1_name_1" }],
-  [{ isActive: 1, uuid: 1 }, { name: "isActive_1_uuid_1" }],
+  { key: { uuid: 1 }, name: "uuid_1", unique: true },
+  { key: { isActive: 1 }, name: "isActive_1" },
+  { key: { isActive: 1, name: 1 }, name: "isActive_1_name_1" },
+  { key: { isActive: 1, uuid: 1 }, name: "isActive_1_uuid_1" },
 ]);
 ```
 
@@ -393,6 +414,14 @@ Añadir casos para `playersQuantity: 4` ⇒ `enableBots: true`, decimales UC sin
 filtro `{isActive:true}` y sort `{createdAt:-1}`, `activeByUuid` ocultando inactivos y update que no
 borra campos omitidos. Dos updates efectivos dentro del mismo milisegundo deben producir `__v: 1` y
 `__v: 2`; el reloj no es la revisión.
+
+⚠ **"Update que no borra campos omitidos" NO ALCANZA, y se descubrió mutando.** Con el caso escrito
+como "no le paso la clave", un `$set: { ...input }` crudo pasa verde en los dos adaptadores. La forma
+que de verdad va a llegar es la otra: las rutas de v1 desestructuran el cuerpo entero y pasan TODAS
+las claves (`Betaso-Domino-Backend/src/game-modes/routes.ts:117-118`), así que un `PUT` que sólo trae
+el premio llega como `{ name: undefined, multiplier: undefined, prize: 20, … }` y la frontera HTTP de
+la Tarea 9 hereda esa forma. En JavaScript esa clave EXISTE: el spread la escribe encima, y del lado
+de Mongo queda un `null` en la base. El caso obligatorio es el `undefined` explícito.
 
 - [ ] **Step 2: ejecutar el rojo**
 
@@ -668,6 +697,17 @@ Con repositorio/outbox/lease en memoria, medir:
 - `listActive()` y `getActive(uuid)` no mutan ni publican;
 - create aplica defaults y rechaza nombre+cantidad duplicados;
 - update parcial preserva campos ausentes y rechaza el duplicado equivalente;
+
+⚠ **Hallazgo de la Tarea 4, para cuando se escriba ésta: en v1 la regla de unicidad es ASIMÉTRICA y
+es de SERVICIO, no de índice.** `create` consulta
+`findOne({ name, playersQuantity })` (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:58`)
+pero `update` consulta `findOne({ name, uuid: { $ne: uuid } })` (`:100-103`), o sea **sólo el
+nombre**, cruzando mesas de dos y de cuatro. Los únicos índices de la colección son los cuatro que
+la Tarea 4 recrea, y ninguno la impone. Hay que decidir explícitamente cuál de las dos reglas vale
+en v2 —el contrato de `DuplicateGameModeError` dice "name + playersQuantity"— y escribir el
+argumento: con la de `create`, un `PUT` que renombra puede crear el par duplicado que v1 rechazaba
+al insertar; con la de `update`, dos modos legítimos del catálogo productivo (mismo nombre, 2P y 4P)
+dejan de poder renombrarse.
 - soft delete sólo cambia `isActive=false` y encola `updated`;
 - reactivate sólo cambia `isActive=true` y encola `updated`;
 - repetir delete/reactivate devuelve el error específico;
