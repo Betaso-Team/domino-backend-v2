@@ -62,6 +62,12 @@
 - Modify: `src/replay.ts`
 - Modify: `src/smoke/engine-smoke.ts`
 - Modify: `src/features/match/tests/fixtures/golden-2p.json`
+- Modify: `src/features/match/transports/match-registry.test.ts`
+- Modify: `src/features/match/tests/replay.test.ts`
+- Modify: `src/features/match/network/tests/history.test.ts`
+- Modify: `src/features/match/transports/colyseus/domino-room.test.ts`
+- Modify: `src/features/lobby/tests/lobby-e2e.test.ts`
+- Modify: `README.md`
 
 - [ ] **Step 1: escribir el test rojo que distingue UC de UC minor**
 
@@ -117,17 +123,38 @@ const ucAmount = z.number().finite().nonnegative();
 todas las ocurrencias de `entryFeeUcMinor`, `prizeUcMinor` y `amountUcMinor` en código, fixtures y
 smoke. No cambiar `rateId`, `currency` ni las claves de idempotencia.
 
+⚠ **`.safe()` no sirve para expresar el techo del entero seguro.** En zod 4 `.safe()` IMPLICA
+entero y rechaza `1.5` (medido sobre la 4.6.1 instalada), así que la guarda que `Number.isSafeInteger`
+daba contra el desborde de la mantisa —dos montos distintos que son el mismo número— se escribe
+`.max(Number.MAX_SAFE_INTEGER)`. El `ucAmount` que quedó es
+`z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER)`: la forma del snippet sola habría
+aceptado `2 ** 53` como monto de una mesa.
+
+⚠ **También hay que tocar `match-registry.test.ts`.** Su aserción de fuga listaba
+`"entryFeeUcMinor"`/`"prizeUcMinor"` entre los nombres que el DTO público NO puede contener; con el
+renombre, ese mismo `not.toContain` contradice al `toMatchObject({ entryFee: 125 })` de dos líneas
+abajo. Un `sed` ciego deja el test rojo. La aserción deja de tener qué medir —el nombre del wire y
+el del campo interno pasan a ser el mismo— y lo que se conserva es la lista de identidad, moneda y
+tasa.
+
 - [ ] **Step 4: regenerar el golden y ejecutar gates del task**
 
 Run:
 
 ```bash
-$env:WRITE_GOLDEN='1'; npx vitest run src/features/match/tests/replay.test.ts
+$env:WRITE_GOLDEN='1'; npx vitest run src/features/match/tests/game-2p-e2e.test.ts; Remove-Item Env:WRITE_GOLDEN
 npx vitest run src/features/match/transports/match-contract.test.ts src/features/match/network/tests/settlement.test.ts src/features/match/tests/replay.test.ts src/deploy-smoke.test.ts
 npm run typecheck
 ```
 
 Expected: todos PASS y el golden contiene `entryFee`/`prize`, nunca `*UcMinor`.
+
+⚠ **El golden lo escribe `game-2p-e2e.test.ts`, no `replay.test.ts`.** `replay.test.ts` solo LEE
+`fixtures/golden-2p.json`; el único llamador de `writeGolden` es el `beforeAll` de
+`game-2p-e2e.test.ts`, que es el único punto donde el árbol final y su historial están los dos
+completos (`tests/e2e-harness.ts`). Con el comando del plan, `WRITE_GOLDEN=1` no escribe nada y el
+gate siguiente falla en `typecheck` —no en vitest, que transpila con esbuild— con el `as
+DominoMatchConfig` de la línea 103 rechazado por los dos campos que faltan.
 
 - [ ] **Step 5: commit**
 
@@ -862,7 +889,7 @@ escriba un modo manualmente. El smoke real crea el modo por HTTP antes de crear 
 - [ ] **Step 5: regenerar golden, verificar y commit**
 
 ```bash
-$env:WRITE_GOLDEN='1'; npx vitest run src/features/match/tests/replay.test.ts
+$env:WRITE_GOLDEN='1'; npx vitest run src/features/match/tests/game-2p-e2e.test.ts; Remove-Item Env:WRITE_GOLDEN
 npx vitest run src/features/match/transports/match-contract.test.ts src/features/match/transports/colyseus/domino-room.test.ts src/features/match/tests/replay.test.ts src/features/match/tests/game-2p-e2e.test.ts
 npm run typecheck
 git add src/features/match src/replay.ts src/smoke/engine-smoke.ts

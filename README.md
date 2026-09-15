@@ -45,9 +45,9 @@ El cambio llega a los lobbies y bloquea únicamente mesas nuevas; las partidas a
 Con Redis lo comparten todos los procesos y sobrevive a sus reinicios; sin Redis vive en memoria.
 
 `GET /config/:roomId` publica los montos con los nombres usados por dominó y truco: `entryFee` y
-`prize`. Ambos son enteros UC con dos decimales implícitos (`125` = `1,25 UC`); el front se encarga
-de presentarlos o convertirlos. Los nombres contables internos `entryFeeUcMinor` y
-`prizeUcMinor` no salen en ese DTO.
+`prize`. Ambos son UC completas, iguales a las del catálogo de v1 (`entryFee: 125` son 125 UC) y
+pueden traer decimales (`1.5` es un UC y medio); convertirlos a la moneda del jugador —con el
+`rateId` de la mesa— y decidir el redondeo es de quien paga, no de este servidor.
 
 ## Varias instancias
 

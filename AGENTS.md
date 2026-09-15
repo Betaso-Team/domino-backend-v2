@@ -181,8 +181,10 @@ remota/outbox pertenece al futuro orquestador —el juego sólo exporta `settlem
 entregado es de certificación, no infraestructura productiva. **El 4P tampoco liquida todavía**:
 falta definir cómo se divide el premio entre compañeros antes de eliminar esa guarda.
 La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
-queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
-`*UcMinor` son enteros seguros: los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
+queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. ⚠ Los montos
+`*UcMinor` que este bloque describe **ya no existen**: la Tarea 1 del incremento del catálogo
+(`ca9e68a`) los renombró a `entryFee`/`prize`/`amount` y los pasó a UC completas — ver el bloque de
+más abajo.
 
 Lo que dejó la Tarea 1, y que conviene saber antes de tocar nada de acá:
 
@@ -214,7 +216,7 @@ Lo que dejó la Tarea 2:
 
 - **`settlementOf` PROYECTA, no mueve** (`network/settlement.ts`, exportada por
   `features/match/index.ts`). Es una función pura: `MATCH_ABORTED` → `REFUND` de
-  `entryFeeUcMinor` a todos los asientos, `MATCH_RESOLVED` → `REWARD` de `prizeUcMinor` al
+  `entryFee` a todos los asientos, `MATCH_RESOLVED` → `REWARD` de `prize` al
   ganador, cualquier otro evento → `undefined`. **No hay puerto de wallet, ni adaptador, ni
   outbox**: todavía no existe un orquestador a quien entregarle el trabajo, y un puerto sin
   quien lo llame es una interfaz que se diseña dos veces.
@@ -309,7 +311,8 @@ Se portó el contrato de lobby del dominó v1 y se recuperaron los nombres públ
 el driver compartido y evita el canal global `$lobby`, que Redis no aísla por índice de base. El
 mantenimiento vive en Redis cuando está configurado —en memoria con una sola instancia—, se cambia
 por `POST /internal/lobby/maintenance`, bloquea únicamente mesas nuevas y falla cerrado ante un valor
-corrupto. `entryFee` y `prize` son UC minor: `125` significa `1,25 UC`; el front presenta y convierte.
+corrupto. ⚠ El `entryFee`/`prize` de UC minor que este bloque describía lo corrigió la Tarea 1 del
+incremento siguiente: son UC completas.
 
 ## Incremento planificado — catálogo v1 y entrega RabbitMQ durable
 
@@ -318,9 +321,26 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **diseño y plan completos; implementación no iniciada**. Baseline previo:
-**373 tests / 54 archivos**. Primer paso pendiente: **Tarea 1, escribir el rojo que corrige la
-semántica monetaria**.
+Estado: **Tarea 1 completa** (`ca9e68a`). Baseline **376 tests / 54 archivos**, con `typecheck`,
+suite, lint y `format` en verde. Primer paso pendiente: **Tarea 2, promover el validador HTTP
+compartido a `src/shared/http/validated.ts`**.
+
+Lo que dejó la Tarea 1:
+
+- **`entryFee`/`prize`/`amount` son UC COMPLETAS** y no llevan más el sufijo `*UcMinor`:
+  `entryFee: 10` son diez UC. Es la convención del catálogo de v1, que es de donde las tareas
+  siguientes copian estos números — y copiarlos con el nombre viejo es lo que invitaba a un `* 100`
+  en una sola de las dos puntas.
+- **`configOf` ya no exige enteros, y las otras dos guardas siguen ahí.** `Number.isSafeInteger`
+  cerraba tres puertas de un golpe y una era la fracción, que v1 usa (`1.5` es un UC y medio). El
+  `ucAmount` que quedó es `z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER)`. **No se
+  escribe `.safe()`**: en zod 4 `.safe()` IMPLICA entero y volvería a rechazar el `1.5` (medido
+  sobre la 4.6.1). Sin el `.max()`, `2 ** 53` sería un monto válido.
+- **`rateId`, `currency` y las claves de idempotencia no se tocaron**, y se siguen asertando como
+  literal.
+- **El golden lo escribe `game-2p-e2e.test.ts` y el plan decía `replay.test.ts`**, que solo lo lee.
+  Corregido en el plan. El renombre deja el fixture sin compilar y **vitest sigue verde**: quien lo
+  atrape es `typecheck`.
 
 Este incremento reemplaza completamente el catálogo de v1: conserva la colección
 `game_modes_domino`, sus campos, defaults, índices, `_id`/`__v`/timestamps, las siete rutas HTTP y
@@ -407,6 +427,12 @@ Y del plan del incremento activo (`2026-09-14-identidad-multiplataforma-y-smoke-
 | 3/4 | La primera corrección sí volvió rojo el falso verde, pero no evitó el comando: `signatureOf` comparaba la **cantidad** de fichas del tablero y no sus valores, justo los extremos que `nextAction` necesita. Dos vistas con igual largo y distinto último patch seguían pareciendo sincronizadas. La firma ahora incluye `placed.tile.{left,right}` y `placed.side` de todo el tablero público; el primer parche intentó leer `left/right` directamente de `PlacedTile`, campos que no existen, y una corrida instrumentada lo mostró como objetos con sólo `side` | `82706dd`, `4119278` |
 | 4 | El smoke finalmente aisló un agujero anterior del engine: revelar `hand.tiles` no hace visibles para siempre las referencias que se agreguen después. Al robar, `tileCount` subía pero el dueño no recibía la ficha nueva; el servidor sí la veía y rechazaba el siguiente `DRAW_TILE` con `MUST_PLAY_INSTEAD_OF_DRAWING`. `RoundPlayer.drawTile` debe publicar cada ficha robada sólo a su dueño; un unit test mide la llamada y el smoke real mide el wire | `cc9125f` |
 | 4 | El contrato estático del wrapper copiaba literalmente `process.env.RUN_ENGINE_SMOKE` dentro de `src/deploy-smoke.test.ts`. El gate completo lo identificó como lector directo porque `env-single-reader.test.ts` busca esa substring en todo `src/`; el test sólo inspecciona texto de `scripts/`, así que ahora construye `process.env` por partes sin abrir una excepción al guardarraíl | `e900c0a` |
+
+Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`):
+
+| Tarea | Defecto | Commit |
+|---|---|---|
+| 1 | Tres: el Step 4 regeneraba el golden con `replay.test.ts`, que solo LO LEE —el único llamador de `writeGolden` es `game-2p-e2e.test.ts`—, así que `WRITE_GOLDEN=1` no escribía nada y el fixture quedaba sin compilar con vitest en verde; la lista `Files:` se olvidaba de cinco archivos que también arman un `DominoRoomOptions` a mano (`match-registry.test.ts`, `replay.test.ts` del match, `history.test.ts`, `domino-room.test.ts`, `lobby-e2e.test.ts`) y del `README.md`; y el `ucAmount` del snippet dejaba `2 ** 53` como monto válido, porque `.safe()` —como estaba expresada la guarda vieja— implica entero en zod 4 y no se puede reusar | `ca9e68a` + este `docs:` |
 
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 
