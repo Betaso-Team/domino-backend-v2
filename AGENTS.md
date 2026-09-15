@@ -322,10 +322,29 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1 y 2 completas** (`ca9e68a`, `5771b1e`). Baseline **377 tests / 54 archivos**, con
-`typecheck`, suite, lint, `format` y `depcruise` (**173 módulos / 654 dependencias**) en verde.
-Primer paso pendiente: **Tarea 3, escribir el rojo del payload literal de Rabbit en
-`src/features/game-mode/events.test.ts`**.
+Estado: **Tareas 1, 2 y 3 completas** (`ca9e68a`, `5771b1e`, `ec63d71`). Baseline **382 tests / 55
+archivos**, con `typecheck`, suite, lint, `format` y `depcruise` (**178 módulos / 661 dependencias**)
+en verde. Primer paso pendiente: **Tarea 4, escribir los rojos del documento, defaults, orden e
+índices en `src/features/game-mode/transports/mongo-repository.test.ts`**.
+
+Lo que dejó la Tarea 3:
+
+- **`features/game-mode` nace con SOLO contratos**: la entidad portable (`core/game-mode.ts`), los dos
+  puertos y los tres errores (`core/catalog.ts`) y el cuerpo literal de Rabbit (`events.ts`). Mongo,
+  HTTP y AMQP son las Tareas 4, 9 y 6.
+- **El `id` del payload Rabbit es el `uuid` del modo y NO el hex del `_id`**, y no estaba escrito en
+  ningún lado: la entidad tiene los dos y la spec sólo declara `id: string`. Lo resuelve el v1
+  productivo (`Betaso-Domino-Backend/src/game-modes/game-mode.publisher.ts:43`, `id: mode.uuid`).
+  **Al revés no falla nada de este lado**: el consumidor upsertea por `id`, así que publicar el `_id`
+  le duplica el catálogo en silencio. La asimetría que queda es deliberada: el `toDTO` HTTP sí mapea
+  `id→_id`, porque el DTO de v1 devuelve los dos campos. El fixture del test los tiene **distintos**
+  a propósito — con el mismo valor ninguna aserción distingue cuál se mapeó.
+- **El cuerpo no lleva `isFreeRoom` ni `enableBots`**, que sí existen en la entidad y en Mongo. La
+  omisión la mide el `toEqual`; medido por mutación, junto con `id: mode.id`, las claves
+  intercambiadas y un `playerCount` fijo.
+- **`index.ts` exporta dos nombres**, `GameMode` y `GameModeReader`. El repositorio, los errores y el
+  contrato Rabbit los consumen adaptadores de esta misma feature; las tareas siguientes agrandan la
+  superficie cuando aparezca el consumidor externo.
 
 La Tarea 2 promovió `validated` a `src/shared/http/validated.ts` sin barrel. El guard de ubicación
 vive en `src/architecture.test.ts` y **no** en `.dependency-cruiser.cjs` a propósito: depcruise
@@ -438,6 +457,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 3 | Uno, y de los que rompen en silencio del OTRO lado: ni el plan ni la spec decían si el `id` del payload Rabbit es el `uuid` o el hex del `_id` —la entidad tiene los dos y §9.1 sólo declara `id: string`—. Lo resolvió el v1 productivo (`game-mode.publisher.ts:43`, `id: mode.uuid`), no el nombre del campo. El fixture del test lleva los dos identificadores distintos para que la aserción mida el mapeo | `ec63d71` + este `docs:` |
 | 1 | Tres: el Step 4 regeneraba el golden con `replay.test.ts`, que solo LO LEE —el único llamador de `writeGolden` es `game-2p-e2e.test.ts`—, así que `WRITE_GOLDEN=1` no escribía nada y el fixture quedaba sin compilar con vitest en verde; la lista `Files:` se olvidaba de cinco archivos que también arman un `DominoRoomOptions` a mano (`match-registry.test.ts`, `replay.test.ts` del match, `history.test.ts`, `domino-room.test.ts`, `lobby-e2e.test.ts`) y del `README.md`; y el `ucAmount` del snippet dejaba `2 ** 53` como monto válido, porque `.safe()` —como estaba expresada la guarda vieja— implica entero en zod 4 y no se puede reusar | `ca9e68a` + este `docs:` |
 
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:

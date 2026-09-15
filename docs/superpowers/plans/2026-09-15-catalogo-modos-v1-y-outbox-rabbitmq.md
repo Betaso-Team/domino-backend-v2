@@ -249,6 +249,21 @@ it("conserva el contrato Rabbit de domino v1", () => {
 El objeto `mode` debe incluir además `isFreeRoom` y `enableBots`; su ausencia del payload se mide al
 usar `toEqual`, no `objectContaining`.
 
+⚠ **`payload.id` es el `uuid` del modo, NO el hex del `_id`**, y ni este plan ni la spec lo decían: la
+entidad tiene los dos identificadores y §9.1 sólo declara `id: string`. Lo resuelve el v1 productivo,
+que es la autoridad del contrato: `Betaso-Domino-Backend/src/game-modes/game-mode.publisher.ts:43`
+hace `id: mode.uuid` (el mismo `buildPayload` para `created` y `updated`). **Al revés no falla nada
+del lado de Domino**: el consumidor upsertea por `id`, así que publicar el `_id` le crea un registro
+nuevo por cada modo en vez de actualizar el que ya tiene. Por eso el `mode` del test lleva `id` y
+`uuid` DISTINTOS —`id` con forma de hex de ObjectId y `uuid: "mode-1"`—: con el mismo valor ninguna
+aserción distingue cuál se mapeó. Ojo con la asimetría que queda: `toDTO` de la Tarea 9 sí mapea
+`id→_id`, porque el DTO HTTP de v1 devuelve los dos campos.
+
+De paso, dos cosas más que el mismo archivo de v1 confirma y que valen para las Tareas 5 y 6: el
+cuerpo va **pelado**, sin el wrapper `{ pattern, data, id }` de NestJS —ése es el camino de colas
+(`publish`), no el del exchange (`publishToExchange`)—, y el exchange se declara `topic` y `durable`
+con properties `persistent`, `contentType: "application/json"` y `messageId`.
+
 - [ ] **Step 2: ejecutar el rojo**
 
 ```bash
