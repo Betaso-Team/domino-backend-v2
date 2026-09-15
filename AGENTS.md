@@ -294,8 +294,8 @@ quedó.
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-14-lobby-y-montos-publicos.md`.
 
-Estado: **Tareas 0–4 completas** (`ba84fa1`, `df3cdb2`, `be443ee`, `2198f07`; cierre documental
-pendiente de registrar). Baseline **372 tests / 54 archivos**. Verificados con código 0:
+Estado: **Tareas 0–4 completas** (`ba84fa1`, `df3cdb2`, `be443ee`, `2198f07`, `e781896`).
+Baseline **372 tests / 54 archivos**. Verificados con código 0:
 `typecheck`, suite, lint, build y depcruise (**172 módulos / 652 dependencias**). El grafo fue
 reindexado y el smoke Docker/PM2/Nginx terminó una partida 2P con 119 entradas de historial; el
 compose quedó vacío.
