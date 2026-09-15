@@ -170,7 +170,8 @@ Autoridad operativa:
 Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
-Estado: **Tarea 1 completa**; baseline **338 tests / 49 archivos**; siguiente: **Task 2, Step 1**.
+Estado: **Tarea 1 completa y revisada**; baseline **346 tests / 49 archivos**; siguiente:
+**Task 2, Step 1**.
 La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
 queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
 `*UcMinor` son enteros seguros: los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
@@ -185,12 +186,29 @@ Lo que dejó la Tarea 1, y que conviene saber antes de tocar nada de acá:
   autenticada y el asiento pasa en UN solo lugar: `onJoin`.
 - **`PlayerState` sincroniza presentación y NO identidad.** `platformId`/`userUuid`/`currency` son
   `noSync()`: no entran a la metadata del Schema, así que ni se codifican ni aparecen en
-  `toJSON()` —tampoco en el fixture golden—. `displayName`/`username`/`profilePicture` sí viajan.
+  `toJSON()`. `displayName`/`username`/`profilePicture` sí viajan.
+  **OJO con el golden**: `golden-2p.json` **sí** contiene `betaso` y `VES`, y no es una filtración
+  —están en `meta`, que es el `DominoMatchConfig` de ENTRADA que el replay necesita para rebobinar;
+  `finalState`, que es el árbol serializado, no los tiene—. Es el primer archivo donde se va a
+  buscar una fuga: la diferencia es `meta` (entrada) contra `finalState` (estado).
+- **La identidad se NORMALIZA con `trim()` en las dos fronteras** (`configOf` y `JwtVerifier`) y la
+  moneda NO. `platformId`/`userUuid` son una llave que se compara y se concatena, así que un
+  espacio de un lado y no del otro es `SeatNotReservedError` con la inscripción ya cobrada;
+  `currency` es un valor contable que se conserva exactamente como se cobró. Si tocás una frontera,
+  tocá la otra.
 - **El índice del registro es la pareja entera**, serializada con `JSON.stringify` y no
   concatenada: `["a","b:c"]` y `["a:b","c"]` no pueden colisionar. El `MatchRegistry` guarda las
   parejas en un `Map` aparte del DTO público, que sigue llevando solo ids opacos.
 - **Los tests del motor usan `core/engine/tests/match-config-fixture.ts`**; el arnés E2E resuelve
   `userUuid`→`seat-N` con `playerIdOf`/`clientOf`, así que ningún test escribe `seat-N` a mano.
+
+⚠ **Compatibilidad de schema — ruptura de wire, y no hay negociación de versión en el repo.** Los
+tres campos sincronizados nuevos (`displayName`, `username`, `profilePicture`) se insertaron
+**entre `playerId` y `teamId`**, así que TODOS los índices posteriores de `PlayerState` se
+corrieron. `@colyseus/schema` codifica por índice: un cliente con el schema pre-generado de antes
+de esta tarea decodifica `displayName` donde espera `teamId`. No es un defecto —agregar campos es
+el punto de la tarea— pero **cliente y servidor tienen que desplegarse juntos**, y el día que eso
+no se pueda, los campos nuevos van al FINAL en vez de al medio.
 
 Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y primer paso pendiente.
 No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.
@@ -256,6 +274,8 @@ Y del plan del incremento activo (`2026-09-14-identidad-multiplataforma-y-smoke-
 | Tarea | Defecto | Commit |
 |---|---|---|
 | 1 | Seis defectos: la lista `Files:` se olvidaba de `round/tests/round-fixture.ts` y `round/tests/block.test.ts` —que también arman un `DominoMatchConfig` a mano—, `InvalidTokenError` perdía su `reason` en silencio, el snippet de visibilidad leía `Room.state` (tipado `object`) sin el cast, los dos `it.each` no compilaban sin tupla explícita, y `lifecycle-e2e` quedaba con tres `mintToken("<uuid>")` y dos aserciones de ids globales que el plan no nombraba | `b930b75` + el `docs:` siguiente |
+| 1 | El séptimo, de la revisión: el snippet del Step 6 leía `payload.platformId` sin estrechar `string \| jwt.JwtPayload` (TS2339) y lanzaba `new InvalidTokenError()` sin argumento contra la firma que ese mismo Step dice conservar (TS2554) | el `fix:` de la revisión |
+| 1 | Y el octavo, encontrado al escribir el test que pinea el cableado: desde que `configOf` valida, `onCreate` puede lanzar ANTES de que `this.log` exista, así que `crash()` moría con «Cannot read properties of undefined (reading 'error')» en vez de nombrar el campo inválido — y después lanzaba otra vez adentro del manejador, porque Colyseus rechaza `disconnect()` durante `onCreate` | el `fix:` de la revisión |
 
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 

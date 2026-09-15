@@ -359,19 +359,31 @@ conserva la firma actual y las ramas nuevas lanzan `InvalidTokenError("sin claim
 En `JwtVerifier.verify`, después de `jwt.verify`, usar:
 
 ```ts
-const platformId = payload.platformId;
-if (
-  typeof payload.sub !== "string" ||
-  payload.sub.trim().length === 0 ||
-  typeof platformId !== "string" ||
-  platformId.trim().length === 0
-) {
-  throw new InvalidTokenError();
+// La guarda del string VA PRIMERO: `payload` es `string | jwt.JwtPayload`, así que leer
+// `payload.platformId` antes de estrecharlo es TS2339.
+if (typeof payload === "string") {
+  throw new InvalidTokenError("payload no es un objeto");
 }
-return { platformId, userUuid: payload.sub };
+const platformId = payload.platformId;
+if (typeof payload.sub !== "string" || payload.sub.trim().length === 0) {
+  throw new InvalidTokenError("sin claim sub");
+}
+if (typeof platformId !== "string" || platformId.trim().length === 0) {
+  throw new InvalidTokenError("sin claim platformId");
+}
+// SE DEVUELVE NORMALIZADA, igual que la normaliza `configOf`. Validar con trim y devolver
+// sin trim deja `"betaso "` en el token y `"betaso"` en el asiento: las dos validaciones
+// pasan y el cruce de `onJoin` falla, con la inscripción ya cobrada.
+return { platformId: platformId.trim(), userUuid: payload.sub.trim() };
 ```
 
 Conservar el `try/catch` actual para que errores de firma, algoritmo, expiración y claims se traduzcan al mismo `InvalidTokenError`.
+
+⚠ **El snippet original de este Step no compilaba, por dos motivos a la vez.** Leía
+`payload.platformId` sin estrechar `string | jwt.JwtPayload` (TS2339), y lanzaba
+`new InvalidTokenError()` sin argumento contra la firma `constructor(reason: string)` que este
+mismo Step dice conservar (TS2554). Van las tres ramas separadas: una razón distinta por causa es
+lo único que hace investigable un rechazo de autenticación en el log.
 
 - [x] **Step 7: Implementar el contrato validado y el config sin campos duplicados**
 
@@ -421,9 +433,13 @@ const ucMinor = z
   .refine(Number.isSafeInteger, "debe ser un entero seguro")
   .refine((value) => value >= 0, "no puede ser negativo");
 
+// La identidad se NORMALIZA (es una llave que se compara contra el token y se concatena en
+// la clave del registro); la moneda NO (es un valor contable que se conserva como se cobró).
+const identityPart = nonBlank.transform((value) => value.trim());
+
 const participant = z.strictObject({
-  platformId: nonBlank,
-  userUuid: nonBlank,
+  platformId: identityPart,
+  userUuid: identityPart,
   displayName: nonBlank,
   username: nonBlank.optional(),
   profilePicture: nonBlank.optional(),
@@ -935,8 +951,8 @@ git commit -m "feat(multiplataforma): congela identidad y moneda por asiento" -m
 
 Expected: commit creado; `git status --short` vacío.
 
-**Continuidad:** Tarea 1 completa; baseline 338 tests / 49 archivos; siguiente paso exacto:
-Task 2, Step 1.
+**Continuidad:** Tarea 1 completa y revisada; baseline 346 tests / 49 archivos; siguiente paso
+exacto: Task 2, Step 1.
 
 ### Task 2: Proyectar recompensa y reembolso sin mover dinero
 
