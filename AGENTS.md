@@ -322,11 +322,52 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3, 4, 5, 6 y 7 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`+este `docs:`).
-Baseline **522 tests / 62 archivos**, con `typecheck`, suite, lint y `format` en verde.
-Primer paso pendiente: **Tarea 8, escribir el rojo del servicio del catálogo en
-`src/features/game-mode/service.test.ts`**.
+Estado: **Tareas 1, 2, 3, 4, 5, 6, 7 y 8 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
+`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+este `docs:`).
+Baseline **543 tests / 63 archivos**, con `typecheck`, suite, lint, `format` y `depcruise`
+(**198 módulos / 751 dependencias**) en verde.
+Primer paso pendiente: **Tarea 9, escribir el rojo del contrato HTTP en
+`src/features/game-mode/transports/http/`**.
+
+Lo que dejó la Tarea 8:
+
+- **EL SERVICIO NO NOMBRA A RABBIT, Y ESO ESTÁ MEDIDO CON LA LISTA EXACTA DE IMPORTS de
+  `service.ts`.** No es decoración: los tipos NO impiden un quinto parámetro `AmqpDelivery` que
+  publique "sólo para el create", y esa es la tentación que el outbox existe para prohibir. Un
+  `expect(imported).not.toContain("amqp")` no alcanzaría —la forma que aparece es un parámetro
+  nuevo—; la lista cerrada obliga a que toda dependencia nueva pase por ese test y su argumento.
+- **LA REGLA DE UNICIDAD ES ASIMÉTRICA Y SE REPRODUJO ASÍ, porque es la de v1**: `create` compara el
+  par `name + playersQuantity` (`game-mode.service.ts:58`), `update` compara **sólo el nombre**,
+  cruzando mesas de dos y de cuatro (`:100-103`), y sólo cuando el nombre CAMBIA (`:99`). Unificar
+  cambia lo que el panel puede hacer hoy en alguna de las dos puntas: hacia el par, un renombre puede
+  dejar el duplicado que v1 rechaza; hacia el nombre solo, deja de poder crearse la pareja homónima
+  2P/4P que el catálogo productivo ya tiene. ⚠ **El hueco heredado**: un `PUT` que cambia sólo
+  `playersQuantity` no dispara ninguna consulta, así que puede fabricar el par que `create` prohíbe.
+  Cerrarlo pide decidir primero cuál de las dos reglas vale — no es una decisión de esta tarea.
+- **LA COLA EN MEMORIA NO ES REDUNDANTE CON EL LEASE, y sin ella la unicidad es decorativa.**
+  `MongoLease` excluye PROCESOS y no llamadas del mismo proceso, y la consulta de duplicados es un
+  `await`: dos `POST /game-modes` contra la misma instancia la pasan los dos antes de que ninguno
+  haya insertado. Es la cola ENCIMA del lease que el comentario del `owner` ya proponía. **El test
+  que lo mide lanza las dos creaciones EN EL MISMO TURNO** — esperar a que la primera termine deja
+  pasar verde a un servicio sin cola.
+- **NO HAY DIFF DE "CAMBIO EFECTIVO", y la ausencia es la decisión.** El repositorio hace `$inc` del
+  `__v` en toda llamada que encuentre el documento, así que dos `PUT` idénticos dan las revisiones 1
+  y 2 y salen dos `game_mode.updated` con el mismo cuerpo — que es lo que hacía v1 (`:110-123`). El
+  consumidor ya deduplica por `id`. Cualquier otra regla tendría que coincidir EXACTAMENTE con el
+  criterio del `$inc`, y el día que no coincida hay un cambio real cuya revisión ya se publicó: un
+  evento descartado en silencio por la clave de deduplicación.
+- **`GameModeStateConflictError` ES EL CUARTO ERROR**, y es el «ya está inactivo»/«ya está activo» de
+  v1 (`:148-150`, `:203-205`). 409 y no 404: el modo existe y el panel lo está listando. Comparte el
+  código con `DuplicateGameModeError` y no el nombre, que es lo que se lee en el log.
+- **SE DESPIERTA AL DESPACHADOR SÓLO TRAS EL ÉXITO** —incluyendo que el outbox haya aceptado—: si el
+  lease no se consiguió no hay nada escrito, y si falló el outbox lo que corresponde es la
+  reconciliación, que el tick de un segundo ya hace. `wakeDispatcher` es un callback y no el
+  `OutboxDispatcher` para no cerrar el ciclo servicio → despachador → outbox → servicio.
+- **LAS LECTURAS NO TOMAN EL LEASE**: un GET público que compitiera por el lease del escritor daría
+  503 cada vez que el panel edita.
+- **Trece mutaciones verificadas a mano**, cada una roja en el test que dice medirla y en ningún
+  otro. La que decidió el diseño del test: sin la cola, la carrera en proceso sólo se ve lanzando las
+  dos creaciones en el mismo turno.
 
 Lo que dejó la Tarea 7:
 
@@ -636,6 +677,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 8 | Tres: la Tarea 3 declaró **tres** errores y «repetir delete/reactivate devuelve el error específico» no tiene con qué expresarse —v1 lanza «El modo ya está inactivo»/«ya está activo» (`game-mode.service.ts:148-150`, `:203-205`) y ninguno de los tres sirve: `NotFound` diría 404 sobre un modo que el panel está listando y `Duplicate` comparte el código pero no la causa—, así que la lista `Files:` tampoco tenía dónde poner el cuarto; «con lease en memoria» y «si el lease no se obtiene» son **mutuamente insatisfacibles** (`MemoryLease` es pasa-manos y nunca devuelve `undefined`), el mismo defecto que ya se había pagado en la Tarea 7; y el Step 3 da por hecho que `lease.within` serializa las mutaciones cuando **excluye procesos y no llamadas**, o sea que la regla de unicidad queda sin proteger contra dos `POST` a la misma instancia | `bed7e88` + este `docs:` |
 | 7 | Y el tercero, que lo encontró la revisión y es el más caro del incremento: **la corrección del segundo estuvo mal**. `revisionKeysOf` devolvía las dos claves SIEMPRE, y como la del `created` no lleva revisión y no hay TTL, existe para siempre: el modo daba «cubierto» en la v1, la v5 y la v50, o sea **el reconciliador apagado para todos los modos que crea el panel**. Sobre-corregir un defecto real es su propio defecto. El `created` sólo cuenta en la revisión cero. Ningún test lo vio porque ninguno combinaba un `created` con una revisión posterior: el hueco tenía la forma exacta del bug | `cf8fe11` + este `docs:` |
 | 7 | Dos: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores ni el test del de memoria —el mismo defecto que la Tarea 4, y `MemoryGameModeOutbox` tampoco es un doble—; y el Step 3 declaraba la clave de `ensureUpdated` y la de `sync` pero **no la de `enqueueCreated` ni contra qué compara `reconcile`**. La lectura ingenua («reconcile llama a `ensureUpdated`») le agrega un `updated` espurio a TODA alta del panel en el primer tick posterior, para siempre, y nada falla | `1f03cd7` + este `docs:` |
 | 6 | Tres, y los tres del «portar de truco» contra la `amqplib` 2.0.1 instalada: reconectar entero al soltar el canal abandona un `RecoveringChannelModel` que sigue reintentando para siempre (un zombi por caída del broker); nadie escucha `error` en la CONEXIÓN, y un `error` sin oyente **tumba el proceso** en Node; y `close()` no espera el intento en vuelo, así que un apagado durante una entrega deja el socket abriéndose después del cierre. El Step 2 tampoco pedía que los dobles fueran `EventEmitter` de verdad, que es lo único que pone roja la segunda | `3be878f` + este `docs:` |

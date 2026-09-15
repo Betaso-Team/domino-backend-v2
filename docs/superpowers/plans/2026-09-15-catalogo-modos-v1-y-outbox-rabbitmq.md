@@ -336,6 +336,13 @@ export interface GameModeRepository extends GameModeReader {
 export class GameModeNotFoundError extends Error {}
 export class DuplicateGameModeError extends Error {}
 export class GameModeWriteBusyError extends Error {}
+// ⚠ SON CUATRO Y NO TRES, y el cuarto lo descubrió la Tarea 8: «repetir delete/reactivate devuelve
+// el error específico» no tiene con qué expresarse acá. v1 lanza «El modo ya está inactivo» /
+// «El modo ya está activo» (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:148-150` y
+// `:203-205`) y ninguno de los tres de arriba sirve: `GameModeNotFoundError` diría 404 sobre un modo
+// que el panel está viendo listado, y `DuplicateGameModeError` comparte el código HTTP (409) pero no
+// la causa —y el nombre es lo que se lee en el log—.
+export class GameModeStateConflictError extends Error {}
 ```
 
 `events.ts` debe exportar `GAME_MODE_EXCHANGE = "betaso"`, los dos routing keys, el tipo exacto de
@@ -821,10 +828,25 @@ git commit -m "feat(game-mode): entrega cambios mediante outbox durable"
 - Create: `src/features/game-mode/service.ts`
 - Create: `src/features/game-mode/service.test.ts`
 - Modify: `src/features/game-mode/index.ts`
+- Modify: `src/features/game-mode/core/catalog.ts` (⚠ faltaba: el cuarto error, ver la Tarea 3)
 
 - [ ] **Step 1: escribir tests rojos para cada operación**
 
 Con repositorio/outbox/lease en memoria, medir:
+
+⚠ **«Con lease en memoria» y «si el lease no se obtiene» son incompatibles, y hay que saberlo antes
+de escribir el archivo.** `MemoryLease` es PASA-MANOS: corre siempre el trabajo y nunca devuelve
+`undefined` —es la semántica correcta para un proceso que no tiene a quién excluir, ver
+`shared/mongo-lease.ts`—, así que con él la rama de "no lo conseguí" es inalcanzable y la aserción
+parece imposible de escribir. Va un negador de tres líneas en el propio test
+(`{ async within() { return undefined } }`), igual que el `deniedLease` de `outbox.test.ts`.
+
+⚠ **Y el lease NO alcanza para la regla de unicidad, aunque este Step lo dé por hecho.**
+`MongoLease` excluye PROCESOS y no llamadas concurrentes del mismo proceso (está escrito en el
+comentario de su `owner`): dos `POST /game-modes` contra la misma instancia entran los dos, y como la
+consulta de duplicados es un `await`, los dos la pasan antes de que ninguno haya insertado. O se
+serializa también adentro del proceso —una cola en memoria ENCIMA del lease, que es lo que ese mismo
+comentario propone— o se acepta el agujero que v1 ya tenía; lo que no se puede es no decidirlo.
 
 - `listActive()` y `getActive(uuid)` no mutan ni publican;
 - create aplica defaults y rechaza nombre+cantidad duplicados;
@@ -842,7 +864,13 @@ al insertar; con la de `update`, dos modos legítimos del catálogo productivo (
 dejan de poder renombrarse.
 - soft delete sólo cambia `isActive=false` y encola `updated`;
 - reactivate sólo cambia `isActive=true` y encola `updated`;
-- repetir delete/reactivate devuelve el error específico;
+- repetir delete/reactivate devuelve el error específico (`GameModeStateConflictError`, el cuarto que
+  la Tarea 3 no declaraba; 409 y no 404, porque el modo existe y el panel lo está listando);
+- un `PUT` idéntico avanza igual la revisión y encola otro `updated`: el repositorio hace `$inc` del
+  `__v` en TODA llamada que encuentre el documento, y v1 publicaba en cada `PUT` sin comparar nada
+  (`game-mode.service.ts:110-123`). No hay diff, y la ausencia es la decisión — cualquier regla de
+  "cambio efectivo" tendría que coincidir EXACTAMENTE con el criterio del `$inc`, y el día que no
+  coincida hay un cambio real cuya revisión ya se publicó, o sea un evento descartado en silencio;
 - `syncAll(batchId)` incluye activos e inactivos y devuelve el total;
 - si el lease no se obtiene, ninguna escritura ocurre;
 - si el repositorio confirma y el outbox falla, la operación rechaza, el cambio permanece y una
