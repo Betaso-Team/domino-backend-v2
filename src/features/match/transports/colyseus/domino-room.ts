@@ -12,6 +12,7 @@ import {
 import { rootContainer } from "../../../../di-container.js";
 import type { Logger } from "../../../../logger.js";
 import { InvalidTokenError, type TokenVerifier } from "../../../auth/index.js";
+import { LobbySettings, MaintenanceModeError } from "../../../lobby/index.js";
 import {
   DEFAULT_GLOBAL_CONFIG,
   type DominoMatchConfig,
@@ -108,6 +109,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
 
     const config = configOf(options);
+    const maintenance = await rootContainer.resolve(LobbySettings).get();
+    if (maintenance.isUnderMaintenance) {
+      throw new MaintenanceModeError(maintenance.maintenanceMessage);
+    }
     this.config = config;
     this.seats = playerIdsOf(config);
     // Colyseus cuenta las reservas de reconexión aunque unlock() abra el listing. Dos
@@ -336,7 +341,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       cause instanceof PlayerAlreadyOutError ||
       cause instanceof ValidationError ||
       cause instanceof UnknownCommandError ||
-      cause instanceof InvalidTokenError
+      cause instanceof InvalidTokenError ||
+      cause instanceof MaintenanceModeError
     ) {
       this.log.warn("rechazo esperado", { method: methodName, reason: cause.message });
       return;

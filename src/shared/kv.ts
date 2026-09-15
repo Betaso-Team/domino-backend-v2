@@ -9,7 +9,7 @@
 // que ya le pasa al servidor, y no hay una clase en el medio traduciendo. Es lo que permite que
 // el adaptador de Redis del dominó sea CERO líneas propias.
 //
-// LOS TRES MÉTODOS SON LOS TRES QUE SE USAN, y la lista corta es una decisión. Truco pide
+// LOS CUATRO MÉTODOS SON LOS CUATRO QUE SE USAN, y la lista corta es una decisión. Truco pide
 // además `sadd`/`srem`/`smembers`/`expire` porque su registro tiene que contestar a qué torneos
 // les quedan partidas; el dominó no tiene torneos ni matchmaking, así que un conjunto acá sería
 // una capacidad sin un solo llamador — y un puerto con métodos que nadie implementa contra algo
@@ -20,6 +20,8 @@
 // permite que una implementación que devuelve `any` —como la de Colyseus— encaje sin castear.
 export interface KeyValueStore {
   get(key: string): Promise<string | undefined>;
+  // Sin plazo: configuración operativa que debe sobrevivir mientras viva el almacén.
+  set(key: string, value: string): Promise<unknown>;
   // Guardar con plazo, en SEGUNDOS. La unidad no es un capricho: es la de Redis, y es la que la
   // implementación real recibe tal cual.
   setex(key: string, value: string, seconds: number): Promise<unknown>;
@@ -49,6 +51,11 @@ export class MemoryKeyValueStore implements KeyValueStore {
 
   async get(key: string): Promise<string | undefined> {
     return this.live(key)?.value;
+  }
+
+  async set(key: string, value: string): Promise<unknown> {
+    this.entries.set(key, { value, expiresAt: Number.POSITIVE_INFINITY });
+    return undefined;
   }
 
   async setex(key: string, value: string, seconds: number): Promise<unknown> {

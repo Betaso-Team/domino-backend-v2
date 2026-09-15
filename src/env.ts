@@ -183,7 +183,8 @@ const schema = z.object({
    * Colyseus, y se salva por los NOMBRES: `p:<processId>` e `ipc:<requestId>` llevan ids
    * aleatorios. Los únicos canales de nombre fijo son `$lobby`
    * (`@colyseus/core/build/matchmaker/Lobby.mjs:3`) y `concurrent:<nombre de sala>:<clave>`
-   * (`MatchMaker.mjs:106`) — el dominó no usa lobby, y la sala se llama `domino`: si algún día
+   * (`MatchMaker.mjs:106`) — el lobby del dominó es una Room normal y no suscribe `$lobby`; la
+   * sala de juego se llama `domino`: si algún día
    * convive con otro Colyseus que tenga una sala con ESE nombre, ahí sí hay que mirar.
    *
    * EL ÍNDICE DOCUMENTADO ES EL `/1` Y NO EL `/0` A PROPÓSITO: el `0` es donde cae todo el que no

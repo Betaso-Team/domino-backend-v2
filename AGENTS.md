@@ -294,8 +294,9 @@ quedó.
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-14-lobby-y-montos-publicos.md`.
 
-Estado: **Tareas 0–2 completas; Tarea 3 pendiente**. Se porta el contrato de lobby del dominó v1 y se recuperan los nombres
-públicos `entryFee`/`prize`; no se añade matchmaking ni catálogo.
+Estado: **Tareas 0–3 completas; Tarea 4 pendiente**. Se porta el contrato de lobby del dominó v1 y se recuperan los nombres
+públicos `entryFee`/`prize`; no se añade matchmaking ni catálogo. El lobby es una `Room` normal:
+consulta el driver compartido y evita el canal global `$lobby`, que Redis no aísla por índice de base.
 
 ## Cómo se ejecuta una tarea
 

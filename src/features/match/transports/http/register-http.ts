@@ -1,13 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
-import type { Application as Express, RequestHandler } from "express";
+import type { Application as Express } from "express";
 import { z } from "zod";
 import type { Logger } from "../../../../logger.js";
+import { requireInternalKey } from "../../../../shared/http/internal-key.js";
 import type { Clock } from "../../core/engine/clock.js";
 import type { HistoryReader } from "../../network/history.js";
 import type { MatchConfigResponse, MatchRegistry } from "../match-registry.js";
 import { validated } from "./validated.js";
 
-const INTERNAL_KEY_HEADER = "X-Internal-Key";
 // En una const para que el aviso de arranque y el `app.get` no puedan divergir: el warn
 // existe para que el operador encuentre ESTA ruta, no una parecida.
 const HISTORY_ROUTE = "/internal/matches/:matchId/history";
@@ -54,31 +53,6 @@ const HISTORY_PARAMS = z.object({
     .max(128)
     .regex(/^\P{Cc}+$/u, "matchId inválido"),
 });
-
-// Comparación en tiempo CONSTANTE. Un `===` sobre un secreto corta en el primer byte que
-// difiere, así que el tiempo de respuesta filtra la llave carácter a carácter y se la
-// puede reconstruir con suficientes pedidos. `timingSafeEqual` LANZA si los buffers no
-// miden lo mismo, así que el guard de largo es obligatorio — y no filtra nada que importe:
-// el largo de la llave no es el secreto, la llave sí.
-function sameKey(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-// 401 y no 404: acá el recurso puede existir perfectamente y lo que falta es la
-// credencial. Es middleware y no un `if` dentro del handler para que la próxima ruta
-// `/internal/*` no pueda nacer sin guardia por olvido.
-function requireInternalKey(expected: string): RequestHandler {
-  return (request, response, next) => {
-    const provided = request.get(INTERNAL_KEY_HEADER);
-    if (provided && sameKey(provided, expected)) {
-      next();
-      return;
-    }
-    response.status(401).json({ error: "UNAUTHORIZED" });
-  };
-}
 
 // TODAS las dependencias entran por PARÁMETRO OBLIGATORIO, ninguna con default y ninguna
 // leída de `env` acá adentro. El razonamiento ya estaba escrito para la llave interna

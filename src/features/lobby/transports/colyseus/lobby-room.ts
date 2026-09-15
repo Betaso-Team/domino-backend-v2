@@ -1,19 +1,21 @@
-import { type AuthContext, type Client, LobbyRoom as ColyseusLobbyRoom } from "colyseus";
+import { type AuthContext, type Client, Room, matchMaker } from "colyseus";
 import { rootContainer } from "../../../../di-container.js";
+import type { Logger } from "../../../../logger.js";
 import type { TokenVerifier } from "../../../auth/index.js";
-import { GameModeCount, LobbyRoomState } from "../../core/state.js";
+import { DEFAULT_MAINTENANCE_MESSAGE, GameModeCount, LobbyRoomState } from "../../core/state.js";
+import { LobbySettings } from "../../settings.js";
 
 interface DominoRoomMetadata {
   readonly gameModeId?: string;
 }
 
-type LobbyJoinOptions = Parameters<ColyseusLobbyRoom["onJoin"]>[1];
-
-// El lobby de Colyseus mantiene el listing compartido; este subtipo solo proyecta el árbol
-// mínimo que ya consume el front. No hace matchmaking: contar y anunciar mantenimiento no
-// necesitan volver a meter esa responsabilidad dentro del socket.
-export class LobbyRoom extends ColyseusLobbyRoom<DominoRoomMetadata> {
+// Es una Room normal a propósito: LobbyRoom de Colyseus usa el canal global `$lobby`, que Redis
+// comparte entre bases y productos. El query queda aislado por la base elegida por REDIS_URL.
+export class LobbyRoom extends Room<{ state: LobbyRoomState; client: Client }> {
   declare state: LobbyRoomState;
+  private settings!: LobbySettings;
+  private log!: Logger;
+  private refreshing = false;
 
   static override async onAuth(
     _token: string,
@@ -23,15 +25,13 @@ export class LobbyRoom extends ColyseusLobbyRoom<DominoRoomMetadata> {
     return true;
   }
 
-  override async onCreate(options: unknown): Promise<void> {
+  override async onCreate(): Promise<void> {
     this.autoDispose = false;
-    this.state = new LobbyRoomState();
-    await super.onCreate(options);
-    this.refreshCounts();
-    // `rooms` se actualiza por el pub/sub nativo de Colyseus. Reproyectarlo no consulta Redis:
-    // es un recorrido corto en memoria y mantiene los contadores vivos aunque nadie entre o salga
-    // del lobby durante una partida.
-    this.clock.setInterval(() => this.refreshCounts(), 1_000);
+    this.setState(new LobbyRoomState());
+    this.settings = rootContainer.resolve(LobbySettings);
+    this.log = rootContainer.resolve<Logger>("Logger");
+    await this.refresh();
+    this.clock.setInterval(() => void this.refresh(), 1_000);
   }
 
   override async onAuth(
@@ -42,26 +42,46 @@ export class LobbyRoom extends ColyseusLobbyRoom<DominoRoomMetadata> {
     return rootContainer.resolve<TokenVerifier>("TokenVerifier").verify(context.token ?? undefined);
   }
 
-  override onJoin(client: Client, options: LobbyJoinOptions): void {
-    super.onJoin(client, options);
+  override onJoin(): void {
     this.state.playersInLobby = this.clients.length;
-    this.refreshCounts();
+    void this.refresh();
   }
 
-  override onLeave(client: Client): void {
-    super.onLeave(client);
+  override onLeave(): void {
     this.state.playersInLobby = this.clients.length;
-    this.refreshCounts();
+    void this.refresh();
   }
 
-  private refreshCounts(): void {
+  private async refresh(): Promise<void> {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    try {
+      const [rooms, maintenance] = await Promise.all([
+        matchMaker.query({ name: "domino" }),
+        this.settings.get(),
+      ]);
+      this.applyCounts(rooms);
+      this.state.isUnderMaintenance = maintenance.isUnderMaintenance;
+      this.state.maintenanceMessage = maintenance.maintenanceMessage;
+    } catch (error: unknown) {
+      this.state.isUnderMaintenance = true;
+      this.state.maintenanceMessage = DEFAULT_MAINTENANCE_MESSAGE;
+      this.log.error("no se pudo refrescar el lobby", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  private applyCounts(rooms: Awaited<ReturnType<typeof matchMaker.query>>): void {
     let totalPlayers = 0;
     const byMode = new Map<string, number>();
 
-    for (const room of this.rooms) {
-      if (room.name !== "domino" || room.clients <= 0) continue;
+    for (const room of rooms) {
+      if (room.clients <= 0) continue;
       totalPlayers += room.clients;
-      const gameModeId = room.metadata?.gameModeId;
+      const gameModeId = (room.metadata as DominoRoomMetadata | undefined)?.gameModeId;
       if (gameModeId) byMode.set(gameModeId, (byMode.get(gameModeId) ?? 0) + room.clients);
     }
 

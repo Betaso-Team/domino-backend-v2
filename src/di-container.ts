@@ -3,6 +3,7 @@ import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from
 import { container } from "tsyringe";
 import { env } from "./env.js";
 import { JwtVerifier } from "./features/auth/index.js";
+import { LobbySettings } from "./features/lobby/settings.js";
 import { type GlobalDominoConfig, globalConfigWith } from "./features/match/core/config.js";
 import type { Clock } from "./features/match/core/engine/clock.js";
 import type { HistoryPort, HistoryReader } from "./features/match/network/history.js";
@@ -67,6 +68,8 @@ export const driver: MatchMakerDriver | undefined = env.redisUrl
 // Sin Redis queda el de memoria, que NO es un doble: es la implementación del proceso único,
 // igual que `MemoryHistory` más abajo.
 const store: KeyValueStore = presence ?? new MemoryKeyValueStore();
+
+rootContainer.register(LobbySettings, { useValue: new LobbySettings(store) });
 
 // EL REGISTRO DE PARTIDAS VIVAS, que ya no es del proceso sino del CLÚSTER: sus dos respuestas
 // —el config público del endpoint HTTP y en qué sala está sentado un jugador— salen del almacén

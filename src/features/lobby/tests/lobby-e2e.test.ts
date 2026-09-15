@@ -97,4 +97,64 @@ describe("lobby", () => {
       "El juego de dominó está en mantenimiento. Vuelve pronto.",
     );
   });
+
+  it("cambia mantenimiento sin deploy y bloquea solo mesas nuevas", async () => {
+    const existing = await server.createRoom("domino", casualTable(["existing-a", "existing-b"]));
+    const room = await server.createRoom("lobby", {});
+    server.sdk.auth.token = mintToken(participantOf("operator-observer"));
+    const client = await server.connectTo(room);
+    const state = client.state as LobbyStateDTO;
+
+    const denied = await fetch("http://localhost:2592/internal/lobby/maintenance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isUnderMaintenance: true, message: "Actualizando mesas" }),
+    });
+    expect(denied.status).toBe(401);
+
+    const malformed = await fetch("http://localhost:2592/internal/lobby/maintenance", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Key": env.internalApiKey ?? "",
+      },
+      body: JSON.stringify({ isUnderMaintenance: "sí" }),
+    });
+    expect(malformed.status).toBe(400);
+
+    const enabled = await fetch("http://localhost:2592/internal/lobby/maintenance", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Key": env.internalApiKey ?? "",
+      },
+      body: JSON.stringify({ isUnderMaintenance: true, message: "Actualizando mesas" }),
+    });
+    expect(enabled.status).toBe(200);
+    expect(await enabled.json()).toEqual({
+      isUnderMaintenance: true,
+      maintenanceMessage: "Actualizando mesas",
+    });
+    await waitUntil(
+      () => state.isUnderMaintenance && state.maintenanceMessage === "Actualizando mesas",
+    );
+
+    expect(server.getRoomById(existing.roomId)).toBeDefined();
+    await expect(
+      server.createRoom("domino", casualTable(["blocked-a", "blocked-b"])),
+    ).rejects.toThrow("Actualizando mesas");
+
+    const disabled = await fetch("http://localhost:2592/internal/lobby/maintenance", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Key": env.internalApiKey ?? "",
+      },
+      body: JSON.stringify({ isUnderMaintenance: false }),
+    });
+    expect(disabled.status).toBe(200);
+    await expect(
+      server.createRoom("domino", casualTable(["available-a", "available-b"])),
+    ).resolves.toBeDefined();
+  });
 });

@@ -3,7 +3,7 @@ import { type ServerOptions, defineRoom, defineServer } from "colyseus";
 import express, { type Application } from "express";
 import { driver, mongo, presence, rootContainer } from "./di-container.js";
 import { env } from "./env.js";
-import { LobbyRoom } from "./features/lobby/index.js";
+import { LobbyRoom, LobbySettings, registerLobbyHttp } from "./features/lobby/index.js";
 import {
   type Clock,
   DominoRoom,
@@ -98,6 +98,10 @@ const registerHttp = (app: Application) => {
   // en `shared/http/health.ts` — `/health` no consulta nada porque "reiniciame" es la única
   // respuesta que destruye partidas en curso.
   registerHealth(app, hardDependencies);
+  registerLobbyHttp(app, {
+    settings: rootContainer.resolve(LobbySettings),
+    internalApiKey: env.internalApiKey,
+  });
   registerMatchHttp(app, {
     registry: rootContainer.resolve(MatchRegistry),
     clock: rootContainer.resolve<Clock>("Clock"),
