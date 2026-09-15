@@ -323,8 +323,8 @@ Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
 Estado: **Tareas 1, 2, 3, 4, 5, 6, 7 y 8 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+este `docs:`).
-Baseline **543 tests / 63 archivos**, con `typecheck`, suite, lint, `format` y `depcruise`
+`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de la
+revisión). Baseline **546 tests / 63 archivos**, con `typecheck`, suite, lint, `format` y `depcruise`
 (**198 módulos / 751 dependencias**) en verde.
 Primer paso pendiente: **Tarea 9, escribir el rojo del contrato HTTP en
 `src/features/game-mode/transports/http/`**.
@@ -332,10 +332,13 @@ Primer paso pendiente: **Tarea 9, escribir el rojo del contrato HTTP en
 Lo que dejó la Tarea 8:
 
 - **EL SERVICIO NO NOMBRA A RABBIT, Y ESO ESTÁ MEDIDO CON LA LISTA EXACTA DE IMPORTS de
-  `service.ts`.** No es decoración: los tipos NO impiden un quinto parámetro `AmqpDelivery` que
-  publique "sólo para el create", y esa es la tentación que el outbox existe para prohibir. Un
-  `expect(imported).not.toContain("amqp")` no alcanzaría —la forma que aparece es un parámetro
-  nuevo—; la lista cerrada obliga a que toda dependencia nueva pase por ese test y su argumento.
+  `service.ts`.** Los tipos NO impiden un quinto parámetro que publique "sólo para el create", y esa
+  es la tentación que el outbox existe para prohibir. ⚠ **Pero hay que saber hasta dónde llega la
+  guarda, porque el comentario original prometía de más**: la lista cerrada atrapa toda dependencia
+  **importada** —el puerto AMQP, el despachador, el container— y **no** un quinto parámetro tipado
+  con un tipo ESTRUCTURAL escrito en la línea (`publish: (key, body) => Promise<void>`), que no
+  importa nada y pasa verde. Está medido. No se intenta cerrar ese caso: el guardarraíl que lo
+  atrapara tendría que entender la firma del constructor. Es el piso, no el techo.
 - **LA REGLA DE UNICIDAD ES ASIMÉTRICA Y SE REPRODUJO ASÍ, porque es la de v1**: `create` compara el
   par `name + playersQuantity` (`game-mode.service.ts:58`), `update` compara **sólo el nombre**,
   cruzando mesas de dos y de cuatro (`:100-103`), y sólo cuando el nombre CAMBIA (`:99`). Unificar
@@ -365,9 +368,25 @@ Lo que dejó la Tarea 8:
   `OutboxDispatcher` para no cerrar el ciclo servicio → despachador → outbox → servicio.
 - **LAS LECTURAS NO TOMAN EL LEASE**: un GET público que compitiera por el lease del escritor daría
   503 cada vez que el panel edita.
-- **Trece mutaciones verificadas a mano**, cada una roja en el test que dice medirla y en ningún
+- **`syncAll` DIVERGE DE v1 EN DOS COSAS, NO EN UNA** (el cuerpo del `feat:` dice "una sola
+  diferencia de fondo" y se queda corto). La primera es la del incremento entero: no publica, encola.
+  La segunda es el número que devuelve — v1 cuenta los modos **efectivamente publicados** (`synced++`
+  adentro del `try`, `game-mode.service.ts:181-189`, así que un fallo del broker baja el número) y v2
+  devuelve los **encolados**. Es lo correcto acá y está argumentado en `memory-outbox.ts:50-53`: con
+  outbox, "publicado" todavía no pasó cuando el HTTP contesta, y repetir el mismo lote no duplica —
+  devolver menos haría creer al operador que se perdieron modos.
+- ⚠ **EL HUECO HEREDADO ESTÁ PINEADO CON UN TEST** (`⚠ HUECO HEREDADO DE v1: un PUT que cambia sólo
+  la cantidad…`): un `PUT` que cambia SÓLO `playersQuantity` no dispara la consulta de duplicados —la
+  de `update` corre sólo cuando el nombre cambia—, así que fabrica el par que `create` rechaza. El
+  test **no celebra el hueco, lo fija**: el que venga a cambiar la regla de unicidad empieza por ahí,
+  y ponerlo rojo es lo correcto. Un hueco documentado sin test se ensancha en silencio.
+- **Dieciséis mutaciones verificadas a mano**, cada una roja en el test que dice medirla y en ningún
   otro. La que decidió el diseño del test: sin la cola, la carrera en proceso sólo se ve lanzando las
-  dos creaciones en el mismo turno.
+  dos creaciones en el mismo turno. Las tres que agregó la revisión, y las tres pasaban verdes contra
+  los 21 tests originales: `this.tail = result` sin neutralizar —el envenenamiento de la cola, que
+  deja el catálogo de sólo lectura hasta reiniciar—, un `batchId` fijo en `syncAll` —el segundo
+  apretón del botón de recuperación no encola NADA y contesta éxito igual— y cerrar el hueco de
+  arriba.
 
 Lo que dejó la Tarea 7:
 

@@ -872,6 +872,17 @@ dejan de poder renombrarse.
   "cambio efectivo" tendría que coincidir EXACTAMENTE con el criterio del `$inc`, y el día que no
   coincida hay un cambio real cuya revisión ya se publicó, o sea un evento descartado en silencio;
 - `syncAll(batchId)` incluye activos e inactivos y devuelve el total;
+- ⚠ **y el `batchId` VIAJA hasta la clave de deduplicación**, medido con DOS lotes seguidos de
+  identificadores distintos. No estaba pedido y es un camino de evento perdido: `sync` deduplica por
+  `["game_mode.sync", batchId, uuid]`, así que un `batchId` fijo adentro del servicio hace que el
+  SEGUNDO apretón del botón de recuperación no encole nada mientras contesta `synced: N` — un no-op
+  en la única operación que existe para recuperar eventos perdidos, sin un error en el log;
+- ⚠ **una mutación que falla no envenena la cola del proceso**: si la cola avanzara con la promesa
+  sin neutralizar (`this.tail = result`), toda mutación posterior rechazaría para siempre con el
+  error viejo — el catálogo queda de sólo lectura hasta que alguien reinicie la instancia;
+- el `total` que devuelve son los ENCOLADOS y no los publicados, y ahí diverge de v1 a propósito:
+  allá `synced++` va adentro del `try` de la publicación (`game-mode.service.ts:181-189`), acá
+  publicar todavía no pasó cuando el HTTP contesta;
 - si el lease no se obtiene, ninguna escritura ocurre;
 - si el repositorio confirma y el outbox falla, la operación rechaza, el cambio permanece y una
   reconciliación posterior crea el evento de esa `version`;
