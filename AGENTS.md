@@ -322,11 +322,54 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3, 4, 5 y 6 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`, `3be878f`+`edf2e14`).
-Baseline **457 tests / 59 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
-(**189 módulos / 694 dependencias**) en verde. Primer paso pendiente: **Tarea 7, escribir el rojo de
-durabilidad e idempotencia del outbox en `src/features/game-mode/outbox.test.ts`**.
+Estado: **Tareas 1, 2, 3, 4, 5, 6 y 7 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
+`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+este `docs:`).
+Baseline **518 tests / 62 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
+(**196 módulos / 737 dependencias**) en verde. Primer paso pendiente: **Tarea 8, escribir el rojo del
+servicio del catálogo en `src/features/game-mode/service.test.ts`**.
+
+Lo que dejó la Tarea 7:
+
+- **EL REQUEST ADMINISTRATIVO NO ESPERA A RABBIT, y ése es el archivo entero.** La mutación escribe
+  Mongo y escribe el outbox; el dispatcher publica después con confirmación del broker. La entrega es
+  **al menos una vez** y está aceptado: un proceso que muere DESPUÉS del confirm y ANTES de marcar
+  `SENT` republica, y el consumidor upsertea por `id`.
+- **LO QUE NO SE ACEPTA ES ADELANTARSE.** `next()` mira el PENDIENTE MÁS VIEJO y devuelve vacío si
+  todavía no venció su reintento, en vez de ofrecer el siguiente. La consulta NO filtra por
+  `nextAttemptAt` (`{status:"PENDING"}` ordenado por `_id`, y el plazo se compara después): con el
+  filtro adentro, el segundo `updated` sale antes que el primero y el consumidor se queda con el modo
+  viejo **sin que nada falle**.
+- **LAS TRES CLAVES DE DEDUPLICACIÓN VIVEN EN `outbox.ts`, no en cada adaptador**, porque el formato
+  ES el contrato: `["game_mode.created", uuid]`, `["game_mode.updated", uuid, version]` y
+  `["game_mode.sync", batchId, uuid]`. `sync` lleva `batchId` y un discriminador propio porque es el
+  botón de "republicar todo" del operador y **debe forzar el evento aunque esa revisión ya se haya
+  publicado** — justo el caso en que se aprieta.
+- **`reconcile` NO es un `ensureUpdated` a secas**, y ése fue el hueco del plan. Da por cubierto al
+  modo cuyo `created` existe (`revisionKeysOf` devuelve las DOS claves): sin eso, cada alta del panel
+  recibe además un `updated` espurio en el primer tick, para siempre. Un `created` PERDIDO sí vuelve
+  como `updated`, que es la estrategia de recuperación del `/sync` de v1.
+- **NO HAY LÍMITE DE INTENTOS, y la ausencia es la decisión.** Descartar al intento N es una pérdida
+  silenciosa; una caída larga del broker cuesta retraso, no datos. El backoff sí tiene techo:
+  `min(300_000, 1_000 * 2 ** attempts)`.
+- ⚠ **EL PLAZO DE 5 s NO ES DECORACIÓN.** `publishTopic` no rechaza solo con el broker caído: SE
+  CUELGA (ver el bloque de la Tarea 6). Sin el plazo, el primer tick contra un Rabbit apagado espera
+  para siempre con el lease tomado y el outbox deja de drenar sin un solo error en el log.
+- **EL DISPATCHER TIENE SU PROPIA GUARDA `inFlight`, y no alcanza con el lease**: `MongoLease` excluye
+  PROCESOS y no llamadas del mismo proceso, así que un `wake()` encima del tick programado publicaría
+  la misma entrada dos veces.
+- **NO HAY TTL NI BORRADO.** Los `SENT` son lo que impide que la reconciliación vuelva a emitir toda
+  revisión ya publicada en cada tick.
+- **`MemoryGameModeOutbox` no es un doble** y comparte `transports/tests/outbox-contract.ts` con el
+  adaptador Mongo. El contrato mide SÓLO por el puerto —no hay inspector de "todas las entradas",
+  porque la única ventana que la producción usa es `next()`—; lo que sólo Mongo puede tener (documento,
+  índices, colección, hex del `ObjectId`) se mide en su propio archivo.
+- **`reconcile` consulta por claves candidatas, no lee la colección.** El techo está escrito como
+  comentario `ponytail:` en `mongo-outbox.ts`: un `$in` de `2 × modos` por segundo deja de ser adecuado
+  del orden del millar de modos, y ahí lo que cambia es la cadencia o una marca de agua, no la consulta.
+- **Quince mutaciones verificadas a mano**, cada una roja en el test que dice medirla. La que corrigió
+  un test decorativo: `close()` sin esperar `inFlight` pasaba VERDE contra un `Promise.race` con una
+  promesa ya resuelta —el race de microtareas lo gana igual—. Se espera un turno completo del event
+  loop.
 
 Lo que dejó la Tarea 6:
 
@@ -581,6 +624,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 7 | Dos: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores ni el test del de memoria —el mismo defecto que la Tarea 4, y `MemoryGameModeOutbox` tampoco es un doble—; y el Step 3 declaraba la clave de `ensureUpdated` y la de `sync` pero **no la de `enqueueCreated` ni contra qué compara `reconcile`**. La lectura ingenua («reconcile llama a `ensureUpdated`») le agrega un `updated` espurio a TODA alta del panel en el primer tick posterior, para siempre, y nada falla | `1f03cd7` + este `docs:` |
 | 6 | Tres, y los tres del «portar de truco» contra la `amqplib` 2.0.1 instalada: reconectar entero al soltar el canal abandona un `RecoveringChannelModel` que sigue reintentando para siempre (un zombi por caída del broker); nadie escucha `error` en la CONEXIÓN, y un `error` sin oyente **tumba el proceso** en Node; y `close()` no espera el intento en vuelo, así que un apagado durante una entrega deja el socket abriéndose después del cierre. El Step 2 tampoco pedía que los dobles fueran `EventEmitter` de verdad, que es lo único que pone roja la segunda | `3be878f` + este `docs:` |
 | 5 | Uno, y de los que se cobran dos tareas después: falta el lease DE MEMORIA y no tiene archivo. La Tarea 8 pide "repositorio/outbox/lease en memoria" y la 11 "registrar repository/outbox/lease de memoria sin URI", pero ninguna de las dos crea un archivo donde pueda vivir y la lista `Files:` de la 5 tiene dos. Va junto al puerto en `src/shared/mongo-lease.ts`, por el criterio de `src/shared/kv.ts` | `348f527` + este `docs:` |
 | 4 | Tres: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores, y cuatro archivos sueltos producen justo la deriva que el propio Step 3 dice evitar (`MemoryGameModeRepository` no es un doble); el snippet de los índices los asertaba como pares `[clave, opciones]`, que es la forma de `createIndex` y no la de `createIndexes`, que el mismo Step pide; y «update que no borra campos omitidos» no alcanza —medido por mutación: un `$set: { ...input }` crudo pasa verde, y la forma que de verdad llega desde las rutas de v1 es el `undefined` EXPLÍCITO— | `ce54f9e` + este `docs:` |

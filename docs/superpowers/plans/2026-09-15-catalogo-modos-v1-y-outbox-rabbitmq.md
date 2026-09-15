@@ -665,7 +665,16 @@ git commit -m "feat(amqp): publica eventos con confirmacion del broker"
 - Create: `src/features/game-mode/transports/mongo-outbox.ts`
 - Create: `src/features/game-mode/transports/mongo-outbox.test.ts`
 - Create: `src/features/game-mode/transports/memory-outbox.ts`
+- Create: `src/features/game-mode/transports/memory-outbox.test.ts`
+- Create: `src/features/game-mode/transports/tests/outbox-contract.ts`
 - Modify: `src/features/game-mode/index.ts`
+
+⚠ **Corregido durante la ejecución (mismo defecto que la Tarea 4): faltaban los dos últimos.**
+`MemoryGameModeOutbox` no es un doble —es el outbox de la instancia sin `MONGO_URI`—, así que sus
+claves de deduplicación, su orden de entrega y su reconciliación tienen que ser los MISMOS que los
+del adaptador Mongo. Eso se mide con UN contrato compartido corrido contra los dos, igual que
+`transports/tests/repository-contract.ts`; con la lista original el adaptador de memoria quedaba sin
+ningún test y las dos implementaciones podían derivar en silencio.
 
 - [ ] **Step 1: escribir tests rojos de durabilidad e idempotencia**
 
@@ -686,7 +695,7 @@ Cubrir con literales:
 - [ ] **Step 2: ejecutar el rojo**
 
 ```bash
-npx vitest run src/features/game-mode/outbox.test.ts src/features/game-mode/transports/mongo-outbox.test.ts
+npx vitest run src/features/game-mode/outbox.test.ts src/features/game-mode/transports/mongo-outbox.test.ts src/features/game-mode/transports/memory-outbox.test.ts
 ```
 
 Expected: FAIL por contratos inexistentes.
@@ -725,6 +734,28 @@ export interface GameModeOutbox {
 por `uuid + version`; `sync` usa `batchId + uuid`, porque debe forzar un evento aun cuando la revisión
 ya se publicó. Crear índices `{dedupeKey:1}` unique y `{status:1,_id:1}`. No TTL ni borrado automático.
 
+⚠ **Lo que este Step NO decía, y se resolvió al ejecutarlo (defecto):** faltaban la clave de
+`enqueueCreated` y —sobre todo— **contra qué compara `reconcile`**. Las tres claves se escriben en
+`outbox.ts` y no en cada adaptador, porque el formato ES el contrato:
+
+```ts
+createdKeyOf(mode) === JSON.stringify(["game_mode.created", mode.uuid])
+updatedKeyOf(mode) === JSON.stringify(["game_mode.updated", mode.uuid, mode.version])
+syncKeyOf(batchId, mode) === JSON.stringify(["game_mode.sync", batchId, mode.uuid])
+```
+
+La de creación no lleva revisión —un modo se crea una vez y nace en `__v = 0`— y la de `sync` lleva un
+discriminador PROPIO (`game_mode.sync`, que no es una clave de ruteo: el evento sale igual como
+`game_mode.updated`) para que un lote forzado no pueda suprimir ni ser suprimido por el evento de una
+revisión.
+
+Y `reconcile` **no puede ser un `ensureUpdated` a secas**: tiene que dar por cubierto al modo cuyo
+`created` existe. Pregunta por las DOS claves de revisión (`createdKeyOf` **o** `updatedKeyOf`) en un
+solo `find({dedupeKey: {$in: …}})` y emite `ensureUpdated` sólo para el que no tenga ninguna. Con la
+lectura ingenua, cada alta del panel recibe además un `updated` espurio en el primer tick posterior,
+para siempre — y nada falla. La clave de `sync` NO se mira: un lote no es direccionable por revisión, y
+el costo de la alternativa sería que `sync` mintiera sobre qué revisión entregó.
+
 - [ ] **Step 4: implementar el dispatcher de una entrada por lease**
 
 ```ts
@@ -747,8 +778,10 @@ ejecutar un bucle infinito dentro del lease.
 - [ ] **Step 5: verde y commit**
 
 ```bash
-npx vitest run src/features/game-mode/outbox.test.ts src/features/game-mode/transports/mongo-outbox.test.ts
+npx vitest run src/features/game-mode/outbox.test.ts src/features/game-mode/transports/mongo-outbox.test.ts src/features/game-mode/transports/memory-outbox.test.ts
 npm run typecheck
+npm run lint
+npm run depcruise
 git add src/features/game-mode
 git commit -m "feat(game-mode): entrega cambios mediante outbox durable"
 ```
