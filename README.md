@@ -15,8 +15,8 @@ docker compose up --build
 ```
 
 `JWT_SECRET` es **obligatoria**: sin ella el proceso no arranca, a propósito.
-`INTERNAL_API_KEY` no lo es, pero sin ella `/internal/matches/:matchId/history` **no se
-registra** y responde 404 — es fail closed, y es el 404 que más se investiga al pedo.
+`INTERNAL_API_KEY` no lo es, pero sin ella las rutas internas de historial y mantenimiento
+**no se registran** y responden 404 — es fail closed, y es el 404 que más se investiga al pedo.
 
 `MONGO_URI` y `REDIS_URL` **no las pongas en el `.env`**: las fija el compose apuntando a los
 servicios (`mongodb://mongo:27017/domino` y `redis://redis:6379/1` — el `/1` es el índice de
@@ -25,6 +25,29 @@ base, y es el aislamiento contra otro producto en el mismo Redis; ver `src/env.t
 documenta a `src/env.ts`): `DOMINO_PORT`, `MONGO_PORT` y `REDIS_PORT`, los puertos del
 **host**, por si ya hay algo escuchando — pasa seguido si el mismo operador corre truco al
 lado.
+
+## Contrato para el front
+
+La sala `lobby` exige el mismo JWT que una mesa y sincroniza el contrato histórico del dominó:
+`totalPlayers`, `playersInLobby`, `gameModesCount[]`, `isUnderMaintenance` y
+`maintenanceMessage`. Los jugadores se cuentan en todas las salas `domino` visibles por el driver
+compartido y se agrupan por `gameModeId` en `gameModesCount[].gameModeName`.
+
+El operador cambia mantenimiento sin desplegar con:
+
+```bash
+curl -X POST -H "X-Internal-Key: <la del .env>" -H "Content-Type: application/json" \
+  -d '{"isUnderMaintenance":true,"message":"Actualizando mesas"}' \
+  http://localhost:2567/internal/lobby/maintenance
+```
+
+El cambio llega a los lobbies y bloquea únicamente mesas nuevas; las partidas abiertas continúan.
+Con Redis lo comparten todos los procesos y sobrevive a sus reinicios; sin Redis vive en memoria.
+
+`GET /config/:roomId` publica los montos con los nombres usados por dominó y truco: `entryFee` y
+`prize`. Ambos son enteros UC con dos decimales implícitos (`125` = `1,25 UC`); el front se encarga
+de presentarlos o convertirlos. Los nombres contables internos `entryFeeUcMinor` y
+`prizeUcMinor` no salen en ese DTO.
 
 ## Varias instancias
 

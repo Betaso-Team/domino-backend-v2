@@ -289,14 +289,23 @@ quedó.
    al menos una vez, reintentos, quién persiste la instrucción— **no está resuelto en ningún
    lado**: es el incremento siguiente, no una omisión de éste.
 
-## Incremento activo — lobby operativo y montos públicos
+## Incremento completo — lobby operativo y montos públicos
 
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-14-lobby-y-montos-publicos.md`.
 
-Estado: **Tareas 0–3 completas; Tarea 4 pendiente**. Se porta el contrato de lobby del dominó v1 y se recuperan los nombres
-públicos `entryFee`/`prize`; no se añade matchmaking ni catálogo. El lobby es una `Room` normal:
-consulta el driver compartido y evita el canal global `$lobby`, que Redis no aísla por índice de base.
+Estado: **Tareas 0–4 completas** (`ba84fa1`, `df3cdb2`, `be443ee`, `2198f07`; cierre documental
+pendiente de registrar). Baseline **372 tests / 54 archivos**. Verificados con código 0:
+`typecheck`, suite, lint, build y depcruise (**172 módulos / 652 dependencias**). El grafo fue
+reindexado y el smoke Docker/PM2/Nginx terminó una partida 2P con 119 entradas de historial; el
+compose quedó vacío.
+
+Se portó el contrato de lobby del dominó v1 y se recuperaron los nombres públicos
+`entryFee`/`prize`; no se añadió matchmaking ni catálogo. El lobby es una `Room` normal: consulta
+el driver compartido y evita el canal global `$lobby`, que Redis no aísla por índice de base. El
+mantenimiento vive en Redis cuando está configurado —en memoria con una sola instancia—, se cambia
+por `POST /internal/lobby/maintenance`, bloquea únicamente mesas nuevas y falla cerrado ante un valor
+corrupto. `entryFee` y `prize` son UC minor: `125` significa `1,25 UC`; el front presenta y convierte.
 
 ## Cómo se ejecuta una tarea
 

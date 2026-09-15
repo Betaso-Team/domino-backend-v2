@@ -22,7 +22,7 @@ este contrato del front.
   registrar `lobby`, autenticarlo y contar conexiones por `gameModeId` usando el listing compartido.
 - [x] **Tarea 3 — Mantenimiento operativo.** Escribir primero los tests rojos de persistencia, ruta
   interna y rechazo de mesas; implementar el estado compartido y su actualización sin deploy.
-- [ ] **Tarea 4 — Cierre.** Actualizar documentación, reindexar el grafo y ejecutar `typecheck`, suite,
+- [x] **Tarea 4 — Cierre.** Actualizar documentación, reindexar el grafo y ejecutar `typecheck`, suite,
   formato/lint, build y depcruise.
 
 ## Criterio de cierre
