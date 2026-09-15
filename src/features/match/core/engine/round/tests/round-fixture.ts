@@ -11,6 +11,7 @@ import {
 import type { BoardSide } from "../../../state/tile.js";
 import { createMatchState } from "../../genesis.js";
 import { handOf } from "../../state-projections.js";
+import { matchConfig } from "../../tests/match-config-fixture.js";
 
 export interface RoundSetup {
   hands: Record<string, [number, number][]>;
@@ -29,15 +30,7 @@ function tileOf([left, right]: [number, number]): Tile {
 
 export function roundState(setup: RoundSetup): MatchState {
   const seats = Object.keys(setup.hands);
-  const match = createMatchState({
-    matchId: "m1",
-    gameModeId: "g",
-    seed: "s",
-    seats,
-    pointsToWin: 100,
-    teamAssignment: "SHUFFLED",
-    isDealWindowEnabled: false,
-  });
+  const match = createMatchState(matchConfig(seats, { seed: "s", teamAssignment: "SHUFFLED" }));
   match.phase = "PLAYING";
 
   const round = new RoundState();

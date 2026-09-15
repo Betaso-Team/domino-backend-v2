@@ -2,21 +2,29 @@ import { describe, expect, it } from "vitest";
 import type { DominoMatchConfig } from "../core/config.js";
 import { replay } from "../history/replay.js";
 import type { HistoryEntry } from "../network/history.js";
+import { configOf } from "../transports/match-contract.js";
 import golden from "./fixtures/golden-2p.json" with { type: "json" };
 
-const meta: DominoMatchConfig = {
+// El meta sale de `configOf`: la ventana de reparto TIENE QUE ESPEJAR PRODUCCIÓN, no la
+// comodidad del test. Con `false`, el motor del replay saltearía la ventana y arrancaría en
+// `PLAYING`; los dos `REVEAL_TILES` que la partida grabada tiene al principio caerían con
+// `NOT_DEALING` y el replay no reproduciría nada. Armarlo con el contrato en vez de a mano
+// es lo que impide que ese campo —o el `rateId`, o los montos— se escriba distinto acá.
+const meta: DominoMatchConfig = configOf({
+  mode: "CASUAL",
   matchId: "m-replay",
   gameModeId: "clasica-2p",
+  participants: [
+    { platformId: "betaso", userUuid: "u1", displayName: "Jugador u1", currency: "VES" },
+    { platformId: "betaso", userUuid: "u2", displayName: "Jugador u2", currency: "VES" },
+  ],
   seed: "seed-replay",
-  seats: ["u1", "u2"],
   pointsToWin: 100,
   teamAssignment: "SHUFFLED",
-  // TIENE QUE ESPEJAR PRODUCCIÓN, no la comodidad del test. Con `false`, el motor del
-  // replay saltearía la ventana y arrancaría en `PLAYING`; los dos `REVEAL_TILES` que la
-  // partida grabada tiene al principio caerían con `NOT_DEALING` y el replay no
-  // reproduciría nada. El config del replay es parte del contrato, igual que el `seed`.
-  isDealWindowEnabled: true,
-};
+  rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+  entryFeeUcMinor: 125,
+  prizeUcMinor: 250,
+});
 
 function entry(seq: number, rest: Partial<HistoryEntry>): HistoryEntry {
   return {
@@ -34,7 +42,7 @@ function entry(seq: number, rest: Partial<HistoryEntry>): HistoryEntry {
 
 // La mesa arranca TAPADA, así que levantar las fichas es el prólogo de toda partida
 // reproducida: sin estos dos actos la ronda sigue en `DEALING` y no hay turno de nadie.
-const reveals: readonly HistoryEntry[] = meta.seats.map((playerId, index) =>
+const reveals: readonly HistoryEntry[] = meta.seats.map(({ playerId }, index) =>
   entry(index + 1, { type: "REVEAL_TILES", payload: { playerId } }),
 );
 

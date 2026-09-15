@@ -1,21 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GLOBAL_CONFIG, type DominoMatchConfig } from "../../config.js";
+import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
 import { BoardState, BoneyardState, RoundState, Tile } from "../../state/index.js";
 import { Dealer } from "../dealer.js";
 import { createMatchState } from "../genesis.js";
 import { handOf } from "../state-projections.js";
 import { DOMINO_SET_SIZE, handValue, sameTile } from "../tile-set.js";
+import { matchConfig } from "./match-config-fixture.js";
 
 function build(seed = "seed-1") {
-  const config: DominoMatchConfig = {
-    matchId: "m1",
-    gameModeId: "g",
-    seed,
-    seats: ["u1", "u2"],
-    pointsToWin: 100,
-    teamAssignment: "SHUFFLED",
-    isDealWindowEnabled: false,
-  };
+  const config = matchConfig(["u1", "u2"], { seed, teamAssignment: "SHUFFLED" });
   const match = createMatchState(config);
   const round = new RoundState();
   round.roundNumber = 1;

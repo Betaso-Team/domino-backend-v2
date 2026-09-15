@@ -1,5 +1,5 @@
 // src/features/match/core/engine/genesis.ts
-import type { DominoMatchConfig } from "../config.js";
+import { type DominoMatchConfig, playerIdsOf } from "../config.js";
 import { Hand, MatchState, PlayerState, Scoreboard } from "../state/index.js";
 import { InvariantViolationError } from "./errors.js";
 import { assignTeams } from "./team-assignment.js";
@@ -14,14 +14,25 @@ export function createMatchState(config: DominoMatchConfig): MatchState {
   match.scoreboard = new Scoreboard();
   match.pointsToWin = config.pointsToWin;
 
-  const teams = assignTeams(config.seats, config.teamAssignment, config.seed);
+  const playerIds = playerIdsOf(config);
+  const teams = assignTeams(playerIds, config.teamAssignment, config.seed);
 
-  config.seats.forEach((playerId, seatIndex) => {
+  // UNA SOLA LISTA. El snapshot del asiento trae el id opaco, la identidad externa y el
+  // perfil juntos, así que copiarlo es un solo recorrido: una segunda lista de
+  // participantes en paralelo tendría que coincidir con ésta en orden y en largo sin que
+  // nada lo verifique, y el que se desalinee cobra el premio del de al lado.
+  config.seats.forEach((seat, seatIndex) => {
     const teamId = teams[seatIndex];
     if (!teamId) throw new InvariantViolationError(`sin equipo para el asiento ${seatIndex}`);
 
     const player = new PlayerState();
-    player.playerId = playerId;
+    player.playerId = seat.playerId;
+    player.displayName = seat.displayName;
+    player.username = seat.username;
+    player.profilePicture = seat.profilePicture;
+    player.platformId = seat.platformId;
+    player.userUuid = seat.userUuid;
+    player.currency = seat.currency;
     player.seatIndex = seatIndex;
     player.teamId = teamId;
     player.hand = new Hand();

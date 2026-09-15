@@ -170,10 +170,27 @@ Autoridad operativa:
 Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
-Estado: **Tarea 0 en curso; código todavía no iniciado**. La identidad externa pasa a ser
-`{ platformId, userUuid }`; `currency` es la moneda ya cobrada y queda congelada, y toda
-recompensa/reembolso usa el `rateId` único de la mesa. Los montos `*UcMinor` son enteros seguros:
-los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
+Estado: **Tarea 1 completa**; baseline **338 tests / 49 archivos**; siguiente: **Task 2, Step 1**.
+La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
+queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
+`*UcMinor` son enteros seguros: los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
+
+Lo que dejó la Tarea 1, y que conviene saber antes de tocar nada de acá:
+
+- **`configOf` es la ÚNICA frontera**, y ahora valida con zod: `onCreate(options: unknown)`, así
+  que una mesa con el dinero mal formado no llega a existir. Rechaza UC fraccionaria, insegura o
+  negativa, `rateId` que no sea UUID, campos en blanco y la pareja duplicada.
+- **`playerId` es OPACO y posicional** (`seat-1`, `seat-2`, …). Adentro de la partida —motor,
+  historial, wire, registro público— no hay plataformas ni UUIDs. El cruce entre la pareja
+  autenticada y el asiento pasa en UN solo lugar: `onJoin`.
+- **`PlayerState` sincroniza presentación y NO identidad.** `platformId`/`userUuid`/`currency` son
+  `noSync()`: no entran a la metadata del Schema, así que ni se codifican ni aparecen en
+  `toJSON()` —tampoco en el fixture golden—. `displayName`/`username`/`profilePicture` sí viajan.
+- **El índice del registro es la pareja entera**, serializada con `JSON.stringify` y no
+  concatenada: `["a","b:c"]` y `["a:b","c"]` no pueden colisionar. El `MatchRegistry` guarda las
+  parejas en un `Map` aparte del DTO público, que sigue llevando solo ids opacos.
+- **Los tests del motor usan `core/engine/tests/match-config-fixture.ts`**; el arnés E2E resuelve
+  `userUuid`→`seat-N` con `playerIdOf`/`clientOf`, así que ningún test escribe `seat-N` a mano.
 
 Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y primer paso pendiente.
 No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.

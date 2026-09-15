@@ -6,7 +6,7 @@ import {
   RevealTilesCommand,
 } from "../../commands/index.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
-import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
+import { DEFAULT_GLOBAL_CONFIG, playerIdsOf } from "../../config.js";
 import type { MatchEvent } from "../../events.js";
 import type { MatchState } from "../../state/index.js";
 import { Tile } from "../../state/index.js";
@@ -27,6 +27,7 @@ import { Scorer } from "../scorer.js";
 import { boneyardOf, currentRoundOf, handOf } from "../state-projections.js";
 import type { TimeoutScheduler } from "../timeout-scheduler.js";
 import type { SchemaVisibilityController } from "../visibility.js";
+import { matchConfig } from "./match-config-fixture.js";
 
 class FixedDealer extends Dealer {
   constructor(
@@ -40,7 +41,7 @@ class FixedDealer extends Dealer {
 
   override deal(_roundNumber: number): void {
     let cursor = 0;
-    for (const playerId of this.fixtureConfig.seats) {
+    for (const playerId of playerIdsOf(this.fixtureConfig)) {
       const hand = handOf(playerId, this.fixtureMatch);
       hand.tiles.clear();
       for (let dealt = 0; dealt < this.fixtureGlobalConfig.tilesPerPlayer; dealt += 1) {
@@ -97,15 +98,9 @@ export function engineWithHands(
     presentingRoundMs: 120,
     presentingMatchMs: 120,
   };
-  const config: DominoMatchConfig = {
-    matchId: "m-test",
-    gameModeId: "test",
-    seed: "seed-test",
-    seats,
-    pointsToWin: 100,
-    teamAssignment: "SEAT_ORDER",
+  const config: DominoMatchConfig = matchConfig(seats, {
     isDealWindowEnabled: options.isDealWindowEnabled ?? false,
-  };
+  });
   const match = createMatchState(config);
   const clockBox = { now: 1_000 };
   const clock: Clock = { now: () => clockBox.now };

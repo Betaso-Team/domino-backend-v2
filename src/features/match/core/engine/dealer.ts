@@ -1,5 +1,5 @@
 import { hashSeed, mulberry32, shuffled } from "../../../../shared/rng.js";
-import type { DominoMatchConfig, GlobalDominoConfig } from "../config.js";
+import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../config.js";
 import { Tile } from "../state/index.js";
 import type { MatchState } from "../state/index.js";
 import { boneyardOf, currentRoundOf, playerOf } from "./state-projections.js";
@@ -19,7 +19,7 @@ export class Dealer {
     const deck = shuffled(this.orderedTiles(), mulberry32(hashSeed(this.config.seed, roundNumber)));
 
     let cursor = 0;
-    for (const playerId of this.config.seats) {
+    for (const playerId of playerIdsOf(this.config)) {
       const hand = playerOf(playerId, this.match).hand;
       hand.tiles.clear();
       for (let dealt = 0; dealt < this.globalConfig.tilesPerPlayer; dealt += 1) {

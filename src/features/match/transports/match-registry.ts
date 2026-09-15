@@ -1,4 +1,5 @@
 import type { KeyValueStore } from "../../../shared/kv.js";
+import type { PlayerRef } from "../../../shared/player-ref.js";
 import type { DominoMatchConfig } from "../core/config.js";
 
 export interface PublicMatchConfig {
@@ -21,15 +22,21 @@ export interface MatchConfigResponse extends PublicMatchConfig {
 // que tienen que coincidir.
 //
 // Medido sobre dos instancias contra el mismo Redis, una en cada índice: estas dos claves salen
-// con el MISMO nombre en las dos bases —`match_config:<roomId>` y `player_match:<userId>`— y
-// ninguna ve la de la otra. Que `player_match:<userId>` lleve un id de usuario COMPARTIDO entre
-// los productos del Betaso es justamente lo que haría de una base compartida una colisión real, y
-// no teórica. El detalle de la medición está en el comentario de `REDIS_URL` en `src/env.ts`.
+// con el MISMO nombre en las dos bases —`match_config:<roomId>` y `player_match:<pareja>`— y
+// ninguna ve la de la otra. Que el id de usuario sea COMPARTIDO entre los productos del Betaso es
+// justamente lo que haría de una base compartida una colisión real, y no teórica. El detalle de
+// la medición está en el comentario de `REDIS_URL` en `src/env.ts`.
 //
 // Tampoco se comparten con nadie: son el estado de EJECUCIÓN de un clúster, no un dato que dos
 // sistemas tengan que ver igual.
 const configKey = (roomId: string) => `match_config:${roomId}`;
-const playerKey = (playerId: string) => `player_match:${playerId}`;
+// LA CLAVE ES LA PAREJA ENTERA, serializada con `JSON.stringify` y no concatenada con un
+// separador: `["a","b:c"]` y `["a:b","c"]` son dos parejas distintas que un `a:b:c` vuelve la
+// misma clave. Con el escape de JSON, dos parejas distintas nunca colisionan aunque el
+// `platformId` o el `userUuid` traigan el separador adentro — y la que colisione sienta a un
+// jugador en la mesa de otro.
+const playerKey = ({ platformId, userUuid }: PlayerRef) =>
+  `player_match:${JSON.stringify([platformId, userUuid])}`;
 
 // EL PLAZO DE TODAS ELLAS, y el latido que lo renueva. Son una sola decisión y no dos:
 //
@@ -69,6 +76,11 @@ export class MatchRegistry {
   // el `seed` no llega ni siquiera a la memoria del registro, y el latido no puede filtrarlo por
   // descuido el día que alguien cambie lo que se estampa.
   private readonly byRoomId = new Map<string, PublicMatchConfig>();
+  // LAS PAREJAS QUE ESTE PROCESO ANOTÓ, aparte y no derivadas del DTO. El DTO público lleva
+  // ids OPACOS —`seat-1`, `seat-2`—, así que reconstruir de ahí la clave del índice invertido
+  // es imposible; y guardar el `DominoMatchConfig` entero para tenerla metería moneda, tasa y
+  // montos en la memoria del registro, que es justo lo que la allowlist de arriba evita.
+  private readonly seatsByRoomId = new Map<string, readonly PlayerRef[]>();
 
   // EL PLAZO NO SE INYECTA, y es a propósito: truco lo deja como segundo parámetro con default y
   // nadie se lo pasa nunca. Acá los tests mueven el RELOJ del almacén, que es la otra mitad del
@@ -85,9 +97,13 @@ export class MatchRegistry {
     this.byRoomId.set(roomId, {
       matchId: config.matchId,
       gameModeId: config.gameModeId,
-      seats: config.seats,
+      seats: config.seats.map(({ playerId }) => playerId),
       pointsToWin: config.pointsToWin,
     });
+    this.seatsByRoomId.set(
+      roomId,
+      config.seats.map(({ platformId, userUuid }) => ({ platformId, userUuid })),
+    );
     await this.keepAlive(roomId);
   }
 
@@ -96,11 +112,12 @@ export class MatchRegistry {
   // que impide que una instancia mantenga viva la sala muerta de otra.
   async keepAlive(roomId: string): Promise<void> {
     const config = this.byRoomId.get(roomId);
-    if (!config) return;
+    const seats = this.seatsByRoomId.get(roomId);
+    if (!config || !seats) return;
 
     await this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS);
-    for (const playerId of config.seats) {
-      await this.store.setex(playerKey(playerId), roomId, TTL_SECONDS);
+    for (const seat of seats) {
+      await this.store.setex(playerKey(seat), roomId, TTL_SECONDS);
     }
   }
 
@@ -111,17 +128,18 @@ export class MatchRegistry {
 
   // En qué sala está sentado, si está en alguna. Es un GET contra el índice que las salas
   // escriben: la respuesta es del CLÚSTER, no de este proceso.
-  async matchOf(playerId: string): Promise<string | undefined> {
-    return await this.store.get(playerKey(playerId));
+  async matchOf(player: PlayerRef): Promise<string | undefined> {
+    return await this.store.get(playerKey(player));
   }
 
   async remove(roomId: string): Promise<void> {
-    const config = this.byRoomId.get(roomId);
-    if (!config) return;
+    const seats = this.seatsByRoomId.get(roomId);
+    if (!this.byRoomId.has(roomId) || !seats) return;
     this.byRoomId.delete(roomId);
+    this.seatsByRoomId.delete(roomId);
 
     this.store.del(configKey(roomId));
-    for (const playerId of config.seats) await this.release(playerId, roomId);
+    for (const seat of seats) await this.release(seat, roomId);
   }
 
   // Soltar a un jugador es borrar SU clave, y SOLO SI sigue apuntando acá: entre que dejó esta
@@ -129,9 +147,9 @@ export class MatchRegistry {
   // proceso o en otro—, y borrar a ciegas lo dejaría sin partida justo cuando acaba de empezar
   // una. El chequeo no es atómico y no hace falta que lo sea: la ventana que queda es la de una
   // clave que caduca sola en dos minutos.
-  private async release(playerId: string, roomId: string): Promise<void> {
-    if ((await this.store.get(playerKey(playerId))) === roomId) {
-      this.store.del(playerKey(playerId));
+  private async release(player: PlayerRef, roomId: string): Promise<void> {
+    if ((await this.store.get(playerKey(player))) === roomId) {
+      this.store.del(playerKey(player));
     }
   }
 }

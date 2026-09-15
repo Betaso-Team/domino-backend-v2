@@ -1,3 +1,4 @@
+import type { PlayerRef } from "../../../shared/player-ref.js";
 import type { PlayerId } from "./ids.js";
 
 // Value-object INMUTABLE, fuera del estado de Colyseus e inyectado por DI.
@@ -7,11 +8,32 @@ import type { PlayerId } from "./ids.js";
 // cambiar este valor en la config del modo de juego, sin tocar el motor (spec §4.3).
 export type TeamAssignmentMode = "SHUFFLED" | "SEAT_ORDER";
 
+/**
+ * UN ASIENTO DE LA MESA, congelado al crearse la partida. Junta las tres cosas que hasta
+ * acá vivían separadas o no existían: el id OPACO con el que el motor lo nombra
+ * (`playerId`), la identidad EXTERNA que lo autoriza (`PlayerRef`) y el perfil que el
+ * front muestra.
+ *
+ * `currency` es la moneda YA COBRADA, no una preferencia del jugador: se congela acá
+ * porque la recompensa se paga en la misma moneda de la inscripción, y releerla al
+ * liquidar —cuando el jugador puede haberla cambiado en su perfil— es pagar en otra.
+ *
+ * `username` y `profilePicture` son OPCIONALES y el resto no: un invitado puede no tener
+ * usuario ni foto, pero nadie juega sin nombre visible ni sin moneda cobrada.
+ */
+export interface MatchSeat extends PlayerRef {
+  readonly playerId: PlayerId;
+  readonly displayName: string;
+  readonly username?: string;
+  readonly profilePicture?: string;
+  readonly currency: string;
+}
+
 export interface DominoMatchConfig {
   readonly matchId: string;
   readonly gameModeId: string;
   readonly seed: string;
-  readonly seats: readonly PlayerId[];
+  readonly seats: readonly MatchSeat[];
   readonly pointsToWin: number;
   readonly teamAssignment: TeamAssignmentMode;
   /**
@@ -22,7 +44,25 @@ export interface DominoMatchConfig {
    * prueban la tranca o el conteo, no esto— no tienen por qué pagar la ceremonia.
    */
   readonly isDealWindowEnabled: boolean;
+  /**
+   * LA TASA DE LA MESA, una sola para toda la partida. Es el identificador de la
+   * conversión con la que se cobró, y toda recompensa o reembolso usa ÉSTA: tomar la
+   * vigente al liquidar pagaría un premio calculado con una tasa que el jugador nunca
+   * aceptó.
+   */
+  readonly rateId: string;
+  /**
+   * Lo COBRADO por asiento y el premio de la mesa, en UC menores: enteros seguros donde
+   * los dos últimos dígitos son decimales (`1234 = 12,34 UC`). Enteros y no flotantes
+   * porque `0.1 + 0.2` no es `0.3`, y acá el redondeo es plata de alguien.
+   */
+  readonly entryFeeUcMinor: number;
+  readonly prizeUcMinor: number;
 }
+
+/** Los ids OPACOS de la mesa, en orden de asiento. Es lo único que el motor consume. */
+export const playerIdsOf = (config: DominoMatchConfig): readonly PlayerId[] =>
+  config.seats.map(({ playerId }) => playerId);
 
 export interface GlobalDominoConfig {
   /** El plazo normal del turno. Se reinicia en cada turno. */

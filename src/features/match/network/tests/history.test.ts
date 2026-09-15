@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Clock } from "../../core/engine/clock.js";
 import { createMatchState } from "../../core/engine/genesis.js";
 import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state/index.js";
+import { configOf } from "../../transports/match-contract.js";
 import type { HistoryEntry, HistoryPort } from "../history.js";
 import { MatchHistory } from "../history.js";
 
@@ -17,15 +18,25 @@ function build() {
   };
   const clockBox = { now: 5_000 };
   const clock: Clock = { now: () => clockBox.now };
-  const match = createMatchState({
-    matchId: "m1",
-    gameModeId: "g",
-    seed: "s",
-    seats: ["u1", "u2"],
-    pointsToWin: 100,
-    teamAssignment: "SHUFFLED",
-    isDealWindowEnabled: false,
-  });
+  // El config sale de `configOf` y no se escribe a mano: es el único que sabe armar un
+  // `DominoMatchConfig` válido, y este test no tiene nada que decir sobre su forma.
+  const match = createMatchState(
+    configOf({
+      mode: "CASUAL",
+      matchId: "m1",
+      gameModeId: "g",
+      participants: [
+        { platformId: "betaso", userUuid: "u1", displayName: "Jugador u1", currency: "VES" },
+        { platformId: "betaso", userUuid: "u2", displayName: "Jugador u2", currency: "VES" },
+      ],
+      seed: "s",
+      pointsToWin: 100,
+      teamAssignment: "SHUFFLED",
+      rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+      entryFeeUcMinor: 125,
+      prizeUcMinor: 250,
+    }),
+  );
   const round = new RoundState();
   round.roundNumber = 3;
   round.board = new BoardState();

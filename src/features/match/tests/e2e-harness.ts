@@ -6,27 +6,58 @@ import jwt from "jsonwebtoken";
 import { testConfig } from "../../../app.config.js";
 import { rootContainer } from "../../../di-container.js";
 import { env } from "../../../env.js";
-import type { GlobalDominoConfig } from "../core/config.js";
+import type { PlayerRef } from "../../../shared/player-ref.js";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config.js";
 import { boardEndsOf } from "../core/engine/round/board-ends.js";
 import { playableSides } from "../core/engine/round/playable.js";
 import type { MatchState } from "../core/state/index.js";
 import type { BoardSide } from "../core/state/tile.js";
 import type { HistoryEntry, HistoryReader } from "../network/history.js";
-import { type DominoRoomOptions, configOf } from "../transports/match-contract.js";
+import {
+  type DominoRoomOptions,
+  type MatchParticipant,
+  configOf,
+} from "../transports/match-contract.js";
 
-export function mintToken(userId: string): string {
-  return jwt.sign({ sub: userId }, env.jwtSecret, { algorithm: "HS256", expiresIn: "1h" });
+// UN STRING SIGUE ALCANZANDO para la mayoría de los tests: casi ninguno mide
+// multiplataforma, y obligarlos a escribir la pareja y el perfil enteros solo agregaría
+// ceremonia a suites que hablan de tranca, de plazos y de visibilidad. El que sí lo mide
+// pasa el participante completo.
+export type ParticipantInput = string | MatchParticipant;
+
+export const participantOf = (input: ParticipantInput): MatchParticipant =>
+  typeof input === "string"
+    ? {
+        platformId: "betaso",
+        userUuid: input,
+        displayName: `Jugador ${input}`,
+        currency: "VES",
+      }
+    : input;
+
+export function mintToken(player: PlayerRef): string {
+  return jwt.sign({ sub: player.userUuid, platformId: player.platformId }, env.jwtSecret, {
+    algorithm: "HS256",
+    expiresIn: "1h",
+  });
 }
 
-export function casualTable(seats: string[], seed = "seed-e2e"): DominoRoomOptions {
+export function casualTable(
+  seats: readonly ParticipantInput[],
+  seed = "seed-e2e",
+): DominoRoomOptions {
+  const participants = seats.map(participantOf);
   return {
     mode: "CASUAL",
-    matchId: `m-${seats.join("-")}`,
+    matchId: `m-${participants.map(({ userUuid }) => userUuid).join("-")}`,
     gameModeId: "clasica-2p",
-    seats,
+    participants,
     seed,
     pointsToWin: 100,
     teamAssignment: "SHUFFLED",
+    rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+    entryFeeUcMinor: 125,
+    prizeUcMinor: 250,
   };
 }
 
@@ -72,23 +103,31 @@ export interface SeatedMatch {
   readonly roomId: string;
   /** Las opciones con las que la sala se creó. Es de dónde sale el config real de la partida. */
   readonly options: DominoRoomOptions;
+  /**
+   * El MISMO snapshot que la sala normalizó: es lo único que traduce entre el `userUuid`
+   * con el que el test nombra a un jugador y el `seat-N` con el que el servidor lo nombra.
+   * Sin él, cada test tendría que saber en qué posición lo sentó `configOf`.
+   */
+  readonly config: DominoMatchConfig;
   readonly serverState: MatchState;
+  /** Indexado por el id OPACO del asiento, que es el que el servidor usa. */
   readonly clients: Record<string, Awaited<ReturnType<ColyseusTestServer["connectTo"]>>>;
 }
 
 export async function seatPair(
   server: ColyseusTestServer,
-  seats: [string, string],
+  seats: readonly [ParticipantInput, ParticipantInput],
   seed?: string,
 ): Promise<SeatedMatch> {
-  const options = casualTable([...seats], seed);
+  const options = casualTable(seats, seed);
+  const config = configOf(options);
   const room = await server.createRoom("domino", options);
   const clients: SeatedMatch["clients"] = {};
-  for (const userId of seats) {
-    server.sdk.auth.token = mintToken(userId);
-    clients[userId] = await server.connectTo(room);
+  for (const seat of config.seats) {
+    server.sdk.auth.token = mintToken(seat);
+    clients[seat.playerId] = await server.connectTo(room);
   }
-  return { roomId: room.roomId, options, serverState: room.state as MatchState, clients };
+  return { roomId: room.roomId, options, config, serverState: room.state as MatchState, clients };
 }
 
 // LA MESA ARRANCA TAPADA. `configOf` enciende la ventana de reparto en TODA mesa
@@ -112,23 +151,58 @@ export async function revealHands(match: SeatedMatch): Promise<void> {
 // justamente lo que este arnés existe para medir.
 export async function rejoinAs(
   server: ColyseusTestServer,
-  roomId: string,
-  userId: string,
+  match: SeatedMatch,
+  selector: string | PlayerRef,
 ): Promise<Room<unknown, MatchState>> {
-  server.sdk.auth.token = mintToken(userId);
+  const playerId = playerIdOf(match, selector);
+  const seat = match.config.seats.find((candidate) => candidate.playerId === playerId);
+  if (!seat) throw new Error(`sin asiento para ${playerId}`);
+  // EL TOKEN SE FIRMA CON LA PAREJA DEL ASIENTO, no con el selector: un test que entró por
+  // `seat-1` tiene que volver como la misma persona, y la plataforma es parte de quién es.
+  server.sdk.auth.token = mintToken(seat);
   // El parámetro de tipo elige el overload que devuelve el estado tipado. Sin él,
   // `joinById` resuelve al de `State = any` y el llamador termina casteando `back.state`
   // en cada línea — casts que no verifican nada y que se quedarían mudos si el árbol
   // cambiara de forma.
-  const room = await server.sdk.joinById<MatchState>(roomId);
+  const room = await server.sdk.joinById<MatchState>(match.roomId);
   await room.waitForInitialState();
   return room;
+}
+
+// EL ÚNICO RESOLVEDOR de "a quién se refiere este test". Acepta el id opaco del asiento
+// —que es lo que el servidor devuelve en `currentTurn.playerId`— y también el `userUuid` o
+// la pareja entera, que es como los tests nombran a la gente. Sin esto, cada suite tendría
+// que saber que `configOf` sienta al primer participante en `seat-1`.
+//
+// El camino por `userUuid` EXIGE que sea único en la mesa: con el mismo UUID en dos
+// plataformas el selector es ambiguo, y elegir el primero sentaría al test en el asiento
+// equivocado sin decir nada. Ese caso se nombra con la pareja.
+export function playerIdOf(match: SeatedMatch, selector: string | PlayerRef): string {
+  if (typeof selector !== "string") {
+    const seat = match.config.seats.find(
+      (candidate) =>
+        candidate.platformId === selector.platformId && candidate.userUuid === selector.userUuid,
+    );
+    if (!seat) throw new Error(`sin asiento para ${JSON.stringify(selector)}`);
+    return seat.playerId;
+  }
+  const direct = match.config.seats.find(({ playerId }) => playerId === selector);
+  if (direct) return direct.playerId;
+  const byUuid = match.config.seats.filter(({ userUuid }) => userUuid === selector);
+  if (byUuid.length !== 1) throw new Error(`selector ambiguo o ausente: ${selector}`);
+  const seat = byUuid[0];
+  if (!seat) throw new Error(`selector ausente: ${selector}`);
+  return seat.playerId;
 }
 
 // El cliente de un asiento, o un fallo con nombre. `SeatedMatch.clients` está indexado por
 // string, así que leerlo devuelve `T | undefined`; el optional chaining convertiría un
 // asiento mal escrito en un test que no hace nada.
-export function clientOf(match: SeatedMatch, playerId: string): SeatedMatch["clients"][string] {
+export function clientOf(
+  match: SeatedMatch,
+  selector: string | PlayerRef,
+): SeatedMatch["clients"][string] {
+  const playerId = playerIdOf(match, selector);
   const client = match.clients[playerId];
   if (!client) throw new Error(`sin cliente para el asiento ${playerId}`);
   return client;
@@ -166,12 +240,12 @@ export function legalPlayFor(
 
 export async function act(
   match: SeatedMatch,
-  userId: string,
+  selector: string | PlayerRef,
   type: string,
   payload: unknown = {},
 ): Promise<void> {
   const before = signatureOf(match.serverState);
-  match.clients[userId]?.send(type, payload);
+  clientOf(match, selector).send(type, payload);
   await waitUntil(() => signatureOf(match.serverState) !== before);
 }
 

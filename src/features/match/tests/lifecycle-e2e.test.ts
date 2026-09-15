@@ -5,9 +5,11 @@ import {
   act,
   bootServer,
   casualTable,
+  clientOf,
   historyOf,
   linesOf,
   mintToken,
+  participantOf,
   revealHands,
   seatPair,
   waitUntil,
@@ -35,7 +37,10 @@ describe("ciclo de vida de una partida", () => {
     await waitUntil(() => match.serverState.phase === "PLAYING");
 
     expect(match.serverState.startedAt).toBeGreaterThan(0);
-    expect(match.serverState.players.map((player) => player.playerId)).toEqual(["u1", "u2"]);
+    expect(match.serverState.players.map((player) => player.playerId)).toEqual([
+      "seat-1",
+      "seat-2",
+    ]);
     expect(match.serverState.players.map((player) => player.teamId)).toEqual(["A", "B"]);
   });
 
@@ -69,8 +74,9 @@ describe("ciclo de vida de una partida", () => {
   it("un verbo desconocido se rechaza y no entra al historial", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
     const illegal: unknown[] = [];
-    match.clients.r1?.onMessage("illegal", (payload) => illegal.push(payload));
-    match.clients.r1?.send("DROP_TABLE", {});
+    const r1 = clientOf(match, "r1");
+    r1.onMessage("illegal", (payload) => illegal.push(payload));
+    r1.send("DROP_TABLE", {});
 
     await waitUntil(() => illegal.length > 0);
     expect(illegal[0]).toEqual({ code: "UNKNOWN_COMMAND" });
@@ -81,8 +87,9 @@ describe("ciclo de vida de una partida", () => {
   it("un mensaje llamado toString no mata la mesa", async () => {
     const match = await seatPair(server, ["p1", "p2"]);
     const illegal: unknown[] = [];
-    match.clients.p1?.onMessage("illegal", (payload) => illegal.push(payload));
-    match.clients.p1?.send("toString", {});
+    const p1 = clientOf(match, "p1");
+    p1.onMessage("illegal", (payload) => illegal.push(payload));
+    p1.send("toString", {});
 
     await waitUntil(() => illegal.length > 0);
     expect(illegal[0]).toEqual({ code: "UNKNOWN_COMMAND" });
@@ -91,7 +98,7 @@ describe("ciclo de vida de una partida", () => {
 
   it("una segunda conexión del mismo asiento desplaza a la primera", async () => {
     const match = await seatPair(server, ["d1", "d2"]);
-    server.sdk.auth.token = mintToken("d1");
+    server.sdk.auth.token = mintToken(participantOf("d1"));
     await server.sdk.joinById(match.roomId);
     await waitUntil(() => server.getRoomById(match.roomId).clients.length === 2);
 
@@ -102,9 +109,9 @@ describe("ciclo de vida de una partida", () => {
 
   it("quien no tiene asiento no entra", async () => {
     const room = await server.createRoom("domino", casualTable(["x1", "x2"]));
-    server.sdk.auth.token = mintToken("x1");
+    server.sdk.auth.token = mintToken(participantOf("x1"));
     await server.connectTo(room);
-    server.sdk.auth.token = mintToken("intruso");
+    server.sdk.auth.token = mintToken(participantOf("intruso"));
 
     await expect(server.connectTo(room)).rejects.toThrow();
     expect(server.getRoomById(room.roomId)).toBeDefined();
@@ -127,7 +134,7 @@ describe("ciclo de vida de una partida", () => {
     expect(JSON.parse(body)).toEqual({
       matchId: "m-c1-c2",
       gameModeId: "clasica-2p",
-      seats: ["c1", "c2"],
+      seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
       serverNow: expect.any(Number),
     });

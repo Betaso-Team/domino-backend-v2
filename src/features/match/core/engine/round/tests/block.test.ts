@@ -2,19 +2,12 @@ import { describe, expect, it } from "vitest";
 import { BoardState, BoneyardState, PlacedTile, RoundState, Tile } from "../../../state/index.js";
 import { createMatchState } from "../../genesis.js";
 import { handOf } from "../../state-projections.js";
+import { matchConfig } from "../../tests/match-config-fixture.js";
 import { blockVerdictOf, isBlocked } from "../block.js";
 
 function build(handsBySeat: Record<string, [number, number][]>, boneyard: [number, number][] = []) {
   const seats = Object.keys(handsBySeat);
-  const match = createMatchState({
-    matchId: "m1",
-    gameModeId: "g",
-    seed: "s",
-    seats,
-    pointsToWin: 100,
-    teamAssignment: "SHUFFLED",
-    isDealWindowEnabled: false,
-  });
+  const match = createMatchState(matchConfig(seats, { seed: "s", teamAssignment: "SHUFFLED" }));
   const round = new RoundState();
   round.roundNumber = 1;
   round.phase = "PLAYING";

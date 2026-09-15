@@ -1,31 +1,35 @@
 // src/features/match/core/engine/tests/genesis.test.ts
 import { describe, expect, it } from "vitest";
-import type { DominoMatchConfig } from "../../config.js";
 import { createMatchState } from "../genesis.js";
 import { scoreboardOf } from "../state-projections.js";
 // El test compara contra la política DIRECTAMENTE, y por eso la importa: así afirma que la
 // génesis la DELEGA en vez de reimplementar `i % 2` y coincidir por casualidad.
 import { assignTeams } from "../team-assignment.js";
+import { matchConfig as config } from "./match-config-fixture.js";
 
-const config = (
-  seats: string[],
-  overrides: Partial<DominoMatchConfig> = {},
-): DominoMatchConfig => ({
-  matchId: "m1",
-  gameModeId: "clasica-2p",
-  seed: "seed-1",
-  seats,
-  pointsToWin: 100,
-  teamAssignment: "SHUFFLED",
-  isDealWindowEnabled: false,
-  ...overrides,
-});
+// El fixture sortea con `SEAT_ORDER` por default; las tres pruebas del sorteo piden
+// `SHUFFLED` explícito, que es lo que estaba bajo prueba desde siempre.
+const SEED = "seed-test";
 
 describe("createMatchState", () => {
   it("sienta a los jugadores en el orden de seats", () => {
     const match = createMatchState(config(["u1", "u2"]));
     expect(match.players.map((p) => p.playerId)).toEqual(["u1", "u2"]);
     expect(match.players.map((p) => p.seatIndex)).toEqual([0, 1]);
+  });
+
+  // El snapshot se COPIA entero al árbol, perfil y todo. La moneda viaja con el asiento
+  // —es la que ya se cobró— y no se re-deriva de nada: congelarla acá es lo que impide que
+  // una recompensa salga en una moneda distinta de la de la inscripción.
+  it("copia perfil e identidad financiera sin cambiar moneda", () => {
+    const match = createMatchState(config(["u1", "u2"]));
+    expect(match.players[0]).toMatchObject({
+      playerId: "u1",
+      displayName: "Jugador u1",
+      platformId: "betaso",
+      userUuid: "u1",
+      currency: "VES",
+    });
   });
 
   // La génesis NO decide los equipos: los delega en la política (spec §4.3). Lo que
@@ -37,15 +41,15 @@ describe("createMatchState", () => {
 
     const shuffledMatch = createMatchState(config(seats, { teamAssignment: "SHUFFLED" }));
     expect(shuffledMatch.players.map((p) => p.teamId)).toEqual(
-      assignTeams(seats, "SHUFFLED", "seed-1"),
+      assignTeams(seats, "SHUFFLED", SEED),
     );
   });
 
   it("con el mismo seed, las parejas sorteadas son siempre las mismas", () => {
     const seats = ["u1", "u2", "u3", "u4"];
-    expect(createMatchState(config(seats)).players.map((p) => p.teamId)).toEqual(
-      createMatchState(config(seats)).players.map((p) => p.teamId),
-    );
+    const shuffled = () =>
+      createMatchState(config(seats, { teamAssignment: "SHUFFLED" })).players.map((p) => p.teamId);
+    expect(shuffled()).toEqual(shuffled());
   });
 
   it("arranca en NOT_STARTED, sin ronda y sin marcador", () => {
@@ -89,6 +93,17 @@ describe("createMatchState", () => {
 
   it("el seed NO entra al estado", () => {
     const match = createMatchState(config(["u1", "u2"]));
-    expect(JSON.stringify(match.toJSON())).not.toContain("seed-1");
+    expect(JSON.stringify(match.toJSON())).not.toContain(SEED);
+  });
+
+  // LA OTRA MITAD DEL SNAPSHOT: lo que se copia al árbol pero NO se sincroniza. Los campos
+  // `noSync()` no entran a la metadata del Schema, así que `toJSON()` —que recorre la
+  // metadata— no puede filtrarlos ni al wire ni al fixture golden.
+  it("la identidad externa y la moneda no entran al árbol serializado", () => {
+    const match = createMatchState(config(["u1", "u2"]));
+    const wire = JSON.stringify(match.toJSON());
+
+    expect(wire).toContain("Jugador u1");
+    for (const privateValue of ["betaso", "VES"]) expect(wire).not.toContain(privateValue);
   });
 });

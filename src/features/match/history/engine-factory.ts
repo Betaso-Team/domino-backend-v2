@@ -6,7 +6,7 @@ import {
   PlayTileCommand,
   RevealTilesCommand,
 } from "../core/commands/index.js";
-import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config.js";
+import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../core/config.js";
 import type { Clock } from "../core/engine/clock.js";
 import { Dealer } from "../core/engine/dealer.js";
 import { createMatchState } from "../core/engine/genesis.js";
@@ -68,7 +68,7 @@ export function buildEngineGraph(
   const scorer = new Scorer(match);
   const dealer = new Dealer(match, config, globalConfig);
   const repository = new PlayerRepository(
-    config.seats,
+    playerIdsOf(config),
     (playerId) => new MatchPlayer(playerId, match),
     (playerId) => new RoundPlayer(playerId, match, deps.visibility),
   );

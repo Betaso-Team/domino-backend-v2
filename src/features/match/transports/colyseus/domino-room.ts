@@ -12,14 +12,19 @@ import {
 import { rootContainer } from "../../../../di-container.js";
 import type { Logger } from "../../../../logger.js";
 import { InvalidTokenError, type TokenVerifier } from "../../../auth/index.js";
-import { DEFAULT_GLOBAL_CONFIG, type GlobalDominoConfig } from "../../core/config.js";
+import {
+  DEFAULT_GLOBAL_CONFIG,
+  type DominoMatchConfig,
+  type GlobalDominoConfig,
+  playerIdsOf,
+} from "../../core/config.js";
 import { RuleViolationError } from "../../core/engine/errors.js";
 import type { SchemaVisibilityController } from "../../core/engine/visibility.js";
 import type { PlayerId } from "../../core/ids.js";
 import type { MatchState } from "../../core/state/index.js";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events.js";
 import { MatchEventNotifier, type MatchHistory } from "../../network/index.js";
-import { type DominoRoomOptions, type SeatCredentials, configOf } from "../match-contract.js";
+import { type SeatCredentials, configOf } from "../match-contract.js";
 import { HEARTBEAT_MS, MatchRegistry } from "../match-registry.js";
 import {
   type MatchHasOutcome,
@@ -41,6 +46,10 @@ import { StateViewVisibilityController } from "./visibility.js";
 
 export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private seats: readonly PlayerId[] = [];
+  // EL SNAPSHOT DE LA MESA, y es lo que la puerta consulta: resolver la pareja autenticada
+  // al asiento opaco necesita la identidad externa, que el estado no sincroniza y el
+  // registro no guarda. Se asigna en `onCreate`, antes de que la sala pueda recibir a nadie.
+  private config!: DominoMatchConfig;
   // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
   // El default reutiliza el global: si algún día `onDrop` corriera antes de que
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
@@ -81,16 +90,22 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     return true;
   }
 
-  override async onCreate(options: DominoRoomOptions): Promise<void> {
+  // `unknown` Y NO `DominoRoomOptions`: lo que llega acá viene del otro lado del cable, y
+  // una firma tipada describe lo que se espera sin comprobar nada. La frontera real es
+  // `configOf`, que valida con zod y LANZA — así la sala no llega a existir con una mesa
+  // cuyo dinero no cierra.
+  override async onCreate(options: unknown): Promise<void> {
     const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
-    this.seats = options.seats;
+
+    const config = configOf(options);
+    this.config = config;
+    this.seats = playerIdsOf(config);
     // Colyseus cuenta las reservas de reconexión aunque unlock() abra el listing. Dos
     // cupos por asiento permiten conservar el token viejo mientras entra un reemplazo,
     // sin abrir capacidad ilimitada: onJoin sigue siendo la puerta de los asientos reales.
     this.maxClients = this.seats.length * 2;
 
-    const config = configOf(options);
     const child = rootContainer.createChildContainer();
     child.register("Config", { useValue: config });
 
@@ -161,19 +176,27 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
   override async onAuth(
     _client: Client,
-    _options: DominoRoomOptions,
+    _options: unknown,
     context: AuthContext,
   ): Promise<SeatCredentials> {
     const token = context.token ?? undefined;
     const identity = await rootContainer.resolve<TokenVerifier>("TokenVerifier").verify(token);
-    return { userId: identity.userId, token: token ?? "" };
+    return { ...identity, token: token ?? "" };
   }
 
   override onJoin(client: Client): void {
-    const { userId: playerId } = client.auth as SeatCredentials;
+    // ACÁ SE CRUZA LA IDENTIDAD EXTERNA CON EL ASIENTO OPACO, y es el único lugar donde
+    // pasa. De estas cuatro líneas para abajo nadie vuelve a ver una plataforma ni un
+    // UUID: el motor, el historial y el wire hablan de `seat-N`.
+    const identity = client.auth as SeatCredentials;
+    const playerId = this.config.seats.find(
+      (seat) => seat.platformId === identity.platformId && seat.userUuid === identity.userUuid,
+    )?.playerId;
     // Primero pertenece a la mesa; recién después se pregunta si sigue jugando. Invertir
     // el orden filtra el estado de una partida a un principal sin asiento reservado.
-    if (!this.seats.includes(playerId)) throw new SeatNotReservedError(playerId);
+    if (!playerId) {
+      throw new SeatNotReservedError(JSON.stringify([identity.platformId, identity.userUuid]));
+    }
     if (!this.isStillPlaying(playerId)) throw new PlayerAlreadyOutError(playerId);
     this.cancelPendingReconnection(playerId);
 

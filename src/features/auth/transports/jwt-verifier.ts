@@ -26,14 +26,24 @@ export class JwtVerifier implements TokenVerifier {
       throw new InvalidTokenError(reason);
     }
 
-    if (
-      typeof payload === "string" ||
-      typeof payload.sub !== "string" ||
-      payload.sub.length === 0
-    ) {
+    // LAS DOS MITADES DE LA IDENTIDAD SE EXIGEN JUNTAS. `platformId` no es un claim
+    // opcional que se pueda completar después: sin él, el mismo `sub` firmado por dos
+    // productos del Betaso reclama el mismo asiento, y el asiento paga.
+    //
+    // Se rechaza el BLANCO además del vacío —`"   "` es un string de largo 3— porque lo
+    // que se arma con estos dos valores es una clave del registro compartido, y una clave
+    // hecha de espacios agrupa a todos los que la mandaron en blanco.
+    if (typeof payload === "string") {
+      throw new InvalidTokenError("payload no es un objeto");
+    }
+    const platformId = payload.platformId;
+    if (typeof payload.sub !== "string" || payload.sub.trim().length === 0) {
       throw new InvalidTokenError("sin claim sub");
     }
+    if (typeof platformId !== "string" || platformId.trim().length === 0) {
+      throw new InvalidTokenError("sin claim platformId");
+    }
 
-    return { userId: payload.sub };
+    return { platformId, userUuid: payload.sub };
   }
 }

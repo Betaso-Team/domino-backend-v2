@@ -14,21 +14,13 @@ import {
   teamOf,
   turnOrderFrom,
 } from "../state-projections.js";
+import { matchConfig } from "./match-config-fixture.js";
 
 // SEAT_ORDER y no SHUFFLED, a propósito: este test prueba las PROYECCIONES, no el sorteo.
 // Con SHUFFLED las aserciones de abajo (u1→A, u2→B, u3→A) dependerían de que la permutación
-// del seed "s" resulte ser la identidad — o sea que pasarían por casualidad, y se romperían
-// el día que alguien toque el PRNG. El sorteo tiene su propio test en el Step 0a.
-const build = (seats = ["u1", "u2"]) =>
-  createMatchState({
-    matchId: "m1",
-    gameModeId: "g",
-    seed: "s",
-    seats,
-    pointsToWin: 100,
-    teamAssignment: "SEAT_ORDER",
-    isDealWindowEnabled: false,
-  });
+// del seed resulte ser la identidad — o sea que pasarían por casualidad, y se romperían
+// el día que alguien toque el PRNG. Es el default del fixture. El sorteo tiene su propio test.
+const build = (seats = ["u1", "u2"]) => createMatchState(matchConfig(seats));
 
 describe("proyecciones puras del estado", () => {
   it("teamOf mapea asiento a equipo", () => {

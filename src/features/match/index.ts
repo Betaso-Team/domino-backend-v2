@@ -16,6 +16,7 @@ export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/registe
 export {
   configOf,
   type DominoRoomOptions,
+  type MatchParticipant,
   type SeatCredentials,
 } from "./transports/match-contract.js";
 export {

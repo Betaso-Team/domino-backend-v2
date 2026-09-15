@@ -104,14 +104,34 @@ if (entries.length === 0) {
 // de estar siempre encendida, le daban al CLI una partida distinta de la que la sala jugó,
 // en silencio y sin que tsc dijera nada. Ahora la mesa se describe en el vocabulario de
 // matchmaking (`DominoRoomOptions`) y la traducción la hace el único que sabe hacerla.
+// LOS PARTICIPANTES SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
+// siendo IDS DE ASIENTO —el vocabulario con el que el historial grabó la partida—, y el
+// resto del snapshot no está grabado en ninguna parte: `match_history` guarda actos y
+// hechos, no la cabecera de la mesa. `platformId: "replay"` y `currency: "REPLAY"` son
+// etiquetas que gritan de dónde salieron, y los montos van en cero con la tasa nula.
+//
+// ⛔ NADA DE ESTO SIRVE PARA LIQUIDAR. Estos campos completan un `DominoMatchConfig` que el
+// motor necesita entero pero cuyo dinero NO consume: la reconstrucción del árbol no lee
+// moneda, tasa ni montos. Usar este config para calcular una recompensa pagaría en una
+// moneda que no existe, a una tasa que nadie aceptó.
+const participants = seats.map((userUuid) => ({
+  platformId: "replay",
+  userUuid,
+  displayName: userUuid,
+  currency: "REPLAY",
+}));
+
 const options: DominoRoomOptions = {
   mode: "CASUAL",
   matchId,
   gameModeId: "replay",
-  seats,
+  participants,
   seed,
   pointsToWin,
   teamAssignment,
+  rateId: "00000000-0000-4000-8000-000000000000",
+  entryFeeUcMinor: 0,
+  prizeUcMinor: 0,
 };
 
 logger.info("rebobinando", { matchId, entries: entries.length });

@@ -110,7 +110,7 @@ Esta tarea es deliberadamente vertical. Separar el cambio de `DominoMatchConfig`
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`
 
-- [ ] **Step 1: Escribir el rojo de JWT compuesto**
+- [x] **Step 1: Escribir el rojo de JWT compuesto**
 
 En `jwt-verifier.test.ts`, cambiar el caso feliz y añadir los dos rechazos:
 
@@ -138,13 +138,13 @@ it.each([
 
 Actualizar los restantes `jwt.sign({ sub: "u1" }` para incluir `platformId: "betaso"`, salvo el caso que prueba ausencia de `sub`.
 
-- [ ] **Step 2: Ejecutar el rojo de auth**
+- [x] **Step 2: Ejecutar el rojo de auth**
 
 Run: `npx vitest run src/features/auth/transports/jwt-verifier.test.ts`
 
 Expected: FAIL; el resultado todavía contiene `userId` y el token sin plataforma aún se acepta.
 
-- [ ] **Step 3: Escribir el rojo del contrato monetario**
+- [x] **Step 3: Escribir el rojo del contrato monetario**
 
 Crear `match-contract.test.ts`:
 
@@ -217,7 +217,7 @@ describe("configOf", () => {
 });
 ```
 
-- [ ] **Step 4: Escribir los rojos de génesis, registro, sala y wire**
+- [x] **Step 4: Escribir los rojos de génesis, registro, sala y wire**
 
 Añadir en `core/engine/tests/genesis.test.ts`:
 
@@ -305,7 +305,7 @@ it("sincroniza presentación pero no identidad externa ni moneda", async () => {
 });
 ```
 
-- [ ] **Step 5: Ejecutar el rojo de contrato y transporte**
+- [x] **Step 5: Ejecutar el rojo de contrato y transporte**
 
 Run:
 
@@ -315,7 +315,7 @@ npx vitest run src/features/match/transports/match-contract.test.ts src/features
 
 Expected: FAIL de compilación/ejecución porque todavía no existen `participants`, `rateId`, la pareja autenticada ni los helpers del arnés.
 
-- [ ] **Step 6: Implementar la identidad compartida y el verificador**
+- [x] **Step 6: Implementar la identidad compartida y el verificador**
 
 Crear `src/shared/player-ref.ts`:
 
@@ -362,7 +362,7 @@ return { platformId, userUuid: payload.sub };
 
 Conservar el `try/catch` actual para que errores de firma, algoritmo, expiración y claims se traduzcan al mismo `InvalidTokenError`.
 
-- [ ] **Step 7: Implementar el contrato validado y el config sin campos duplicados**
+- [x] **Step 7: Implementar el contrato validado y el config sin campos duplicados**
 
 Reemplazar la parte de partida en `core/config.ts` por:
 
@@ -479,7 +479,7 @@ export function configOf(input: unknown): DominoMatchConfig {
 
 Exportar también `MatchParticipant` desde `src/features/match/index.ts`.
 
-- [ ] **Step 8: Copiar el snapshot a estado y adaptar los consumidores del motor**
+- [x] **Step 8: Copiar el snapshot a estado y adaptar los consumidores del motor**
 
 En `PlayerState` añadir antes de `teamId`:
 
@@ -519,7 +519,7 @@ config.seats.forEach((seat, seatIndex) => {
 
 Importar `playerIdsOf`. En `dealer.ts`, `history/engine-factory.ts` y `core/engine/tests/build-engine.ts`, reemplazar cada iteración/constructor que espera ids por `playerIdsOf(config)`. No cambiar `assignTeams`, `PlayerRepository` ni `maxClients`.
 
-- [ ] **Step 9: Adaptar sala y registro a la pareja**
+- [x] **Step 9: Adaptar sala y registro a la pareja**
 
 En `DominoRoom` guardar `private config!: DominoMatchConfig`, construir primero `const config = configOf(options)`, asignar `this.config = config`, y obtener `this.seats = playerIdsOf(config)`.
 
@@ -618,7 +618,7 @@ private async release(player: PlayerRef, roomId: string): Promise<void> {
 
 Esto evita reconstruir identidad desde el DTO público y evita guardar el config financiero entero en memoria del registro.
 
-- [ ] **Step 10: Crear el fixture de config y migrar los tests unitarios**
+- [x] **Step 10: Crear el fixture de config y migrar los tests unitarios**
 
 Crear `core/engine/tests/match-config-fixture.ts`:
 
@@ -740,7 +740,7 @@ async function connect(
 
 Importar `PlayerRef` y `MatchParticipant`. En el primer test, usar `tokenOf("a")` y esperar `room.clients[0]?.auth` igual a `{ platformId: "betaso", userUuid: "a", token }`.
 
-- [ ] **Step 11: Migrar el arnés E2E sin obligar a cada test a conocer `seat-N`**
+- [x] **Step 11: Migrar el arnés E2E sin obligar a cada test a conocer `seat-N`**
 
 En `e2e-harness.ts`, definir:
 
@@ -846,7 +846,7 @@ export async function rejoinAs(
 
 En `visibility` y `reconnection`, cambiar cada llamada a `rejoinAs(server, match.roomId, selector)` por `rejoinAs(server, match, selector)`. En `visibility`, `deal-window`, `lifecycle` y `reconnection`, reemplazar accesos directos `match.clients.<uuid>` y comparaciones `playerId === "<uuid>"` por `clientOf(...)` y `playerIdOf(...)`. No tocar el algoritmo del juego.
 
-- [ ] **Step 12: Adaptar el CLI de replay sin fingir datos históricos**
+- [x] **Step 12: Adaptar el CLI de replay sin fingir datos históricos**
 
 En `src/replay.ts`, mantener los argumentos posicionales actuales como ids de asiento y construir participantes explícitamente sintéticos:
 
@@ -874,7 +874,7 @@ const options: DominoRoomOptions = {
 
 Actualizar el comentario del CLI: esos valores solo completan campos que no intervienen en el engine; el historial actual no contiene el snapshot real. No presentar `REPLAY` como moneda real ni usar este config para liquidar.
 
-- [ ] **Step 13: Ejecutar targeted, regenerar golden y cerrar el gate completo**
+- [x] **Step 13: Ejecutar targeted, regenerar golden y cerrar el gate completo**
 
 Run:
 
@@ -904,7 +904,7 @@ npm run lint
 
 Expected: cuatro comandos con código 0; la suite supera el baseline anterior de 320 tests.
 
-- [ ] **Step 14: Reindexar, registrar continuidad y commit**
+- [x] **Step 14: Reindexar, registrar continuidad y commit**
 
 Ejecutar `index_repository` sobre la raíz con modo `fast`. Actualizar `AGENTS.md` a `Tarea 1 completa`, anotar el total real de tests y `siguiente: Task 2, Step 1`. Marcar esta tarea `[x]` en el plan.
 
@@ -914,6 +914,9 @@ git commit -m "feat(multiplataforma): congela identidad y moneda por asiento" -m
 ```
 
 Expected: commit creado; `git status --short` vacío.
+
+**Continuidad:** Tarea 1 completa; baseline 338 tests / 49 archivos; siguiente paso exacto:
+Task 2, Step 1.
 
 ### Task 2: Proyectar recompensa y reembolso sin mover dinero
 

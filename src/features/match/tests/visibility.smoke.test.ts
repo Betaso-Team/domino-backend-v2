@@ -4,7 +4,9 @@ import type { MatchState } from "../core/state/index.js";
 import {
   type SeatedMatch,
   bootServer,
+  clientOf,
   legalPlayFor,
+  playerIdOf,
   rejoinAs,
   revealHands,
   seatPair,
@@ -22,15 +24,16 @@ afterAll(async () => {
   await server.shutdown();
 });
 
-// Lee el estado TAL COMO LO RECIBIÓ el cliente, ya filtrado por su StateView.
-const clientState = (match: SeatedMatch, userId: string): MatchState => {
-  const client = match.clients[userId];
-  if (!client) throw new Error(`sin cliente para ${userId}`);
-  return client.state as MatchState;
-};
+// Lee el estado TAL COMO LO RECIBIÓ el cliente, ya filtrado por su StateView. El selector
+// es el `userUuid` con el que el test nombra a la gente; `clientOf` lo traduce al asiento.
+const clientState = (match: SeatedMatch, selector: string): MatchState =>
+  clientOf(match, selector).state as MatchState;
 
-const tilesSeenBy = (state: MatchState, owner: string) => [
-  ...(state.players.find((player) => player.playerId === owner)?.hand.tiles ?? []),
+// El DUEÑO también se resuelve: adentro del árbol los jugadores se llaman `seat-N`, y
+// comparar contra el uuid daría cero fichas para todos — o sea un test verde que no mide.
+const tilesSeenBy = (match: SeatedMatch, state: MatchState, owner: string) => [
+  ...(state.players.find((player) => player.playerId === playerIdOf(match, owner))?.hand.tiles ??
+    []),
 ];
 
 // Espera a que a CADA uno le haya llegado su propia mano. Se espera sobre la vista que el
@@ -38,7 +41,7 @@ const tilesSeenBy = (state: MatchState, owner: string) => [
 // una ventana en la que el cero que se mide es el patch que todavía no llegó.
 const awaitDealtHands = async (match: SeatedMatch, viewers: readonly string[]) => {
   for (const viewer of viewers) {
-    await waitUntil(() => tilesSeenBy(clientState(match, viewer), viewer).length === 7);
+    await waitUntil(() => tilesSeenBy(match, clientState(match, viewer), viewer).length === 7);
   }
 };
 
@@ -48,8 +51,8 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     await revealHands(match);
     await awaitDealtHands(match, ["v1", "v2"]);
 
-    expect(tilesSeenBy(clientState(match, "v1"), "v1")).toHaveLength(7);
-    expect(tilesSeenBy(clientState(match, "v2"), "v2")).toHaveLength(7);
+    expect(tilesSeenBy(match, clientState(match, "v1"), "v1")).toHaveLength(7);
+    expect(tilesSeenBy(match, clientState(match, "v2"), "v2")).toHaveLength(7);
   });
 
   // EL AGUJERO DEL V1. Allí `players` era un MapSchema completo con las fichas
@@ -59,8 +62,8 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     await revealHands(match);
     await awaitDealtHands(match, ["w1", "w2"]);
 
-    expect(tilesSeenBy(clientState(match, "w1"), "w2")).toHaveLength(0);
-    expect(tilesSeenBy(clientState(match, "w2"), "w1")).toHaveLength(0);
+    expect(tilesSeenBy(match, clientState(match, "w1"), "w2")).toHaveLength(0);
+    expect(tilesSeenBy(match, clientState(match, "w2"), "w1")).toHaveLength(0);
   });
 
   it("pero SÍ ve cuántas le quedan: tileCount es público", async () => {
@@ -68,7 +71,9 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     await revealHands(match);
     await awaitDealtHands(match, ["x1"]);
 
-    const rival = clientState(match, "x1").players.find((player) => player.playerId === "x2");
+    const rival = clientState(match, "x1").players.find(
+      (player) => player.playerId === playerIdOf(match, "x2"),
+    );
     expect(rival?.hand.tileCount).toBe(7);
   });
 
@@ -96,13 +101,43 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     const play = legalPlayFor(clientState(match, turnHolder), turnHolder);
     if (!play) throw new Error("sin jugada legal");
 
-    match.clients[turnHolder]?.send("PLAY_TILE", play);
+    clientOf(match, turnHolder).send("PLAY_TILE", play);
 
     await waitUntil(() => match.serverState.currentRound?.board.tiles.length === 1);
     for (const viewer of ["z1", "z2"]) {
       await waitUntil(() => clientState(match, viewer).currentRound?.board.tiles.length === 1);
       const placed = clientState(match, viewer).currentRound?.board.tiles.at(0);
       expect([placed?.tile.left, placed?.tile.right]).toEqual([play.left, play.right]);
+    }
+  });
+
+  // EL WIRE NO LLEVA IDENTIDAD EXTERNA NI MONEDA. `displayName` y el resto del perfil son
+  // presentación y viajan; la pareja `{ platformId, userUuid }` y la moneda ya cobrada son
+  // `noSync()` y no entran al árbol sincronizado. Si entraran, cualquier cliente conocería
+  // la cuenta del rival en la plataforma — y con plata de por medio eso no se deshace.
+  it("sincroniza presentación pero no identidad externa ni moneda", async () => {
+    const match = await seatPair(server, [
+      {
+        platformId: "betaso",
+        userUuid: "private-a",
+        displayName: "Ada",
+        // Los dos OPCIONALES van poblados en un solo asiento y ausentes en el otro: es la
+        // única forma de medir las dos ramas de `t.string().optional()` a la vez.
+        username: "ada99",
+        profilePicture: "https://img.test/ada.png",
+        currency: "VES",
+      },
+      { platformId: "partner", userUuid: "private-b", displayName: "Lin", currency: "USD" },
+    ]);
+    await waitUntil(() => clientState(match, "private-a").players.length === 2);
+
+    const wire = JSON.stringify(clientState(match, "private-a").toJSON());
+    expect(wire).toContain("Ada");
+    expect(wire).toContain("Lin");
+    expect(wire).toContain("ada99");
+    expect(wire).toContain("https://img.test/ada.png");
+    for (const privateValue of ["private-a", "private-b", "betaso", "partner", "VES", "USD"]) {
+      expect(wire).not.toContain(privateValue);
     }
   });
 
@@ -114,17 +149,18 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     await revealHands(match);
     await awaitDealtHands(match, ["r1"]);
 
-    await match.clients.r1?.leave(false);
+    await clientOf(match, "r1").leave(false);
     await waitUntil(
       () =>
-        match.serverState.players.find((player) => player.playerId === "r1")?.connected === false,
+        match.serverState.players.find((player) => player.playerId === playerIdOf(match, "r1"))
+          ?.connected === false,
     );
 
-    const back = await rejoinAs(server, match.roomId, "r1");
+    const back = await rejoinAs(server, match, "r1");
     await waitUntil(() => back.state.players.length === 2);
 
-    expect(tilesSeenBy(back.state, "r1")).toHaveLength(7);
+    expect(tilesSeenBy(match, back.state, "r1")).toHaveLength(7);
     // Y sigue sin ver la del rival.
-    expect(tilesSeenBy(back.state, "r2")).toHaveLength(0);
+    expect(tilesSeenBy(match, back.state, "r2")).toHaveLength(0);
   });
 });

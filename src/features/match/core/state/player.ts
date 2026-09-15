@@ -42,9 +42,24 @@ export type Hand = SchemaType<typeof Hand>;
 // `REVEAL_TILES`, y NO se resetea entre rondas —la ventana de reparto es solo la de la
 // ronda 1—. Es **público** a propósito: el front tiene que poder decir *a quién se está
 // esperando*, que es la mitad del valor de la ventana.
+// EL CORTE ENTRE PRESENTACIÓN E IDENTIDAD, y es el motivo por el que los seis campos de
+// abajo no son un solo bloque. `displayName`/`username`/`profilePicture` son lo que el
+// front dibuja y viajan al wire; la pareja `{ platformId, userUuid }` y la moneda ya
+// cobrada son `noSync()` —viven en la instancia del servidor y NO entran a la metadata,
+// así que no se codifican, no se sincronizan y ni siquiera aparecen en `toJSON()`—.
+//
+// Están en el árbol igual, y no en un mapa aparte de la sala, porque son del ASIENTO:
+// quien tenga el `PlayerState` tiene todo lo que hace falta para liquidarlo, sin un
+// segundo lugar obligado a mantenerse en sincronía con éste.
 export const PlayerState = schema(
   {
     playerId: t.string(),
+    displayName: t.string(),
+    username: t.string().optional(),
+    profilePicture: t.string().optional(),
+    platformId: t.string().noSync(),
+    userUuid: t.string().noSync(),
+    currency: t.string().noSync(),
     teamId: t.string(),
     seatIndex: t.number(),
     connected: t.boolean().default(true),

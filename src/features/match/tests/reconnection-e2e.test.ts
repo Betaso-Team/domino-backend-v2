@@ -3,8 +3,16 @@ import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rootContainer } from "../../../di-container.js";
 import { type GlobalDominoConfig, globalConfigWith } from "../core/config.js";
-import type { MatchState } from "../core/state/index.js";
-import { bootServer, clientOf, linesOf, rejoinAs, seatPair, waitUntil } from "./e2e-harness.js";
+import {
+  type SeatedMatch,
+  bootServer,
+  clientOf,
+  linesOf,
+  playerIdOf,
+  rejoinAs,
+  seatPair,
+  waitUntil,
+} from "./e2e-harness.js";
 
 let server: ColyseusTestServer;
 let originalGlobalConfig: GlobalDominoConfig;
@@ -25,8 +33,14 @@ afterAll(async () => {
   rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
-const connectedOf = (state: MatchState, playerId: string) =>
-  state.players.find((player) => player.playerId === playerId)?.connected;
+// Reciben la MESA y no solo el árbol: el selector que los tests usan es el `userUuid`, y
+// adentro del árbol los jugadores se llaman `seat-N`. Comparar el uuid contra el asiento
+// daría `undefined` siempre — un `waitUntil` que se cuelga sin decir por qué.
+const connectedOf = (match: SeatedMatch, selector: string) =>
+  playerStateOf(match, selector)?.connected;
+
+const playerStateOf = (match: SeatedMatch, selector: string) =>
+  match.serverState.players.find((player) => player.playerId === playerIdOf(match, selector));
 
 // NINGUNO DE LOS TRES CAMINOS REVELA LAS DOS MANOS, y no es un olvido: con la ronda en
 // PLAYING el plazo del turno son 600 ms + 300 de reserva en test, así que un jugador caído
@@ -69,13 +83,13 @@ describe("reconexión — los tres caminos", () => {
     await waitUntil(() => dropped, 3_000);
     // El corte lo ve primero el cliente —es su propio socket—; el servidor se entera un
     // viaje después. Afirmar `connected === false` en seco es una carrera que pierde.
-    await waitUntil(() => connectedOf(match.serverState, "n1") === false, 3_000);
+    await waitUntil(() => connectedOf(match, "n1") === false, 3_000);
     // La partida sigue viva, y el reloj del juego no se pausó.
     expect(match.serverState.phase).toBe("PLAYING");
     expect(match.serverState.activeDeadline).toBeGreaterThan(0);
 
     await waitUntil(() => reconnected, 5_000);
-    await waitUntil(() => connectedOf(match.serverState, "n1") === true, 3_000);
+    await waitUntil(() => connectedOf(match, "n1") === true, 3_000);
     expect(await linesOf("m-n1-n2")).toContain("SYSTEM PLAYER_RECONNECTED");
   });
 
@@ -97,20 +111,21 @@ describe("reconexión — los tres caminos", () => {
     const client = clientOf(match, "t1");
     // Solo t1 levanta sus fichas: su vista queda con las siete y la ronda sigue en DEALING.
     client.send("REVEAL_TILES", {});
-    await waitUntil(() => seenTilesOf(match.serverState, "t1") === true, 3_000);
+    await waitUntil(() => playerStateOf(match, "t1")?.hasSeenTiles === true, 3_000);
 
     // Perder el token ES no poder reintentar con él. Apagado el reintento automático, el
     // único camino de vuelta es el manual —joinById— que es justo el que se quiere medir.
     client.reconnection.enabled = false;
     await client.leave(false);
-    await waitUntil(() => connectedOf(match.serverState, "t1") === false, 3_000);
+    await waitUntil(() => connectedOf(match, "t1") === false, 3_000);
 
     // Con un solo cupo por asiento, esta línea lanza.
-    const back = await rejoinAs(server, match.roomId, "t1");
+    const back = await rejoinAs(server, match, "t1");
 
-    await waitUntil(() => connectedOf(match.serverState, "t1") === true, 3_000);
+    await waitUntil(() => connectedOf(match, "t1") === true, 3_000);
     // Ve su mano completa: la vista es del ASIENTO y le esperó.
-    const own = [...(back.state.players.find((p) => p.playerId === "t1")?.hand.tiles ?? [])];
+    const seatId = playerIdOf(match, "t1");
+    const own = [...(back.state.players.find((p) => p.playerId === seatId)?.hand.tiles ?? [])];
     expect(own).toHaveLength(7);
   });
 
@@ -145,10 +160,7 @@ describe("reconexión — los tres caminos", () => {
     );
 
     // NO fue expulsado del juego: sigue siendo jugador, y la partida sigue en pie.
-    expect(match.serverState.players.find((p) => p.playerId === "e1")?.hasAbandoned).toBe(false);
+    expect(playerStateOf(match, "e1")?.hasAbandoned).toBe(false);
     expect(match.serverState.phase).toBe("PLAYING");
   });
 });
-
-const seenTilesOf = (state: MatchState, playerId: string) =>
-  state.players.find((player) => player.playerId === playerId)?.hasSeenTiles;

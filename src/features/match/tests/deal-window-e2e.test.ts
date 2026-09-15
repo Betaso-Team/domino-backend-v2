@@ -8,6 +8,7 @@ import {
   clientOf,
   historyOf,
   linesOf,
+  playerIdOf,
   seatPair,
   waitUntil,
 } from "./e2e-harness.js";
@@ -22,19 +23,26 @@ afterAll(async () => {
   await server.shutdown();
 });
 
-const seenOf = (state: MatchState, playerId: string): boolean =>
-  state.players.find((player) => player.playerId === playerId)?.hasSeenTiles ?? false;
+// El SELECTOR es el `userUuid` con el que el test nombra a la gente; adentro del árbol los
+// jugadores se llaman `seat-N`, así que traducirlo no es opcional: sin `playerIdOf` la
+// búsqueda no encuentra a nadie y el `waitUntil` se cuelga en vez de fallar.
+const seenOf = (match: SeatedMatch, state: MatchState, selector: string): boolean =>
+  state.players.find((player) => player.playerId === playerIdOf(match, selector))?.hasSeenTiles ??
+  false;
 
-const revealTiles = async (match: SeatedMatch, playerId: string): Promise<void> => {
-  clientOf(match, playerId).send("REVEAL_TILES", {});
-  await waitUntil(() => seenOf(match.serverState, playerId));
+const revealTiles = async (match: SeatedMatch, selector: string): Promise<void> => {
+  clientOf(match, selector).send("REVEAL_TILES", {});
+  await waitUntil(() => seenOf(match, match.serverState, selector));
 };
 
 const tilesSeenBy = (match: SeatedMatch, viewerId: string, ownerId: string) => [
   ...((clientOf(match, viewerId).state as MatchState).players.find(
-    (player) => player.playerId === ownerId,
+    (player) => player.playerId === playerIdOf(match, ownerId),
   )?.hand.tiles ?? []),
 ];
+
+const playerStateOf = (match: SeatedMatch, selector: string) =>
+  match.serverState.players.find((player) => player.playerId === playerIdOf(match, selector));
 
 describe("ventana de reparto", () => {
   it("reparte tapado y espera a que ambos levanten antes de dar el turno", async () => {
@@ -50,8 +58,8 @@ describe("ventana de reparto", () => {
 
     await revealTiles(match, "deal-d1");
 
-    expect(seenOf(match.serverState, "deal-d1")).toBe(true);
-    expect(seenOf(match.serverState, "deal-d2")).toBe(false);
+    expect(seenOf(match, match.serverState, "deal-d1")).toBe(true);
+    expect(seenOf(match, match.serverState, "deal-d2")).toBe(false);
     expect(match.serverState.currentRound?.phase).toBe("DEALING");
 
     await act(match, "deal-d2", "REVEAL_TILES");
@@ -67,7 +75,7 @@ describe("ventana de reparto", () => {
     await waitUntil(
       () =>
         tilesSeenBy(match, "deal-v1", "deal-v1").length === 7 &&
-        seenOf(clientOf(match, "deal-v2").state as MatchState, "deal-v1"),
+        seenOf(match, clientOf(match, "deal-v2").state as MatchState, "deal-v1"),
     );
 
     expect(tilesSeenBy(match, "deal-v1", "deal-v1")).toHaveLength(7);
@@ -79,20 +87,11 @@ describe("ventana de reparto", () => {
     const matchId = "m-deal-f1-deal-f2";
 
     await revealTiles(match, "deal-f1");
-    await waitUntil(
-      () =>
-        match.serverState.players.find((player) => player.playerId === "deal-f2")?.hasAbandoned ===
-        true,
-      5_000,
-    );
+    await waitUntil(() => playerStateOf(match, "deal-f2")?.hasAbandoned === true, 5_000);
 
-    const winnerTeamId = match.serverState.players.find(
-      (player) => player.playerId === "deal-f1",
-    )?.teamId;
+    const winnerTeamId = playerStateOf(match, "deal-f1")?.teamId;
     // Al presente NO lo retiran: el forfeit es del que no levantó, y solo de él.
-    expect(
-      match.serverState.players.find((player) => player.playerId === "deal-f1")?.hasAbandoned,
-    ).toBe(false);
+    expect(playerStateOf(match, "deal-f1")?.hasAbandoned).toBe(false);
     expect(await linesOf(matchId)).toContain("SYSTEM ABANDON");
     expect(await linesOf(matchId)).toContain("SYSTEM MATCH_RESOLVED");
     expect(

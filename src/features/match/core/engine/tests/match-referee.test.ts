@@ -11,23 +11,15 @@
 // una sola vez. Sin este test, la guarda queda verde-y-muerta: se puede mover DESPUÉS
 // del `for` —dead code— y los 63 tests de todos modos pasan.
 import { describe, expect, it } from "vitest";
-import type { DominoMatchConfig } from "../../config.js";
 import { createMatchState } from "../genesis.js";
 import { MatchReferee } from "../match/referee.js";
 import { playerOf } from "../state-projections.js";
+import { matchConfig } from "./match-config-fixture.js";
 
 // SEAT_ORDER, a propósito, misma razón que en build-engine.ts: este test prueba la
 // regla del juez, no el sorteo. Con SEAT_ORDER, "u1" es SIEMPRE team A y "u2" SIEMPRE
-// team B.
-const config: DominoMatchConfig = {
-  matchId: "m-referee-test",
-  gameModeId: "test",
-  seed: "seed-test",
-  seats: ["u1", "u2"],
-  pointsToWin: 100,
-  teamAssignment: "SEAT_ORDER",
-  isDealWindowEnabled: false,
-};
+// team B. Es el default del fixture, y por eso no se pasa override.
+const config = matchConfig(["u1", "u2"], { matchId: "m-referee-test" });
 
 describe("MatchReferee.outcome — abandono", () => {
   it("si abandonaron los DOS equipos, no hay veredicto", () => {

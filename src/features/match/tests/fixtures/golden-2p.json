@@ -2,11 +2,29 @@
   "meta": {
     "matchId": "m-g1-g2",
     "gameModeId": "clasica-2p",
-    "seats": ["g1", "g2"],
+    "seats": [
+      {
+        "platformId": "betaso",
+        "userUuid": "g1",
+        "displayName": "Jugador g1",
+        "currency": "VES",
+        "playerId": "seat-1"
+      },
+      {
+        "platformId": "betaso",
+        "userUuid": "g2",
+        "displayName": "Jugador g2",
+        "currency": "VES",
+        "playerId": "seat-2"
+      }
+    ],
     "seed": "seed-partida-completa",
     "pointsToWin": 100,
     "teamAssignment": "SHUFFLED",
-    "isDealWindowEnabled": true
+    "isDealWindowEnabled": true,
+    "rateId": "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+    "entryFeeUcMinor": 125,
+    "prizeUcMinor": 250
   },
   "globalConfig": {
     "turnTimeoutMs": 600,
@@ -18,36 +36,36 @@
     "reconnectionWindowSeconds": 3,
     "tilesPerPlayer": 7
   },
-  "startedAt": 1789402121623,
+  "startedAt": 1789432962027,
   "entries": [
     {
       "matchId": "m-g1-g2",
       "seq": 1,
-      "at": 1789402121636,
+      "at": 1789432962035,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "REVEAL_TILES",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 2,
-      "at": 1789402121638,
+      "at": 1789432962036,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "REVEAL_TILES",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 3,
-      "at": 1789402121658,
+      "at": 1789432962053,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -56,13 +74,13 @@
         "left": 1,
         "right": 3,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 4,
-      "at": 1789402121669,
+      "at": 1789432962069,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -71,13 +89,13 @@
         "left": 0,
         "right": 1,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 5,
-      "at": 1789402121684,
+      "at": 1789432962082,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -86,13 +104,13 @@
         "left": 3,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 6,
-      "at": 1789402121699,
+      "at": 1789432962098,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -101,13 +119,13 @@
         "left": 0,
         "right": 0,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 7,
-      "at": 1789402121716,
+      "at": 1789432962115,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -116,25 +134,25 @@
         "left": 0,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 8,
-      "at": 1789402121730,
+      "at": 1789432962130,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 9,
-      "at": 1789402121746,
+      "at": 1789432962144,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -143,49 +161,49 @@
         "left": 6,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 10,
-      "at": 1789402121761,
+      "at": 1789432962161,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 11,
-      "at": 1789402121779,
+      "at": 1789432962176,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 12,
-      "at": 1789402121792,
+      "at": 1789432962191,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 13,
-      "at": 1789402121812,
+      "at": 1789432962206,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -194,13 +212,13 @@
         "left": 1,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 14,
-      "at": 1789402121824,
+      "at": 1789432962221,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -209,13 +227,13 @@
         "left": 1,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 15,
-      "at": 1789402121842,
+      "at": 1789432962236,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -224,13 +242,13 @@
         "left": 5,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 16,
-      "at": 1789402121854,
+      "at": 1789432962251,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -239,13 +257,13 @@
         "left": 4,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 17,
-      "at": 1789402121869,
+      "at": 1789432962266,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -254,37 +272,37 @@
         "left": 1,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 18,
-      "at": 1789402121885,
+      "at": 1789432962282,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 19,
-      "at": 1789402121900,
+      "at": 1789432962297,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 20,
-      "at": 1789402121915,
+      "at": 1789432962313,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -293,13 +311,13 @@
         "left": 4,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 21,
-      "at": 1789402121931,
+      "at": 1789432962328,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -308,13 +326,13 @@
         "left": 1,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 22,
-      "at": 1789402121946,
+      "at": 1789432962344,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -323,13 +341,13 @@
         "left": 4,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 23,
-      "at": 1789402121962,
+      "at": 1789432962361,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -338,13 +356,13 @@
         "left": 2,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 24,
-      "at": 1789402121977,
+      "at": 1789432962378,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -353,25 +371,25 @@
         "left": 0,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 25,
-      "at": 1789402121993,
+      "at": 1789432962393,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 26,
-      "at": 1789402122009,
+      "at": 1789432962408,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -380,13 +398,13 @@
         "left": 0,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 27,
-      "at": 1789402122026,
+      "at": 1789432962424,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -395,37 +413,37 @@
         "left": 2,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 28,
-      "at": 1789402122040,
+      "at": 1789432962441,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 29,
-      "at": 1789402122056,
+      "at": 1789432962456,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 30,
-      "at": 1789402122072,
+      "at": 1789432962472,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -434,13 +452,13 @@
         "left": 3,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 31,
-      "at": 1789402122088,
+      "at": 1789432962488,
       "roundNumber": 1,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -449,20 +467,20 @@
         "left": 2,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 32,
-      "at": 1789402122089,
+      "at": 1789432962488,
       "roundNumber": 1,
       "source": "SYSTEM",
       "kind": "EVENT",
       "type": "ROUND_RESOLVED",
       "payload": {
         "roundNumber": 1,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 19,
         "reason": "DOMINO"
@@ -471,7 +489,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 33,
-      "at": 1789402122212,
+      "at": 1789432962611,
       "roundNumber": 2,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -483,7 +501,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 34,
-      "at": 1789402122214,
+      "at": 1789432962643,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -492,13 +510,13 @@
         "left": 0,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 35,
-      "at": 1789402122226,
+      "at": 1789432962643,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -507,13 +525,13 @@
         "left": 3,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 36,
-      "at": 1789402122242,
+      "at": 1789432962657,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -522,13 +540,13 @@
         "left": 3,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 37,
-      "at": 1789402122257,
+      "at": 1789432962674,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -537,13 +555,13 @@
         "left": 0,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 38,
-      "at": 1789402122274,
+      "at": 1789432962689,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -552,37 +570,37 @@
         "left": 2,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 39,
-      "at": 1789402122290,
+      "at": 1789432962705,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 40,
-      "at": 1789402122305,
+      "at": 1789432962721,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 41,
-      "at": 1789402122320,
+      "at": 1789432962737,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -591,13 +609,13 @@
         "left": 4,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 42,
-      "at": 1789402122336,
+      "at": 1789432962753,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -606,13 +624,13 @@
         "left": 2,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 43,
-      "at": 1789402122350,
+      "at": 1789432962768,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -621,49 +639,49 @@
         "left": 4,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 44,
-      "at": 1789402122365,
+      "at": 1789432962784,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 45,
-      "at": 1789402122382,
+      "at": 1789432962801,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 46,
-      "at": 1789402122397,
+      "at": 1789432962816,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 47,
-      "at": 1789402122413,
+      "at": 1789432962831,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -672,61 +690,61 @@
         "left": 2,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 48,
-      "at": 1789402122428,
+      "at": 1789432962846,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 49,
-      "at": 1789402122444,
+      "at": 1789432962862,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 50,
-      "at": 1789402122459,
+      "at": 1789432962877,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 51,
-      "at": 1789402122475,
+      "at": 1789432962892,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 52,
-      "at": 1789402122491,
+      "at": 1789432962908,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -735,13 +753,13 @@
         "left": 1,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 53,
-      "at": 1789402122506,
+      "at": 1789432962923,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -750,13 +768,13 @@
         "left": 0,
         "right": 1,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 54,
-      "at": 1789402122522,
+      "at": 1789432962938,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -765,13 +783,13 @@
         "left": 0,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 55,
-      "at": 1789402122536,
+      "at": 1789432962953,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -780,13 +798,13 @@
         "left": 1,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 56,
-      "at": 1789402122551,
+      "at": 1789432962968,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -795,49 +813,49 @@
         "left": 1,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 57,
-      "at": 1789402122567,
+      "at": 1789432962985,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 58,
-      "at": 1789402122582,
+      "at": 1789432963000,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 59,
-      "at": 1789402122597,
+      "at": 1789432963016,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 60,
-      "at": 1789402122612,
+      "at": 1789432963032,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -846,68 +864,68 @@
         "left": 4,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 61,
-      "at": 1789402122627,
+      "at": 1789432963048,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 62,
-      "at": 1789402122643,
+      "at": 1789432963063,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 63,
-      "at": 1789402122658,
+      "at": 1789432963079,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "PASS",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 64,
-      "at": 1789402122668,
+      "at": 1789432963096,
       "roundNumber": 2,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "PASS",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 65,
-      "at": 1789402122668,
+      "at": 1789432963096,
       "roundNumber": 2,
       "source": "SYSTEM",
       "kind": "EVENT",
       "type": "ROUND_RESOLVED",
       "payload": {
         "roundNumber": 2,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 54,
         "reason": "BLOCKED"
@@ -916,7 +934,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 66,
-      "at": 1789402122767,
+      "at": 1789432963176,
       "roundNumber": 3,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -928,7 +946,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 67,
-      "at": 1789402122769,
+      "at": 1789432963178,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -937,13 +955,13 @@
         "left": 3,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 68,
-      "at": 1789402122782,
+      "at": 1789432963191,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -952,13 +970,13 @@
         "left": 4,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 69,
-      "at": 1789402122798,
+      "at": 1789432963206,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -967,13 +985,13 @@
         "left": 2,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 70,
-      "at": 1789402122814,
+      "at": 1789432963221,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -982,13 +1000,13 @@
         "left": 2,
         "right": 2,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 71,
-      "at": 1789402122830,
+      "at": 1789432963237,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -997,13 +1015,13 @@
         "left": 0,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 72,
-      "at": 1789402122845,
+      "at": 1789432963251,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1012,13 +1030,13 @@
         "left": 2,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 73,
-      "at": 1789402122860,
+      "at": 1789432963267,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1027,25 +1045,25 @@
         "left": 5,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 74,
-      "at": 1789402122876,
+      "at": 1789432963283,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 75,
-      "at": 1789402122893,
+      "at": 1789432963299,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1054,13 +1072,13 @@
         "left": 2,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 76,
-      "at": 1789402122907,
+      "at": 1789432963314,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1069,13 +1087,13 @@
         "left": 0,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 77,
-      "at": 1789402122922,
+      "at": 1789432963329,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1084,13 +1102,13 @@
         "left": 1,
         "right": 2,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 78,
-      "at": 1789402122938,
+      "at": 1789432963343,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1099,13 +1117,13 @@
         "left": 1,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 79,
-      "at": 1789402122953,
+      "at": 1789432963359,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1114,13 +1132,13 @@
         "left": 4,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 80,
-      "at": 1789402122969,
+      "at": 1789432963375,
       "roundNumber": 3,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1129,20 +1147,20 @@
         "left": 3,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 81,
-      "at": 1789402122969,
+      "at": 1789432963375,
       "roundNumber": 3,
       "source": "SYSTEM",
       "kind": "EVENT",
       "type": "ROUND_RESOLVED",
       "payload": {
         "roundNumber": 3,
-        "winnerId": "g2",
+        "winnerId": "seat-2",
         "winnerTeamId": "B",
         "points": 10,
         "reason": "DOMINO"
@@ -1151,7 +1169,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 82,
-      "at": 1789402123078,
+      "at": 1789432963468,
       "roundNumber": 4,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -1163,7 +1181,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 83,
-      "at": 1789402123080,
+      "at": 1789432963469,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1172,13 +1190,13 @@
         "left": 1,
         "right": 3,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 84,
-      "at": 1789402123092,
+      "at": 1789432963483,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1187,13 +1205,13 @@
         "left": 0,
         "right": 3,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 85,
-      "at": 1789402123108,
+      "at": 1789432963497,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1202,13 +1220,13 @@
         "left": 0,
         "right": 2,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 86,
-      "at": 1789402123124,
+      "at": 1789432963512,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1217,13 +1235,13 @@
         "left": 1,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 87,
-      "at": 1789402123142,
+      "at": 1789432963528,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1232,13 +1250,13 @@
         "left": 2,
         "right": 3,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 88,
-      "at": 1789402123155,
+      "at": 1789432963542,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1247,13 +1265,13 @@
         "left": 3,
         "right": 3,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 89,
-      "at": 1789402123171,
+      "at": 1789432963557,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1262,13 +1280,13 @@
         "left": 3,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 90,
-      "at": 1789402123186,
+      "at": 1789432963573,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1277,13 +1295,13 @@
         "left": 5,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 91,
-      "at": 1789402123202,
+      "at": 1789432963589,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1292,49 +1310,49 @@
         "left": 4,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 92,
-      "at": 1789402123217,
+      "at": 1789432963603,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 93,
-      "at": 1789402123232,
+      "at": 1789432963619,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 94,
-      "at": 1789402123248,
+      "at": 1789432963635,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 95,
-      "at": 1789402123263,
+      "at": 1789432963652,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1343,13 +1361,13 @@
         "left": 5,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 96,
-      "at": 1789402123278,
+      "at": 1789432963667,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1358,13 +1376,13 @@
         "left": 2,
         "right": 6,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 97,
-      "at": 1789402123294,
+      "at": 1789432963682,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1373,25 +1391,25 @@
         "left": 2,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 98,
-      "at": 1789402123309,
+      "at": 1789432963697,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 99,
-      "at": 1789402123325,
+      "at": 1789432963712,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1400,13 +1418,13 @@
         "left": 6,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 100,
-      "at": 1789402123340,
+      "at": 1789432963727,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1415,13 +1433,13 @@
         "left": 2,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 101,
-      "at": 1789402123356,
+      "at": 1789432963742,
       "roundNumber": 4,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1430,20 +1448,20 @@
         "left": 4,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 102,
-      "at": 1789402123356,
+      "at": 1789432963742,
       "roundNumber": 4,
       "source": "SYSTEM",
       "kind": "EVENT",
       "type": "ROUND_RESOLVED",
       "payload": {
         "roundNumber": 4,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 15,
         "reason": "DOMINO"
@@ -1452,7 +1470,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 103,
-      "at": 1789402123448,
+      "at": 1789432963835,
       "roundNumber": 5,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -1464,7 +1482,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 104,
-      "at": 1789402123450,
+      "at": 1789432963837,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1473,13 +1491,13 @@
         "left": 5,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 105,
-      "at": 1789402123463,
+      "at": 1789432963851,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1488,13 +1506,13 @@
         "left": 4,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 106,
-      "at": 1789402123479,
+      "at": 1789432963866,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1503,13 +1521,13 @@
         "left": 0,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 107,
-      "at": 1789402123494,
+      "at": 1789432963882,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1518,13 +1536,13 @@
         "left": 1,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 108,
-      "at": 1789402123511,
+      "at": 1789432963897,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1533,13 +1551,13 @@
         "left": 1,
         "right": 1,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 109,
-      "at": 1789402123525,
+      "at": 1789432963911,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1548,13 +1566,13 @@
         "left": 1,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 110,
-      "at": 1789402123541,
+      "at": 1789432963927,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1563,13 +1581,13 @@
         "left": 0,
         "right": 0,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 111,
-      "at": 1789402123556,
+      "at": 1789432963942,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1578,13 +1596,13 @@
         "left": 3,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 112,
-      "at": 1789402123573,
+      "at": 1789432963957,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1593,13 +1611,13 @@
         "left": 3,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 113,
-      "at": 1789402123588,
+      "at": 1789432963972,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1608,37 +1626,37 @@
         "left": 4,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 114,
-      "at": 1789402123603,
+      "at": 1789432963987,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 115,
-      "at": 1789402123618,
+      "at": 1789432964003,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 116,
-      "at": 1789402123634,
+      "at": 1789432964019,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1647,13 +1665,13 @@
         "left": 0,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 117,
-      "at": 1789402123650,
+      "at": 1789432964034,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1662,13 +1680,13 @@
         "left": 2,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 118,
-      "at": 1789402123665,
+      "at": 1789432964050,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1677,25 +1695,25 @@
         "left": 2,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 119,
-      "at": 1789402123681,
+      "at": 1789432964066,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 120,
-      "at": 1789402123697,
+      "at": 1789432964081,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1704,25 +1722,25 @@
         "left": 4,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 121,
-      "at": 1789402123711,
+      "at": 1789432964096,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 122,
-      "at": 1789402123726,
+      "at": 1789432964111,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1731,13 +1749,13 @@
         "left": 0,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 123,
-      "at": 1789402123741,
+      "at": 1789432964126,
       "roundNumber": 5,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1746,20 +1764,20 @@
         "left": 0,
         "right": 2,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 124,
-      "at": 1789402123742,
+      "at": 1789432964126,
       "roundNumber": 5,
       "source": "SYSTEM",
       "kind": "EVENT",
       "type": "ROUND_RESOLVED",
       "payload": {
         "roundNumber": 5,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 8,
         "reason": "DOMINO"
@@ -1768,7 +1786,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 125,
-      "at": 1789402123819,
+      "at": 1789432964203,
       "roundNumber": 6,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -1780,7 +1798,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 126,
-      "at": 1789402123821,
+      "at": 1789432964205,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1789,13 +1807,13 @@
         "left": 0,
         "right": 1,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 127,
-      "at": 1789402123835,
+      "at": 1789432964218,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1804,13 +1822,13 @@
         "left": 0,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 128,
-      "at": 1789402123851,
+      "at": 1789432964234,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1819,13 +1837,13 @@
         "left": 1,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 129,
-      "at": 1789402123866,
+      "at": 1789432964250,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1834,13 +1852,13 @@
         "left": 1,
         "right": 3,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 130,
-      "at": 1789402123882,
+      "at": 1789432964266,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1849,13 +1867,13 @@
         "left": 4,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 131,
-      "at": 1789402123897,
+      "at": 1789432964281,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1864,13 +1882,13 @@
         "left": 1,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 132,
-      "at": 1789402123913,
+      "at": 1789432964297,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1879,49 +1897,49 @@
         "left": 2,
         "right": 4,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 133,
-      "at": 1789402123928,
+      "at": 1789432964312,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 134,
-      "at": 1789402123945,
+      "at": 1789432964329,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 135,
-      "at": 1789402123960,
+      "at": 1789432964344,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 136,
-      "at": 1789402123975,
+      "at": 1789432964360,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1930,13 +1948,13 @@
         "left": 0,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 137,
-      "at": 1789402123990,
+      "at": 1789432964376,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1945,13 +1963,13 @@
         "left": 2,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 138,
-      "at": 1789402124007,
+      "at": 1789432964392,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -1960,61 +1978,61 @@
         "left": 0,
         "right": 0,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 139,
-      "at": 1789402124022,
+      "at": 1789432964408,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 140,
-      "at": 1789402124038,
+      "at": 1789432964422,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 141,
-      "at": 1789402124054,
+      "at": 1789432964438,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 142,
-      "at": 1789402124070,
+      "at": 1789432964453,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 143,
-      "at": 1789402124085,
+      "at": 1789432964468,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2023,13 +2041,13 @@
         "left": 1,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 144,
-      "at": 1789402124100,
+      "at": 1789432964483,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2038,13 +2056,13 @@
         "left": 0,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 145,
-      "at": 1789402124116,
+      "at": 1789432964499,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2053,13 +2071,13 @@
         "left": 5,
         "right": 6,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 146,
-      "at": 1789402124132,
+      "at": 1789432964515,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2068,13 +2086,13 @@
         "left": 3,
         "right": 5,
         "side": "RIGHT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 147,
-      "at": 1789402124147,
+      "at": 1789432964529,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2083,13 +2101,13 @@
         "left": 3,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 148,
-      "at": 1789402124162,
+      "at": 1789432964545,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2098,13 +2116,13 @@
         "left": 1,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 149,
-      "at": 1789402124178,
+      "at": 1789432964560,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2113,13 +2131,13 @@
         "left": 5,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 150,
-      "at": 1789402124195,
+      "at": 1789432964576,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2128,13 +2146,13 @@
         "left": 0,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 151,
-      "at": 1789402124208,
+      "at": 1789432964591,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2143,25 +2161,25 @@
         "left": 4,
         "right": 4,
         "side": "RIGHT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 152,
-      "at": 1789402124224,
+      "at": 1789432964606,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 153,
-      "at": 1789402124240,
+      "at": 1789432964622,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2170,25 +2188,25 @@
         "left": 0,
         "right": 2,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 154,
-      "at": 1789402124257,
+      "at": 1789432964638,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 155,
-      "at": 1789402124270,
+      "at": 1789432964653,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2197,49 +2215,49 @@
         "left": 2,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 156,
-      "at": 1789402124286,
+      "at": 1789432964669,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 157,
-      "at": 1789402124302,
+      "at": 1789432964685,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 158,
-      "at": 1789402124318,
+      "at": 1789432964701,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 159,
-      "at": 1789402124333,
+      "at": 1789432964717,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
@@ -2248,68 +2266,68 @@
         "left": 4,
         "right": 5,
         "side": "LEFT",
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 160,
-      "at": 1789402124349,
+      "at": 1789432964733,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 161,
-      "at": 1789402124363,
+      "at": 1789432964749,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "DRAW_TILE",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 162,
-      "at": 1789402124380,
+      "at": 1789432964765,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "PASS",
       "payload": {
-        "playerId": "g1"
+        "playerId": "seat-1"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 163,
-      "at": 1789402124395,
+      "at": 1789432964779,
       "roundNumber": 6,
       "source": "PLAYER",
       "kind": "COMMAND",
       "type": "PASS",
       "payload": {
-        "playerId": "g2"
+        "playerId": "seat-2"
       }
     },
     {
       "matchId": "m-g1-g2",
       "seq": 164,
-      "at": 1789402124395,
+      "at": 1789432964779,
       "roundNumber": 6,
       "source": "SYSTEM",
       "kind": "EVENT",
       "type": "ROUND_RESOLVED",
       "payload": {
         "roundNumber": 6,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 22,
         "reason": "BLOCKED"
@@ -2318,7 +2336,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 165,
-      "at": 1789402124502,
+      "at": 1789432964890,
       "roundNumber": 6,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -2330,7 +2348,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 166,
-      "at": 1789402124502,
+      "at": 1789432964890,
       "roundNumber": 6,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -2343,7 +2361,7 @@
     {
       "matchId": "m-g1-g2",
       "seq": 167,
-      "at": 1789402124624,
+      "at": 1789432965013,
       "roundNumber": 6,
       "source": "SYSTEM",
       "kind": "EVENT",
@@ -2361,7 +2379,8 @@
     },
     "players": [
       {
-        "playerId": "g1",
+        "playerId": "seat-1",
+        "displayName": "Jugador g1",
         "teamId": "A",
         "seatIndex": 0,
         "connected": true,
@@ -2388,7 +2407,8 @@
         }
       },
       {
-        "playerId": "g2",
+        "playerId": "seat-2",
+        "displayName": "Jugador g2",
         "teamId": "B",
         "seatIndex": 1,
         "connected": true,
@@ -2418,7 +2438,7 @@
     "currentRound": {
       "roundNumber": 6,
       "phase": "PRESENTING_ROUND",
-      "starterId": "g1",
+      "starterId": "seat-1",
       "board": {
         "tiles": [
           {
@@ -2426,7 +2446,7 @@
               "left": 0,
               "right": 1
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "RIGHT"
           },
           {
@@ -2434,7 +2454,7 @@
               "left": 0,
               "right": 3
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "LEFT"
           },
           {
@@ -2442,7 +2462,7 @@
               "left": 1,
               "right": 6
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "RIGHT"
           },
           {
@@ -2450,7 +2470,7 @@
               "left": 1,
               "right": 3
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "LEFT"
           },
           {
@@ -2458,7 +2478,7 @@
               "left": 4,
               "right": 6
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "RIGHT"
           },
           {
@@ -2466,7 +2486,7 @@
               "left": 1,
               "right": 4
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "LEFT"
           },
           {
@@ -2474,7 +2494,7 @@
               "left": 2,
               "right": 4
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "LEFT"
           },
           {
@@ -2482,7 +2502,7 @@
               "left": 0,
               "right": 4
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "RIGHT"
           },
           {
@@ -2490,7 +2510,7 @@
               "left": 2,
               "right": 2
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "LEFT"
           },
           {
@@ -2498,7 +2518,7 @@
               "left": 0,
               "right": 0
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "RIGHT"
           },
           {
@@ -2506,7 +2526,7 @@
               "left": 1,
               "right": 2
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "LEFT"
           },
           {
@@ -2514,7 +2534,7 @@
               "left": 0,
               "right": 6
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "RIGHT"
           },
           {
@@ -2522,7 +2542,7 @@
               "left": 5,
               "right": 6
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "RIGHT"
           },
           {
@@ -2530,7 +2550,7 @@
               "left": 3,
               "right": 5
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "RIGHT"
           },
           {
@@ -2538,7 +2558,7 @@
               "left": 3,
               "right": 4
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "RIGHT"
           },
           {
@@ -2546,7 +2566,7 @@
               "left": 1,
               "right": 5
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "LEFT"
           },
           {
@@ -2554,7 +2574,7 @@
               "left": 5,
               "right": 5
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "LEFT"
           },
           {
@@ -2562,7 +2582,7 @@
               "left": 0,
               "right": 5
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "LEFT"
           },
           {
@@ -2570,7 +2590,7 @@
               "left": 4,
               "right": 4
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "RIGHT"
           },
           {
@@ -2578,7 +2598,7 @@
               "left": 0,
               "right": 2
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "LEFT"
           },
           {
@@ -2586,7 +2606,7 @@
               "left": 2,
               "right": 5
             },
-            "playedBy": "g1",
+            "playedBy": "seat-1",
             "side": "LEFT"
           },
           {
@@ -2594,7 +2614,7 @@
               "left": 4,
               "right": 5
             },
-            "playedBy": "g2",
+            "playedBy": "seat-2",
             "side": "LEFT"
           }
         ]
@@ -2604,7 +2624,7 @@
         "tiles": []
       },
       "currentTurn": {
-        "playerId": "g2",
+        "playerId": "seat-2",
         "isConsumingExtendedTime": false,
         "consecutivePasses": 2
       }
@@ -2612,42 +2632,42 @@
     "pastRounds": [
       {
         "roundNumber": 1,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 19,
         "reason": "DOMINO"
       },
       {
         "roundNumber": 2,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 54,
         "reason": "BLOCKED"
       },
       {
         "roundNumber": 3,
-        "winnerId": "g2",
+        "winnerId": "seat-2",
         "winnerTeamId": "B",
         "points": 10,
         "reason": "DOMINO"
       },
       {
         "roundNumber": 4,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 15,
         "reason": "DOMINO"
       },
       {
         "roundNumber": 5,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 8,
         "reason": "DOMINO"
       },
       {
         "roundNumber": 6,
-        "winnerId": "g1",
+        "winnerId": "seat-1",
         "winnerTeamId": "A",
         "points": 22,
         "reason": "BLOCKED"
@@ -2655,6 +2675,6 @@
     ],
     "pointsToWin": 100,
     "activeDeadline": 0,
-    "startedAt": 1789402121623
+    "startedAt": 1789432962027
   }
 }
