@@ -49,6 +49,16 @@ const roomOptions = z
     mode: z.literal("CASUAL"),
     matchId: nonBlank,
     gameModeId: nonBlank,
+    // ⚠ ACEPTA CUATRO Y LA LIQUIDACIÓN NO SABE PAGARLOS. `settlementOf`
+    // (`network/settlement.ts`) exige EXACTAMENTE UN ganador, así que el final de una mesa
+    // de cuatro lanza `InvariantViolationError` en vez de repartir el premio: no existe la
+    // regla escrita de cómo se parte entre compañeros, y repartirlo sin ella sería
+    // inventarla al liquidar.
+    //
+    // Hoy es inofensivo porque nadie liquida. El día que exista el orquestador deja de
+    // serlo, y de una forma que conviene ver ANTES: el throw cae DESPUÉS del veredicto, o
+    // sea que esa mesa no cobra premio (tiró) ni reembolso (hubo desenlace). Plata trabada.
+    // Abrir el 4P de verdad es traer la regla del reparto; este `max(4)` no es esa regla.
     participants: z.array(participant).min(2).max(4),
     seed: nonBlank,
     pointsToWin: z.number().int().positive().safe(),

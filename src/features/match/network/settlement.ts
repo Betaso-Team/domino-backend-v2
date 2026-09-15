@@ -19,9 +19,13 @@ export type SettlementKind = "REWARD" | "REFUND";
  * `playerId` opaco— porque el asiento es interno de la partida: quien cobre tiene que
  * resolver una billetera, y `seat-1` no nombra a nadie afuera de esta mesa.
  *
- * `currency` es la moneda CONGELADA de la inscripción y el monto viene en UC menores tal
- * cual se cobró: acá no se convierte nada. La conversión es del `rateId` de la
- * instrucción, y es de quien pague.
+ * ⚠ `currency` ES LA MONEDA EN QUE SE COBRÓ, NO LA UNIDAD DEL MONTO, y confundirlas es la
+ * ambigüedad más cara que puede tener este tipo. `amountUcMinor` está SIEMPRE en UC
+ * menores —la unidad interna, dos decimales—, así que
+ * `{ currency: "VES", amountUcMinor: 250 }` **no** son 250 céntimos de bolívar: son 2,50 UC
+ * que este jugador pagó en VES y que en VES tiene que cobrar. Lo que traduce una cosa en la
+ * otra es el `rateId` de la instrucción, y la traducción es del que PAGA: acá no se
+ * convierte nada, porque convertir dos veces con dos tasas da dos pagos distintos.
  *
  * `idempotencyKey` se SERIALIZA con `JSON.stringify` en vez de concatenarse, por el mismo
  * motivo que el índice del registro: `["m","a:b"]` y `["m:a","b"]` no pueden colisionar, y
@@ -40,8 +44,12 @@ export interface SettlementInstruction {
   readonly entries: readonly SettlementEntry[];
 }
 
+// Recibe el `matchId` pelado y no la `config` entera A PROPÓSITO: con la config adentro
+// podría leerse `prizeUcMinor` o `entryFeeUcMinor` desde acá, y entonces el monto de una
+// entrada dejaría de estar decidido en un solo lugar. El que llama elige cuánto; éste solo
+// sabe armar la entrada.
 const entryOf = (
-  config: DominoMatchConfig,
+  matchId: string,
   kind: SettlementKind,
   amountUcMinor: number,
   seat: MatchSeat,
@@ -50,45 +58,59 @@ const entryOf = (
   userUuid: seat.userUuid,
   currency: seat.currency,
   amountUcMinor,
-  idempotencyKey: JSON.stringify([config.matchId, kind, seat.platformId, seat.userUuid]),
+  idempotencyKey: JSON.stringify([matchId, kind, seat.platformId, seat.userUuid]),
 });
 
 /**
- * El desenlace de la mesa como instrucción monetaria, o `undefined` si el evento no es un
- * desenlace. La mayoría de los eventos no lo son —una desconexión no es plata— y devolver
- * `undefined` es lo que deja al que llame filtrar sin conocer el catálogo entero.
+ * ¿Este estado y este snapshot son de la MISMA mesa? Es la pregunta que el desajuste de
+ * argumentos no contesta solo, y por eso se pregunta explícitamente antes de tocar plata.
  *
- * Los tres motivos de `MATCH_ABORTED` reembolsan igual (`network/events.ts`): la
- * diferencia entre ellos es para soporte, no para la caja.
+ * Los `playerId` son opacos **y posicionales** (`seat-1`, `seat-2`, …), así que existen
+ * idénticos en TODAS las mesas. Cruzar el estado de una con el snapshot de otra no da cero
+ * ganadores ni dos —que serían ruidosos—: da EXACTAMENTE UNO, y emite una instrucción
+ * internamente coherente, con el `matchId` y el `rateId` correctos, que le paga el premio a
+ * otra persona. El fallo más caro de este archivo es el que no hace ruido.
+ *
+ * ⚠ LO QUE ESTA GUARDA NO PUEDE VER: dos mesas del MISMO TAMAÑO son indistinguibles, porque
+ * `MatchState` no lleva `matchId` y no hay un solo campo con el que cruzarlas. Cubre el
+ * desajuste de FORMA (2P contra 4P, un estado a medio construir), que es todo lo que el
+ * árbol permite hoy. El día que el estado lleve la mesa de la que es, esta función se
+ * vuelve exacta con una línea; hasta entonces, nombrar lo que cubre importa más que
+ * aparentar que cubre todo.
  */
-export function settlementOf(
-  event: NetworkMatchEvent,
+const assertSameTable = (match: MatchState, config: DominoMatchConfig): void => {
+  const seated = new Set(config.seats.map(({ playerId }) => playerId));
+  const strangers = match.players
+    .map(({ playerId }) => playerId)
+    .filter((playerId) => !seated.has(playerId));
+  if (strangers.length === 0 && match.players.length === seated.size) return;
+
+  // Nombra el DESAJUSTE y no el conteo de ganadores: «recibió 0 ganadores» manda a soporte
+  // a investigar el veredicto de una partida que se jugó bien, cuando lo que está mal es
+  // quién llamó con qué.
+  const shape = `${match.players.length} jugadores contra ${seated.size} asientos`;
+  const detail = strangers.length > 0 ? ` y ${JSON.stringify(strangers)} sin asiento` : "";
+  throw new InvariantViolationError(
+    `el estado y el snapshot no son de la misma mesa ${config.matchId}: ${shape}${detail}`,
+  );
+};
+
+function rewardOf(
+  winnerTeamId: string,
   match: MatchState,
   config: DominoMatchConfig,
-): SettlementInstruction | undefined {
-  if (event.type === "MATCH_ABORTED") {
-    return {
-      matchId: config.matchId,
-      rateId: config.rateId,
-      kind: "REFUND",
-      entries: config.seats.map((seat) => entryOf(config, "REFUND", config.entryFeeUcMinor, seat)),
-    };
-  }
-  if (event.type !== "MATCH_RESOLVED") return undefined;
-
+): SettlementInstruction {
   // El equipo ganador se lee del ESTADO —que es quien reparte los asientos en equipos— y
   // la identidad se lee de la CONFIG, que es donde está congelada. Cruzarlos por el id
   // opaco es lo que mantiene al motor sin saber de plataformas.
   const winnerIds = new Set(
-    match.players
-      .filter(({ teamId }) => teamId === event.winnerTeamId)
-      .map(({ playerId }) => playerId),
+    match.players.filter(({ teamId }) => teamId === winnerTeamId).map(({ playerId }) => playerId),
   );
   const winners = config.seats.filter(({ playerId }) => winnerIds.has(playerId));
   // PLATA DE POR MEDIO: ante la duda, rechazar. Cero ganadores sería un veredicto sobre un
-  // equipo que no existe, y varios —el 4P, que este contrato todavía no sabe liquidar—
-  // dejaría el premio de la mesa sin una regla escrita de cómo se parte. Las dos cosas son
-  // un invariante roto, y un invariante roto cierra la partida en vez de pagar de más.
+  // equipo que no existe, y varios —el 4P, que `configOf` ya acepta— dejaría el premio de la
+  // mesa sin una regla escrita de cómo se parte. Las dos cosas son un invariante roto, y un
+  // invariante roto cierra la partida en vez de pagar de más.
   if (winners.length !== 1) {
     throw new InvariantViolationError(
       `la liquidación 2P necesita exactamente un ganador, recibió ${winners.length}`,
@@ -98,6 +120,61 @@ export function settlementOf(
     matchId: config.matchId,
     rateId: config.rateId,
     kind: "REWARD",
-    entries: winners.map((seat) => entryOf(config, "REWARD", config.prizeUcMinor, seat)),
+    entries: winners.map((seat) => entryOf(config.matchId, "REWARD", config.prizeUcMinor, seat)),
   };
+}
+
+/**
+ * El desenlace de la mesa como instrucción monetaria, o `undefined` si el evento no es un
+ * desenlace. La mayoría de los eventos no lo son —una desconexión no es plata— y devolver
+ * `undefined` es lo que deja al que llame filtrar sin conocer el catálogo entero.
+ *
+ * EL `switch` ES EXHAUSTIVO A PROPÓSITO, con los no-terminales enumerados uno por uno y un
+ * `never` en el default. Un `if (type !== "MATCH_RESOLVED") return undefined` alcanzaría
+ * hoy y fallaría en silencio mañana: el día que `PlatformMatchEvent` sume un cuarto miembro
+ * que TAMBIÉN devuelva plata —una cancelación, una expulsión por fraude— compilaría sin una
+ * línea roja, esto devolvería `undefined`, nadie cobraría y nadie se enteraría. Con el
+ * `never`, el gate `typecheck` obliga a decidir si el evento nuevo mueve dinero.
+ *
+ * Los tres motivos de `MATCH_ABORTED` reembolsan IGUAL (`network/events.ts`): la diferencia
+ * entre ellos es para soporte, no para la caja. Los tres están medidos en la suite.
+ *
+ * Un monto de cero —mesa gratis, `entryFeeUcMinor: 0`— EMITE la instrucción igual, con sus
+ * entradas en cero. Suprimirla ahorraría un mensaje y costaría dos cosas: el rastro de que
+ * esa mesa se liquidó, y la distinción entre "no hubo desenlace" y "el desenlace no movía
+ * plata", que pasarían a ser el mismo `undefined`. Filtrar montos nulos es del que paga.
+ */
+export function settlementOf(
+  event: NetworkMatchEvent,
+  match: MatchState,
+  config: DominoMatchConfig,
+): SettlementInstruction | undefined {
+  switch (event.type) {
+    case "MATCH_ABORTED": {
+      assertSameTable(match, config);
+      return {
+        matchId: config.matchId,
+        rateId: config.rateId,
+        kind: "REFUND",
+        entries: config.seats.map((seat) =>
+          entryOf(config.matchId, "REFUND", config.entryFeeUcMinor, seat),
+        ),
+      };
+    }
+    case "MATCH_RESOLVED": {
+      assertSameTable(match, config);
+      return rewardOf(event.winnerTeamId, match, config);
+    }
+    // Los que NO son un desenlace, enumerados para que agregar uno obligue a pasar por acá.
+    case "ROUND_RESOLVED":
+    case "DEADLINE_EXPIRED":
+    case "ABANDON":
+    case "PLAYER_DISCONNECTED":
+    case "PLAYER_RECONNECTED":
+      return undefined;
+    default: {
+      const unhandled: never = event;
+      return unhandled;
+    }
+  }
 }

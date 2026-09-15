@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMatchState } from "../../core/engine/genesis.js";
 import { configOf } from "../../transports/match-contract.js";
+import type { AbortReason } from "../events.js";
 import { settlementOf } from "../settlement.js";
 
 const options = {
@@ -19,8 +20,57 @@ const options = {
   prizeUcMinor: 250,
 } as const;
 
+// La mesa de CUATRO, que `configOf` acepta sin objeción. Sirve para dos cosas distintas: el
+// reembolso de cuatro entradas —que sí se paga— y el desajuste de forma contra un estado de
+// dos, que es la única manera que hay hoy de cruzar dos mesas distintas y notarlo.
+const fourSeatOptions = {
+  ...options,
+  matchId: "money-4p",
+  gameModeId: "classic-4p",
+  participants: [
+    { platformId: "betaso", userUuid: "u1", displayName: "Ada", currency: "VES" },
+    { platformId: "betaso", userUuid: "u2", displayName: "Lin", currency: "VES" },
+    { platformId: "partner", userUuid: "u3", displayName: "Rex", currency: "USD" },
+    { platformId: "partner", userUuid: "u4", displayName: "Zoe", currency: "COP" },
+  ],
+} as const;
+
 const config = configOf(options);
 const matchOf = () => createMatchState(config);
+
+// Las claves van como LITERAL y no recalculadas con el mismo `JSON.stringify` del código:
+// recalcularlas mediría que dos expresiones idénticas dan lo mismo. Escritas a mano, pinean
+// el FORMATO —que es lo que el pagador va a guardar como única defensa contra el pago doble—
+// y se ponen rojas si alguien le cambia el orden o el separador.
+const rewardKey = '["money-1","REWARD","betaso","same"]';
+const refundKeys = [
+  '["money-1","REFUND","betaso","same"]',
+  '["money-1","REFUND","partner","same"]',
+];
+
+const refundOfMoney1 = {
+  matchId: "money-1",
+  rateId: options.rateId,
+  kind: "REFUND",
+  entries: [
+    {
+      platformId: "betaso",
+      userUuid: "same",
+      currency: "VES",
+      amountUcMinor: 125,
+      idempotencyKey: refundKeys[0],
+    },
+    {
+      platformId: "partner",
+      userUuid: "same",
+      currency: "USD",
+      amountUcMinor: 125,
+      idempotencyKey: refundKeys[1],
+    },
+  ],
+};
+
+const abortReasons: readonly AbortReason[] = ["NEVER_STARTED", "NEVER_PLAYED", "INTERRUPTED"];
 
 describe("settlementOf", () => {
   it("premia al ganador con su pareja y la moneda cobrada", () => {
@@ -38,31 +88,89 @@ describe("settlementOf", () => {
           userUuid: "same",
           currency: "VES",
           amountUcMinor: 250,
-          idempotencyKey: JSON.stringify(["money-1", "REWARD", "betaso", "same"]),
+          idempotencyKey: rewardKey,
         },
       ],
     });
   });
 
-  it("reembolsa a todos un aborto en la moneda original", () => {
-    const match = matchOf();
-    const result = settlementOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, match, config);
-    expect(result?.kind).toBe("REFUND");
-    expect(result?.entries).toEqual([
-      expect.objectContaining({ platformId: "betaso", currency: "VES", amountUcMinor: 125 }),
-      expect.objectContaining({ platformId: "partner", currency: "USD", amountUcMinor: 125 }),
-    ]);
+  // LOS TRES MOTIVOS REEMBOLSAN IGUAL, y sin esta vuelta el contrato solo vivía en un
+  // comentario: quien agregue un `if (reason === "NEVER_STARTED") return undefined` —que
+  // suena razonable, "esa mesa nunca arrancó"— deja la suite verde y le saca el reembolso a
+  // una mesa cuya inscripción YA se cobró. La igualdad es completa, además, porque con
+  // `objectContaining` de tres campos el `kind` del reembolso podía ser `"REWARD"` adentro
+  // de la clave sin que nadie lo viera — y ahí la clave del reembolso del ganador es
+  // idéntica a la de su premio, que es justo la colisión que la serialización evita.
+  it.each(abortReasons)(
+    "reembolsa a todos la inscripción, sea cual sea el motivo (%s)",
+    (reason) => {
+      expect(settlementOf({ type: "MATCH_ABORTED", reason }, matchOf(), config)).toEqual(
+        refundOfMoney1,
+      );
+    },
+  );
+
+  it("reembolsa las cuatro entradas de una mesa de cuatro, cada una en su moneda", () => {
+    const fourSeatConfig = configOf(fourSeatOptions);
+    const result = settlementOf(
+      { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
+      createMatchState(fourSeatConfig),
+      fourSeatConfig,
+    );
+    expect(result).toEqual({
+      matchId: "money-4p",
+      rateId: options.rateId,
+      kind: "REFUND",
+      entries: [
+        {
+          platformId: "betaso",
+          userUuid: "u1",
+          currency: "VES",
+          amountUcMinor: 125,
+          idempotencyKey: '["money-4p","REFUND","betaso","u1"]',
+        },
+        {
+          platformId: "betaso",
+          userUuid: "u2",
+          currency: "VES",
+          amountUcMinor: 125,
+          idempotencyKey: '["money-4p","REFUND","betaso","u2"]',
+        },
+        {
+          platformId: "partner",
+          userUuid: "u3",
+          currency: "USD",
+          amountUcMinor: 125,
+          idempotencyKey: '["money-4p","REFUND","partner","u3"]',
+        },
+        {
+          platformId: "partner",
+          userUuid: "u4",
+          currency: "COP",
+          amountUcMinor: 125,
+          idempotencyKey: '["money-4p","REFUND","partner","u4"]',
+        },
+      ],
+    });
   });
 
-  it("no proyecta eventos no terminales y rechaza un ganador imposible", () => {
+  it("no proyecta los eventos que no son un desenlace", () => {
     const match = matchOf();
     expect(
       settlementOf({ type: "PLAYER_DISCONNECTED", playerId: "seat-1" }, match, config),
     ).toBeUndefined();
+    expect(
+      settlementOf({ type: "PLAYER_RECONNECTED", playerId: "seat-1" }, match, config),
+    ).toBeUndefined();
+    expect(settlementOf({ type: "DEADLINE_EXPIRED", kind: "TURN" }, match, config)).toBeUndefined();
+  });
+
+  it("rechaza un veredicto sin ganadores", () => {
+    const match = matchOf();
     for (const player of match.players) player.teamId = "B";
     expect(() =>
       settlementOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
-    ).toThrow(/exactamente un ganador/);
+    ).toThrow(/exactamente un ganador, recibió 0/);
   });
 
   // LA OTRA MITAD DE LA GUARDA, y es la que puede pasar de verdad: `configOf` acepta cuatro
@@ -75,5 +183,38 @@ describe("settlementOf", () => {
     expect(() =>
       settlementOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
     ).toThrow(/exactamente un ganador, recibió 2/);
+  });
+
+  // EL FALLO QUE NO HACE RUIDO. Los `playerId` son posicionales, así que `seat-1` existe en
+  // las dos mesas: sin la guarda esto NO daría cero ni dos ganadores —daría exactamente uno—
+  // y emitiría una instrucción impecable, con el `matchId` y el `rateId` de la mesa de
+  // cuatro, pagándole el premio a alguien que no jugó esta partida. Y el error tiene que
+  // nombrar el desajuste: «recibió 0 ganadores» manda a soporte a auditar un veredicto sano.
+  it("rechaza un estado que no es de la mesa del snapshot, y lo dice", () => {
+    const twoSeatMatch = matchOf();
+    const fourSeatConfig = configOf(fourSeatOptions);
+    expect(() =>
+      settlementOf(
+        { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
+        twoSeatMatch,
+        fourSeatConfig,
+      ),
+    ).toThrow(/no son de la misma mesa money-4p: 2 jugadores contra 4 asientos/);
+    expect(() =>
+      settlementOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, twoSeatMatch, fourSeatConfig),
+    ).toThrow(/no son de la misma mesa/);
+  });
+
+  // La mesa GRATIS emite igual, con sus entradas en cero: es la decisión escrita en
+  // `settlement.ts`, y sin test alguien la "optimiza" y deja a una liquidación sin rastro.
+  it("emite el reembolso de una mesa gratis con las entradas en cero", () => {
+    const free = configOf({ ...options, matchId: "money-free", entryFeeUcMinor: 0 });
+    const result = settlementOf(
+      { type: "MATCH_ABORTED", reason: "NEVER_STARTED" },
+      createMatchState(free),
+      free,
+    );
+    expect(result?.kind).toBe("REFUND");
+    expect(result?.entries.map(({ amountUcMinor }) => amountUcMinor)).toEqual([0, 0]);
   });
 });
