@@ -24,3 +24,14 @@ EXPOSE 2567
 # y que el único `entry` de `tsup.config.ts` — los cuatro los pinea `src/entrypoint.test.ts`,
 # porque ninguno de ellos rompe el gate al desincronizarse.
 CMD ["node", "dist/main.js"]
+
+# Solo la certificación del deploy necesita PM2; la imagen normal conserva un único proceso.
+FROM runtime AS smoke-server
+RUN npm install --global pm2@7.0.4
+COPY ecosystem.config.cjs ./
+EXPOSE 2568
+CMD ["pm2-runtime", "ecosystem.config.cjs"]
+
+# El cliente necesita TypeScript y las devDependencies, ya presentes en build.
+FROM build AS smoke-client
+CMD ["npm", "run", "smoke:client"]

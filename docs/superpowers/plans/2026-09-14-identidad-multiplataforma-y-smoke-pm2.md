@@ -1609,7 +1609,7 @@ git commit -m "test(smoke): juega el protocolo público hasta el veredicto" -m "
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`
 
-- [ ] **Step 1: Escribir el contrato de deploy rojo**
+- [x] **Step 1: Escribir el contrato de deploy rojo**
 
 Crear `src/deploy-smoke.test.ts`:
 
@@ -1657,13 +1657,13 @@ describe("smoke del deploy", () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar el rojo**
+- [x] **Step 2: Ejecutar el rojo**
 
 Run: `npx vitest run src/deploy-smoke.test.ts`
 
 Expected: FAIL porque aún no existen Compose, Nginx, wrapper ni targets.
 
-- [ ] **Step 3: Añadir targets sin engordar runtime**
+- [x] **Step 3: Añadir targets sin engordar runtime**
 
 Al final de `Dockerfile`, después del `CMD` normal, añadir:
 
@@ -1681,7 +1681,7 @@ FROM build AS smoke-client
 CMD ["npm", "run", "smoke:client"]
 ```
 
-- [ ] **Step 4: Configurar Nginx por los paths anunciados**
+- [x] **Step 4: Configurar Nginx por los paths anunciados**
 
 Crear `smoke/nginx.conf`:
 
@@ -1722,7 +1722,7 @@ server {
 }
 ```
 
-- [ ] **Step 5: Crear el Compose efímero**
+- [x] **Step 5: Crear el Compose efímero**
 
 Crear `compose.smoke.yaml`:
 
@@ -1782,7 +1782,7 @@ services:
 
 No publicar puertos ni declarar volúmenes: el cliente vive en la misma red y `down -v` debe dejar cero estado reutilizable.
 
-- [ ] **Step 6: Crear el wrapper portable y el script npm**
+- [x] **Step 6: Crear el wrapper portable y el script npm**
 
 Crear `scripts/run-engine-smoke.mjs`:
 
@@ -1815,7 +1815,7 @@ En `package.json` añadir:
 "test:deploy": "node scripts/run-engine-smoke.mjs"
 ```
 
-- [ ] **Step 7: Verificar el contrato estático y el rechazo sin flag**
+- [x] **Step 7: Verificar el contrato estático y el rechazo sin flag**
 
 Run:
 
@@ -1830,7 +1830,7 @@ npm run test:deploy
 
 Expected: tests, lint y build código 0; el último comando código distinto de cero con `test:deploy requiere RUN_ENGINE_SMOKE=1` y sin crear contenedores.
 
-- [ ] **Step 8: Medir y cerrar la visibilidad de una ficha robada**
+- [x] **Step 8: Medir y cerrar la visibilidad de una ficha robada**
 
 El primer smoke real encontró un agujero anterior: hacer visible `hand.tiles` no vuelve visible
 automáticamente una referencia `Tile` añadida después. Escribir primero un test en
@@ -1846,7 +1846,7 @@ Run: `npx vitest run src/features/match/core/engine/round/tests/player.test.ts`
 Expected: rojo antes de la línea y verde después. El smoke Docker de abajo es la prueba de que el
 adaptador `StateView` cumple esa llamada en el wire real.
 
-- [ ] **Step 9: Ejecutar el smoke real**
+- [x] **Step 9: Ejecutar el smoke real**
 
 PowerShell:
 
@@ -1860,7 +1860,7 @@ válidos, `smoke-client` sale 0 y Compose elimina contenedores/red/volúmenes.
 
 Si falla por una API real de PM2, Nginx o Colyseus distinta de la asumida, corregir primero el plan en un commit `docs:` separado, explicando el comportamiento medido, y recién después ajustar código/config.
 
-- [ ] **Step 10: Registrar continuidad y commit**
+- [x] **Step 10: Registrar continuidad y commit**
 
 Actualizar `AGENTS.md` con salida real del smoke, versión de Docker/PM2 observada, baseline y `siguiente: Task 5, Step 1`; marcar Task 4 completa.
 

@@ -103,7 +103,7 @@ const signatureOf = (state: MatchState) =>
     state.currentRound?.phase,
     state.currentRound?.roundNumber,
     state.currentRound?.currentTurn?.playerId,
-    state.currentRound?.board.tiles.length,
+    state.currentRound?.board.tiles.map(({ tile, side }) => [tile.left, tile.right, side]),
     state.currentRound?.boneyard?.count,
     state.players.map(({ playerId, hand }) => [playerId, hand.tileCount]),
   ]);
@@ -138,7 +138,7 @@ function assertSettlements(
   const winnerTeamId = line.payload.winnerTeamId;
   const reason = line.payload.reason;
   assert.ok(winnerTeamId === "A" || winnerTeamId === "B", "winnerTeamId inválido");
-  assert.ok(reason === "SCORE" || reason === "ABANDONMENT", "reason inválido");
+  assert.equal(reason, "SCORE", "el smoke terminó sin jugar hasta el puntaje");
 
   const settlementState = createMatchState(config);
   for (const player of settlementState.players) {
@@ -201,6 +201,11 @@ async function play(roomA: SmokeRoom, roomB: SmokeRoom, config: DominoMatchConfi
     if (roomA.state.currentRound?.phase === "PLAYING" && playerId) {
       const owner = byPlayerId.get(playerId);
       if (!owner) throw new Error(`turno de asiento desconocido: ${playerId}`);
+      await waitUntil(
+        `la vista de ${playerId} no alcanzó al árbitro`,
+        () => signatureOf(owner.state) === before,
+        1_000,
+      );
       const action = nextAction(owner.state, playerId);
       if (!action) throw new Error(`sin acción para ${playerId}`);
       recentActions.push(`${playerId} ${action.type}`);

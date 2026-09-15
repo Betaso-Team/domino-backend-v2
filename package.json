@@ -13,6 +13,7 @@
     "dev": "tsx watch src/main.ts",
     "replay": "tsx src/replay.ts",
     "smoke:client": "tsx src/smoke/engine-smoke.ts",
+    "test:deploy": "node scripts/run-engine-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src",
     "format": "biome format --write src",

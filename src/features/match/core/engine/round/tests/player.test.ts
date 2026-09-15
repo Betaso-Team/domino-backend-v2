@@ -109,6 +109,23 @@ describe("RoundPlayer.playTile", () => {
 });
 
 describe("RoundPlayer.drawTile", () => {
+  it("revela al dueño la ficha que acaba de robar", () => {
+    const match = roundState({
+      hands: { u1: [[3, 2]], u2: [[5, 5]] },
+      board: [[6, 4, "RIGHT"]],
+      boneyard: [[0, 0]],
+    });
+    const makePublic = vi.fn();
+    const recordingVisibility = { makePublic, hide: vi.fn() } satisfies SchemaVisibilityController;
+
+    new RoundPlayer("u1", match, recordingVisibility).drawTile();
+
+    expect(makePublic).toHaveBeenCalledWith(handOf("u1", match).tiles.at(-1), {
+      kind: "PLAYER",
+      playerId: "u1",
+    });
+  });
+
   it("mueve una ficha del pozo a la mano y actualiza los dos contadores", () => {
     const match = roundState({
       hands: { u1: [[3, 2]], u2: [[5, 5]] },

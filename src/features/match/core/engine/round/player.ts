@@ -62,5 +62,6 @@ export class RoundPlayer {
     const hand = handOf(this.playerId, this.match);
     hand.tiles.push(tile);
     hand.tileCount = hand.tiles.length;
+    this.visibility.makePublic(tile, { kind: "PLAYER", playerId: this.playerId });
   }
 }
