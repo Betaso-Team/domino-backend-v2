@@ -38,4 +38,16 @@ describe("smoke del deploy", () => {
     expect(runner).toContain('"--exit-code-from", "smoke-client"');
     expect(runner).toContain('"down", "-v", "--remove-orphans"');
   });
+
+  it("CI ejecuta el smoke después del build y antes de empaquetar", () => {
+    const ci = read(".github/workflows/ci.yml");
+    const build = ci.indexOf("name: Build");
+    const smoke = ci.indexOf("name: Smoke Docker, PM2 y Nginx");
+    const pack = ci.indexOf("name: Empaquetar el release");
+    expect(build).toBeGreaterThan(-1);
+    expect(smoke).toBeGreaterThan(build);
+    expect(pack).toBeGreaterThan(smoke);
+    expect(ci.slice(smoke, pack)).toContain("RUN_ENGINE_SMOKE: '1'");
+    expect(ci.slice(smoke, pack)).toContain("npm run test:deploy");
+  });
 });

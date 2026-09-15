@@ -82,6 +82,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Suite de integración separada: sí levanta Mongo/Redis porque además certifica el bundle,
+      # PM2 y los paths de Nginx. No contradice que Vitest sea hermético.
+      - name: Smoke Docker, PM2 y Nginx
+        env:
+          RUN_ENGINE_SMOKE: '1'
+        run: npm run test:deploy
+
       # SIN PASO DE DOCS, que truco sí tiene: este repo no publica un sitio de documentación y no
       # existe un script `docs:build`. Los documentos que hay (`AGENTS.md`, `README.md`, `docs/`)
       # se leen en el repositorio.

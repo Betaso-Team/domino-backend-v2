@@ -157,6 +157,18 @@ acaba de fallar, que es el más nuevo que hay en disco.
 `scripts/deploy-remote.sh` **es de Linux** (`/proc`, `mv -Tf`, `readlink -f`) y viaja **dentro del
 artefacto**: el que corre es siempre el de la versión que se está desplegando.
 
+## Smoke del deploy
+
+El gate completo compila `dist/main.js` y juega una partida 2P contra dos procesos PM2 detrás de
+Nginx, con Redis y Mongo efímeros:
+
+```powershell
+$env:RUN_ENGINE_SMOKE='1'; npm run test:deploy; Remove-Item Env:RUN_ENGINE_SMOKE
+```
+
+Sin la flag el comando se niega a correr. Esta prueba no llama wallets ni valida el Nginx de
+producción; valida el contrato `/2567` y `/2568` que ese proxy debe implementar.
+
 ## Los tests
 
 **No necesitan Docker, ni Mongo, ni Redis.** `vitest.setup.ts` **borra** `MONGO_URI` y

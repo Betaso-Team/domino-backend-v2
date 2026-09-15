@@ -1878,7 +1878,7 @@ git commit -m "test(deploy): certifica PM2 y Nginx con una partida real" -m "Eje
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`
 
-- [ ] **Step 1: Escribir el rojo del orden del CI**
+- [x] **Step 1: Escribir el rojo del orden del CI**
 
 Añadir a `src/deploy-smoke.test.ts`:
 
@@ -1896,13 +1896,13 @@ it("CI ejecuta el smoke después del build y antes de empaquetar", () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar el rojo**
+- [x] **Step 2: Ejecutar el rojo**
 
 Run: `npx vitest run src/deploy-smoke.test.ts`
 
 Expected: FAIL porque el workflow no contiene el paso smoke.
 
-- [ ] **Step 3: Insertar el gate en CI**
+- [x] **Step 3: Insertar el gate en CI**
 
 En `.github/workflows/ci.yml`, inmediatamente después de `Build` y antes de empaquetar:
 
@@ -1915,7 +1915,7 @@ En `.github/workflows/ci.yml`, inmediatamente después de `Build` y antes de emp
         run: npm run test:deploy
 ```
 
-- [ ] **Step 4: Documentar ejecución y límite**
+- [x] **Step 4: Documentar ejecución y límite**
 
 En `README.md` añadir una sección breve:
 
@@ -1933,7 +1933,7 @@ Sin la flag el comando se niega a correr. Esta prueba no llama wallets ni valida
 producción; valida el contrato `/2567` y `/2568` que ese proxy debe implementar.
 ````
 
-- [ ] **Step 5: Ejecutar todos los gates en el orden de deploy**
+- [x] **Step 5: Ejecutar todos los gates en el orden de deploy**
 
 Run:
 
@@ -1955,7 +1955,7 @@ $env:RUN_ENGINE_SMOKE='1'; npm run test:deploy; $code=$LASTEXITCODE; Remove-Item
 
 Expected: código 0 y stack eliminado.
 
-- [ ] **Step 6: Auditar secretos, arquitectura y worktree**
+- [x] **Step 6: Auditar secretos, arquitectura y worktree**
 
 Run:
 
@@ -1975,7 +1975,7 @@ rg -n "userId|ucRate|profilePicture|currency|rateId|UcMinor" src
 
 Expected: ningún `userId` vivo en auth/sala/registro; no aparece un `ucRate` copiado; `currency`, `rateId` y `UcMinor` solo están en contrato, snapshot, liquidación y pruebas correspondientes.
 
-- [ ] **Step 7: Cerrar documentación y commit**
+- [x] **Step 7: Cerrar documentación y commit**
 
 Actualizar `AGENTS.md` con:
 

@@ -161,22 +161,25 @@ que no sea el que corre», y un despliegue fallido sale en rojo ANTES de la limp
 release roto sigue en disco y **es el más nuevo**. El rollback de emergencia se iba de cabeza a la
 versión que acababa de fallar. Ahora el fallido se marca con un `FAILED` y el bucle lo saltea.
 
-**Baseline actual: 320 tests / 48 archivos.**
+**Baseline antes del incremento siguiente: 320 tests / 48 archivos.**
 
-## Incremento activo — identidad multiplataforma y smoke real
+## Incremento completo — identidad multiplataforma y smoke real
 
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`.
 Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
-Estado: **Tareas 1–4 completas y verificadas** (`b930b75`…`ce8a895` la 1; `d3617cb`, `8239ca1`,
-`0339dca`, `a55fa53`, `ceb6957` la 2; `60d7c19`, `dc151be` la 3; `6a10918`, `82706dd`,
-`4119278`, `cc9125f`, `e900c0a` y el commit siguiente la 4); baseline **365 tests / 52 archivos**;
-siguiente: **Task 5, Step 1** —hacer del smoke un gate anterior al artefacto de CI—. El smoke
-real quedó verde con Docker Desktop 4.35.1 / Engine 27.3.1 / Compose 2.29.7, PM2 7.0.4 y
-Nginx 1.30.4: ambas instancias escucharon en 2567/2568, la partida terminó por `SCORE` con 119
-entradas de historial y `down -v --remove-orphans` dejó el compose vacío.
+Estado: **incremento completo; Tareas 0–5 cerradas** (`8a88229` la 0; `b930b75`…`ce8a895` la 1;
+`d3617cb`…`922d85d` la 2; `60d7c19`, `dc151be` la 3; `6a10918`…`7e5d286` la 4; el commit
+siguiente la 5). Baseline **366 tests / 52 archivos**. Verificados con código 0:
+`typecheck`, suite, lint, build y depcruise (**163 módulos / 617 dependencias**). El smoke real
+quedó verde con Docker Desktop 4.35.1 / Engine 27.3.1 / Compose 2.29.7, PM2 7.0.4 y Nginx
+1.30.4: ambas instancias escucharon en 2567/2568, la partida terminó por `SCORE` con 119 entradas
+de historial y `down -v --remove-orphans` dejó el compose vacío. Deuda deliberada: la entrega
+remota/outbox pertenece al futuro orquestador —el juego sólo exporta `settlementOf`— y el Nginx
+entregado es de certificación, no infraestructura productiva. **El 4P tampoco liquida todavía**:
+falta definir cómo se divide el premio entre compañeros antes de eliminar esa guarda.
 La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
 queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
 `*UcMinor` son enteros seguros: los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
