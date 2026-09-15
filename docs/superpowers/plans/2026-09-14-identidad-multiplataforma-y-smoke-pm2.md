@@ -34,7 +34,7 @@ No se añade un puerto de wallet, un adaptador remoto ni un outbox: no existe to
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`
 
-- [ ] **Step 1: Añadir el incremento activo a `AGENTS.md`**
+- [x] **Step 1: Añadir el incremento activo a `AGENTS.md`**
 
 Insertar después del párrafo `Baseline actual`:
 
@@ -55,15 +55,13 @@ Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y pri
 No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.
 ```
 
-- [ ] **Step 2: Marcar esta tarea completa en el plan**
+- [x] **Step 2: Marcar esta tarea completa en el plan**
 
 Cambiar sus dos casillas a `[x]` y dejar bajo este paso:
 
-```markdown
 **Continuidad:** Tarea 0 completa; siguiente paso exacto: Task 1, Step 1.
-```
 
-- [ ] **Step 3: Commit de documentación**
+- [x] **Step 3: Commit de documentación**
 
 ```bash
 git add AGENTS.md docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md

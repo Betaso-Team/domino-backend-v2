@@ -163,6 +163,21 @@ versión que acababa de fallar. Ahora el fallido se marca con un `FAILED` y el b
 
 **Baseline actual: 320 tests / 48 archivos.**
 
+## Incremento activo — identidad multiplataforma y smoke real
+
+Autoridad operativa:
+`docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`.
+Diseño aprobado:
+`docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
+
+Estado: **Tarea 0 en curso; código todavía no iniciado**. La identidad externa pasa a ser
+`{ platformId, userUuid }`; `currency` es la moneda ya cobrada y queda congelada, y toda
+recompensa/reembolso usa el `rateId` único de la mesa. Los montos `*UcMinor` son enteros seguros:
+los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
+
+Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y primer paso pendiente.
+No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.
+
 **Única deuda abierta — NO CUMPLIDA:** el `unlock()` de `onDrop` no tiene test y es
 inalcanzable bajo el `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva
 está en el recuadro ⛔ de la Tarea 22 y junto al propio `unlock()`: **si tocás `maxClients`, leelo
