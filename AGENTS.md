@@ -323,12 +323,24 @@ Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
 Estado: **Tareas 1, 2, 3, 4, 5, 6 y 7 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+este `docs:`).
-Baseline **518 tests / 62 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
-(**196 módulos / 737 dependencias**) en verde. Primer paso pendiente: **Tarea 8, escribir el rojo del
-servicio del catálogo en `src/features/game-mode/service.test.ts`**.
+`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`+este `docs:`).
+Baseline **522 tests / 62 archivos**, con `typecheck`, suite, lint y `format` en verde.
+Primer paso pendiente: **Tarea 8, escribir el rojo del servicio del catálogo en
+`src/features/game-mode/service.test.ts`**.
 
 Lo que dejó la Tarea 7:
+
+- ⚠ **EL `created` SÓLO CUENTA EN LA REVISIÓN CERO** (`cf8fe11`, y la primera corrección del defecto
+  estuvo mal). `createdKeyOf` no lleva revisión —hay una sola creación por modo— y los registros del
+  outbox **no tienen TTL**, así que esa clave existe para siempre desde que el modo pasó por
+  `enqueueCreated`. `revisionKeysOf` la aceptaba sin condición, con lo cual el modo daba "cubierto" en
+  la v1, en la v5 y en la v50: **el reconciliador apagado exactamente para los modos que crea el
+  panel**, que son todos. Y es la única pieza que cubre la falta de transacción entre
+  `game_modes_domino` y `game_mode_outbox` —no hay replica set—, así que una edición cuyo insert de
+  outbox se pierda no se recupera nunca más sola. Las tres decisiones se sostienen entre sí y no se
+  pueden tocar de a una: **clave de creación sin revisión + sin TTL ⇒ el `created` sólo cuenta en la
+  revisión cero**. El hueco del contrato tenía la forma exacta del bug —ningún test combinaba un
+  `created` con una revisión posterior—, que es el motivo por el que la suite entera daba verde.
 
 - **EL REQUEST ADMINISTRATIVO NO ESPERA A RABBIT, y ése es el archivo entero.** La mutación escribe
   Mongo y escribe el outbox; el dispatcher publica después con confirmación del broker. La entrega es
@@ -624,6 +636,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 
 | Tarea | Defecto | Commit |
 |---|---|---|
+| 7 | Y el tercero, que lo encontró la revisión y es el más caro del incremento: **la corrección del segundo estuvo mal**. `revisionKeysOf` devolvía las dos claves SIEMPRE, y como la del `created` no lleva revisión y no hay TTL, existe para siempre: el modo daba «cubierto» en la v1, la v5 y la v50, o sea **el reconciliador apagado para todos los modos que crea el panel**. Sobre-corregir un defecto real es su propio defecto. El `created` sólo cuenta en la revisión cero. Ningún test lo vio porque ninguno combinaba un `created` con una revisión posterior: el hueco tenía la forma exacta del bug | `cf8fe11` + este `docs:` |
 | 7 | Dos: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores ni el test del de memoria —el mismo defecto que la Tarea 4, y `MemoryGameModeOutbox` tampoco es un doble—; y el Step 3 declaraba la clave de `ensureUpdated` y la de `sync` pero **no la de `enqueueCreated` ni contra qué compara `reconcile`**. La lectura ingenua («reconcile llama a `ensureUpdated`») le agrega un `updated` espurio a TODA alta del panel en el primer tick posterior, para siempre, y nada falla | `1f03cd7` + este `docs:` |
 | 6 | Tres, y los tres del «portar de truco» contra la `amqplib` 2.0.1 instalada: reconectar entero al soltar el canal abandona un `RecoveringChannelModel` que sigue reintentando para siempre (un zombi por caída del broker); nadie escucha `error` en la CONEXIÓN, y un `error` sin oyente **tumba el proceso** en Node; y `close()` no espera el intento en vuelo, así que un apagado durante una entrega deja el socket abriéndose después del cierre. El Step 2 tampoco pedía que los dobles fueran `EventEmitter` de verdad, que es lo único que pone roja la segunda | `3be878f` + este `docs:` |
 | 5 | Uno, y de los que se cobran dos tareas después: falta el lease DE MEMORIA y no tiene archivo. La Tarea 8 pide "repositorio/outbox/lease en memoria" y la 11 "registrar repository/outbox/lease de memoria sin URI", pero ninguna de las dos crea un archivo donde pueda vivir y la lista `Files:` de la 5 tiene dos. Va junto al puerto en `src/shared/mongo-lease.ts`, por el criterio de `src/shared/kv.ts` | `348f527` + este `docs:` |

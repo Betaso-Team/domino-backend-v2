@@ -750,11 +750,38 @@ discriminador PROPIO (`game_mode.sync`, que no es una clave de ruteo: el evento 
 revisión.
 
 Y `reconcile` **no puede ser un `ensureUpdated` a secas**: tiene que dar por cubierto al modo cuyo
-`created` existe. Pregunta por las DOS claves de revisión (`createdKeyOf` **o** `updatedKeyOf`) en un
-solo `find({dedupeKey: {$in: …}})` y emite `ensureUpdated` sólo para el que no tenga ninguna. Con la
-lectura ingenua, cada alta del panel recibe además un `updated` espurio en el primer tick posterior,
-para siempre — y nada falla. La clave de `sync` NO se mira: un lote no es direccionable por revisión, y
-el costo de la alternativa sería que `sync` mintiera sobre qué revisión entregó.
+`created` existe. Pregunta por las claves de revisión en un solo `find({dedupeKey: {$in: …}})` y emite
+`ensureUpdated` sólo para el que no tenga ninguna. Con la lectura ingenua —mirar sólo el `updated`—,
+cada alta del panel recibe además un `updated` espurio en el primer tick posterior, para siempre, y
+nada falla. La clave de `sync` NO se mira: un lote no es direccionable por revisión, y el costo de la
+alternativa sería que `sync` mintiera sobre qué revisión entregó.
+
+⚠ **PERO EL `created` SÓLO CUENTA EN LA REVISIÓN CERO, y ésta es la línea que ya estuvo mal una vez
+(commit `cf8fe11`).** La primera corrección de este defecto devolvía las dos claves SIEMPRE, y eso es
+peor que el defecto que arreglaba:
+
+```ts
+revisionKeysOf(mode) === mode.version === 0
+  ? [createdKeyOf(mode), updatedKeyOf(mode)]
+  : [updatedKeyOf(mode)];
+```
+
+`createdKeyOf` no lleva revisión y los registros del outbox **no tienen TTL**, así que esa clave existe
+para siempre desde que el modo pasó por `enqueueCreated`. Aceptándola sin condición,
+`some(presente)` da verdadero en la v1, en la v5 y en la v50: **el reconciliador queda apagado
+exactamente para los modos que crea el panel**, que son todos. Y como es la única pieza que cubre la
+falta de transacción entre `game_modes_domino` y `game_mode_outbox` —no hay replica set—, una edición
+cuyo insert de outbox se pierda no se recupera nunca más sola: el consumidor se queda con el modo
+viejo, nada falla de los dos lados, y la única salida es que un operador dispare el lote forzado a
+mano.
+
+Las tres decisiones se sostienen entre sí y **no se pueden tocar de a una**: clave de creación sin
+revisión + sin TTL ⇒ el `created` sólo puede contar en la revisión cero.
+
+El hueco del contrato tenía la forma exacta del bug, y por eso ningún test lo vio: ninguno combinaba
+un `created` con una revisión posterior —el caso que llega a la v3 lo hace por `ensureUpdated`, así que
+nunca hay un `created` en el almacén, y el de reconciliación se quedaba en la revisión cero, donde las
+dos lecturas coinciden—. El test de regresión pasa por `enqueueCreated`, entrega, y recién ahí edita.
 
 - [ ] **Step 4: implementar el dispatcher de una entrada por lease**
 
