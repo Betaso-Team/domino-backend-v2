@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Clock } from "../../core/engine/clock.js";
 import { createMatchState } from "../../core/engine/genesis.js";
 import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state/index.js";
-import { configOf } from "../../transports/match-contract.js";
+import { replayConfigOf } from "../../transports/match-contract.js";
 import type { HistoryEntry, HistoryPort } from "../history.js";
 import { MatchHistory } from "../history.js";
 
@@ -18,20 +18,34 @@ function build() {
   };
   const clockBox = { now: 5_000 };
   const clock: Clock = { now: () => clockBox.now };
-  // El config sale de `configOf` y no se escribe a mano: es el único que sabe armar un
-  // `DominoMatchConfig` válido, y este test no tiene nada que decir sobre su forma.
+  // El config sale del CONTRATO y no se escribe a mano: es el único que sabe armar un
+  // `DominoMatchConfig` válido, y este test no tiene nada que decir sobre su forma. Va por
+  // `replayConfigOf` —la entrada del SNAPSHOT grabado— y no por `configOf`, que desde la Tarea 10
+  // pide además el `GameMode` que el catálogo resolvió: el historial no consulta catálogos.
   const match = createMatchState(
-    configOf({
-      mode: "CASUAL",
+    replayConfigOf({
       matchId: "m1",
       gameModeId: "g",
-      participants: [
-        { platformId: "betaso", userUuid: "u1", displayName: "Jugador u1", currency: "VES" },
-        { platformId: "betaso", userUuid: "u2", displayName: "Jugador u2", currency: "VES" },
+      seats: [
+        {
+          platformId: "betaso",
+          userUuid: "u1",
+          displayName: "Jugador u1",
+          currency: "VES",
+          playerId: "seat-1",
+        },
+        {
+          platformId: "betaso",
+          userUuid: "u2",
+          displayName: "Jugador u2",
+          currency: "VES",
+          playerId: "seat-2",
+        },
       ],
       seed: "s",
       pointsToWin: 100,
       teamAssignment: "SHUFFLED",
+      isDealWindowEnabled: true,
       rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
       entryFee: 125,
       prize: 250,

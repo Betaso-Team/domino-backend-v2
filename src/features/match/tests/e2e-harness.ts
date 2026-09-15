@@ -7,6 +7,7 @@ import { testConfig } from "../../../app.config.js";
 import { rootContainer } from "../../../di-container.js";
 import { env } from "../../../env.js";
 import type { PlayerRef } from "../../../shared/player-ref.js";
+import { CASUAL_2P } from "../../../tests/game-mode-catalog.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config.js";
 import { boardEndsOf } from "../core/engine/round/board-ends.js";
 import { playableSides } from "../core/engine/round/playable.js";
@@ -14,9 +15,10 @@ import type { MatchState } from "../core/state/index.js";
 import type { BoardSide } from "../core/state/tile.js";
 import type { HistoryEntry, HistoryReader } from "../network/history.js";
 import {
-  type DominoRoomOptions,
+  type CreateMatchRequest,
   type MatchParticipant,
   configOf,
+  requestOf,
 } from "../transports/match-contract.js";
 
 // UN STRING SIGUE ALCANZANDO para la mayoría de los tests: casi ninguno mide
@@ -42,22 +44,23 @@ export function mintToken(player: PlayerRef): string {
   });
 }
 
+// EL REQUEST VIVO, y ya no trae dinero ni puntos: desde la Tarea 10 los pone el catálogo. El
+// `gameModeId` es el uuid del modo que `src/tests/game-mode-catalog.ts` sembró en el container —el
+// mismo que la sala va a resolver—, así que ningún test de acá escribe un modo a mano ni tiene que
+// saber cuánto cobra la mesa.
 export function casualTable(
   seats: readonly ParticipantInput[],
   seed = "seed-e2e",
-): DominoRoomOptions {
+): CreateMatchRequest {
   const participants = seats.map(participantOf);
   return {
     mode: "CASUAL",
     matchId: `m-${participants.map(({ userUuid }) => userUuid).join("-")}`,
-    gameModeId: "clasica-2p",
+    gameModeId: CASUAL_2P.uuid,
     participants,
     seed,
-    pointsToWin: 100,
     teamAssignment: "SHUFFLED",
     rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-    entryFee: 125,
-    prize: 250,
   };
 }
 
@@ -101,8 +104,8 @@ export function signatureOf(state: MatchState): string {
 
 export interface SeatedMatch {
   readonly roomId: string;
-  /** Las opciones con las que la sala se creó. Es de dónde sale el config real de la partida. */
-  readonly options: DominoRoomOptions;
+  /** El request con el que la sala se creó. Es la mitad viva del config; la otra es el modo. */
+  readonly options: CreateMatchRequest;
   /**
    * El MISMO snapshot que la sala normalizó: es lo único que traduce entre el `userUuid`
    * con el que el test nombra a un jugador y el `seat-N` con el que el servidor lo nombra.
@@ -120,7 +123,10 @@ export async function seatPair(
   seed?: string,
 ): Promise<SeatedMatch> {
   const options = casualTable(seats, seed);
-  const config = configOf(options);
+  // EL MISMO PAR QUE LA SALA: el request validado y el modo sembrado. Si acá se armara el config a
+  // mano, el arnés describiría una mesa distinta de la que el servidor creó y los `seat-N` con los
+  // que los tests hablan podrían no ser los suyos.
+  const config = configOf(requestOf(options), CASUAL_2P);
   const room = await server.createRoom("domino", options);
   const clients: SeatedMatch["clients"] = {};
   for (const seat of config.seats) {
@@ -280,7 +286,14 @@ const GOLDEN_DIR = fileURLToPath(new URL("fixtures", import.meta.url));
 // —incluso escribiendo el nombre de esa variable global en un comentario como éste—.
 export async function writeGolden(name: string, match: SeatedMatch): Promise<void> {
   if (!env.writeGolden) return;
-  const meta = configOf(match.options);
+  // EL SNAPSHOT QUE LA SALA USÓ, no uno recalculado: desde la Tarea 10 el config depende del modo
+  // que el catálogo resolvió, y volver a armarlo acá sería una segunda oportunidad de armarlo
+  // distinto. `match.config` es exactamente el par (request, modo) que `seatPair` cruzó.
+  //
+  // OJO AL REGENERAR: `meta.gameModeId` es el uuid que el catálogo de ESA corrida generó, así que
+  // cambia en cada regeneración como los instantes. El motor no lo lee —`replay()` lo ignora—, así
+  // que es ruido del diff y no una diferencia de la partida.
+  const meta = match.config;
   const payload = {
     meta,
     globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testConfig } from "../../../app.config.js";
 import { env } from "../../../env.js";
 import type { PlayerRef } from "../../../shared/player-ref.js";
+import { CASUAL_2P } from "../../../tests/game-mode-catalog.js";
 
 const participantOf = (userUuid: string) => ({
   platformId: "betaso",
@@ -19,17 +20,20 @@ const mintToken = (player: PlayerRef): string =>
     expiresIn: "1h",
   });
 
+// EL MODO SALE DEL CATÁLOGO SEMBRADO en `src/tests/game-mode-catalog.ts` y no de un literal: desde
+// la Tarea 10 la sala lo resuelve contra el container, así que un `gameModeId` inventado acá haría
+// que ninguna mesa de este archivo llegue a existir. El request tampoco trae ya dinero ni puntos.
+//
+// Se importa de `src/tests/` y no del arnés E2E del match porque la Regla 4 (`feature-boundary`)
+// prohíbe que esta feature importe archivos internos de otra.
 const casualTable = (userUuids: readonly [string, string]) => ({
   mode: "CASUAL",
   matchId: `m-${userUuids.join("-")}`,
-  gameModeId: "clasica-2p",
+  gameModeId: CASUAL_2P.uuid,
   participants: userUuids.map(participantOf),
   seed: "lobby-e2e",
-  pointsToWin: 100,
   teamAssignment: "SHUFFLED",
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-  entryFee: 125,
-  prize: 250,
 });
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
@@ -88,7 +92,9 @@ describe("lobby", () => {
         state.totalPlayers === 2 &&
         state.playersInLobby === 2 &&
         state.gameModesCount.some(
-          ({ gameModeName, playerCount }) => gameModeName === "clasica-2p" && playerCount === 2,
+          // El lobby cuenta por el `gameModeId` de la metadata, que desde la Tarea 10 es el uuid
+          // del modo resuelto y ya no el nombre que el request traía.
+          ({ gameModeName, playerCount }) => gameModeName === CASUAL_2P.uuid && playerCount === 2,
         ),
     );
 

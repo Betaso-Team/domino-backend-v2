@@ -18,7 +18,7 @@ import { mongo, rootContainer } from "./di-container.js";
 import type { GlobalDominoConfig, TeamAssignmentMode } from "./features/match/core/config.js";
 import { replay } from "./features/match/history/replay.js";
 import type { HistoryEntry, HistoryReader } from "./features/match/network/history.js";
-import { type DominoRoomOptions, configOf } from "./features/match/transports/match-contract.js";
+import { replayConfigOf } from "./features/match/transports/match-contract.js";
 import { logger } from "./logger.js";
 
 const USAGE =
@@ -97,14 +97,20 @@ if (entries.length === 0) {
   process.exit(1);
 }
 
-// El config sale de `configOf` y NO se arma a mano acá. Escrito a mano decía "igual que en
+// EL CONFIG SALE DE `replayConfigOf` Y NO SE ARMA A MANO. Escrito a mano decía "igual que en
 // `configOf`" en un comentario, que es la misma regla en dos lugares obligada a coincidir
-// sin que nada lo verifique — el smell exacto que esta tarea vino a cerrar en el grafo de
-// actores. Un campo nuevo en `DominoMatchConfig`, o el día que `isDealWindowEnabled` deje
-// de estar siempre encendida, le daban al CLI una partida distinta de la que la sala jugó,
-// en silencio y sin que tsc dijera nada. Ahora la mesa se describe en el vocabulario de
-// matchmaking (`DominoRoomOptions`) y la traducción la hace el único que sabe hacerla.
-// LOS PARTICIPANTES SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
+// sin que nada lo verifique. Un campo nuevo en `DominoMatchConfig`, o el día que
+// `isDealWindowEnabled` deje de estar siempre encendida, le daban al CLI una partida
+// distinta de la que la sala jugó, en silencio y sin que tsc dijera nada.
+//
+// ⛔ Y ES `replayConfigOf` Y NO `configOf`, QUE ES LA MITAD DE LA TAREA 10. Desde que el catálogo
+// es la autoridad, `configOf` pide el `GameMode` resuelto: usarlo acá obligaría al CLI de soporte
+// a consultar Mongo —o peor, a consultarlo y encontrar el modo YA EDITADO—, y entonces rebobinar
+// una partida vieja la reconstruiría con los puntos y el premio de hoy. Una partida se rebobina
+// con el snapshot que TENÍA. Por eso este archivo no importa nada de `features/game-mode`, y hay
+// un test que lo mide sobre la lista exacta de imports.
+//
+// LOS ASIENTOS SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
 // siendo IDS DE ASIENTO —el vocabulario con el que el historial grabó la partida—, y el
 // resto del snapshot no está grabado en ninguna parte: `match_history` guarda actos y
 // hechos, no la cabecera de la mesa. `platformId: "replay"` y `currency: "REPLAY"` son
@@ -114,21 +120,25 @@ if (entries.length === 0) {
 // motor necesita entero pero cuyo dinero NO consume: la reconstrucción del árbol no lee
 // moneda, tasa ni montos. Usar este config para calcular una recompensa pagaría en una
 // moneda que no existe, a una tasa que nadie aceptó.
-const participants = seats.map((userUuid) => ({
-  platformId: "replay",
-  userUuid,
-  displayName: userUuid,
-  currency: "REPLAY",
-}));
-
-const options: DominoRoomOptions = {
-  mode: "CASUAL",
+//
+// EL `playerId` SE NUMERA ACÁ, y es exactamente lo que `configOf` hacía antes: `seat-1`, `seat-2`,
+// … EN ORDEN DE ARGUMENTO. Es el id OPACO con el que el motor y el historial nombran a cada
+// jugador, así que tomarlo del argumento en vez de numerarlo cambiaría de asiento a cualquiera que
+// invoque el CLI con otra etiqueta y rebobinaría la partida con las manos cruzadas.
+const snapshot = {
   matchId,
   gameModeId: "replay",
-  participants,
+  seats: seats.map((userUuid, index) => ({
+    platformId: "replay",
+    userUuid,
+    displayName: userUuid,
+    currency: "REPLAY",
+    playerId: `seat-${index + 1}`,
+  })),
   seed,
   pointsToWin,
   teamAssignment,
+  isDealWindowEnabled: true,
   rateId: "00000000-0000-4000-8000-000000000000",
   entryFee: 0,
   prize: 0,
@@ -136,7 +146,7 @@ const options: DominoRoomOptions = {
 
 logger.info("rebobinando", { matchId, entries: entries.length });
 const state = replay({
-  meta: configOf(options),
+  meta: replayConfigOf(snapshot),
   // El MISMO `globalConfig` que el container del proceso derivó de `env`. Sin esto el
   // replay caía a `DEFAULT_GLOBAL_CONFIG` y le estampaba a una partida real plazos que
   // nunca tuvo —y un `extraTimeRemainingMs` inventado, que es estado observable del árbol

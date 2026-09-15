@@ -1,40 +1,40 @@
 import { describe, expect, it } from "vitest";
 import { MemoryKeyValueStore } from "../../../shared/kv.js";
-import { configOf } from "./match-contract.js";
+import { replayConfigOf } from "./match-contract.js";
 import { MatchRegistry, TTL_SECONDS } from "./match-registry.js";
 
-// El config se arma con `configOf` y no a mano: lo que el registro indexa son las parejas
+// El config se arma con el CONTRATO y no a mano: lo que el registro indexa son las parejas
 // del snapshot REAL, y un objeto escrito a mano podría describir una mesa que el contrato
-// ni siquiera aceptaría.
-const participant = (userUuid: string) => ({
-  platformId: "betaso",
+// ni siquiera aceptaría. Va por `replayConfigOf` —la entrada del snapshot ya congelado— y no por
+// `configOf`, que desde la Tarea 10 pide además el `GameMode` resuelto: el registro indexa mesas
+// que ya nacieron, no las hace nacer.
+const seat = (userUuid: string, index: number, platformId = "betaso", currency = "VES") => ({
+  platformId,
   userUuid,
   displayName: `Jugador ${userUuid}`,
-  currency: "VES",
+  currency,
+  playerId: `seat-${index + 1}`,
 });
 
 const roomOptions = {
-  mode: "CASUAL",
   matchId: "m1",
   gameModeId: "clasica-2p",
-  participants: [participant("u1"), participant("u2")],
+  seats: [seat("u1", 0), seat("u2", 1)],
   seed: "secreto-que-no-sale",
   pointsToWin: 100,
   teamAssignment: "SHUFFLED",
+  isDealWindowEnabled: true,
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
   entryFee: 125,
   prize: 250,
 } as const;
 
-const config = configOf(roomOptions);
+const config = replayConfigOf(roomOptions);
 // LA MESA QUE COLISIONARÍA con un índice por UUID pelado: el mismo `userUuid` en dos
 // plataformas distintas, que son dos personas con dos billeteras.
-const collidingConfig = configOf({
+const collidingConfig = replayConfigOf({
   ...roomOptions,
-  participants: [
-    { ...participant("same"), platformId: "betaso" },
-    { ...participant("same"), platformId: "partner", currency: "USD" },
-  ],
+  seats: [seat("same", 0), seat("same", 1, "partner", "USD")],
 });
 
 const seatRef = (userUuid: string, platformId = "betaso") => ({ platformId, userUuid });
@@ -211,10 +211,10 @@ describe("MatchRegistry", () => {
     await vieja.register("room-1", config);
     await nueva.register(
       "room-2",
-      configOf({
+      replayConfigOf({
         ...roomOptions,
         matchId: "m2",
-        participants: [participant("u1"), participant("u3")],
+        seats: [seat("u1", 0), seat("u3", 1)],
       }),
     );
 

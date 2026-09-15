@@ -1,6 +1,7 @@
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env } from "../../../env.js";
+import { CASUAL_2P } from "../../../tests/game-mode-catalog.js";
 import {
   act,
   bootServer,
@@ -133,8 +134,13 @@ describe("ciclo de vida de una partida", () => {
     expect(body).not.toContain("seed-secretisimo");
     expect(JSON.parse(body)).toEqual({
       matchId: "m-c1-c2",
-      gameModeId: "clasica-2p",
+      // EL UUID DEL MODO RESUELTO, y ya no el nombre que el request traía: desde la Tarea 10 el
+      // snapshot guarda lo que el catálogo devolvió. Sale del modo sembrado y no de un literal
+      // porque el repositorio de memoria lo genera al crearlo.
+      gameModeId: CASUAL_2P.uuid,
       seats: ["seat-1", "seat-2"],
+      // LOS TRES NÚMEROS SALEN DEL CATÁLOGO y siguen siendo los mismos: van como literal para que
+      // este endpoint quede pineado contra el modo y no contra sí mismo.
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,

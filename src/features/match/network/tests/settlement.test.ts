@@ -1,41 +1,54 @@
 import { describe, expect, it } from "vitest";
 import { createMatchState } from "../../core/engine/genesis.js";
-import { configOf } from "../../transports/match-contract.js";
+import { replayConfigOf } from "../../transports/match-contract.js";
 import type { AbortReason } from "../events.js";
 import { settlementOf } from "../settlement.js";
 
+// EL SNAPSHOT DE LA MESA, Y SE ARMA CON `replayConfigOf` Y NO CON `configOf`. Lo que `settlementOf`
+// recibe es la mesa YA CONGELADA —asientos numerados, dinero adentro—, que es exactamente lo que
+// esta función valida; `configOf` pide además el `GameMode` resuelto, o sea que armar estas mesas
+// con él obligaría a inventar un catálogo para medir una proyección que no lo consulta.
+//
+// ⚠ Y HAY UN SEGUNDO MOTIVO, que es el que decide: desde la Tarea 10 `configOf` RECHAZA el 4P, así
+// que la mesa de cuatro de más abajo —la que mide las dos guardas más caras del archivo— no se
+// podría ni escribir con él. La asimetría es deliberada y está argumentada en `match-contract.ts`:
+// se prohíbe que una mesa de cuatro NAZCA, no que una ya grabada se pueda rebobinar y auditar. Y
+// auditarla es justo lo que hace falta el día que una quede con la plata trabada.
+const seatsOf = (participants: readonly Record<string, string>[]) =>
+  participants.map((participant, index) => ({ ...participant, playerId: `seat-${index + 1}` }));
+
 const options = {
-  mode: "CASUAL",
   matchId: "money-1",
   gameModeId: "classic-2p",
-  participants: [
+  seats: seatsOf([
     { platformId: "betaso", userUuid: "same", displayName: "Ada", currency: "VES" },
     { platformId: "partner", userUuid: "same", displayName: "Lin", currency: "USD" },
-  ],
+  ]),
   seed: "money-seed",
   pointsToWin: 100,
   teamAssignment: "SEAT_ORDER",
+  isDealWindowEnabled: true,
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
   entryFee: 125,
   prize: 250,
 } as const;
 
-// La mesa de CUATRO, que `configOf` acepta sin objeción. Sirve para dos cosas distintas: el
-// reembolso de cuatro entradas —que sí se paga— y el desajuste de forma contra un estado de
-// dos, que es la única manera que hay hoy de cruzar dos mesas distintas y notarlo.
+// La mesa de CUATRO, que el motor ya no sienta y el replay sí reconstruye. Sirve para dos cosas
+// distintas: el reembolso de cuatro entradas —que sí se paga— y el desajuste de forma contra un
+// estado de dos, que es la única manera que hay hoy de cruzar dos mesas distintas y notarlo.
 const fourSeatOptions = {
   ...options,
   matchId: "money-4p",
   gameModeId: "classic-4p",
-  participants: [
+  seats: seatsOf([
     { platformId: "betaso", userUuid: "u1", displayName: "Ada", currency: "VES" },
     { platformId: "betaso", userUuid: "u2", displayName: "Lin", currency: "VES" },
     { platformId: "partner", userUuid: "u3", displayName: "Rex", currency: "USD" },
     { platformId: "partner", userUuid: "u4", displayName: "Zoe", currency: "COP" },
-  ],
+  ]),
 } as const;
 
-const config = configOf(options);
+const config = replayConfigOf(options);
 const matchOf = () => createMatchState(config);
 
 // Las claves van como LITERAL y no recalculadas con el mismo `JSON.stringify` del código:
@@ -111,7 +124,7 @@ describe("settlementOf", () => {
   );
 
   it("reembolsa las cuatro entradas de una mesa de cuatro, cada una en su moneda", () => {
-    const fourSeatConfig = configOf(fourSeatOptions);
+    const fourSeatConfig = replayConfigOf(fourSeatOptions);
     const result = settlementOf(
       { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
       createMatchState(fourSeatConfig),
@@ -173,8 +186,8 @@ describe("settlementOf", () => {
     ).toThrow(/exactamente un ganador, recibió 0/);
   });
 
-  // LA OTRA MITAD DE LA GUARDA, y es la que puede pasar de verdad: `configOf` acepta cuatro
-  // participantes, así que una mesa con dos ganadores del mismo equipo es alcanzable hoy.
+  // LA OTRA MITAD DE LA GUARDA, y es la que puede pasar de verdad: una mesa de cuatro grabada se
+  // reconstruye sin objeción, así que dos ganadores del mismo equipo siguen siendo alcanzables.
   // Sin esta aserción el guard podía ser `=== 0` y la suite seguía verde — pagando el premio
   // ENTERO a cada uno de los dos, o sea el doble de lo que la mesa cobró.
   it("rechaza varios ganadores en vez de pagarle el premio entero a cada uno", () => {
@@ -192,7 +205,7 @@ describe("settlementOf", () => {
   // nombrar el desajuste: «recibió 0 ganadores» manda a soporte a auditar un veredicto sano.
   it("rechaza un estado que no es de la mesa del snapshot, y lo dice", () => {
     const twoSeatMatch = matchOf();
-    const fourSeatConfig = configOf(fourSeatOptions);
+    const fourSeatConfig = replayConfigOf(fourSeatOptions);
     expect(() =>
       settlementOf(
         { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
@@ -210,13 +223,13 @@ describe("settlementOf", () => {
   // congelada de cada asiento las distingue. Sin comparar la pareja, esto pagaba los 250 a
   // alguien de la otra mesa con una instrucción impecable.
   it("rechaza otro estado del mismo tamaño y nombra la identidad que no coincide", () => {
-    const otherTable = configOf({
+    const otherTable = replayConfigOf({
       ...options,
       matchId: "money-2",
-      participants: [
+      seats: seatsOf([
         { platformId: "betaso", userUuid: "ada", displayName: "Ada", currency: "VES" },
         { platformId: "partner", userUuid: "rex", displayName: "Rex", currency: "USD" },
-      ],
+      ]),
     });
     expect(() =>
       settlementOf(
@@ -234,13 +247,13 @@ describe("settlementOf", () => {
   // copia mediría que dos lecturas del mismo dato coinciden, y seguiría verde el día que
   // alguien reintroduzca la escala en los dos lados a la vez.
   it("proyecta las UC decimales tal cual, sin escalarlas", () => {
-    const decimalTable = configOf({
+    const decimalTable = replayConfigOf({
       ...options,
       matchId: "money-dec",
-      participants: [
+      seats: seatsOf([
         { platformId: "betaso", userUuid: "u1", displayName: "Ada", currency: "VES" },
         { platformId: "partner", userUuid: "u2", displayName: "Lin", currency: "USD" },
-      ],
+      ]),
       entryFee: 1.5,
       prize: 2.75,
     });
@@ -264,7 +277,7 @@ describe("settlementOf", () => {
   // La mesa GRATIS emite igual, con sus entradas en cero: es la decisión escrita en
   // `settlement.ts`, y sin test alguien la "optimiza" y deja a una liquidación sin rastro.
   it("emite el reembolso de una mesa gratis con las entradas en cero", () => {
-    const free = configOf({ ...options, matchId: "money-free", entryFee: 0 });
+    const free = replayConfigOf({ ...options, matchId: "money-free", entryFee: 0 });
     const result = settlementOf(
       { type: "MATCH_ABORTED", reason: "NEVER_STARTED" },
       createMatchState(free),

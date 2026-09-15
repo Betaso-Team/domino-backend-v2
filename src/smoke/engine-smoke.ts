@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { ColyseusSDK, type Room } from "@colyseus/sdk";
 import jwt from "jsonwebtoken";
 import { env } from "../env.js";
+import type { GameMode } from "../features/game-mode/index.js";
 import type { DominoMatchConfig } from "../features/match/core/config.js";
 import { createMatchState } from "../features/match/core/engine/genesis.js";
 import { boardEndsOf } from "../features/match/core/engine/round/board-ends.js";
@@ -11,36 +12,71 @@ import { boneyardCountOf } from "../features/match/core/engine/state-projections
 import { MatchState } from "../features/match/core/state/index.js";
 import type { BoardSide } from "../features/match/core/state/tile.js";
 import { settlementOf } from "../features/match/index.js";
-import { type DominoRoomOptions, configOf } from "../features/match/transports/match-contract.js";
+import {
+  type CreateMatchRequest,
+  configOf,
+  requestOf,
+} from "../features/match/transports/match-contract.js";
 import { logger } from "../logger.js";
 
 const WS_URL = "ws://nginx:8080";
 const HTTP_URL = "http://nginx:8080";
-const OPTIONS = {
-  mode: "CASUAL",
-  matchId: "smoke-full-game",
-  gameModeId: "classic-2p",
-  participants: [
-    {
-      platformId: "betaso",
-      userUuid: "shared-smoke-uuid",
-      displayName: "Ada",
-      currency: "VES",
-    },
-    {
-      platformId: "partner",
-      userUuid: "shared-smoke-uuid",
-      displayName: "Lin",
-      currency: "USD",
-    },
-  ],
-  seed: "smoke-deterministic-seed",
+
+// EL MODO QUE EL SMOKE CONFIGURA, y desde la Tarea 10 es de dónde salen los puntos y el dinero de
+// la mesa: el request ya no los puede declarar. Se crea POR HTTP contra el servidor real y no se
+// escribe en el proceso del smoke — el punto entero del smoke es que el servidor resuelva su
+// propio catálogo—. `pointsToWin: 30` es lo que hace que la partida termine en un tiempo razonable.
+const MODE_INPUT = {
+  name: "smoke-2p",
+  playersQuantity: 2,
   pointsToWin: 30,
-  teamAssignment: "SEAT_ORDER",
-  rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
   entryFee: 125,
   prize: 250,
-} satisfies DominoRoomOptions;
+} as const;
+
+// El DTO de v1, recortado a lo que el smoke necesita: `configOf` sólo lee `uuid`,
+// `playersQuantity`, `pointsToWin`, `entryFee` y `prize`. Se declara acá porque la superficie del
+// catálogo exporta la ENTIDAD y no su representación HTTP, que es del panel.
+interface GameModeDTO {
+  readonly _id: string;
+  readonly uuid: string;
+  readonly name: string;
+  readonly multiplier: number;
+  readonly prize: number;
+  readonly entryFee: number;
+  readonly playersQuantity: 2 | 4;
+  readonly pointsToWin: number;
+  readonly isActive: boolean;
+  readonly isFreeRoom: boolean;
+  readonly enableBots: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly __v: number;
+}
+
+const requestFor = (gameModeId: string) =>
+  ({
+    mode: "CASUAL",
+    matchId: "smoke-full-game",
+    gameModeId,
+    participants: [
+      {
+        platformId: "betaso",
+        userUuid: "shared-smoke-uuid",
+        displayName: "Ada",
+        currency: "VES",
+      },
+      {
+        platformId: "partner",
+        userUuid: "shared-smoke-uuid",
+        displayName: "Lin",
+        currency: "USD",
+      },
+    ],
+    seed: "smoke-deterministic-seed",
+    teamAssignment: "SEAT_ORDER",
+    rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+  }) satisfies CreateMatchRequest;
 
 type SmokeRoom = Room<unknown, MatchState>;
 
@@ -221,6 +257,48 @@ async function play(roomA: SmokeRoom, roomB: SmokeRoom, config: DominoMatchConfi
   );
 }
 
+// CREA EL MODO CONTRA EL SERVIDOR REAL, con la llave interna: el catálogo es administrativo y sus
+// mutaciones no son públicas. Se afirma el 201 en vez de tolerar el 409 del duplicado a propósito —
+// el smoke corre contra un compose recién levantado (`down -v` entre corridas), así que un modo ya
+// existente significa que el entorno no está limpio, y eso es un fallo que conviene ver acá y no
+// tres aserciones más adelante.
+//
+// ⛔ ESTO TODAVÍA NO PUEDE CONTESTAR 201: la Tarea 11 es la que registra `registerGameModeHttp` en
+// `src/app.config.ts` y la 12 la que arma las fases del compose que ejercitan este archivo. Queda
+// escrito acá porque es el llamador que justifica ese cableado, y porque el smoke sin esta llamada
+// no describiría el sistema que la Tarea 10 acaba de construir.
+async function createGameMode(): Promise<GameMode> {
+  const response = await fetch(`${HTTP_URL}/game-modes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Internal-Key": env.internalApiKey ?? "" },
+    body: JSON.stringify(MODE_INPUT),
+  });
+  assert.equal(
+    response.status,
+    201,
+    `el catálogo no creó el modo del smoke: HTTP ${response.status}`,
+  );
+  const { data } = (await response.json()) as { data: GameModeDTO };
+  // El DTO de v1 nombra `_id` y `__v` lo que la entidad llama `id` y `version`: el mapeo va acá y
+  // no se saltea, porque `configOf` recibe la ENTIDAD y no la representación del panel.
+  return {
+    id: data._id,
+    uuid: data.uuid,
+    name: data.name,
+    multiplier: data.multiplier,
+    prize: data.prize,
+    entryFee: data.entryFee,
+    playersQuantity: data.playersQuantity,
+    pointsToWin: data.pointsToWin,
+    isActive: data.isActive,
+    isFreeRoom: data.isFreeRoom,
+    enableBots: data.enableBots,
+    createdAt: new Date(data.createdAt),
+    updatedAt: new Date(data.updatedAt),
+    version: data.__v,
+  };
+}
+
 async function run(): Promise<void> {
   requireSmokeFlag(env.runEngineSmoke);
   await Promise.all([
@@ -228,7 +306,14 @@ async function run(): Promise<void> {
     waitUntil("ready de 2568", () => isReady(2568), 30_000),
   ]);
 
-  const config = configOf(OPTIONS);
+  // EL MODO SE CREA ANTES QUE LA SALA, y esa es la mitad nueva de esta corrida: el servidor
+  // resuelve el catálogo en `onCreate`, así que sin este POST ninguna mesa llega a existir.
+  const mode = await createGameMode();
+  const OPTIONS = requestFor(mode.uuid);
+  // EL MISMO PAR QUE EL SERVIDOR CRUZÓ. El smoke necesita el snapshot local para saber qué asiento
+  // es cada uno y para proyectar la liquidación; armarlo con el modo que el catálogo devolvió es
+  // lo que garantiza que sea el mismo que la sala congeló.
+  const config = configOf(requestOf(OPTIONS), mode);
   const sdkA = new ColyseusSDK(WS_URL);
   const sdkB = new ColyseusSDK(WS_URL);
   sdkA.auth.token = tokenOf("betaso", "shared-smoke-uuid");

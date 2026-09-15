@@ -3,11 +3,12 @@ import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testConfig } from "../../../../app.config.js";
-import { rootContainer } from "../../../../di-container.js";
+import { gameModes, rootContainer } from "../../../../di-container.js";
 import { env } from "../../../../env.js";
 import type { PlayerRef } from "../../../../shared/player-ref.js";
+import { CASUAL_2P } from "../../../../tests/game-mode-catalog.js";
 import type { HistoryReader } from "../../network/history.js";
-import type { DominoRoomOptions, MatchParticipant } from "../match-contract.js";
+import type { CreateMatchRequest, MatchParticipant } from "../match-contract.js";
 import type { DominoRoom } from "./domino-room.js";
 
 let server: ColyseusTestServer | undefined;
@@ -163,6 +164,138 @@ describe("DominoRoom", () => {
     await Promise.all([a.leave(), b.leave()]);
   });
 
+  // EL CATÁLOGO ES LA AUTORIDAD, Y LA SALA LO CONSULTA. Estos cinco `it` son el cableado: los
+  // rechazos en sí los mide `match-contract.test.ts` en aislamiento, pero que `onCreate` LLAME al
+  // catálogo —y que no atrape lo que lanza— es una arista aparte, y es justo la que un refactor
+  // rompe en silencio. Una sala creada con un modo inventado ya cobró la inscripción.
+  it("no crea la sala con un modo que no está en el catálogo", async () => {
+    const testServer = requiredServer();
+
+    await expect(
+      testServer.createRoom<DominoRoom>("domino", {
+        ...options("match-unknown-mode"),
+        gameModeId: "00000000-0000-4000-8000-00000000dead",
+      }),
+    ).rejects.toThrow(/UNKNOWN_GAME_MODE/);
+  });
+
+  // UN MODO DADO DE BAJA NO EXISTE DESDE AFUERA, y esta es la diferencia entre `activeByUuid` y
+  // `byUuid`. El panel da de baja un modo justamente para que deje de sentar mesas; con `byUuid`
+  // el retiro sería decorativo y el modo seguiría cobrando.
+  it("no crea la sala con un modo dado de baja", async () => {
+    const testServer = requiredServer();
+    const retirado = await gameModes.create({
+      name: "retirado-2p",
+      playersQuantity: 2,
+      pointsToWin: 50,
+      entryFee: 10,
+      prize: 20,
+    });
+    await gameModes.update(retirado.uuid, { isActive: false });
+
+    await expect(
+      testServer.createRoom<DominoRoom>("domino", {
+        ...options("match-inactive-mode"),
+        gameModeId: retirado.uuid,
+      }),
+    ).rejects.toThrow(/UNKNOWN_GAME_MODE/);
+  });
+
+  // EL 4P SE RECHAZA ANTES DE GÉNESIS. No hay regla escrita de cómo se parte el premio entre
+  // compañeros, así que `settlementOf` lanza DESPUÉS del veredicto: sin premio y sin reembolso,
+  // plata trabada. La sala no llega a existir, que es lo que mantiene esa deuda inerte.
+  it("no crea la sala con un modo de cuatro jugadores", async () => {
+    const testServer = requiredServer();
+    const cuatro = await gameModes.create({
+      name: "clasica-4p",
+      playersQuantity: 4,
+      pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
+    });
+
+    await expect(
+      testServer.createRoom<DominoRoom>("domino", {
+        ...options("match-4p", [
+          ...defaultParticipants,
+          { platformId: "betaso", userUuid: "c", displayName: "C", currency: "VES" },
+          { platformId: "betaso", userUuid: "d", displayName: "D", currency: "VES" },
+        ]),
+        gameModeId: cuatro.uuid,
+      }),
+    ).rejects.toThrow(/UNSUPPORTED_GAME_MODE/);
+  });
+
+  // LA CANTIDAD LA DECIDE EL MODO. Cuatro participantes sobre un modo de dos serían cuatro
+  // asientos en una mesa cuyo premio se configuró para dos.
+  it("no crea la sala si los participantes no son los del modo", async () => {
+    const testServer = requiredServer();
+
+    await expect(
+      testServer.createRoom<DominoRoom>(
+        "domino",
+        options("match-seat-mismatch", [
+          ...defaultParticipants,
+          { platformId: "betaso", userUuid: "c", displayName: "C", currency: "VES" },
+          { platformId: "betaso", userUuid: "d", displayName: "D", currency: "VES" },
+        ]),
+      ),
+    ).rejects.toThrow(/SEAT_COUNT_MISMATCH/);
+  });
+
+  // EL SNAPSHOT SE CONGELA EN `onCreate`, y esta es la mitad reproducible de la tarea. El catálogo
+  // se consulta UNA vez; editar el modo después no puede cambiarle los puntos ni el premio a una
+  // mesa cuya inscripción YA se cobró. Sin esto —con una sala que releyera el catálogo— un cambio
+  // de precio del panel reescribiría en caliente la economía de todas las partidas en curso.
+  it("congela el modo: editarlo después no cambia ni el estado ni la configuración pública", async () => {
+    const testServer = requiredServer();
+    const editable = await gameModes.create({
+      name: "editable-2p",
+      playersQuantity: 2,
+      pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
+    });
+    const room = await testServer.createRoom<DominoRoom>("domino", {
+      ...options("match-frozen-mode"),
+      gameModeId: editable.uuid,
+    });
+
+    expect(room.state.pointsToWin).toBe(100);
+    expect(await configOfRoom(testServer, room.roomId)).toMatchObject({
+      pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
+    });
+
+    await gameModes.update(editable.uuid, { pointsToWin: 7, entryFee: 1, prize: 2 });
+
+    // Los números van como LITERAL y no releídos del modo: leerlos del catálogo mediría que dos
+    // lecturas del mismo dato coinciden, y quedaría verde si la sala empezara a releerlo.
+    expect(room.state.pointsToWin).toBe(100);
+    expect(await configOfRoom(testServer, room.roomId)).toMatchObject({
+      pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
+    });
+
+    // Y LA EDICIÓN SÍ OCURRIÓ, que es lo que impide que las tres aserciones de arriba pasen por la
+    // razón equivocada: una mesa NUEVA nace con los valores nuevos. Sin esta vuelta, un `update`
+    // que no escribiera nada dejaría el test verde midiendo el catálogo que nunca cambió.
+    const nueva = await testServer.createRoom<DominoRoom>("domino", {
+      ...options("match-after-edit"),
+      gameModeId: editable.uuid,
+    });
+    expect(nueva.state.pointsToWin).toBe(7);
+    expect(await configOfRoom(testServer, nueva.roomId)).toMatchObject({
+      pointsToWin: 7,
+      entryFee: 1,
+      prize: 2,
+    });
+
+    await Promise.all([room.disconnect(), nueva.disconnect()]);
+  });
+
   it("marca la configuración pública como no cacheable", async () => {
     const testServer = requiredServer();
     const room = await testServer.createRoom<DominoRoom>("domino", options("match-cache"));
@@ -179,22 +312,26 @@ const defaultParticipants = [
   { platformId: "betaso", userUuid: "b", displayName: "B", currency: "VES" },
 ] as const;
 
+// El request YA NO TRAE DINERO NI PUNTOS: los pone el modo que `src/tests/game-mode-catalog.ts`
+// sembró en el catálogo del container, que es el mismo que la sala resuelve.
 function options(
   matchId: string,
   participants: readonly MatchParticipant[] = defaultParticipants,
-): DominoRoomOptions {
+): CreateMatchRequest {
   return {
     mode: "CASUAL",
     matchId,
-    gameModeId: "classic-2p",
+    gameModeId: CASUAL_2P.uuid,
     participants: [...participants],
     seed: "seed",
-    pointsToWin: 100,
     teamAssignment: "SEAT_ORDER",
     rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-    entryFee: 125,
-    prize: 250,
   };
+}
+
+async function configOfRoom(testServer: ColyseusTestServer, roomId: string) {
+  const response = await fetch(`http://127.0.0.1:${portOf(testServer)}/config/${roomId}`);
+  return (await response.json()) as { pointsToWin: number; entryFee: number; prize: number };
 }
 
 // Un string es azúcar para "de la plataforma de siempre": los tests que no miden

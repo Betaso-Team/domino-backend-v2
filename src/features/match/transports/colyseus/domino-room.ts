@@ -12,6 +12,7 @@ import {
 import { rootContainer } from "../../../../di-container.js";
 import type { Logger } from "../../../../logger.js";
 import { InvalidTokenError, type TokenVerifier } from "../../../auth/index.js";
+import type { GameModeReader } from "../../../game-mode/index.js";
 import { LobbySettings, MaintenanceModeError } from "../../../lobby/index.js";
 import {
   DEFAULT_GLOBAL_CONFIG,
@@ -25,7 +26,12 @@ import type { PlayerId } from "../../core/ids.js";
 import type { MatchState } from "../../core/state/index.js";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events.js";
 import { MatchEventNotifier, type MatchHistory } from "../../network/index.js";
-import { type SeatCredentials, configOf } from "../match-contract.js";
+import {
+  type SeatCredentials,
+  UnknownGameModeError,
+  configOf,
+  requestOf,
+} from "../match-contract.js";
 import { HEARTBEAT_MS, MatchRegistry } from "../match-registry.js";
 import {
   type MatchHasOutcome,
@@ -91,24 +97,43 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     return true;
   }
 
-  // `unknown` Y NO `DominoRoomOptions`: lo que llega acá viene del otro lado del cable, y
+  // `unknown` Y NO `CreateMatchRequest`: lo que llega acá viene del otro lado del cable, y
   // una firma tipada describe lo que se espera sin comprobar nada. La frontera real es
-  // `configOf`, que valida con zod y LANZA — así la sala no llega a existir con una mesa
-  // cuyo dinero no cierra.
+  // `requestOf`, que valida con zod y LANZA — así la sala no llega a existir con una mesa
+  // cuyos datos no cierran.
   override async onCreate(options: unknown): Promise<void> {
-    // EL LOG SE ARMA ANTES QUE NADA, y desde que `configOf` valida eso dejó de ser cosmético:
-    // `onCreate` ahora PUEDE lanzar, Colyseus enruta eso a `onUncaughtException` -> `crash()`, y
+    // EL LOG SE ARMA ANTES QUE NADA, y desde que el request se valida eso dejó de ser cosmético:
+    // `onCreate` PUEDE lanzar, Colyseus enruta eso a `onUncaughtException` -> `crash()`, y
     // `crash()` escribe por `this.log`. Con el logger armado recién junto al estado —donde
     // estaba—, un snapshot inválido moría con «Cannot read properties of undefined (reading
     // 'error')» en vez de nombrar el campo que vino mal. MEDIDO, no deducido: es lo que imprimía
     // el test de opciones inválidas antes de mover estas dos líneas.
+    //
+    // LA TAREA 10 SUMÓ TRES LANZADORES MÁS en esta misma ventana —el modo que no existe, el modo
+    // de cuatro y la cantidad que no coincide—, y los tres caen acá con el logger ya puesto. Es la
+    // razón de que la resolución del catálogo vaya DESPUÉS de estas dos líneas y no antes.
     const rootLogger = rootContainer.resolve<Logger>("Logger");
     this.log = rootLogger.child({ roomId: this.roomId });
 
     const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
 
-    const config = configOf(options);
+    // EL CATÁLOGO ES LA AUTORIDAD, Y SE CONSULTA UNA SOLA VEZ. El request nombra un modo; de acá
+    // salen los puntos y el dinero de la mesa, y lo que queda en `config` es una COPIA. La sala no
+    // vuelve a preguntar nunca más: editar un modo mientras hay una partida en curso no puede
+    // cambiarle el premio a una mesa ya cobrada, y `replay` rebobina con lo grabado y sin base.
+    //
+    // `activeByUuid` y no `byUuid`: un modo dado de baja NO EXISTE desde afuera, y el panel lo da
+    // de baja justamente para que deje de sentar mesas.
+    const request = requestOf(options);
+    const mode = await rootContainer
+      .resolve<GameModeReader>("GameModeReader")
+      .activeByUuid(request.gameModeId);
+    if (!mode) throw new UnknownGameModeError(request.gameModeId);
+    // Acá adentro se rechaza el 4P (`UNSUPPORTED_GAME_MODE`) y la cantidad que no coincide, y las
+    // dos cosas pasan ANTES de la génesis: el árbol de la partida nace unas líneas más abajo, en
+    // el `child.resolve("MatchState")`.
+    const config = configOf(request, mode);
     const maintenance = await rootContainer.resolve(LobbySettings).get();
     if (maintenance.isUnderMaintenance) {
       throw new MaintenanceModeError(maintenance.maintenanceMessage);

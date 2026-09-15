@@ -34,11 +34,21 @@ export { DominoRoom } from "./transports/colyseus/domino-room.js";
 // una superficie que nadie puede podar después.
 export { selectProcessIdToCreateRoom } from "./transports/colyseus/load-balancer.js";
 export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/register-http.js";
+// LAS TRES FUNCIONES DE LA FRONTERA Y SUS TIPOS. `requestOf`/`configOf` son el camino de una mesa
+// que NACE —el segundo pide el `GameMode` ya resuelto contra el catálogo— y `replayConfigOf` el de
+// una que se REBOBINA. Los tres errores salen también: el que pide crear una sala tiene que poder
+// distinguir "ese modo no existe" de "ese modo no lo sabemos jugar", y un error que no se puede
+// nombrar no se puede atrapar.
 export {
   configOf,
-  type DominoRoomOptions,
+  type CreateMatchRequest,
   type MatchParticipant,
+  replayConfigOf,
+  requestOf,
+  SeatCountMismatchError,
   type SeatCredentials,
+  UnknownGameModeError,
+  UnsupportedGameModeError,
 } from "./transports/match-contract.js";
 export {
   MatchRegistry,

@@ -3,6 +3,7 @@ import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from
 import { container } from "tsyringe";
 import { env } from "./env.js";
 import { JwtVerifier } from "./features/auth/index.js";
+import { type GameModeReader, MemoryGameModeRepository } from "./features/game-mode/index.js";
 import { LobbySettings } from "./features/lobby/settings.js";
 import { type GlobalDominoConfig, globalConfigWith } from "./features/match/core/config.js";
 import type { Clock } from "./features/match/core/engine/clock.js";
@@ -29,7 +30,8 @@ rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
     reconnectionWindowSeconds: env.reconnectionWindowSeconds,
   }),
 });
-rootContainer.register<Clock>("Clock", { useValue: { now: () => Date.now() } satisfies Clock });
+const clock: Clock = { now: () => Date.now() };
+rootContainer.register<Clock>("Clock", { useValue: clock });
 rootContainer.register<Logger>("Logger", { useValue: logger });
 rootContainer.register("TokenVerifier", { useValue: new JwtVerifier(env.jwtSecret) });
 
@@ -105,6 +107,22 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
 rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
 rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
+
+// EL CATÁLOGO DE MODOS, que desde la Tarea 10 es la AUTORIDAD sobre la economía de una mesa: la
+// sala resuelve acá el modo que el request nombró y de él salen `pointsToWin`, `entryFee` y
+// `prize`. Sin este registro ninguna sala puede nacer, así que el token no es opcional.
+//
+// Se registra SOLO el puerto de LECTURA aunque el adaptador sepa escribir: quien crea y edita es
+// la API administrativa del catálogo, que recibe su propio servicio. Un token de escritura acá
+// sería una puerta que la sala podría abrir sin querer.
+//
+// ⛔ HOY ES SIEMPRE EL DE MEMORIA, y es un estado de transición: la Tarea 11 es la que elige
+// `MongoGameModeRepository` cuando hay `MONGO_URI`, con el mismo criterio de `MemoryHistory` de
+// acá arriba —la presencia de la URI elige, no un interruptor que nombre la implementación—. Se
+// exporta porque el que lo siembra en la suite es un módulo de test: un catálogo vacío no puede
+// sentar ninguna mesa, y resolver el token para castearlo a repositorio sería peor.
+export const gameModes = new MemoryGameModeRepository(clock);
+rootContainer.register<GameModeReader>("GameModeReader", { useValue: gameModes });
 
 // CERRAR LO QUE ESTE ARCHIVO ABRIÓ, que es la deuda que el incremento del clúster dejó
 // anotada: nadie cerraba nada y `SIGTERM` cortaba en seco. Lo llama el apagado ordenado
