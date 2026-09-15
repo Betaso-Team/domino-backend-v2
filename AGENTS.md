@@ -323,7 +323,7 @@ Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
 Estado: **Tareas 1, 2, 3, 4, 5 y 6 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`, `3be878f`).
+`348f527`+`93809c1`, `3be878f`+`edf2e14`).
 Baseline **457 tests / 59 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
 (**189 módulos / 694 dependencias**) en verde. Primer paso pendiente: **Tarea 7, escribir el rojo de
 durabilidad e idempotencia del outbox en `src/features/game-mode/outbox.test.ts`**.
