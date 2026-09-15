@@ -371,21 +371,96 @@ DTO ni los endpoints del negocio.
 
 ### Inicio de juego desde navegador o app
 
-La API key nunca se instala en un cliente. El flujo público es:
+El contrato toma como referencia el flujo **Game launch** de _Vibra RGS Casino Wallet Integration_:
+la plataforma abre una URL entregada por el proveedor dentro de un `iframe` o una ventana nueva.
+Vibra incluye `siteId`, juego, usuario, moneda, idioma, canal, regreso al lobby y token en esa URL.
+El orquestador conserva el modelo de lanzamiento, pero deja en la URL pública únicamente un código
+opaco.
+
+Equivalencias:
+
+| Vibra                     | Orquestador                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------- |
+| `siteId`                  | `platformId`, derivado de `X-Platform-Key`                                              |
+| `gameId`                  | `gameId`                                                                                |
+| `gameMode` (`FUN`/`REAL`) | no se mezcla con `gameModeId`; se añadirá como `playMode` sólo cuando exista juego demo |
+| `userId`                  | `userUuid`, estable dentro de la plataforma                                             |
+| `currency`                | moneda de la sesión, congelada al aceptar el lanzamiento                                |
+| `locale`                  | `locale`                                                                                |
+| `channel`                 | `mobile` o `desktop`                                                                    |
+| `lobbyURL`                | `returnUrl` hacia la plataforma                                                         |
+| `lobbyTarget`             | `returnTarget`                                                                          |
+| `token`                   | `launchCode` opaco, corto y de un solo uso                                              |
+
+La API key nunca se instala en un cliente. El backend de la plataforma crea el lanzamiento:
+
+```http
+POST /v1/launches HTTP/1.1
+Host: orchestrator.example.com
+Content-Type: application/json
+X-Platform-Key: pk_live_public-id.secret-aleatorio
+Idempotency-Key: 3ccd0cf2-e995-4d5f-a926-51b3ebd4a996
+
+{
+  "gameId": "domino",
+  "gameModeId": "71ea5233-9e9d-4cbc-a155-31abf3f40a14",
+  "userUuid": "usuario-77",
+  "currency": "VES",
+  "locale": "es",
+  "channel": "mobile",
+  "returnUrl": "https://partner.example.com/games",
+  "returnTarget": "_top"
+}
+```
+
+`platformId` no se recibe: sale de la API key. Tampoco se reciben nombre, avatar ni saldo; el
+orquestador los consulta al adapter autenticado de la plataforma. `gameModeId` puede omitirse cuando
+el lanzamiento abre el lobby general del juego. La moneda se valida con la plataforma y queda
+inmutable: cobro, premio y reembolso deben usar esa misma moneda.
+
+Respuesta:
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+
+{
+  "launchId": "2f58e699-d83d-49ca-a447-1ff8328b7434",
+  "launchUrl": "https://play.example.com/launch?code=lc_live_Zi5x...",
+  "expiresAt": "2026-09-15T18:31:00.000Z"
+}
+```
+
+La plataforma usa `launchUrl` en una ventana nueva o en un `iframe`:
+
+```html
+<iframe
+  src="https://play.example.com/launch?code=lc_live_Zi5x..."
+  allow="fullscreen"
+></iframe>
+```
+
+El flujo completo es:
 
 1. la plataforma autentica al usuario por su mecanismo habitual;
-2. su backend llama `POST /launches` al orquestador con su API key, `userUuid`, juego y modo;
-3. el orquestador devuelve un código opaco aleatorio, de un solo uso y con vida máxima de 60 s;
-4. la plataforma abre el juego pasando únicamente ese código;
-5. el cliente canjea el código y el orquestador lo invalida atómicamente.
+2. su backend crea el lanzamiento con su API key;
+3. el orquestador valida plataforma, juego, modo, moneda y `returnUrl`;
+4. devuelve una URL con un código aleatorio de 32 bytes, de un solo uso y válido por 60 s;
+5. el navegador abre esa URL y el orquestador consume el código atómicamente;
+6. el usuario entra al lobby o modo solicitado; el cobro ocurre después, al formar la partida.
 
-El código no contiene identidad ni dinero y no es un JWT. Puede generarse con 32 bytes aleatorios y
-guardarse sólo como hash. El `platformId` y `userUuid` salen del registro server-side creado por el
-request autenticado, no de parámetros confiados al navegador.
+El código se guarda sólo como hash y no contiene identidad ni dinero. Un retry con la misma
+`Idempotency-Key` devuelve el mismo lanzamiento mientras siga vigente; para generar uno nuevo se usa
+otra clave. `returnUrl` debe pertenecer a los orígenes HTTPS permitidos para esa plataforma y
+`returnTarget` sólo acepta `_self`, `_parent` o `_top`; no se admiten URLs `javascript:`.
+El host de juego también limita qué plataformas pueden embeberlo mediante CSP `frame-ancestors`.
 
-La guía entregada a una plataforma necesita únicamente la URL, su key y ejemplos de `POST /launches`
-y operaciones idempotentes en `curl` y TypeScript. No tiene que implementar criptografía ni una
-librería propietaria.
+El `token` rotativo de Vibra acompaña después todas sus llamadas de wallet. No se copia esa parte:
+el `launchCode` sirve únicamente para entregar la sesión al navegador, mientras las operaciones de
+wallet usan las credenciales del adapter y sus claves de idempotencia.
+
+La guía para integrar una plataforma necesita únicamente la URL base, su API key y estos ejemplos
+de creación y apertura. No tiene que implementar criptografía ni una librería propietaria.
 
 Referencias normativas:
 
@@ -734,3 +809,7 @@ El `settlementOf` actual ya proyecta `REWARD` y `REFUND`, pero nadie lo entrega 
 12. Una key no puede usar rutas, juegos ni operaciones fuera de sus permisos.
 13. Repetir una `Idempotency-Key` con el mismo contenido devuelve el resultado anterior.
 14. Repetir una `Idempotency-Key` con distinto usuario, moneda, importe o tipo devuelve `CONFLICT`.
+15. La URL pública de lanzamiento no contiene `platformId`, `userUuid`, moneda ni API key.
+16. Un `launchCode` sólo puede consumirse una vez y falla después de 60 s.
+17. Un `returnUrl` fuera de los orígenes permitidos para la plataforma se rechaza.
+18. La moneda aceptada en el lanzamiento no puede cambiarse al cobrar o liquidar.
