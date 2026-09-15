@@ -1400,7 +1400,7 @@ function assertSettlements(
   const winnerTeamId = line.payload.winnerTeamId;
   const reason = line.payload.reason;
   assert.ok(winnerTeamId === "A" || winnerTeamId === "B", "winnerTeamId inválido");
-  assert.ok(reason === "SCORE" || reason === "ABANDONMENT", "reason inválido");
+  assert.equal(reason, "SCORE", "el smoke terminó sin jugar hasta el puntaje");
 
   // El estado del SDK no trae `platformId`/`userUuid`: son `noSync()` a propósito. Se
   // reconstruye únicamente ese snapshot privado desde el mismo config y se copian los equipos
@@ -1472,6 +1472,11 @@ async function play(roomA: SmokeRoom, roomB: SmokeRoom, config: DominoMatchConfi
     if (roomA.state.currentRound?.phase === "PLAYING" && playerId) {
       const owner = byPlayerId.get(playerId);
       if (!owner) throw new Error(`turno de asiento desconocido: ${playerId}`);
+      await waitUntil(
+        `la vista de ${playerId} no alcanzó al árbitro`,
+        () => signatureOf(owner.state) === before,
+        1_000,
+      );
       const action = nextAction(owner.state, playerId);
       if (!action) throw new Error(`sin acción para ${playerId}`);
       recentActions.push(`${playerId} ${action.type}`);
@@ -1830,7 +1835,9 @@ PowerShell:
 $env:RUN_ENGINE_SMOKE='1'; npm run test:deploy; $code=$LASTEXITCODE; Remove-Item Env:RUN_ENGINE_SMOKE; exit $code
 ```
 
-Expected: imágenes construidas, readiness 200 para `/2567/ready` y `/2568/ready`, partida en `FINISHED`, historial con `MATCH_RESOLVED`, `REWARD`/`REFUND` válidos, `smoke-client` sale 0 y Compose elimina contenedores/red/volúmenes.
+Expected: imágenes construidas, readiness 200 para `/2567/ready` y `/2568/ready`, partida en
+`FINISHED` por `SCORE` y sin comandos ilegales, historial con `MATCH_RESOLVED`, `REWARD`/`REFUND`
+válidos, `smoke-client` sale 0 y Compose elimina contenedores/red/volúmenes.
 
 Si falla por una API real de PM2, Nginx o Colyseus distinta de la asumida, corregir primero el plan en un commit `docs:` separado, explicando el comportamiento medido, y recién después ajustar código/config.
 
