@@ -154,7 +154,8 @@ huella canónica completa de la operación.
 - el publisher de Domino v1 no espera confirmación de RabbitMQ;
 - el consumidor descarta el mensaje fallido de la cola activa con `requeue: false`;
 - la interfaz Rabbit de Betaso está tipada para `ADD`, no como un contrato monetario bidireccional;
-- una API key estática o una allowlist de IP no autentican cada request ni impiden replay.
+- una API key global compartida o una allowlist de IP no identifican ni permiten revocar cada
+  plataforma por separado.
 
 Estos puntos describen el código actual; no cambian el comportamiento que el adaptador inicial de
 Betaso deba conservar.
@@ -326,62 +327,69 @@ hueco que tiene hoy el hash legado.
 
 ## Seguridad plataforma-orquestador sin JWT
 
-La recomendación es **HTTPS + HTTP Message Signatures con HMAC-SHA256**, una credencial diferente por
-plataforma. Los secretos viven únicamente en el backend de cada plataforma y en el orquestador;
+Para la primera versión se elige **HTTPS + una API key opaca diferente por plataforma**. Es menos
+completa que firmar cada request, pero reduce mucho el tiempo de implementación y la explicación a
+los integradores. La API key vive únicamente en el backend de la plataforma y en el orquestador;
 nunca en el navegador ni en la aplicación móvil.
 
-Cada request incluye, siguiendo RFC 9421 y RFC 9530:
+Cada request lleva `X-Platform-Key`; las mutaciones idempotentes añaden un segundo header:
 
 ```http
-Content-Digest: sha-256=:BASE64_SHA256_DEL_BODY:
+X-Platform-Key: pk_live_public-id.secret-aleatorio
 Idempotency-Key: 7b718f8f-...
-Signature-Input: sig1=("@method" "@authority" "@target-uri" "content-digest" "idempotency-key");created=1789502400;expires=1789502700;nonce="uuid";keyid="partner-x/key-2026-09";alg="hmac-sha256"
-Signature: sig1=:BASE64_HMAC:
 ```
 
-`keyid` identifica a la plataforma y la llave; por eso el orquestador no confía en un `platformId`
-libre del body. La firma cubre método, host, URI completa, digest del body e idempotencia: no puede
-reutilizarse para otro endpoint, payload u operación.
+La API key identifica a la plataforma; el orquestador deriva de ella `platformId` y permisos. Si el
+body también contiene `platformId`, debe coincidir, pero nunca es la fuente de autoridad.
+
+Esta key autentica llamadas **hacia** el orquestador. Para llamar desde el orquestador a la API de
+una plataforma, su adapter usa otra credencial emitida por esa plataforma; no se reutiliza la key de
+entrada en ambas direcciones.
 
 Validación obligatoria del orquestador:
 
 1. exigir TLS y rechazar HTTP;
-2. buscar la credencial por `keyid` y derivar de ella el `platformId` y los permisos;
-3. recalcular `Content-Digest` sobre los bytes recibidos;
-4. verificar el HMAC en tiempo constante;
-5. exigir `created` y `expires`, con una ventana máxima de cinco minutos;
-6. registrar `keyid + nonce` con unicidad hasta que expire para impedir replay;
-7. aplicar idempotencia de negocio por separado: el nonce protege el request, la
-   `Idempotency-Key` protege el movimiento monetario;
-8. limitar rutas, juegos, monedas y tasa de requests por plataforma;
-9. permitir dos llaves activas por plataforma para rotarlas sin corte y revocarlas por `keyid`.
+2. generar al menos 32 bytes aleatorios para el secreto;
+3. guardar sólo el identificador público y el hash SHA-256 del secreto, nunca la key recuperable;
+4. verificar el hash en tiempo constante y rechazar keys revocadas o del entorno incorrecto;
+5. derivar `platformId`, juegos, rutas y permisos desde la credencial;
+6. exigir `Idempotency-Key` en cobros, premios, reembolsos y creación de partidas;
+7. limitar la tasa de requests por plataforma y registrar auditoría sin escribir la key en logs;
+8. permitir dos keys activas por plataforma para rotarlas sin cortar el servicio.
 
-No se recomienda una API key sola: si se filtra, permite fabricar requests y repetirlos. Tampoco se
-recomienda usar IP como identidad; puede mantenerse únicamente como una defensa adicional.
+Las keys de sandbox y producción son diferentes. Una credencial comprometida puede revocarse por su
+identificador público sin afectar a las demás plataformas. Una allowlist de IP puede añadirse como
+defensa adicional, pero no reemplaza la key.
 
-Para plataformas de alto riesgo puede añadirse **mTLS** como segundo factor de máquina. El
-certificado identifica la conexión y el HMAC sigue protegiendo el request exacto incluso detrás de
-proxies que terminan TLS. No es requisito para la primera integración porque su operación y rotación
-son más costosas que una llave HMAC.
+### Endurecimiento posterior, no requisito del MVP
+
+HTTP Message Signatures con HMAC-SHA256 según RFC 9421 y mTLS siguen siendo opciones válidas, pero no
+forman parte del contrato inicial. Se justifican cuando una plataforma regulada los exija, el tráfico
+atraviese intermediarios no controlados o una auditoría requiera integridad y protección de replay a
+nivel de cada request. Pueden agregarse después en el middleware de autenticación sin cambiar los
+DTO ni los endpoints del negocio.
 
 ### Inicio de juego desde navegador o app
 
-El secreto HMAC nunca se instala en un cliente. El flujo público es:
+La API key nunca se instala en un cliente. El flujo público es:
 
 1. la plataforma autentica al usuario por su mecanismo habitual;
-2. su backend firma `POST /launches` al orquestador con `userUuid`, juego y modo;
+2. su backend llama `POST /launches` al orquestador con su API key, `userUuid`, juego y modo;
 3. el orquestador devuelve un código opaco aleatorio, de un solo uso y con vida máxima de 60 s;
 4. la plataforma abre el juego pasando únicamente ese código;
 5. el cliente canjea el código y el orquestador lo invalida atómicamente.
 
 El código no contiene identidad ni dinero y no es un JWT. Puede generarse con 32 bytes aleatorios y
 guardarse sólo como hash. El `platformId` y `userUuid` salen del registro server-side creado por el
-request HMAC, no de parámetros confiados al navegador.
+request autenticado, no de parámetros confiados al navegador.
+
+La guía entregada a una plataforma necesita únicamente la URL, su key y ejemplos de `POST /launches`
+y operaciones idempotentes en `curl` y TypeScript. No tiene que implementar criptografía ni una
+librería propietaria.
 
 Referencias normativas:
 
 - [RFC 9421 — HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421.html)
-- [RFC 9530 — Digest Fields](https://www.rfc-editor.org/rfc/rfc9530.html)
 - [RFC 8446 — TLS 1.3](https://www.rfc-editor.org/rfc/rfc8446.html)
 
 ## Adaptador de juego
@@ -507,7 +515,7 @@ El orquestador emite un token corto por jugador y devuelve al cliente `roomId`, 
 token. El secreto de firma sólo se comparte entre el orquestador y Domino.
 
 Este JWT es el ticket interno que Domino ya sabe validar; no autentica a una plataforma ante el
-orquestador. La comunicación B2B usa la firma HMAC anterior. Cambiar también el ticket interno por
+orquestador. La comunicación B2B usa la API key anterior. Cambiar también el ticket interno por
 uno opaco requeriría agregar introspección a Domino y no aporta nada a la primera integración.
 
 ## Instrucción económica emitida por un juego
@@ -722,7 +730,7 @@ El `settlementOf` actual ya proyecta `REWARD` y `REFUND`, pero nadie lo entrega 
 8. Rabbit caído no pierde una recompensa o reembolso.
 9. Cambiar la tasa o moneda después del cobro no altera la partida.
 10. Un cliente no puede ocupar un asiento reservado a otra pareja `{platformId, userUuid}`.
-11. Un request B2B sin firma, vencido o con body alterado se rechaza.
-12. Repetir el mismo `keyid + nonce` se rechaza aunque la firma sea válida.
+11. Un request B2B sin key, con key inválida, revocada o de otro entorno se rechaza.
+12. Una key no puede usar rutas, juegos ni operaciones fuera de sus permisos.
 13. Repetir una `Idempotency-Key` con el mismo contenido devuelve el resultado anterior.
 14. Repetir una `Idempotency-Key` con distinto usuario, moneda, importe o tipo devuelve `CONFLICT`.
