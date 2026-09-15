@@ -300,6 +300,48 @@ export function describeGameModeOutboxContract(
       expect(await outbox.next(now)).toBeUndefined();
     });
 
+    // ⚠ **EL TEST DE REGRESIÓN DEL DEFECTO MÁS CARO DE ESTA TAREA.** El modo nació por el panel
+    // —pasó por `enqueueCreated`, su evento se entregó— y DESPUÉS se editó a la revisión 1 con el
+    // insert del outbox perdido. La clave del `created` NO lleva revisión y no se borra nunca, así
+    // que una reconciliación que la aceptara sin condición daría a este modo por cubierto en la v1,
+    // en la v5 y en la v50: el reconciliador apagado exactamente para los modos que crea el panel,
+    // que son todos. Y es la ÚNICA pieza que cierra la ventana entre escribir el modo y escribir el
+    // outbox, porque no hay transacción entre las dos colecciones.
+    //
+    // La primera versión de este contrato no lo medía: el test de más arriba llega a la revisión 3
+    // por `ensureUpdated`, así que nunca hay un `created` en el almacén, y el de acá abajo se
+    // quedaba en la revisión cero, donde las dos lecturas coinciden. El hueco tenía la forma exacta
+    // del bug.
+    it("un modo creado y ya publicado recibe el updated de su revisión siguiente", async () => {
+      const { outbox, clock } = harnessOf();
+      const now = new Date(clock.now());
+      await outbox.enqueueCreated(clasica());
+      await drain(outbox, now);
+
+      await outbox.reconcile([clasica({ version: 1 })]);
+
+      expect(await outbox.next(now)).toMatchObject({
+        dedupeKey: '["game_mode.updated","mode-1",1]',
+        routingKey: "game_mode.updated",
+      });
+    });
+
+    // Y con el `created` PERDIDO además de la edición: se emite el `updated` de la revisión actual y
+    // NO el de la cero. El consumidor recibe un `updated` de un modo que nunca vio nacer, que es la
+    // misma semántica de recuperación del `/sync` de v1 — el cuerpo es el mismo y upsertea por `id`.
+    it("un modo sin created y ya editado recibe sólo el updated de su revisión", async () => {
+      const { outbox, clock } = harnessOf();
+      const now = new Date(clock.now());
+
+      await outbox.reconcile([clasica({ version: 1 })]);
+
+      const entry = await outbox.next(now);
+      expect(entry).toMatchObject({ dedupeKey: '["game_mode.updated","mode-1",1]' });
+      await outbox.sent(entry?.id ?? "", now);
+      // Uno solo: la revisión cero perdida no se reconstruye, se la lleva puesta la actual.
+      expect(await outbox.next(now)).toBeUndefined();
+    });
+
     // EL EVENTO YA ENTREGADO SIGUE CONTANDO. Los registros `SENT` se conservan —no hay TTL ni
     // borrado— justamente para esto: si la reconciliación sólo mirara lo pendiente, cada tick
     // volvería a emitir el evento de toda revisión ya publicada y el outbox no dejaría de crecer.

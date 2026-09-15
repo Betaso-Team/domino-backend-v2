@@ -117,9 +117,9 @@ export interface GameModeOutbox {
 // `["a:b","c"]` dan la misma cadena, y una colisión acá es un evento que NO se publica porque otro ya
 // usó la clave.
 
-// LA CREACIÓN NO LLEVA REVISIÓN: un modo se crea una sola vez y nace en `__v = 0`, así que el `uuid`
-// ya es único. Agregarle el cero sería un dato que no distingue nada y que habría que mantener
-// sincronizado con el reconciliador, que busca esta clave exacta.
+// LA CREACIÓN NO LLEVA REVISIÓN, y esa ausencia tiene una consecuencia que hay que leer junto con
+// `revisionKeysOf`: un modo se crea UNA sola vez y nace en `__v = 0`, así que el `uuid` ya lo
+// identifica. Lo que NO se sigue de ahí es que esta clave cubra al modo para siempre — ver abajo.
 export function createdKeyOf(mode: GameMode): string {
   return JSON.stringify([GAME_MODE_CREATED_KEY, mode.uuid]);
 }
@@ -139,18 +139,33 @@ export function syncKeyOf(batchId: string, mode: GameMode): string {
   return JSON.stringify([SYNC_TAG, batchId, mode.uuid]);
 }
 
-// LAS CLAVES QUE HACEN QUE UN MODO **NO** NECESITE RECONCILIACIÓN, y son DOS y no una. La respuesta a
-// la pregunta "¿este modo tiene el evento de su revisión actual?" es que sí cuando existe el `updated`
-// de esa revisión **o** cuando existe su `created` — porque un modo en revisión cero publicó su
-// cambio como `created`. Mirando sólo el `updated`, cada alta del panel recibiría además un `updated`
-// espurio en el primer tick, para siempre.
+// LAS CLAVES QUE HACEN QUE UN MODO **NO** NECESITE RECONCILIACIÓN. La pregunta exacta que contestan
+// es "¿este modo tiene el evento de **la revisión que tiene ahora**?", y las dos mitades de esa
+// pregunta son igual de importantes.
+//
+// EN REVISIÓN CERO SON DOS CLAVES: el `created` ES el evento de la revisión cero. Mirando sólo el
+// `updated`, cada alta del panel recibiría además un `updated` espurio en el primer tick, para
+// siempre.
+//
+// ⚠ **DE LA REVISIÓN UNO EN ADELANTE, EL `created` NO CUENTA, y ésta es la línea que ya estuvo mal
+// una vez.** `createdKeyOf` NO lleva revisión —a propósito: hay una sola creación por modo—, así que
+// la clave del `created` existe para SIEMPRE una vez que el modo pasó por `enqueueCreated`. Si se la
+// aceptara sin condición, `revisionKeysOf(mode).some(presente)` daría verdadero en la v1, en la v5 y
+// en la v50: **el reconciliador quedaría apagado exactamente para los modos que crea el panel**, que
+// son todos. Y como NO HAY TTL —también a propósito, porque los `SENT` son lo que impide republicar
+// toda revisión ya entregada en cada tick—, esa lectura equivocada no es un bache transitorio: es
+// permanente. La ventana modo→outbox, que es lo único que cierra la falta de transacción entre las
+// dos colecciones, se cerraría sola y en silencio.
+//
+// O sea que las tres decisiones se sostienen entre sí y no se pueden tocar de a una: clave de
+// creación sin revisión + sin TTL ⇒ el `created` sólo puede contar en la revisión cero.
 //
 // NO se mira la clave de `sync`: un lote forzado no es direccionable por revisión, así que un `sync`
 // posterior a una ventana perdida deja que el reconciliador emita igual su `updated`. El costo es un
 // duplicado que el consumidor ya deduplica; la alternativa sería que `sync` mintiera sobre qué
 // revisión entregó.
 export function revisionKeysOf(mode: GameMode): readonly string[] {
-  return [createdKeyOf(mode), updatedKeyOf(mode)];
+  return mode.version === 0 ? [createdKeyOf(mode), updatedKeyOf(mode)] : [updatedKeyOf(mode)];
 }
 
 // EL DESPACHADOR. Un tick = un lease, una reconciliación y UNA entrada.

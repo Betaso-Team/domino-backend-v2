@@ -264,17 +264,26 @@ describe("MongoGameModeOutbox: el documento durable", () => {
     await expect(outbox.enqueueCreated(clasica())).rejects.toThrow("sin conexión");
   });
 
-  // LA RECONCILIACIÓN PREGUNTA POR LAS CLAVES CANDIDATAS, no lee la colección entera: son dos claves
-  // por modo resueltas contra el índice único. Ver el techo escrito en `mongo-outbox.ts`.
-  it("la reconciliación consulta sólo las claves de los modos que recibió", async () => {
+  // LA RECONCILIACIÓN PREGUNTA POR LAS CLAVES CANDIDATAS, no lee la colección entera: se resuelven
+  // contra el índice único. Ver el techo escrito en `mongo-outbox.ts`.
+  //
+  // Y la consulta es donde se ve el alcance del `created`: en la revisión CERO son dos claves —el
+  // `created` ES el evento de esa revisión— y de la UNO en adelante es una sola. La clave del
+  // `created` no lleva revisión y no se borra nunca, así que preguntarla en la v2 daría cubierto para
+  // siempre a todo modo que haya pasado por el panel.
+  it("la reconciliación consulta la clave del created sólo en la revisión cero", async () => {
     const { outbox, collection } = harness();
 
     await outbox.reconcile([clasica({ version: 2 })]);
+    await outbox.reconcile([clasica()]);
 
-    expect(collection.find).toHaveBeenCalledTimes(1);
+    expect(collection.find).toHaveBeenCalledTimes(2);
     expect(collection.find.mock.calls[0]?.[0]).toEqual({
+      dedupeKey: { $in: ['["game_mode.updated","mode-1",2]'] },
+    });
+    expect(collection.find.mock.calls[1]?.[0]).toEqual({
       dedupeKey: {
-        $in: ['["game_mode.created","mode-1"]', '["game_mode.updated","mode-1",2]'],
+        $in: ['["game_mode.created","mode-1"]', '["game_mode.updated","mode-1",0]'],
       },
     });
   });
