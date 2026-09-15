@@ -3,6 +3,57 @@
 Este documento describe lo que necesita el orquestador para conectar Domino y otros juegos con
 distintas plataformas de usuarios, sin acoplar los motores a Betaso ni mover dinero dentro del juego.
 
+## Tecnología elegida
+
+El orquestador debe ser un backend y repositorio independiente de Domino y de Betaso:
+
+```text
+TypeScript estricto
+Node.js 24 LTS
+NestJS
+```
+
+**NestJS sobre Node es la recomendación.** Este servicio no está limitado por el rendimiento del
+router HTTP: espera a bases de datos, RabbitMQ y APIs externas. Importan más los módulos, inyección
+de dependencias, guards, validación, apagado ordenado, pruebas y observabilidad. Además, Betaso ya
+usa NestJS, por lo que el equipo puede reutilizar experiencia sin acoplar el nuevo servicio a su
+código.
+
+Comparación:
+
+| Opción         | Decisión                    | Motivo                                                                                                                                                      |
+| -------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node + NestJS  | **Elegida**                 | Mejor estructura para adapters, operaciones monetarias, HTTP, consumidores y procesos en background.                                                        |
+| Node + Express | Válida, pero no recomendada | Es más pequeño al inicio, pero habría que volver a decidir y mantener DI, módulos, ciclo de vida, guards, errores y documentación.                          |
+| Bun + Elysia   | No para la primera versión  | Es rápido y agradable, pero la compatibilidad de Bun con Node sigue siendo incompleta; ese riesgo no aporta valor en un servicio contable dominado por I/O. |
+
+Node 24 está en LTS y recibe soporte hasta abril de 2028. No se debe usar una versión `Current` en
+producción.
+
+### Cómo usar NestJS sin sobrecargar el servicio
+
+- una sola aplicación desplegable al inicio, con HTTP y consumidor Rabbit en el mismo proceso;
+- usar el adapter Express que Nest trae por defecto; cambiarlo sólo si una medición real lo exige;
+- módulos por capacidad: partidas, dinero, plataformas, juegos y entrega durable;
+- dominio escrito en TypeScript normal, sin decorators de Nest;
+- adapters de Betaso, Domino, HTTP, Rabbit y persistencia inyectados desde los módulos;
+- `amqplib`/`amqp-connection-manager` directamente para RabbitMQ, con publisher confirms y ACK
+  manual;
+- no agregar Bull, CQRS ni otro broker: el outbox de base de datos y RabbitMQ ya cubren el trabajo;
+- separar API y worker en procesos distintos sólo cuando una medición o aislamiento operativo lo
+  justifique.
+
+Nest ofrece transporte RabbitMQ, persistencia de mensajes y ACK manual, pero el flujo monetario
+necesita controlar exactamente cuándo se confirma la publicación y cuándo se marca el outbox. Por
+eso Rabbit debe quedar en un provider explícito y pequeño, no escondido detrás de un transporte RPC.
+
+Referencias de la decisión:
+
+- [Node.js — versiones y estado LTS](https://nodejs.org/en/about/previous-releases)
+- [NestJS — transporte RabbitMQ](https://docs.nestjs.com/microservices/rabbitmq)
+- [Bun — compatibilidad con Node.js](https://bun.sh/docs/runtime/nodejs-compat)
+- [Elysia — runtimes soportados](https://elysiajs.com/quick-start)
+
 ## Responsabilidad de cada sistema
 
 ### Orquestador
