@@ -13,7 +13,15 @@
 // Exportarlos ahora sería una superficie que nadie usa —y una superficie que nadie usa es una que
 // nadie puede podar después, porque no se sabe quién dependía de qué. Las tareas siguientes la
 // agrandan cuando aparezca el consumidor.
+// El despachador y los dos outbox salen como VALOR por lo mismo que los repositorios: los construye el
+// composition root —el único que sabe si esta instancia tiene Mongo y broker— y es también el único
+// que arranca y cierra el despachador, porque su ciclo de vida es el del proceso. El puerto
+// `GameModeOutbox` NO sale: quien lo consume adentro es el servicio de esta misma feature (Tarea 8), y
+// el root no necesita nombrarlo para pasar el adaptador que acaba de construir.
 export type { GameModeReader } from "./core/catalog.js";
 export type { GameMode } from "./core/game-mode.js";
+export { OutboxDispatcher } from "./outbox.js";
+export { MemoryGameModeOutbox } from "./transports/memory-outbox.js";
 export { MemoryGameModeRepository } from "./transports/memory-repository.js";
+export { MongoGameModeOutbox } from "./transports/mongo-outbox.js";
 export { MongoGameModeRepository } from "./transports/mongo-repository.js";
