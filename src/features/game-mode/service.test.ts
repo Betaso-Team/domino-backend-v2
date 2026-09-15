@@ -253,6 +253,30 @@ describe("GameModeService: create", () => {
     expect(rechazada.reason).toBeInstanceOf(DuplicateGameModeError);
     expect(await repository.all()).toHaveLength(1);
   });
+
+  it("una mutación que falla NO envenena la cola del proceso", async () => {
+    const { service, repository } = harness();
+    const creada = await service.create(clasica());
+
+    // LANZADAS EN EL MISMO TURNO, y la primera rechaza a propósito. Lo que se mide es el bug de
+    // manual de las colas de promesas: si la cola avanzara con la promesa SIN neutralizar
+    // (`this.tail = result` en vez de `result.then(() => undefined, () => undefined)`), quedaría con
+    // una promesa rechazada adentro y **toda mutación posterior de este proceso rechazaría para
+    // siempre con el error viejo, sin llegar a correr**. O sea un catálogo que se vuelve de sólo
+    // lectura —con un `GameModeNotFoundError` de otro request como explicación— hasta que alguien
+    // reinicie la instancia. La propiedad estaba escrita en un comentario y no la pineaba nadie.
+    const [falla, sigue] = await Promise.allSettled([
+      service.update("mode-x", { prize: 1 }),
+      service.update(creada.uuid, { prize: 20 }),
+    ]);
+
+    expect(falla?.status).toBe("rejected");
+    expect(sigue?.status).toBe("fulfilled");
+    expect((await repository.byUuid(creada.uuid))?.prize).toBe(20);
+
+    // Y la tercera, ya en otro turno, también entra: la cola queda sana y no sólo "sobrevivió una".
+    expect((await service.update(creada.uuid, { prize: 21 })).prize).toBe(21);
+  });
 });
 
 describe("GameModeService: update", () => {
@@ -334,6 +358,31 @@ describe("GameModeService: update", () => {
 
     expect(await drain(outbox, clock)).toEqual([]);
     expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("⚠ HUECO HEREDADO DE v1: un PUT que cambia sólo la cantidad fabrica el par duplicado", async () => {
+    const { service, repository } = harness();
+    await service.create(clasica());
+    const cuatro = await service.create(clasica({ playersQuantity: 4 }));
+
+    // NO LANZA, Y ES v1 AL PIE: la consulta de duplicados de `update` corre SÓLO cuando el nombre
+    // cambia (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:99`), así que un cuerpo con
+    // el mismo nombre y otra cantidad pasa derecho al `findOneAndUpdate` (`:110`). Acá es la misma
+    // línea (`service.ts`, la guarda `input.name !== current.name`).
+    await service.update(cuatro.uuid, { playersQuantity: 2 });
+
+    // Y QUEDA EL PAR QUE `create` RECHAZA UNA LÍNEA MÁS ARRIBA.
+    expect((await repository.all()).map((modo) => `${modo.name}/${modo.playersQuantity}`)).toEqual([
+      "Clásica/2",
+      "Clásica/2",
+    ]);
+
+    // ⚠ ESTE TEST NO CELEBRA EL HUECO: LO PINEA. Es el comportamiento de v1 reproducido fielmente, y
+    // cerrarlo no es una decisión de esta tarea —pide elegir primero cuál de las dos reglas de
+    // unicidad vale, la del par (`create`) o la del nombre solo (`update`), y cualquiera de las dos
+    // cambia lo que el panel puede hacer hoy—. **El que venga a cambiar la regla de unicidad empieza
+    // por acá**: este `it` es el que se va a poner rojo, y ponerlo rojo es lo correcto. Un hueco
+    // documentado sin test es un hueco que se ensancha en silencio.
   });
 });
 
@@ -457,6 +506,36 @@ describe("GameModeService: syncAll", () => {
     );
     expect(wake).toHaveBeenCalledTimes(1);
   });
+
+  it("el batchId VIAJA hasta la clave: dos lotes republican todo dos veces", async () => {
+    const { service, outbox, clock } = harness();
+    const clasicaCreada = await service.create(clasica());
+    const rapida = await service.create(clasica({ name: "Rápida" }));
+    await drain(outbox, clock);
+
+    expect(await service.syncAll("lote-1")).toEqual({ synced: 2 });
+    expect(await keysOf(outbox, clock)).toHaveLength(2);
+
+    // EL SEGUNDO LOTE TIENE QUE REPUBLICAR TODO OTRA VEZ, y esto es un camino de EVENTO PERDIDO y no
+    // una aserción de prolijidad. `sync` deduplica por `["game_mode.sync", batchId, uuid]`
+    // (`outbox.ts:138-140`), así que un `batchId` que no viaje —uno fijo adentro del servicio, o uno
+    // que se olvide de propagarse— hace que el SEGUNDO apretón del botón no encole absolutamente
+    // nada mientras contesta `synced: 2`. O sea: el operador aprieta "republicar todo" justamente
+    // porque el consumidor se quedó sin eventos, recibe un envelope de éxito, y no se republica uno
+    // solo. Nada falla, nada se loguea.
+    expect(await service.syncAll("lote-2")).toEqual({ synced: 2 });
+
+    const segundo = await drain(outbox, clock);
+    // Las claves se assertan como LITERAL y no reconstruidas con `syncKeyOf`: recalcularlas con la
+    // misma función del código mediría que dos llamadas iguales dan lo mismo, y acompañaría un
+    // `batchId` fijo sin ponerse roja.
+    expect(segundo.map((una) => una.dedupeKey).sort()).toEqual(
+      [
+        JSON.stringify(["game_mode.sync", "lote-2", clasicaCreada.uuid]),
+        JSON.stringify(["game_mode.sync", "lote-2", rapida.uuid]),
+      ].sort(),
+    );
+  });
 });
 
 describe("GameModeService: el lease del catálogo", () => {
@@ -546,13 +625,18 @@ describe("GameModeService: sus dependencias", () => {
     const source = readFileSync("src/features/game-mode/service.ts", "utf8");
     const imported = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
 
-    // LA LISTA EXACTA Y NO UN "no contiene amqp", y la diferencia importa: la tentación no es
-    // importar el publicador, es agregarle al servicio un quinto parámetro que publique "sólo para
-    // el create". Con la lista cerrada, cualquier dependencia nueva —el publicador, el despachador,
-    // el container— tiene que pasar por acá y por el argumento que la justifique.
+    // LA LISTA EXACTA Y NO UN "no contiene amqp": con la lista cerrada, toda dependencia IMPORTADA
+    // nueva —el publicador, el despachador, el container— tiene que pasar por acá y por el argumento
+    // que la justifique.
     //
-    // Los tipos NO lo impiden: nada en TypeScript prohíbe un `AmqpDelivery` en el constructor. Lo
-    // que lo impide es esta aserción.
+    // ⚠ **LO QUE ESTA GUARDA NO CUBRE, dicho para no creerle de más**: un quinto parámetro tipado
+    // con un tipo ESTRUCTURAL escrito en la línea (`publish: (key: string, body: unknown) =>
+    // Promise<void>`) no importa nada, así que pasa verde — medido. Los tipos tampoco lo impiden:
+    // nada en TypeScript prohíbe un publicador en el constructor. Esta aserción cubre la forma
+    // frecuente —importar el puerto AMQP— y no la estructural, y **no se intenta cubrir la segunda**:
+    // el guardarraíl que la atrapara tendría que entender la firma del constructor, y un test que
+    // parsea TypeScript miente de otras maneras. Lo que de verdad sostiene la propiedad es el
+    // comentario de cabecera de `service.ts` y la revisión; esto es el piso, no el techo.
     expect([...imported].sort()).toEqual([
       "../../shared/mongo-lease.js",
       "./core/catalog.js",
