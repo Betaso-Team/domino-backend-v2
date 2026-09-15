@@ -24,10 +24,20 @@
 // Los CUATRO ERRORES tampoco salen todavía — quien los traduce a 404/409/503 es la frontera HTTP de
 // la Tarea 9, que vive adentro de esta misma feature. El día que un consumidor de afuera necesite
 // distinguirlos, salen; exportarlos antes es superficie que nadie puede podar después.
+//
+// `registerGameModeHttp` sale con su tipo de dependencias, igual que las otras dos superficies HTTP
+// del repo (`features/match/index.ts`, `features/lobby/index.ts`): el composition root es el único
+// que puede llamarla porque es el único que tiene el servicio armado y el único que lee
+// `env.internalApiKey`. Los CUATRO ERRORES siguen sin salir: quien los traduce a 404/409/503 es esa
+// misma función, acá adentro.
 export type { GameModeReader } from "./core/catalog.js";
 export type { GameMode } from "./core/game-mode.js";
 export { OutboxDispatcher } from "./outbox.js";
 export { GameModeService } from "./service.js";
+export {
+  type GameModeHttpDeps,
+  registerGameModeHttp,
+} from "./transports/http/register-http.js";
 export { MemoryGameModeOutbox } from "./transports/memory-outbox.js";
 export { MemoryGameModeRepository } from "./transports/memory-repository.js";
 export { MongoGameModeOutbox } from "./transports/mongo-outbox.js";
