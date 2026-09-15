@@ -322,7 +322,8 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3, 4 y 5 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`, `348f527`).
+Estado: **Tareas 1, 2, 3, 4 y 5 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
+`348f527`+`93809c1`).
 Baseline **441 tests / 58 archivos**, con `typecheck`, suite, lint, `format` y `depcruise`
 (**185 módulos / 687 dependencias**) en verde. Primer paso pendiente: **Tarea 6, escribir el rojo del
 publicador AMQP con confirms en `src/shared/amqp.test.ts`**.
