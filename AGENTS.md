@@ -170,8 +170,8 @@ Autoridad operativa:
 Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
-Estado: **Tarea 1 completa y revisada**; baseline **346 tests / 49 archivos**; siguiente:
-**Task 2, Step 1**.
+Estado: **Tarea 2 completa**; baseline **349 tests / 50 archivos**; siguiente:
+**Task 3, Step 1**.
 La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
 queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
 `*UcMinor` son enteros seguros: los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
@@ -201,6 +201,26 @@ Lo que dejó la Tarea 1, y que conviene saber antes de tocar nada de acá:
   parejas en un `Map` aparte del DTO público, que sigue llevando solo ids opacos.
 - **Los tests del motor usan `core/engine/tests/match-config-fixture.ts`**; el arnés E2E resuelve
   `userUuid`→`seat-N` con `playerIdOf`/`clientOf`, así que ningún test escribe `seat-N` a mano.
+
+Lo que dejó la Tarea 2:
+
+- **`settlementOf` PROYECTA, no mueve** (`network/settlement.ts`, exportada por
+  `features/match/index.ts`). Es una función pura: `MATCH_ABORTED` → `REFUND` de
+  `entryFeeUcMinor` a todos los asientos, `MATCH_RESOLVED` → `REWARD` de `prizeUcMinor` al
+  ganador, cualquier otro evento → `undefined`. **No hay puerto de wallet, ni adaptador, ni
+  outbox**: todavía no existe un orquestador a quien entregarle el trabajo, y un puerto sin
+  quien lo llame es una interfaz que se diseña dos veces.
+- **Devuelve la pareja y la moneda congeladas, y el `rateId` de la mesa. No convierte.** La
+  identidad sale de `config.seats` —donde quedó congelada— y el equipo ganador del estado; el
+  cruce es por el id opaco, así que el motor sigue sin saber de plataformas.
+- **La `idempotencyKey` se serializa con `JSON.stringify(["matchId","KIND",platformId,userUuid])`**,
+  igual que el índice del registro y por lo mismo: concatenada, dos parejas distintas pueden dar
+  la misma clave, y una colisión acá es un pago que no se hace porque otro ya usó la clave.
+- **Cero ganadores o más de uno lanza `InvariantViolationError`**, que cierra la partida. Es
+  "plata de por medio" aplicada: el 4P todavía no tiene regla escrita de cómo se parte el premio,
+  y sin esa regla repartirlo es inventarla al liquidar. **Si alguna vez se liquida una mesa de
+  cuatro, esta guarda es el primer lugar que hay que tocar** —y hay que traer la regla, no
+  borrarla—.
 
 ⚠ **Compatibilidad de schema — ruptura de wire, y no hay negociación de versión en el repo.** Los
 tres campos sincronizados nuevos (`displayName`, `username`, `profilePicture`) se insertaron

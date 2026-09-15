@@ -964,7 +964,7 @@ exacto: Task 2, Step 1.
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`
 
-- [ ] **Step 1: Escribir los tests monetarios rojos**
+- [x] **Step 1: Escribir los tests monetarios rojos**
 
 Crear `network/tests/settlement.test.ts`:
 
@@ -1036,13 +1036,13 @@ describe("settlementOf", () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar el rojo**
+- [x] **Step 2: Ejecutar el rojo**
 
 Run: `npx vitest run src/features/match/network/tests/settlement.test.ts`
 
 Expected: FAIL porque `network/settlement.ts` no existe.
 
-- [ ] **Step 3: Implementar la proyección pura**
+- [x] **Step 3: Implementar la proyección pura**
 
 Crear `network/settlement.ts`:
 
@@ -1118,7 +1118,7 @@ export function settlementOf(
 
 Exportar el archivo desde `network/index.ts` y exportar `settlementOf`, `SettlementEntry`, `SettlementInstruction` y `SettlementKind` desde la superficie `features/match/index.ts`.
 
-- [ ] **Step 4: Verificar, documentar y commit**
+- [x] **Step 4: Verificar, documentar y commit**
 
 Run:
 

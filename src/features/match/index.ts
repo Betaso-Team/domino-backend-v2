@@ -5,6 +5,16 @@
 // frontera de la feature existiría solo para los que ya están adentro.
 export type { Clock } from "./core/engine/clock.js";
 export type { HistoryReader } from "./network/history.js";
+// La proyección monetaria sale por acá porque su consumidor está AFUERA de la feature: hoy
+// el smoke, mañana el adaptador que efectivamente pague. Sale la función y salen sus tipos
+// —una instrucción que nadie puede nombrar no se puede recibir ni loguear—, pero no sale
+// nada del evento que la origina: quién paga no tiene por qué saber del catálogo de eventos.
+export {
+  settlementOf,
+  type SettlementEntry,
+  type SettlementInstruction,
+  type SettlementKind,
+} from "./network/settlement.js";
 export { DominoRoom } from "./transports/colyseus/domino-room.js";
 // El reparto de partidas entre procesos. Sale por acá porque lo entrega el composition root al
 // servidor, que es el único que puede: `matchMaker` no se importa desde ningún otro lado.
