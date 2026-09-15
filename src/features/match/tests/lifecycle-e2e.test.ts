@@ -136,6 +136,8 @@ describe("ciclo de vida de una partida", () => {
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
       serverNow: expect.any(Number),
     });
   });

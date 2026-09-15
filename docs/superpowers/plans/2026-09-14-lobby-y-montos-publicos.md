@@ -16,7 +16,7 @@ este contrato del front.
 ## Tareas
 
 - [x] **Tarea 0 — Publicar el punto de continuidad.** Añadir este incremento a `AGENTS.md`.
-- [ ] **Tarea 1 — Montos públicos.** Escribir primero el test rojo del DTO y exponer `entryFee` y
+- [x] **Tarea 1 — Montos públicos.** Escribir primero el test rojo del DTO y exponer `entryFee` y
   `prize` desde el snapshot inmutable, sin publicar tasa, moneda ni identidad.
 - [ ] **Tarea 2 — Estado y contadores del lobby.** Escribir primero el E2E rojo; añadir el schema,
   registrar `lobby`, autenticarlo y contar conexiones por `gameModeId` usando el listing compartido.

@@ -61,6 +61,8 @@ describe("MatchRegistry", () => {
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
     });
   });
 
@@ -118,6 +120,8 @@ describe("MatchRegistry", () => {
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
     });
     expect(await procesoB.matchOf(seatRef("u1"))).toBe("room-1");
   });
@@ -178,10 +182,10 @@ describe("MatchRegistry", () => {
     expect(await registry.matchOf({ platformId: "third", userUuid: "same" })).toBeUndefined();
   });
 
-  // La allowlist del DTO público ahora también cubre DINERO. Se afirma sobre el contenido
-  // crudo de la clave y no sobre la respuesta: un dato que nunca se sirve pero sí se
-  // guarda sigue estando afuera del proceso, y el almacén lo comparte todo el clúster.
-  it("no guarda identidad, moneda, tasa ni montos en la configuración pública", async () => {
+  // `entryFee` y `prize` son los dos montos PÚBLICOS en UC menores. Lo privado sigue siendo
+  // cómo se cobró a cada asiento: identidad, moneda y tasa. También se fijan los NOMBRES del
+  // wire para que el front no herede los sufijos contables internos de v2.
+  it("publica los montos UC sin identidad, moneda, tasa ni nombres internos", async () => {
     const store = new MemoryKeyValueStore();
     const registry = new MatchRegistry(store);
     await registry.register("room-1", collidingConfig);
@@ -195,9 +199,11 @@ describe("MatchRegistry", () => {
       "USD",
       collidingConfig.rateId,
       "entryFeeUcMinor",
+      "prizeUcMinor",
     ]) {
       expect(raw).not.toContain(secret);
     }
+    expect(JSON.parse(raw ?? "{}")).toMatchObject({ entryFee: 125, prize: 250 });
   });
 
   // Entre que un jugador dejó esta sala y que esta sala se entera, el jugador puede haberse
