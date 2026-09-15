@@ -228,6 +228,8 @@ const schema = z.object({
    * Cualquier valor distinto de "1" lo deja apagado, así que no hay entorno que rechazar.
    */
   WRITE_GOLDEN: z.string().optional(),
+  /** Activa exclusivamente el cliente de certificación Docker/PM2/Nginx. */
+  RUN_ENGINE_SMOKE: z.string().optional(),
 });
 
 export interface Env {
@@ -260,6 +262,7 @@ export interface Env {
   readonly reconnectionWindowSeconds: number;
   readonly logLevel: "debug" | "info";
   readonly writeGolden: boolean;
+  readonly runEngineSmoke: boolean;
 }
 
 export function parseEnv(source: Record<string, string | undefined>): Env {
@@ -300,6 +303,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     reconnectionWindowSeconds: parsed.RECONNECTION_WINDOW_SECONDS,
     logLevel: parsed.NODE_ENV === "production" ? "info" : "debug",
     writeGolden: parsed.WRITE_GOLDEN === "1",
+    runEngineSmoke: parsed.RUN_ENGINE_SMOKE === "1",
   };
 }
 

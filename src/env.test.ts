@@ -138,6 +138,15 @@ describe("parseEnv", () => {
     expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).publicAddress).toBeUndefined();
   });
 
+  it("solo activa el smoke con el valor 1", () => {
+    expect(parseEnv({ JWT_SECRET: "s".repeat(16), RUN_ENGINE_SMOKE: "1" }).runEngineSmoke).toBe(
+      true,
+    );
+    expect(parseEnv({ JWT_SECRET: "s".repeat(16), RUN_ENGINE_SMOKE: "true" }).runEngineSmoke).toBe(
+      false,
+    );
+  });
+
   it("rechaza un NODE_ENV fuera del enum", () => {
     expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), NODE_ENV: "staging" })).toThrow(/NODE_ENV/);
   });

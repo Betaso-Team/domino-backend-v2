@@ -1192,7 +1192,7 @@ en `network/settlement.ts` y su test; esto es el índice de las diferencias):
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-09-14-identidad-multiplataforma-y-smoke-pm2.md`
 
-- [ ] **Step 1: Escribir el rojo del bot y de la flag**
+- [x] **Step 1: Escribir el rojo del bot y de la flag**
 
 Crear `src/smoke/engine-smoke.test.ts`:
 
@@ -1216,13 +1216,13 @@ describe("engine smoke", () => {
 
 El segundo caso fija que fuera de una ronda `PLAYING` no se envía ningún verbo; los caminos jugar/robar/pasar quedarán cubiertos por la partida real y por los E2E existentes del engine.
 
-- [ ] **Step 2: Ejecutar el rojo**
+- [x] **Step 2: Ejecutar el rojo**
 
 Run: `npx vitest run src/smoke/engine-smoke.test.ts`
 
 Expected: FAIL porque el módulo no existe.
 
-- [ ] **Step 3: Añadir la flag al único lector de entorno**
+- [x] **Step 3: Añadir la flag al único lector de entorno**
 
 En el schema de `env.ts` añadir:
 
@@ -1252,7 +1252,7 @@ Documentar en `.env.example`:
 RUN_ENGINE_SMOKE=0
 ```
 
-- [ ] **Step 4: Implementar el runner con funciones pequeñas y plazos**
+- [x] **Step 4: Implementar el runner con funciones pequeñas y plazos**
 
 Crear `src/smoke/engine-smoke.ts`:
 
@@ -1558,7 +1558,7 @@ if (isMain) {
 }
 ```
 
-- [ ] **Step 5: Añadir el script y verificar local sin Docker**
+- [x] **Step 5: Añadir el script y verificar local sin Docker**
 
 En `package.json` añadir:
 
@@ -1581,7 +1581,7 @@ Run: `npm run smoke:client`
 
 Expected: código distinto de cero y mensaje `el smoke requiere RUN_ENGINE_SMOKE=1`; no intenta red.
 
-- [ ] **Step 6: Registrar continuidad y commit**
+- [x] **Step 6: Registrar continuidad y commit**
 
 Actualizar `AGENTS.md` con `Tarea 3 completa`, baseline y `siguiente: Task 4, Step 1`; marcar Task 3 completa y reindexar en modo `fast`.
 

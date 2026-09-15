@@ -170,11 +170,10 @@ Autoridad operativa:
 Diseño aprobado:
 `docs/superpowers/specs/2026-09-14-identidad-multiplataforma-y-smoke-pm2-design.md`.
 
-Estado: **Tareas 1 y 2 completas y revisadas** (`b930b75`…`ce8a895` la 1; `d3617cb`, `8239ca1`,
-`0339dca`, `a55fa53`, `ceb6957` la 2); baseline **357 tests / 50 archivos**; siguiente: **Task 3, Step 1**
-—el cliente smoke, que consume `settlementOf`—. **Acá se paró el incremento**: de la Task 3 en
-adelante no se ejecutó nada, y las tres correcciones que la revisión ya le encontró al plan de esa
-tarea están aplicadas al texto del plan y anotadas en la tabla de defectos.
+Estado: **Tareas 1–3 completas y revisadas** (`b930b75`…`ce8a895` la 1; `d3617cb`, `8239ca1`,
+`0339dca`, `a55fa53`, `ceb6957` la 2; `60d7c19` y el commit siguiente la 3); baseline
+**360 tests / 51 archivos**; siguiente: **Task 4, Step 1** —levantar el artefacto bajo PM2 y Nginx
+en Docker y ejecutar ahí el cliente smoke completo—.
 La identidad externa pasa a ser `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y
 queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. Los montos
 `*UcMinor` son enteros seguros: los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
@@ -344,8 +343,8 @@ Y del plan del incremento activo (`2026-09-14-identidad-multiplataforma-y-smoke-
 | 1 | Y el octavo, encontrado al escribir el test que pinea el cableado: desde que `configOf` valida, `onCreate` puede lanzar ANTES de que `this.log` exista, así que `crash()` moría con «Cannot read properties of undefined (reading 'error')» en vez de nombrar el campo inválido — y después lanzaba otra vez adentro del manejador, porque Colyseus rechaza `disconnect()` durante `onCreate` | el `fix:` de la revisión |
 | 2 | Uno solo, y del lado del TEST: el `it` «rechaza un ganador imposible» solo armaba el caso de CERO ganadores, así que con el guard mutado a `winners.length === 0` los tres tests seguían verdes mientras el 4P —que `configOf` ya acepta— pagaba el premio entero a cada ganador. Se descubrió mutando el guard a mano; el cuarto `it` es el que mide esa rama | `8239ca1` + el `docs:` siguiente |
 | 2 | Y los de la revisión, todos por lo mismo —el plan trata al tercer parámetro como si no pudiera estar mal—: `settlementOf(evento, estadoDeOtraMesa, config)` no da 0 ni 2 ganadores sino **exactamente 1**, porque los `seat-N` son posicionales, y paga una instrucción impecable a quien no jugó; el `if (type !== "MATCH_RESOLVED")` de salida acepta en silencio cualquier evento de plata futuro; el `objectContaining` del `REFUND` dejaba pasar el `kind` cambiado a `"REWARD"` (medido: suite verde); los tres `AbortReason` y el reembolso de cuatro entradas no los medía nadie; y la superficie exportaba la función sin los tipos de sus parámetros | `a55fa53` + este `docs:` |
-| 3 | **No ejecutada**, pero la revisión le encontró dos y quedan corregidas en el texto: el smoke importa `settlementOf` con un import PROFUNDO (`network/settlement.js`), salteándose la superficie que la Task 2 acaba de construir —y `depcruise` no lo ve, porque `feature-boundary` solo mira aristas que SALEN de `src/features/`, y el smoke no vive ahí—; y `assertSettlements` recalcula la `idempotencyKey` con el mismo `JSON.stringify` del código bajo prueba, o sea una aserción tautológica que acompañaría cualquier cambio de formato sin ponerse roja | este `docs:` |
-| 3 | El tercero apareció al empezar a ejecutarla: `settlementOf` compara la identidad privada del estado con el snapshot, pero el plan le pasaba `room.state`, que viene del SDK y **no puede** traer `platformId`/`userUuid` porque son `noSync()`. El smoke ahora toma ganador/equipos del deploy y reconstruye localmente solo el snapshot privado antes de proyectar; hacer sincronizables esos campos para satisfacer el test rompería la barrera de privacidad que la Task 1 vino a crear | el `docs:` siguiente |
+| 3 | La revisión le encontró dos: el smoke importaba `settlementOf` con un import PROFUNDO (`network/settlement.js`), salteándose la superficie que la Task 2 acaba de construir —y `depcruise` no lo ve, porque `feature-boundary` solo mira aristas que SALEN de `src/features/`, y el smoke no vive ahí—; y `assertSettlements` recalculaba la `idempotencyKey` con el mismo `JSON.stringify` del código bajo prueba, o sea una aserción tautológica que acompañaría cualquier cambio de formato sin ponerse roja | `60d7c19` |
+| 3 | El tercero apareció al empezar a ejecutarla: `settlementOf` compara la identidad privada del estado con el snapshot, pero el plan le pasaba `room.state`, que viene del SDK y **no puede** traer `platformId`/`userUuid` porque son `noSync()`. El smoke ahora toma ganador/equipos del deploy y reconstruye localmente solo el snapshot privado antes de proyectar; hacer sincronizables esos campos para satisfacer el test rompería la barrera de privacidad que la Task 1 vino a crear | `60d7c19` |
 
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 
