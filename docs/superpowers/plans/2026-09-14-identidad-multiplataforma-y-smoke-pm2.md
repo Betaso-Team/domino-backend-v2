@@ -1365,7 +1365,7 @@ const signatureOf = (state: MatchState) =>
     state.currentRound?.phase,
     state.currentRound?.roundNumber,
     state.currentRound?.currentTurn?.playerId,
-    state.currentRound?.board.tiles.length,
+    state.currentRound?.board.tiles.map(({ left, right, side }) => [left, right, side]),
     state.currentRound?.boneyard?.count,
     state.players.map(({ playerId, hand }) => [playerId, hand.tileCount]),
   ]);
