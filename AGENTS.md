@@ -322,11 +322,57 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3, 4, 5, 6, 7, 8 y 9 completas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de la
-revisión, `dd16258`+`075900c`). Baseline **640 tests / 65 archivos**, con `typecheck`, suite, lint,
-`format` y `depcruise` (**202 módulos / 778 dependencias**) en verde.
-Primer paso pendiente: **Tarea 10, resolver el modo de juego al crear una partida**.
+Estado: **Tareas 1, 2, 3, 4, 5, 6, 7, 8, 9 y 10 completas** (`ca9e68a`, `5771b1e`, `ec63d71`,
+`ce54f9e`, `348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de
+la revisión, `dd16258`+`075900c`, `3c9930c`). Baseline **660 tests / 65 archivos**, con `typecheck`,
+suite, lint, `format`, `build` y `depcruise` (**203 módulos / 790 dependencias**) en verde.
+Primer paso pendiente: **Tarea 11, cablear entorno, DI, readiness y apagado**.
+
+Lo que dejó la Tarea 10:
+
+- **EL CATÁLOGO ES LA AUTORIDAD SOBRE LA ECONOMÍA DE UNA MESA.** El request nombra un
+  `gameModeId`, la sala lo resuelve con `activeByUuid` y `pointsToWin`/`entryFee`/`prize` salen del
+  modo. El request **ya no puede nombrarlos**: el `strictObject` los RECHAZA en vez de ignorarlos,
+  porque ignorarlos dejaría a un llamador creyendo que fijó el premio mientras el modo lo pisa.
+- **LA FRONTERA SON DOS FUNCIONES PORQUE LAS ENTRADAS SON DOS COSAS.** `requestOf` +
+  `configOf(request, mode)` es el camino de una mesa que NACE; `replayConfigOf` valida un snapshot
+  YA GRABADO y **no consulta nada**. Con una sola función que resolviera el modo, el CLI de soporte
+  tendría que ir a Mongo para rebobinar —y encontraría el modo YA EDITADO—, así que una partida
+  vieja se reconstruiría con los puntos y el premio de hoy.
+- **EL MODO SE COPIA AL SNAPSHOT EN `onCreate` Y NO SE VUELVE A CONSULTAR.** Editar un modo con
+  partidas en curso no puede reescribirle la economía a una mesa cuya inscripción ya se cobró. Lo
+  mide un test que crea la sala, edita el modo y **además** crea una mesa nueva que sí ve los
+  valores nuevos: sin esa segunda mitad, un `update` que no escribiera nada dejaba el test verde.
+- ⚠ **EL 4P SE RECHAZA EN `configOf`, NO EN LA SALA**, y la ubicación es la decisión: `configOf` es
+  lo único que ve el request Y el modo, y es por donde pasa toda mesa que nace —la sala es UN
+  llamador, y una segunda puerta de creación quedaría sin guarda—. «Antes de génesis» queda
+  garantizado por construcción: el árbol nace de un `DominoMatchConfig` y no hay otro modo de
+  obtener uno. **La guarda de `settlementOf` NO se tocó**; sigue siendo la última red.
+- **Y `replayConfigOf` SÍ acepta cuatro asientos.** Se prohíbe que una mesa de cuatro NAZCA, no que
+  una ya grabada se rebobine y se audite — que es justo lo que hace falta el día que una quede con
+  la plata trabada. Los tests de mesa de cuatro de `settlement.test.ts` se arman ahora con ella.
+- **«El replay nunca consulta el catálogo» se mide SOBRE LA LISTA EXACTA DE IMPORTS de
+  `src/replay.ts`**, con el idioma de la Tarea 8. Un reader envenenado sólo diría que hoy no se
+  llama con esta entrada; que el archivo no importe nada de `features/game-mode` es estructural. Lo
+  que la guarda no cubre: un `await import()` o un `resolve()` del container, que ya está importado.
+- **`src/di-container.ts` registra SOLO `GameModeReader`** aunque el adaptador sepa escribir: quien
+  crea y edita es la API administrativa, y un token de escritura ahí sería una puerta que la sala
+  podría abrir sin querer. Hoy es siempre el de memoria — la rama de Mongo es de la Tarea 11.
+- **`src/tests/game-mode-catalog.ts` siembra el modo de la suite UNA vez**, y vive fuera de
+  `src/features/` porque `feature-boundary` prohíbe que `features/lobby/tests/lobby-e2e.test.ts`
+  —que también crea mesas de dominó— importe el arnés de `features/match/tests/`.
+- **El golden se regeneró y lo único que cambió además de los instantes es `meta.gameModeId`**, que
+  ahora es el uuid del modo resuelto. Las 167 entradas y el `finalState` salieron idénticos. ⚠ Ese
+  uuid lo genera `MemoryGameModeRepository` en cada corrida, así que **cambia en cada regeneración
+  como los timestamps**; el motor no lo lee.
+- **Seis mutaciones verificadas a mano**, cada una roja en el test que dice medirla y en ningún
+  otro: `byUuid` en vez de `activeByUuid`, `pointsToWin` fijo en vez del modo, sin la guarda de
+  cantidad, sin la guarda del 4P, un import del catálogo en `replay.ts`, y una sala que relee el
+  catálogo después de `onCreate`.
+- ⚠ **EL SMOKE TIENE EL LLAMADOR PERO TODAVÍA NO PUEDE CORRER.** `src/smoke/engine-smoke.ts` crea
+  el modo con `POST /game-modes` + `X-Internal-Key` antes de crear la sala, pero esa ruta no está
+  registrada hasta que la **Tarea 11** llame a `registerGameModeHttp` desde `src/app.config.ts`, y
+  las fases del compose son de la **Tarea 12**. Está escrito y anotado, no verificado.
 
 Lo que dejó la Tarea 9:
 

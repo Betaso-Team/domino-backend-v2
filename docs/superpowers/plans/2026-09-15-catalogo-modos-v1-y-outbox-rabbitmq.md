@@ -1102,6 +1102,22 @@ git commit -m "feat(game-mode): conserva la api http de domino v1"
 - Modify: `src/smoke/engine-smoke.ts`
 - Modify: `src/replay.ts`
 - Modify: `src/features/match/tests/replay.test.ts`
+- Modify: `src/features/match/index.ts` — la superficie exporta `configOf`/`DominoRoomOptions`,
+  y las dos cosas cambian de nombre y de firma.
+- Modify: `src/di-container.ts` — **sin esto NINGUNA sala nace**: la sala resuelve
+  `GameModeReader` del root y nadie lo registra. Se registra el adaptador de memoria (sólo el
+  puerto de LECTURA); la Tarea 11 agrega la rama de Mongo.
+- Modify: `src/features/match/transports/match-registry.test.ts`
+- Modify: `src/features/match/network/tests/history.test.ts`
+- Modify: `src/features/match/network/tests/settlement.test.ts` — los tres arman un
+  `DominoMatchConfig` con `configOf`; pasan a `replayConfigOf`. El de `settlement` **no podría
+  usar `configOf`** aunque quisiera: su mesa de cuatro —la que mide las dos guardas más caras
+  del archivo— ahora sería `UNSUPPORTED_GAME_MODE`.
+- Modify: `src/features/lobby/tests/lobby-e2e.test.ts` — arma su propio `casualTable` y crea
+  mesas de dominó; además assertaba `gameModeName === "clasica-2p"`, que ahora es el uuid.
+- Create: `src/tests/game-mode-catalog.ts` — el modo sembrado, UNA vez. **Fuera de
+  `src/features/`**: `feature-boundary` prohíbe que `features/lobby/tests` importe el arnés de
+  `features/match/tests`, así que el arnés no puede ser el lugar.
 
 - [ ] **Step 1: escribir tests rojos de autoridad del catálogo**
 
@@ -1160,6 +1176,20 @@ completo grabado; no llama Mongo. La validación de identidad sigue normalizando
 antes. La feature `match` importa `GameMode`/`GameModeReader` sólo desde
 `features/game-mode/index.ts`; no cruza hacia archivos internos del catálogo.
 
+⚠ **EL PLAN NO DICE DÓNDE VA EL RECHAZO DEL 4P, y hay tres candidatos.** Va en `configOf`, junto a
+la comparación de cantidad:
+
+- `requestOf` no puede: no ve el modo, y la cantidad de asientos la decide el modo.
+- La sala tampoco, aunque funcione: es UN llamador. `configOf` es por donde pasa toda mesa que
+  nace, así que una segunda puerta de creación —matchmaking— quedaría sin guarda. Y partir en dos
+  archivos dos reglas sobre los mismos dos datos es la duplicación que este repo ya pagó.
+- «Antes de génesis» queda garantizado por construcción: el árbol nace de un `DominoMatchConfig`,
+  y no hay forma de obtener uno sin pasar por acá.
+
+`replayConfigOf` **sí** acepta cuatro asientos, y la asimetría es la decisión: se prohíbe que una
+mesa de cuatro NAZCA, no que una ya grabada se rebobine. La guarda de `settlementOf` **no se toca**
+— sigue siendo la última red, y sus tests de mesa de cuatro se arman ahora con `replayConfigOf`.
+
 - [ ] **Step 4: integrar la sala sin romper su crash path**
 
 Inyectar `GameModeReader` por el container de la sala. En `onCreate`, parsear el request, consultar
@@ -1169,6 +1199,19 @@ de `onCreate`.
 
 Actualizar el arnés para registrar un `MemoryGameModeRepository` con `mode-2p`; no hacer que cada test
 escriba un modo manualmente. El smoke real crea el modo por HTTP antes de crear la sala.
+
+⚠ **`MemoryGameModeRepository` GENERA el uuid** (`randomUUID()` adentro de su `create`), así que
+`mode-2p` no puede ser el `gameModeId` de ninguna mesa sembrada con él: el request literal del Step 1
+sólo funciona contra un `GameMode` escrito a mano, que es lo que usa el test unitario de
+`match-contract`. Del lado E2E el request toma `CASUAL_2P.uuid`. Consecuencia en el golden:
+`meta.gameModeId` pasa a ser un uuid distinto en cada regeneración, como los instantes. El motor no
+lo lee.
+
+⚠ **EL SMOKE NO PUEDE QUEDAR VERDE EN ESTA TAREA, y el Step lo dice como si pudiera**: el `POST
+/game-modes` que necesita no está registrado hasta que la **Tarea 11** llame a
+`registerGameModeHttp` desde `src/app.config.ts`, y las fases del compose que lo ejercitan son de la
+**Tarea 12**. Acá se escribe el llamador —que es lo que justifica ese cableado— y se deja anotado en
+el propio archivo que todavía no puede contestar 201.
 
 - [ ] **Step 5: regenerar golden, verificar y commit**
 
