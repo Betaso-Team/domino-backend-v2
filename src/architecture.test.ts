@@ -39,6 +39,18 @@ function writeViolation(source: string): void {
   writeFile(VIOLATION_FILE, source);
 }
 
+// Devuelve TODOS los `.ts` de un árbol, tests incluidos. La usan los dos tests de acá que no
+// pasan por depcruise: el de la asincronía del core —que filtra los `.test.ts` porque la
+// regla es sobre el código que se despliega— y el de la ubicación única del validador HTTP,
+// que justamente necesita verlos para atrapar una copia del test.
+function walkTs(dir: string): string[] {
+  return readdirSync(dir).flatMap((entry) => {
+    const path = `${dir}/${entry}`;
+    if (statSync(path).isDirectory()) return walkTs(path);
+    return path.endsWith(".ts") ? [path] : [];
+  });
+}
+
 // Se miden PALABRAS CLAVE, no menciones: los comentarios se borran antes de buscar.
 // Se recorre el archivo para no confundir el `//` de una URL dentro de un string con un
 // comentario. Los strings se conservan para errar hacia un rojo visible, nunca hacia un
@@ -181,17 +193,10 @@ describe("reglas de arquitectura", () => {
   // asincronía es sintaxis del cuerpo del archivo. Por eso es un test de arquitectura sin
   // depcruise detrás, y de paso no le suma un segundo a los ~17 s que ya cuestan los otros.
   it("no hay await ni async en el core del engine ni en los comandos", () => {
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((entry) => {
-        const path = `${dir}/${entry}`;
-        if (statSync(path).isDirectory()) return walk(path);
-        return path.endsWith(".ts") && !path.endsWith(".test.ts") ? [path] : [];
-      });
-
     const scanned = [
-      ...walk("src/features/match/core/commands"),
-      ...walk("src/features/match/core/engine"),
-    ].filter((path) => !path.includes("/tests/"));
+      ...walkTs("src/features/match/core/commands"),
+      ...walkTs("src/features/match/core/engine"),
+    ].filter((path) => !path.endsWith(".test.ts") && !path.includes("/tests/"));
 
     // La red tiene que estar tendida sobre algo: si un refactor mueve estas carpetas, el
     // walk devuelve vacío y `offenders` sale vacío por la razón equivocada.
@@ -202,6 +207,40 @@ describe("reglas de arquitectura", () => {
       return /\bawait\b/.test(source) || /\basync\b/.test(source);
     });
 
+    expect(offenders).toEqual([]);
+  });
+
+  // El validador de la frontera HTTP tiene UNA ubicación, `shared/http/`, y la Regla 4 es lo
+  // que la vuelve obligatoria: en cuanto una segunda feature necesita `validated`, importarlo
+  // de `features/match/transports/http/` es una violación de `feature-boundary`, y la salida
+  // barata frente a ese error es copiar el archivo. Dos copias de la costura que decide qué
+  // entra al sistema divergen en silencio: la que arreglás no es la que corre.
+  //
+  // DEPCRUISE NO PUEDE APLICARLO. Mira ARISTAS del grafo, y "este archivo no existe en esta
+  // carpeta" no es una arista: una copia sin importadores no produce ninguna. Por eso es un
+  // test de arquitectura sin depcruise detrás, igual que el de la asincronía del core.
+  it("el validador HTTP vive solo en shared/http, y de ahí lo importa todo el mundo", () => {
+    const files = walkTs("src");
+    // La red tiene que estar tendida sobre algo: si el walk devolviera vacío, las tres
+    // aserciones de abajo pasarían por la razón equivocada.
+    expect(files.length).toBeGreaterThan(100);
+
+    // La ubicación única existe...
+    expect(files).toContain("src/shared/http/validated.ts");
+    // ...y no hay ninguna copia bajo `features/`, ni de la pieza ni de su test.
+    expect(
+      files.filter((file) => /^src\/features\/.*\/validated(\.test)?\.ts$/.test(file)),
+    ).toEqual([]);
+
+    // Y el que lo usa lo importa de ahí. Sin esta parte, un `validated.ts` renombrado dentro
+    // de una feature dejaría el guard verde sobre la misma duplicación. Los archivos de
+    // `shared/http/` quedan afuera porque el import correcto desde ahí es `./validated.js`.
+    const offenders = files
+      .filter((file) => !file.startsWith("src/shared/http/"))
+      .filter((file) => {
+        const specifiers = readFileSync(file, "utf8").match(/from "[^"]*validated\.js"/g) ?? [];
+        return specifiers.some((specifier) => !specifier.endsWith('shared/http/validated.js"'));
+      });
     expect(offenders).toEqual([]);
   });
 

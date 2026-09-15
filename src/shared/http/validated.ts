@@ -2,29 +2,30 @@ import type { RequestHandler, Response } from "express";
 import { z } from "zod";
 
 // VALIDA + TIPA la entrada de un endpoint HTTP, en el mismo molde que el `MessageDecoder`
-// del wire de Colyseus (`../colyseus/commands/decoders.ts`): el schema es la fuente de
-// verdad de la FORMA, el handler recibe algo ya válido, y lo que el schema no deja pasar no
-// llega. La diferencia con el socket es de forma y no de fondo —allá el catálogo de verbos
-// es un mapa cerrado (`COMMAND_PAYLOADS`) y acá cada ruta declara lo suyo—, pero la frontera
-// es la misma: **ningún handler ve un `unknown`**.
+// del wire de Colyseus (`../../features/match/transports/colyseus/commands/decoders.ts`): el
+// schema es la fuente de verdad de la FORMA, el handler recibe algo ya válido, y lo que el
+// schema no deja pasar no llega. La diferencia con el socket es de forma y no de fondo
+// —allá el catálogo de verbos es un mapa cerrado (`COMMAND_PAYLOADS`) y acá cada ruta declara
+// lo suyo—, pero la frontera es la misma: **ningún handler ve un `unknown`**.
 //
-// POR QUÉ VIVE ACÁ Y NO EN `shared/`. `shared/` es para lo portable **que una segunda parte
-// del sistema ya necesita**; esta pieza es portable pero hoy tiene un solo consumidor, y
-// `match` es la única feature que registra rutas —`auth` verifica tokens y no expone
-// ninguna (`src/features/auth/`), y en `app.config.ts` hay una sola llamada de registro—.
-// El `httpErrorHandler` sí se ganó `shared/` por el criterio opuesto: se registra en
-// `app.config.ts` y cubre TODA la superficie Express, así que no puede vivir dentro de una
-// feature sin que otra dependa de ella.
+// POR QUÉ VIVE ACÁ. Nació dentro de `features/match/transports/http/` cuando era su único
+// consumidor, con un disparador de promoción escrito sobre una línea que se puede ir a
+// mirar: «el día que `app.config.ts` tenga una SEGUNDA llamada de registro de rutas». Ese
+// día llegó —`registerLobbyHttp` y `registerMatchHttp` conviven ahí, y el catálogo de modos
+// trae la tercera—, así que la pieza subió. No es una preferencia de estilo: la Regla 4
+// (`feature-boundary`) prohíbe que una feature importe internals de otra, y frente a ese
+// error la salida barata es COPIAR el archivo. Dos copias de la costura que decide qué entra
+// al sistema divergen en silencio, y la que arreglás no es la que corre. Lo pinea
+// `src/architecture.test.ts` — depcruise no puede: una copia sin importadores no crea
+// ninguna arista que mirar.
 //
-// **DISPARADOR DE PROMOCIÓN, concreto y verificable**: el día que `app.config.ts` tenga una
-// SEGUNDA llamada de registro de rutas —de cualquier feature—, esta pieza sube a
-// `src/shared/http/` junto al `error-handler` y las dos se exportan por un barrel. El
-// disparador se escribe así, sobre una línea que se puede ir a mirar, y no nombrando la
-// feature que uno adivina que vendrá: en truco el comentario del cliente HTTP apostó a que
-// el disparador lo apretaría `match`, y `match` fue justamente la única que no lo tocó.
+// SIN BARREL, y esa parte del disparador viejo no se cumplió a propósito: un `index.ts` de
+// `shared/http/` no tendría un solo consumidor que lo use —las tres piezas de esta carpeta
+// se importan por su ruta, cada una desde un lugar distinto— y sería una superficie que hay
+// que mantener para nadie.
 //
-// Que esté dentro de `match` no le deja saber de `match`: no importa nada de `core/` ni
-// extiende los errores de la feature, para que mudarla de carpeta sea mover el archivo.
+// No sabe de `match` ni de ninguna feature: no importa nada de `core/` ni extiende los
+// errores de nadie, que es por lo que mudarla fue mover el archivo.
 
 // Las tres fuentes de entrada de un request. Un endpoint declara SOLO las que le llegan; lo
 // que no declara no viaja al handler.
