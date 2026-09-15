@@ -95,6 +95,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // `configOf`, que valida con zod y LANZA — así la sala no llega a existir con una mesa
   // cuyo dinero no cierra.
   override async onCreate(options: unknown): Promise<void> {
+    // EL LOG SE ARMA ANTES QUE NADA, y desde que `configOf` valida eso dejó de ser cosmético:
+    // `onCreate` ahora PUEDE lanzar, Colyseus enrutà eso a `onUncaughtException` -> `crash()`, y
+    // `crash()` escribe por `this.log`. Con el logger armado recién junto al estado —donde
+    // estaba—, un snapshot inválido moría con «Cannot read properties of undefined (reading
+    // 'error')» en vez de nombrar el campo que vino mal. MEDIDO, no deducido: es lo que imprimía
+    // el test de opciones inválidas antes de mover estas dos líneas.
+    const rootLogger = rootContainer.resolve<Logger>("Logger");
+    this.log = rootLogger.child({ roomId: this.roomId });
+
     const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
 
@@ -141,9 +150,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.isStillPlaying = child.resolve<MatchSeatGuard>("MatchSeatGuard");
     this.startMatch = child.resolve<MatchStarter>("MatchStarter");
 
-    this.log = rootContainer
-      .resolve<Logger>("Logger")
-      .child({ matchId: config.matchId, roomId: this.roomId, gameModeId: config.gameModeId });
+    // Y ACÁ SE ENRIQUECE, ya con la partida parseada: el de arriba solo sabía el `roomId`,
+    // que es todo lo que existe antes de que el snapshot valide.
+    this.log = rootLogger.child({
+      matchId: config.matchId,
+      roomId: this.roomId,
+      gameModeId: config.gameModeId,
+    });
     this.setState(match);
 
     // SE ANOTA ENTRE LAS PARTIDAS VIVAS DEL CLÚSTER, y SE ESPERA. A partir de que `onCreate`
@@ -194,6 +207,11 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     )?.playerId;
     // Primero pertenece a la mesa; recién después se pregunta si sigue jugando. Invertir
     // el orden filtra el estado de una partida a un principal sin asiento reservado.
+    // LA ÚNICA EXCEPCIÓN DELIBERADA a "la identidad externa no sale del cruce": este error
+    // termina en el log de `onUncaughtException` con la pareja adentro. Se cruza con motivo —el
+    // rechazo hay que poder investigarlo, y "alguien sin asiento" no se investiga—, y el que se
+    // registra es SIEMPRE el rechazado, nunca un jugador sentado. `seat-N` no serviría acá:
+    // justamente no tiene asiento, así que no hay id opaco que nombrarlo.
     if (!playerId) {
       throw new SeatNotReservedError(JSON.stringify([identity.platformId, identity.userUuid]));
     }
@@ -397,6 +415,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private crash(error: unknown, method: string): void {
     const cause = error instanceof Error ? error : new Error(String(error));
     this.log.error("error no controlado", { method, message: cause.message, stack: cause.stack });
+    // NO SE DESCONECTA LO QUE TODAVÍA NO EXISTE. Colyseus RECHAZA `disconnect()` durante
+    // `onCreate` —lanza «cannot disconnect during onCreate()», `@colyseus/core/build/Room.mjs:1012`—
+    // y tiene razón: no hay sala ni clientes, y el matchmaker ya la descarta al propagar el
+    // error (`MatchMaker.mjs:296-306`). Sin esta guarda el manejador de errores lanza ADENTRO del
+    // manejador de errores, y esa segunda excepción tapa la causa real que se acaba de loguear.
+    //
+    // Es alcanzable desde que `configOf` valida: un snapshot con la tasa o los montos mal
+    // formados entra por acá. Medido con el test de opciones inválidas.
+    if (method === "onCreate") return;
     void this.disconnect(CloseCode.WITH_ERROR);
   }
 }

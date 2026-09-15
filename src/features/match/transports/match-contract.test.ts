@@ -49,8 +49,27 @@ describe("configOf", () => {
     expect(config.seats.map(({ currency }) => currency)).toEqual(["VES", "USD"]);
   });
 
+  // OTRO PRINCIPAL CUALQUIERA, para armar mesas de largo distinto del válido. Cada uno es una
+  // pareja nueva, así que lo único que estas filas ejercen es el LARGO — si reusaran una pareja
+  // existente, el rechazo podría venir del control de duplicados y la fila mediría otra regla.
+  const extra = (n: number) => ({
+    platformId: "betaso",
+    userUuid: `extra-${n}`,
+    displayName: `Extra ${n}`,
+    currency: "VES",
+  });
+
   it.each<[string, Record<string, unknown>]>([
     ["rateId no UUID", { rateId: "actual" }],
+    // LAS TRES DEL LARGO DE LA MESA. Sin ellas, borrar el `superRefine` de paridad deja la
+    // suite entera en verde y una mesa de 3 revienta recién adentro de `assignTeams` — o sea
+    // después de crear la sala, que es después del cobro.
+    ["cantidad impar", { participants: [...valid.participants, extra(1)] }],
+    ["un solo participante", { participants: [valid.participants[0]] }],
+    [
+      "cinco participantes",
+      { participants: [...valid.participants, extra(1), extra(2), extra(3)] },
+    ],
     ["UC fraccionaria", { entryFeeUcMinor: 12.5 }],
     ["UC insegura", { prizeUcMinor: Number.MAX_SAFE_INTEGER + 1 }],
     ["UC negativa", { prizeUcMinor: -1 }],
@@ -82,5 +101,43 @@ describe("configOf", () => {
     expect(() =>
       configOf({ ...valid, participants: [valid.participants[0], valid.participants[0]] }),
     ).toThrow(/duplicada/);
+  });
+
+  // LA IDENTIDAD SE GUARDA NORMALIZADA. El asiento se compara contra lo que viene en el token,
+  // así que un `platformId` con padding acá y sin padding allá sería el mismo jugador para el
+  // validador y dos distintos para `onJoin` — asiento rechazado con la inscripción cobrada.
+  it("normaliza los espacios de la identidad y deja la moneda intacta", () => {
+    const padded = configOf({
+      ...valid,
+      participants: [
+        { ...valid.participants[0], platformId: " betaso ", userUuid: "  same  " },
+        valid.participants[1],
+      ],
+    });
+
+    expect(padded.seats[0]).toMatchObject({ platformId: "betaso", userUuid: "same" });
+  });
+
+  // Y NORMALIZAR ANTES DE COMPARAR es lo que impide colar la misma pareja dos veces con un
+  // espacio de más. `superRefine` recibe la salida del objeto, así que ve los valores ya
+  // recortados; si corriera sobre la entrada, esta mesa pasaría y cobraría dos asientos al
+  // mismo principal.
+  it("el padding no alcanza para duplicar una pareja", () => {
+    expect(() =>
+      configOf({
+        ...valid,
+        participants: [valid.participants[0], { ...valid.participants[0], userUuid: " same " }],
+      }),
+    ).toThrow(/duplicada/);
+  });
+
+  // La moneda es un valor CONTABLE, no una llave: se conserva exactamente como se cobró.
+  it("conserva la moneda tal cual, sin recortarla", () => {
+    const config = configOf({
+      ...valid,
+      participants: [{ ...valid.participants[0], currency: " VES " }, valid.participants[1]],
+    });
+
+    expect(config.seats[0]?.currency).toBe(" VES ");
   });
 });

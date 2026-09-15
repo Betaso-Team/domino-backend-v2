@@ -44,6 +44,11 @@ export class JwtVerifier implements TokenVerifier {
       throw new InvalidTokenError("sin claim platformId");
     }
 
-    return { platformId, userUuid: payload.sub };
+    // SE DEVUELVE NORMALIZADA, igual que la normaliza `configOf` del otro lado (ver el
+    // comentario de `identityPart` en `transports/match-contract.ts`). Validar con trim y
+    // devolver sin trim haría que `"betaso "` en el token y `"betaso"` en el asiento pasen
+    // las dos validaciones y fallen el cruce de `onJoin`: rechazo de asiento con la
+    // inscripción ya cobrada. La comparación tiene que ser contra el MISMO valor.
+    return { platformId: platformId.trim(), userUuid: payload.sub.trim() };
   }
 }

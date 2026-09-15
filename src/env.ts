@@ -164,7 +164,8 @@ const schema = z.object({
    *     incluidas las que escribe Colyseus y que nosotros no elegimos.
    *   · MEDIDO con dos instancias contra el mismo Redis del compose, una en `/0` y otra en `/1`:
    *     `redis-cli -n 0 KEYS '*'` y `-n 1 KEYS '*'` devuelven cada una su propio juego completo
-   *     —`roomcaches`, `roomcount`, `ch:domino`, `match_config:<roomId>`, `player_match:<userId>`—
+   *     —`roomcaches`, `roomcount`, `ch:domino`, `match_config:<roomId>`,
+   *     `player_match:["<platformId>","<userUuid>"]`—
    *     con los MISMOS NOMBRES en las dos. En un solo índice serían la misma clave. Y no se ven:
    *     `GET /config/<sala ajena>` da 404 y `joinById` cruzado da 522, mientras que una tercera
    *     instancia en `/0` contesta 200 por la sala de la primera y se une. El índice es lo único

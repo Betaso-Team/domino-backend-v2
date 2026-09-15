@@ -188,10 +188,10 @@ export function playerIdOf(match: SeatedMatch, selector: string | PlayerRef): st
   }
   const direct = match.config.seats.find(({ playerId }) => playerId === selector);
   if (direct) return direct.playerId;
-  const byUuid = match.config.seats.filter(({ userUuid }) => userUuid === selector);
-  if (byUuid.length !== 1) throw new Error(`selector ambiguo o ausente: ${selector}`);
-  const seat = byUuid[0];
-  if (!seat) throw new Error(`selector ausente: ${selector}`);
+  // Un solo chequeo para los dos casos: el resto vacío dice "no es ambiguo" y `seat` presente
+  // dice "existe" — que es además lo que `noUncheckedIndexedAccess` necesita para estrechar.
+  const [seat, ...ambiguous] = match.config.seats.filter(({ userUuid }) => userUuid === selector);
+  if (!seat || ambiguous.length > 0) throw new Error(`selector ambiguo o ausente: ${selector}`);
   return seat.playerId;
 }
 

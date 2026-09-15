@@ -32,6 +32,20 @@ describe("JwtVerifier", () => {
     await expect(verifier.verify(token)).rejects.toBeInstanceOf(InvalidTokenError);
   });
 
+  // LA OTRA MITAD DEL CRUCE. `configOf` guarda la identidad recortada; si el verificador
+  // devolviera el padding, `onJoin` compararía `"betaso "` contra `"betaso"` y rechazaría el
+  // asiento de alguien que ya pagó. Las dos fronteras normalizan o ninguna sirve.
+  it("normaliza los espacios de la identidad que devuelve", async () => {
+    const token = jwt.sign({ sub: "  u1  ", platformId: " betaso " }, SECRET, {
+      algorithm: "HS256",
+    });
+
+    await expect(verifier.verify(token)).resolves.toEqual({
+      platformId: "betaso",
+      userUuid: "u1",
+    });
+  });
+
   it("rechaza un token ausente", async () => {
     await expect(verifier.verify(undefined)).rejects.toBeInstanceOf(InvalidTokenError);
   });

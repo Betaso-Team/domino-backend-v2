@@ -11,6 +11,20 @@ import type { DominoMatchConfig } from "../core/config.js";
 // `DominoMatchConfig` es un dato confiable, y eso incluye la moneda, la tasa y los montos.
 const nonBlank = z.string().refine((value) => value.trim().length > 0, "no puede estar vacío");
 
+// LA IDENTIDAD SE NORMALIZA; LA MONEDA NO, y la asimetría es deliberada.
+//
+// `platformId` y `userUuid` son las dos mitades de una LLAVE: se comparan contra el token en
+// `DominoRoom.onJoin` y se concatenan en la clave del registro. Validar con trim y guardar sin
+// trim deja que `"betaso "` en el snapshot y `"betaso"` en el token sean el mismo jugador para
+// el validador y dos distintos para el cruce — o sea `SeatNotReservedError` con la inscripción
+// ya cobrada, por un espacio que nadie ve. `JwtVerifier` normaliza igual, y tienen que hacerlo
+// las DOS fronteras: normalizar una sola mueve el problema en vez de cerrarlo.
+//
+// `currency` es un VALOR CONTABLE que se conserva exactamente como se cobró, no una llave que se
+// compare con nada: el diseño pide congelarla, y tocarla acá sería este archivo decidiendo sobre
+// dinero que ya se movió. Lo mismo vale para el perfil, que es presentación.
+const identityPart = nonBlank.transform((value) => value.trim());
+
 // LOS MONTOS SON ENTEROS SEGUROS, sin excepción. `Number.isSafeInteger` cierra las tres
 // puertas de un solo golpe: la fracción (`12.5` de UC no existe, los centésimos ya son la
 // unidad), el desborde de la mantisa —donde dos montos distintos son el mismo número— y
@@ -22,8 +36,8 @@ const ucMinor = z
   .refine((value) => value >= 0, "no puede ser negativo");
 
 const participant = z.strictObject({
-  platformId: nonBlank,
-  userUuid: nonBlank,
+  platformId: identityPart,
+  userUuid: identityPart,
   displayName: nonBlank,
   username: nonBlank.optional(),
   profilePicture: nonBlank.optional(),
@@ -51,6 +65,10 @@ const roomOptions = z
     }
     // LA PAREJA ENTERA es lo único único. El mismo `userUuid` en dos plataformas son dos
     // personas; el mismo par dos veces es el mismo principal cobrando dos asientos.
+    //
+    // Corre DESPUÉS del `.transform()` de cada campo —`superRefine` recibe la salida del
+    // objeto, no su entrada—, así que `"same"` y `" same "` ya son la misma clave acá: el
+    // padding no alcanza para colar la misma pareja dos veces.
     const seen = new Set<string>();
     participants.forEach((value, index) => {
       const key = JSON.stringify([value.platformId, value.userUuid]);

@@ -122,6 +122,22 @@ describe("DominoRoom", () => {
     await b.leave();
   });
 
+  // LA SALA NO NACE SI EL DINERO NO CIERRA, y esto es lo único que lo pinea EN EL CABLEADO.
+  // `configOf` tiene sus propios tests, pero en aislamiento: que `onCreate` lo LLAME —y que no
+  // atrape lo que lanza— es una arista aparte, y es justo la que un refactor rompe en silencio.
+  // Es el patrón de `fdd99b6`: la regla estaba escrita, el test miraba el borde equivocado y
+  // daba verde sobre una violación viva. Una sala creada con una tasa inválida ya cobró.
+  it("no crea la sala si las opciones no pasan el contrato", async () => {
+    const testServer = requiredServer();
+
+    // `/rateId/` y no un `toThrow()` pelado: el rechazo tiene que venir del CONTRATO y nombrar
+    // el campo. Sin el patrón, cualquier otra falla de arranque —un container a medio cablear,
+    // un puerto tomado— dejaría este test verde sin que `configOf` se llame una sola vez.
+    await expect(
+      testServer.createRoom<DominoRoom>("domino", { ...options("match-bad"), rateId: "no-uuid" }),
+    ).rejects.toThrow(/rateId/);
+  });
+
   // LA PAREJA ES LA LLAVE DEL ASIENTO. El mismo `sub` firmado por dos plataformas son dos
   // personas, y la tercera —que no está en la mesa— no entra aunque comparta el UUID.
   it("distingue el mismo UUID de dos plataformas y rechaza una tercera", async () => {
