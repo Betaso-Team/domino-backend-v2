@@ -322,31 +322,37 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1–11 completas; la 12 NO, y por eso el incremento NO ESTÁ CERRADO** (`ca9e68a`,
-`5771b1e`, `ec63d71`, `ce54f9e`, `348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`,
-`bed7e88`+`c269959`+los de la revisión, `dd16258`+`075900c`, `3c9930c`, `b9c35b2`).
-Baseline **677 tests / 65 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
-(**203 módulos / 793 dependencias**) en verde.
+Estado: **incremento COMPLETO, Tareas 1–13 cerradas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
+`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de la
+revisión, `dd16258`+`075900c`, `3c9930c`, `b9c35b2`, `782ed54`, `d684fd4`).
+Baseline **691 tests / 66 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
+(**205 módulos / 800 dependencias**) en verde.
 
-⛔ **LO QUE FALTA, Y NO ES OPCIONAL: la Tarea 12.** El criterio de cierre del plan lo dice en su
-última sección — *"Antes de cerrar el incremento deben estar verdes la suite completa, lint, build,
-depcruise, integración Mongo/Rabbit y el smoke PM2/Nginx del juego"*. **Nada de este incremento se
-ejecutó nunca contra un Mongo, un Rabbit o un Nginx de verdad**: los adaptadores se midieron con
-dobles del driver y el publicador con `amqplib` mockeada, que es lo correcto para una suite que no
-debe depender de servicios externos, pero NO es lo mismo que haber visto el documento en la
-colección ni el mensaje en la cola. Lo que la 12 certifica y hoy nadie verificó:
+**La certificación real quedó verde con código 0 de punta a punta** (Docker Engine 27.3.1, Compose
+2.29.7, RabbitMQ 4, Mongo 7, Nginx 1.30.4, PM2 con dos instancias): la colección con sus cuatro
+índices y su `__v`, el payload del exchange `betaso` comparado campo por campo contra un consumidor
+real, el ciclo **Rabbit apagado → encolado PENDING → Rabbit arriba → entregado SENT**, el
+reconciliador cerrando una ventana modo→outbox rota a mano, las dos instancias PM2 contestando la
+misma revisión, y la partida 2P terminada por `SCORE` con 119 entradas de historial.
+`docker compose ps -a` quedó vacío.
 
-- que el documento que escribe `MongoGameModeRepository` sea el que Mongo acepta —índices, `__v`,
-  fechas— y no sólo el que el doble dejó pasar;
-- que el cuerpo que sale al exchange `betaso` sea byte a byte el de v1, contra un consumidor real;
-- el escenario **Rabbit apagado → encolado → Rabbit arriba → entregado**, que es la razón entera de
-  que el outbox exista y el único camino que ninguna suite puede medir;
-- que el reconciliador emita el `updated` de un `__v` incrementado a mano sin outbox;
-- que las dos instancias PM2 (2567/2568) sirvan el mismo catálogo compartido.
+⚠ **Lo que la primera corrida real encontró, y no lo veía ninguna suite:**
 
-**El primer paso pendiente es la Tarea 12**, empezando por su Step 1: el test estático del runner en
-`src/game-mode-integration.test.ts`. La 13 (documentación y gates) se adelantó — esto que estás
-leyendo— para no dejar el estado sin registrar, pero su Step 2 sólo corrió los gates de escritorio.
+- **`up --build` sólo construye los servicios QUE SE NOMBRAN.** El cliente del smoke lo invoca
+  `compose run`, que NO reconstruye, así que corría una imagen con un `engine-smoke.ts` anterior a
+  la Tarea 1 y mandaba `entryFeeUcMinor`. El modo de falla es cruel: el error apunta al CONTRATO y
+  no a la imagen, así que se investiga el código que ya está bien. Ahora el cliente se construye
+  explícito y primero.
+- **El smoke del engine terminaba su trabajo y no salía NUNCA.** El SDK de Colyseus deja handles
+  vivos después del `leave()`, así que el event loop no se vacía solo — estuvo colgado 56 minutos,
+  en verde, sin decir nada. El runner viejo lo tapaba con `--abort-on-container-exit`; el nuevo
+  espera a cada fase, así que quedó a la vista. Los dos smokes salen ahora explícitamente.
+- **La cola durable se declara ANTES de la primera mutación.** Un topic exchange DESCARTA lo que no
+  matchea ninguna binding, y el publicador recibe su confirm igual —el broker confirma que lo
+  ACEPTÓ, no que alguien lo guardó—, así que al revés la fase `recover` esperaría para siempre un
+  mensaje que nunca existió.
+- **`--no-deps` en todas las fases de cliente.** Sin eso `compose run` vuelve a PRENDER RabbitMQ al
+  intentar certificar que está caído, y `enqueue` mediría en verde lo contrario de lo que dice.
 
 ### El incremento en diez líneas, para el que llega sin contexto
 
@@ -374,28 +380,34 @@ leyendo— para no dejar el estado sin registrar, pero su Step 2 sólo corrió l
 
 **Deudas abiertas de ESTE incremento — NO CUMPLIDAS:**
 
-1. **La Tarea 12 entera** (ver el ⛔ de arriba). Es la más grande y la única que mide contra
-   servicios de verdad.
-2. **4P, bots y multiplicador siguen sin implementarse, y es deliberado.** El catálogo los PERSISTE
+1. **4P, bots y multiplicador siguen sin implementarse, y es deliberado.** El catálogo los PERSISTE
    y los publica —`playersQuantity: 4`, `enableBots`, `multiplier` viajan a Mongo y a HTTP— pero
    ninguno tiene efecto: una mesa de cuatro se rechaza con `UNSUPPORTED_GAME_MODE` en `configOf`
    antes de génesis, nadie lee `enableBots`, y `multiplier` no multiplica nada. La causa del rechazo
    4P es **dinero y no falta de motor**: `settlementOf` exige exactamente un ganador, así que el
    final de una mesa de cuatro lanzaría DESPUÉS del veredicto —sin premio y sin reembolso—, plata
    trabada. Empezá por la regla de reparto, no por borrar la guarda.
-3. **El hueco heredado del `PUT` que cambia sólo `playersQuantity`.** v1 no consulta duplicados
+2. **El hueco heredado del `PUT` que cambia sólo `playersQuantity`.** v1 no consulta duplicados
    cuando el nombre no cambia, así que una edición puede fabricar el par `name + playersQuantity`
    que `create` rechaza una línea antes. Está **pineado por un test** que lo afirma como hueco, no
    como virtud: el que toque la regla de unicidad empieza ahí, y ponerlo rojo es el resultado
    correcto. Cerrarlo exige decidir cuál de las dos reglas asimétricas de v1 gana.
-4. **El lease excluye PROCESOS, no llamadas.** El `owner` es por proceso, así que dos mutaciones
+3. **El lease excluye PROCESOS, no llamadas.** El `owner` es por proceso, así que dos mutaciones
    concurrentes de la MISMA instancia entran las dos. Lo cubre una cola en memoria dentro de
    `GameModeService`; si aparece un segundo escritor del catálogo que no pase por ese servicio, esa
    cola no lo protege.
-5. **`src/architecture.test.ts` es flaky bajo carga.** Corre `depcruise` como subproceso: aislado
+4. **`src/architecture.test.ts` es flaky bajo carga.** Corre `depcruise` como subproceso: aislado
    tarda ~2,4 s, dentro de `npm test` llegó a 5,6 s y falló una vez, verde al repetir. `npm run
    depcruise` da limpio. No se tocó —está fuera del alcance de este incremento— pero si lo ves rojo,
    repetilo antes de investigar.
+
+**El incremento siguiente, y por dónde empieza.** Nadie llama a `settlementOf` todavía: el juego
+proyecta la instrucción de pago y no hay quien la cobre. El catálogo ya demostró la forma que le
+falta a esa pieza —outbox durable, lease, confirmación del broker, entrega al menos una vez— así
+que el primer paso es **portar esa misma forma a la liquidación**: un outbox de instrucciones de
+pago con su dispatcher, consumido por el orquestador. Lo que NO está resuelto en ningún lado y hay
+que decidir antes de escribir código es **el 4P**: sin regla de reparto del premio, abrir la
+liquidación de cuatro deja plata trabada (ver la deuda 1). La decisión va primero, el código después.
 
 Lo que dejó la Tarea 11:
 
