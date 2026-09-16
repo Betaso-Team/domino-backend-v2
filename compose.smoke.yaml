@@ -7,6 +7,20 @@ services:
   mongo:
     image: mongo:7
 
+  # EL BROKER, CON HEALTHCHECK Y NO CON UN `depends_on` PELADO. `depends_on` sin condición sólo
+  # espera a que el contenedor ARRANQUE, y RabbitMQ tarda segundos más en aceptar conexiones: sin
+  # esto la app arrancaría contra un puerto que todavía no atiende y, con `recovery: true`,
+  # `amqplib` no falla —reintenta para siempre—, así que el síntoma sería un `/ready` colgado y no
+  # un error. El volumen queda anónimo y se lo lleva el `down -v`: la fase `recover` necesita que la
+  # cola durable del smoke NO sobreviva a la corrida anterior.
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
   domino:
     build:
       context: .
@@ -20,6 +34,7 @@ services:
       INTERNAL_API_KEY: smoke-internal-key-with-more-than-16-chars
       REDIS_URL: redis://redis:6379/1
       MONGO_URI: mongodb://mongo:27017/domino-smoke
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       TURN_TIMEOUT_MS: 5000
       EXTRA_TIME_RESERVE_MS: 1000
       DEALING_TIMEOUT_MS: 5000
@@ -28,8 +43,12 @@ services:
       SEATING_TIMEOUT_MS: 5000
       RECONNECTION_WINDOW_SECONDS: 5
     depends_on:
-      - redis
-      - mongo
+      redis:
+        condition: service_started
+      mongo:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
   nginx:
     image: nginx:1.30.4-alpine3.24
@@ -38,6 +57,14 @@ services:
     depends_on:
       - domino
 
+  # EL CLIENTE MIDE DESDE AFUERA, y por eso recibe las dos URLs además de hablar HTTP: un cliente
+  # que sólo pidiera por HTTP mediría lo que el servidor DICE, no lo que quedó escrito. Acá abre
+  # Mongo para leer el documento y el outbox, y abre AMQP para leer el mensaje que llegó al
+  # consumidor — que es el único lugar donde se puede comparar el cuerpo publicado con el de v1.
+  #
+  # ⚠ NO tiene `depends_on: rabbitmq`: el runner lo invoca con `--no-deps` justamente porque una de
+  # las fases certifica que Rabbit está CAÍDO. Queda declarado igual para el caso en que alguien
+  # corra el servicio a mano.
   smoke-client:
     build:
       context: .
@@ -46,6 +73,8 @@ services:
       NODE_ENV: test
       JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
       INTERNAL_API_KEY: smoke-internal-key-with-more-than-16-chars
+      MONGO_URI: mongodb://mongo:27017/domino-smoke
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       RUN_ENGINE_SMOKE: 1
     depends_on:
       - nginx

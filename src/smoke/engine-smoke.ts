@@ -368,11 +368,23 @@ async function run(): Promise<void> {
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
-  void run().catch((error: unknown) => {
-    logger.error("smoke fallido", {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    process.exitCode = 1;
-  });
+  void run()
+    .catch((error: unknown) => {
+      logger.error("smoke fallido", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      process.exitCode = 1;
+    })
+    // ⚠ SE SALE EXPLÍCITAMENTE, y esto lo encontró la primera corrida real de la Tarea 12: el
+    // trabajo terminaba bien —«smoke completo» con 119 entradas de historial— y el proceso NO
+    // salía nunca. El SDK de Colyseus deja handles vivos después del `leave()` (el `outsider` que
+    // se rechaza, y sockets que siguen recibiendo `events`), así que el event loop no se vacía
+    // solo. Antes lo tapaba el `--abort-on-container-exit` del runner viejo, que mataba el stack
+    // entero apenas un contenedor salía; el runner de la Tarea 12 ESPERA a cada fase, así que el
+    // cuelgue quedó a la vista — colgado 56 minutos, en verde, sin decir nada.
+    //
+    // Un CLI que terminó su trabajo tiene que salir. Los logs de pino van a stdout de forma
+    // síncrona, así que no hay nada en vuelo que truncar.
+    .finally(() => process.exit(process.exitCode ?? 0));
 }
