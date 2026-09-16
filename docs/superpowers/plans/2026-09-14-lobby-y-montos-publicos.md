@@ -7,8 +7,13 @@
 - Mantener el estado de mantenimiento en el almacén compartido y permitir cambiarlo mediante una
   ruta interna autenticada, sin desplegar.
 - Rechazar la creación de nuevas mesas durante mantenimiento sin interrumpir las que ya existen.
-- Publicar en `GET /config/:roomId` los nombres históricos `entryFee` y `prize`. Sus valores siguen
-  siendo enteros UC con dos decimales implícitos; la conversión de presentación pertenece al front.
+- Publicar en `GET /config/:roomId` los nombres históricos `entryFee` y `prize`. ⚠ ~~Sus valores
+  siguen siendo enteros UC con dos decimales implícitos; la conversión de presentación pertenece al
+  front.~~ **Supersedido** por
+  [`2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md`](../specs/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md):
+  producción v1 nunca usó esa escala —`entryFee: 10` es **10 UC**—, así que los valores son números
+  finitos no negativos y el front NO convierte nada. Los NOMBRES que este incremento recuperó son
+  los correctos y no cambiaron; lo que cambió es la unidad que llevan adentro.
 
 No entra matchmaking ni catálogo de mesas: todavía no existen en v2 y no hacen falta para recuperar
 este contrato del front.

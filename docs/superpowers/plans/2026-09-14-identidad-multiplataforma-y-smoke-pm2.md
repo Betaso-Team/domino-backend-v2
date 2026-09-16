@@ -48,8 +48,19 @@ Diseño aprobado:
 
 Estado: **Tarea 0 en curso; código todavía no iniciado**. La identidad externa pasa a ser
 `{ platformId, userUuid }`; `currency` es la moneda ya cobrada y queda congelada, y toda
-recompensa/reembolso usa el `rateId` único de la mesa. Los montos `*UcMinor` son enteros seguros:
-los dos últimos dígitos son decimales (`1234 = 12,34 UC`).
+recompensa/reembolso usa el `rateId` único de la mesa.
+
+⚠ ~~Los montos `*UcMinor` son enteros seguros: los dos últimos dígitos son decimales
+(`1234 = 12,34 UC`).~~ **SUPERSEDIDO** por
+[`2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md`](../specs/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md).
+El supuesto era falso contra producción: en el v1 que este repo reemplaza `entryFee: 10` significa
+**10 UC**. La Tarea 1 de aquel incremento renombró `entryFeeUcMinor`/`prizeUcMinor`/`amountUcMinor`
+a `entryFee`/`prize`/`amount` **sin escalar ningún número**, y aceptó decimales finitos.
+
+**Los snippets de este plan conservan los nombres viejos a propósito**: son el registro de lo que
+este incremento ejecutó, no una guía para escribir código hoy. Quien venga a copiar de acá tiene que
+leer primero esta nota — y lo que sí sigue vigente de la decisión original es el techo de magnitud
+(`Number.MAX_SAFE_INTEGER`), que no se cayó con la escala.
 
 Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y primer paso pendiente.
 No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.

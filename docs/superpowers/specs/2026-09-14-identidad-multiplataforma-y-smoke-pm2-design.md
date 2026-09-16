@@ -7,6 +7,20 @@
 > La decisión nueva es que la identidad de negocio es siempre `{ platformId, userUuid }` y que Betaso
 > es una plataforma más. El motor puede conservar un identificador opaco de asiento, pero nunca usarlo
 > para cobrar, premiar ni identificar una cuenta fuera de la partida.
+>
+> ⚠ **SUPERSEDIDO EN SU CONVENCIÓN MONETARIA** por
+> [`2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md`](./2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md),
+> §«Supersesión de la convención UC». Todo lo que este documento dice sobre `*UcMinor` y sobre
+> «enteros con dos decimales implícitos» describe un supuesto que resultó **falso contra producción**:
+> en el v1 que este repo reemplaza, `entryFee: 10` significa **10 UC** y no `0,10 UC`, y el catálogo
+> productivo tiene montos decimales. La Tarea 1 de aquel incremento renombró `entryFeeUcMinor`,
+> `prizeUcMinor` y `amountUcMinor` a `entryFee`, `prize` y `amount`, sin escalar ningún número.
+>
+> **No se borra el registro de la decisión previa**: era razonable cuando se tomó —evitar coma
+> flotante en dinero es doctrina sana— y lo que la invalidó no fue un argumento sino leer el backend
+> v1 en disco. Lo que sí sobrevive intacto de esta sección es el piso de magnitud: los montos siguen
+> rechazándose por encima de `Number.MAX_SAFE_INTEGER`, porque ahí dos importes distintos son el
+> mismo número. Lo que se cayó es la escala, no la guarda.
 
 ## 1. Objetivo
 
@@ -106,6 +120,11 @@ el emisor o validar un token del futuro orquestador no entra al core.
 ## 4. UC, tasa y liquidación
 
 ### 4.1 Representación de UC
+
+⚠ **ESTA SUBSECCIÓN ESTÁ SUPERSEDIDA.** Ver la nota del encabezado: producción v1 no usa escala. Lo
+que sigue se conserva como registro de la decisión previa, no como contrato vigente. El vigente es
+`entryFee`/`prize`/`amount` como números finitos no negativos, decimales incluidos, con techo
+`Number.MAX_SAFE_INTEGER`.
 
 Todo monto UC es un entero seguro de JavaScript, no negativo y con escala fija de dos decimales:
 
@@ -270,7 +289,8 @@ decisiones desde la conversación.
 - Perfil y moneda nacen del snapshot; el backend no consulta Betaso.
 - La moneda de cobro es la de recompensa/reembolso y no cambia durante la partida.
 - Toda conversión usa el único `rateId` congelado de la mesa.
-- Los montos UC son enteros de dos decimales implícitos.
+- ⚠ ~~Los montos UC son enteros de dos decimales implícitos.~~ **Supersedido** (ver encabezado y
+  §4.1): son números finitos no negativos, decimales incluidos, con techo `MAX_SAFE_INTEGER`.
 - Un cobro parcial nunca abre partida y ordena reembolso.
 - El rival no recibe identidad externa ni moneda; sí recibe la presentación pública.
 - Una partida 2P completa termina contra `dist/main.js` en dos procesos PM2 detrás de Nginx.

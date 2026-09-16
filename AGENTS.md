@@ -322,11 +322,115 @@ Diseño aprobado:
 Autoridad operativa:
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **Tareas 1, 2, 3, 4, 5, 6, 7, 8, 9 y 10 completas** (`ca9e68a`, `5771b1e`, `ec63d71`,
-`ce54f9e`, `348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de
-la revisión, `dd16258`+`075900c`, `3c9930c`). Baseline **660 tests / 65 archivos**, con `typecheck`,
-suite, lint, `format`, `build` y `depcruise` (**203 módulos / 790 dependencias**) en verde.
-Primer paso pendiente: **Tarea 11, cablear entorno, DI, readiness y apagado**.
+Estado: **Tareas 1–11 completas; la 12 NO, y por eso el incremento NO ESTÁ CERRADO** (`ca9e68a`,
+`5771b1e`, `ec63d71`, `ce54f9e`, `348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`,
+`bed7e88`+`c269959`+los de la revisión, `dd16258`+`075900c`, `3c9930c`, `b9c35b2`).
+Baseline **677 tests / 65 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
+(**203 módulos / 793 dependencias**) en verde.
+
+⛔ **LO QUE FALTA, Y NO ES OPCIONAL: la Tarea 12.** El criterio de cierre del plan lo dice en su
+última sección — *"Antes de cerrar el incremento deben estar verdes la suite completa, lint, build,
+depcruise, integración Mongo/Rabbit y el smoke PM2/Nginx del juego"*. **Nada de este incremento se
+ejecutó nunca contra un Mongo, un Rabbit o un Nginx de verdad**: los adaptadores se midieron con
+dobles del driver y el publicador con `amqplib` mockeada, que es lo correcto para una suite que no
+debe depender de servicios externos, pero NO es lo mismo que haber visto el documento en la
+colección ni el mensaje en la cola. Lo que la 12 certifica y hoy nadie verificó:
+
+- que el documento que escribe `MongoGameModeRepository` sea el que Mongo acepta —índices, `__v`,
+  fechas— y no sólo el que el doble dejó pasar;
+- que el cuerpo que sale al exchange `betaso` sea byte a byte el de v1, contra un consumidor real;
+- el escenario **Rabbit apagado → encolado → Rabbit arriba → entregado**, que es la razón entera de
+  que el outbox exista y el único camino que ninguna suite puede medir;
+- que el reconciliador emita el `updated` de un `__v` incrementado a mano sin outbox;
+- que las dos instancias PM2 (2567/2568) sirvan el mismo catálogo compartido.
+
+**El primer paso pendiente es la Tarea 12**, empezando por su Step 1: el test estático del runner en
+`src/game-mode-integration.test.ts`. La 13 (documentación y gates) se adelantó — esto que estás
+leyendo— para no dejar el estado sin registrar, pero su Step 2 sólo corrió los gates de escritorio.
+
+### El incremento en diez líneas, para el que llega sin contexto
+
+- **La colección es la de v1 y no se migró nada**: `game_modes_domino`, los mismos campos y defaults,
+  los mismos cuatro índices (`uuid_1` único, `isActive_1`, `isActive_1_name_1`, `isActive_1_uuid_1`),
+  `_id`, `__v` y los timestamps de Mongoose. Sin mongoose y sin el paquete `uuid`: el documento vive
+  sólo dentro del transporte. ⚠ **En v1 el `__v` nunca se movía** —el `versionKey` de Mongoose sólo
+  avanza con modificaciones de arreglos y este documento no tiene ninguno—, así que todo lo
+  productivo está en `0`; que v2 lo use como revisión es un uso NUEVO de un campo existente, sin
+  lector v1 que lo consuma.
+- **`entryFee: 10` son 10 UC.** No hay escala, no hay `*UcMinor`, y los montos aceptan decimales
+  finitos no negativos con techo `Number.MAX_SAFE_INTEGER`. La spec del 2026-09-14 quedó supersedida
+  en ese punto y lleva la nota.
+- **El dominó NO autentica administradores.** Los GET del catálogo son públicos; las cinco
+  mutaciones viven detrás de `X-Internal-Key` y **no se registran** sin llave (fail closed, 404 y no
+  401). Quien valida al admin es el futuro orquestador.
+- **La entrega es AL MENOS UNA VEZ y el consumidor debe deduplicar.** La mutación escribe Mongo y un
+  outbox durable; el despachador publica después con confirmación del broker, una entrada por lease,
+  backoff hasta 300 s y **sin límite de intentos** —una caída larga no puede convertir un pendiente
+  en pérdida silenciosa—. Una caída posterior al confirm reentrega, pero **nunca adelanta** la
+  siguiente entrada: reordenar el historial del catálogo deja al consumidor con un modo viejo.
+- **No hay replica set, así que no hay transacción** entre `game_modes_domino` y `game_mode_outbox`.
+  Lo que cubre esa ventana es el reconciliador, y su regla más delicada está abajo en la tabla de
+  defectos: el `created` sólo cuenta en la revisión cero.
+
+**Deudas abiertas de ESTE incremento — NO CUMPLIDAS:**
+
+1. **La Tarea 12 entera** (ver el ⛔ de arriba). Es la más grande y la única que mide contra
+   servicios de verdad.
+2. **4P, bots y multiplicador siguen sin implementarse, y es deliberado.** El catálogo los PERSISTE
+   y los publica —`playersQuantity: 4`, `enableBots`, `multiplier` viajan a Mongo y a HTTP— pero
+   ninguno tiene efecto: una mesa de cuatro se rechaza con `UNSUPPORTED_GAME_MODE` en `configOf`
+   antes de génesis, nadie lee `enableBots`, y `multiplier` no multiplica nada. La causa del rechazo
+   4P es **dinero y no falta de motor**: `settlementOf` exige exactamente un ganador, así que el
+   final de una mesa de cuatro lanzaría DESPUÉS del veredicto —sin premio y sin reembolso—, plata
+   trabada. Empezá por la regla de reparto, no por borrar la guarda.
+3. **El hueco heredado del `PUT` que cambia sólo `playersQuantity`.** v1 no consulta duplicados
+   cuando el nombre no cambia, así que una edición puede fabricar el par `name + playersQuantity`
+   que `create` rechaza una línea antes. Está **pineado por un test** que lo afirma como hueco, no
+   como virtud: el que toque la regla de unicidad empieza ahí, y ponerlo rojo es el resultado
+   correcto. Cerrarlo exige decidir cuál de las dos reglas asimétricas de v1 gana.
+4. **El lease excluye PROCESOS, no llamadas.** El `owner` es por proceso, así que dos mutaciones
+   concurrentes de la MISMA instancia entran las dos. Lo cubre una cola en memoria dentro de
+   `GameModeService`; si aparece un segundo escritor del catálogo que no pase por ese servicio, esa
+   cola no lo protege.
+5. **`src/architecture.test.ts` es flaky bajo carga.** Corre `depcruise` como subproceso: aislado
+   tarda ~2,4 s, dentro de `npm test` llegó a 5,6 s y falló una vez, verde al repetir. `npm run
+   depcruise` da limpio. No se tocó —está fuera del alcance de este incremento— pero si lo ves rojo,
+   repetilo antes de investigar.
+
+Lo que dejó la Tarea 11:
+
+- **LA PRESENCIA DEL DATO ELIGE, y ahora son TRES variables con el mismo criterio.** `RABBITMQ_URL`
+  se suma a `MONGO_URI` y `REDIS_URL`: ausente no es una falla, es "esta instancia no publica" — no
+  se construye publicador, el despachador no arranca y **el outbox sigue acumulando**, que es el
+  punto entero de que la entrega esté desacoplada del request administrativo. No hay
+  `GAME_MODE_DRIVER` ni `OUTBOX_DRIVER` ni `AMQP_DRIVER`, y `src/di-container.test.ts` se pone rojo
+  si aparecen.
+- **LAS TRES PIEZAS DEL CATÁLOGO ELIGEN JUNTAS Y POR `mongo`**, nunca una por una: son la MISMA
+  base. Un catálogo en Mongo con un outbox en memoria pierde en cada reinicio justamente los eventos
+  que el outbox existe para no perder, y un lease de memoria no excluye a la otra instancia, que es
+  lo único que ese lease hace.
+- ⚠ **EN PRODUCCIÓN LAS TRES SON OBLIGATORIAS**, y la asimetría con el schema de zod es deliberada:
+  fuera de producción "ausente" es la elección legítima de una instancia que corre sola. Adentro,
+  las tres ausencias fallan **en silencio** —sin Mongo el catálogo muere con el proceso, sin Rabbit
+  el consumidor se queda con un catálogo viejo sin que falle nada de los dos lados, sin llave el
+  panel recibe 404 donde espera administrar—. Se emite **UN error que las enumera a las tres**:
+  corregir de a una es un despliegue productivo por variable.
+- **`vitest.setup.ts` BORRA `RABBITMQ_URL`** como ya borraba las otras dos, y acá el daño del olvido
+  SALE DEL REPO: los otros dos ensucian una base nuestra, éste le manda eventos a los CONSUMIDORES
+  de otro sistema desde cuarenta archivos en paralelo. Y el modo de falla no sería un rojo sino un
+  cuelgue.
+- **EL ORDEN DEL APAGADO ES EL CONTRATO**: despachador → drenado del historial → broker → Mongo, y
+  cada paso escribe en el siguiente. Cerrar el broker antes que el despachador tira la publicación
+  en vuelo sobre un canal cerrado; cerrar Mongo antes de drenar pierde el desenlace de cada partida.
+  El test lo mide como **secuencia** (`indexOf` creciente) y no con cuatro `toContain`, que darían
+  verde con el orden invertido. Redis sigue afuera: lo cierra Colyseus.
+- **`src/main.ts` NO se tocó**, contra lo que el plan listaba: ya delega en el `shutdown()` del
+  container, así que la extensión entera vive donde se abrieron las conexiones.
+- ⚠ **`ping()` NO RECHAZA SOLO CON EL BROKER CAÍDO: CUELGA** (`amqplib` con `recovery: true` usa
+  `maxRetries: Infinity`). Lo único que lo convierte en un 503 es el plazo POR CHEQUEO de
+  `registerHealth`. Por eso su test usa una promesa que **cuelga** y no una que rechaza: con
+  `Promise.reject` daría verde aunque ese plazo no existiera, y el síntoma en producción sería un
+  `/ready` que no contesta nada.
 
 Lo que dejó la Tarea 10:
 
