@@ -3,7 +3,16 @@ import { parseEnv } from "./env.js";
 
 describe("parseEnv", () => {
   it("acepta un entorno completo", () => {
-    const env = parseEnv({ NODE_ENV: "production", PORT: "3000", JWT_SECRET: "s".repeat(16) });
+    // Producción exige además las tres de infraestructura (ver el describe de más abajo), así que
+    // el "entorno completo" de este test es el completo de verdad y no el mínimo que compila.
+    const env = parseEnv({
+      NODE_ENV: "production",
+      PORT: "3000",
+      JWT_SECRET: "s".repeat(16),
+      MONGO_URI: "mongodb://mongo:27017/domino",
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+      INTERNAL_API_KEY: "k".repeat(16),
+    });
     expect(env.port).toBe(3000);
     expect(env.nodeEnv).toBe("production");
     expect(env.jwtSecret).toBe("s".repeat(16));
@@ -42,7 +51,13 @@ describe("parseEnv", () => {
   });
 
   it("en producción el nivel de log baja a info", () => {
-    const env = parseEnv({ NODE_ENV: "production", JWT_SECRET: "s".repeat(16) });
+    const env = parseEnv({
+      NODE_ENV: "production",
+      JWT_SECRET: "s".repeat(16),
+      MONGO_URI: "mongodb://mongo:27017/domino",
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+      INTERNAL_API_KEY: "k".repeat(16),
+    });
     expect(env.logLevel).toBe("info");
   });
 
@@ -75,6 +90,63 @@ describe("parseEnv", () => {
   // criterio que MONGO_URI — la presencia del dato elige, sin un interruptor que la nombre.
   it("sin REDIS_URL el entorno es válido y el clúster queda en uno", () => {
     expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).redisUrl).toBeUndefined();
+  });
+
+  // RABBITMQ_URL sigue el mismo criterio que las otras dos URIs: la PRESENCIA del dato elige la
+  // implementación y no hay ningún `AMQP_DRIVER` que nombre una. Ausente significa que esta
+  // instancia no publica al broker —el outbox sigue acumulando, que es el punto entero de que
+  // sea durable—, y es lo que hace que `npm test` no toque la red.
+  it("sin RABBITMQ_URL el entorno es válido y la URL queda indefinida", () => {
+    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).rabbitmqUrl).toBeUndefined();
+  });
+
+  // EN PRODUCCIÓN LAS TRES SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera de
+  // producción, "ausente" es la decisión legítima de una instancia que corre sola y sin
+  // infraestructura. En producción es lo contrario — un despliegue productivo sin `MONGO_URI`
+  // arranca creyendo que persiste, sin `RABBITMQ_URL` acumula eventos que nadie va a publicar, y
+  // sin `INTERNAL_API_KEY` deja el catálogo sin su API administrativa. Las tres fallan en
+  // SILENCIO, que es exactamente la clase de error que un arranque tiene que rechazar.
+  describe("en producción exige la infraestructura completa", () => {
+    const productivo = {
+      NODE_ENV: "production",
+      JWT_SECRET: "s".repeat(16),
+      MONGO_URI: "mongodb://mongo:27017/domino",
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+      INTERNAL_API_KEY: "k".repeat(16),
+    };
+
+    it("acepta el entorno productivo completo", () => {
+      const env = parseEnv(productivo);
+      expect(env.mongoUri).toBe("mongodb://mongo:27017/domino");
+      expect(env.rabbitmqUrl).toBe("amqp://guest:guest@rabbitmq:5672");
+      expect(env.internalApiKey).toBe("k".repeat(16));
+    });
+
+    it.each([["MONGO_URI"], ["RABBITMQ_URL"], ["INTERNAL_API_KEY"]] as const)(
+      "rechaza producción sin %s",
+      (faltante) => {
+        const { [faltante]: _, ...incompleto } = productivo;
+        expect(() => parseEnv(incompleto)).toThrow(new RegExp(faltante));
+      },
+    );
+
+    // UN SOLO ERROR QUE LAS ENUMERA, no el primero que aparece. Un arranque que dice "falta
+    // MONGO_URI", se corrige, y entonces dice "falta RABBITMQ_URL" es tres despliegues en vez de
+    // uno — y cada intento contra un entorno productivo cuesta una ventana de mantenimiento.
+    it("nombra TODAS las que faltan en un solo error", () => {
+      const intento = () => parseEnv({ NODE_ENV: "production", JWT_SECRET: "s".repeat(16) });
+      expect(intento).toThrow(/MONGO_URI/);
+      expect(intento).toThrow(/RABBITMQ_URL/);
+      expect(intento).toThrow(/INTERNAL_API_KEY/);
+    });
+
+    // La misma ausencia FUERA de producción no es un error: es el despliegue de desarrollo.
+    it("fuera de producción las tres pueden faltar", () => {
+      const env = parseEnv({ JWT_SECRET: "s".repeat(16) });
+      expect(env.mongoUri).toBeUndefined();
+      expect(env.rabbitmqUrl).toBeUndefined();
+      expect(env.internalApiKey).toBeUndefined();
+    });
   });
 
   // `PORT` ES LA BASE Y NO EL PUERTO, y no es una convención nuestra: `@colyseus/tools` le suma
