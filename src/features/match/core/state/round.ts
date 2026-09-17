@@ -2,31 +2,11 @@ import { type SchemaType, schema, t } from "@colyseus/schema";
 import { BoardState } from "./board.js";
 import { BoneyardState } from "./boneyard.js";
 
-// UN EJE, UN CAMPO (spec §7.1): la fase reemplaza los booleanos del v1
-// (isRoundFinished + bloqueo derivado + roundEndReason codificaban lo mismo tres veces).
-//
-// UNA FASE ES UN ESTADO QUE ESPERA ALGO —input, o el vencimiento de su plazo—.
-//
-// `DEALING` es la VENTANA DE REPARTO (reglas §3.1): al empezar la partida las fichas se
-// reparten pero NO se hacen públicas, y cada jugador levanta las suyas con `REVEAL_TILES`
-// dentro de 15 s. Mientras falte alguien la ronda no arranca; al vencer, el que no las
-// levantó se retira. Es de la RONDA 1 nada más: de la 2 en adelante el reparto revela
-// solo. Portado de truco (negocio v27 §12.7).
-//
-// Es la fase que hace que esperar sea observable, así que existe de verdad: repartir sí
-// es síncrono, pero *esperar a que los dos estén ahí* no.
-// `NEGOTIATING_BET` es la ventana de respuesta del AUMENTO DE APUESTA (en v1,
-// `PROPOSE_BET_MULTIPLIER` y sus 10 s). Es una fase y no un booleano por la misma razón que
-// las otras tres: es un estado que ESPERA algo —la respuesta del rival, o el vencimiento de
-// su plazo— y el modelo tiene UN SOLO `activeDeadline`. Sin fase propia, el plazo de la
-// negociación y el del turno serían el mismo campo queriendo decir dos cosas.
-//
-// CONGELA EL TURNO SIN TOCARLO: `currentTurn` queda intacto, así que al volver a `PLAYING`
-// sigue siendo de quien era. Lo único que cambia es quién puede actuar, y eso ya lo dice la
-// fase. El plazo del turno se re-estampa entero al volver, que es lo que evita que negociar
-// le coma el reloj al que no propuso.
-export type RoundPhase = "DEALING" | "PLAYING" | "NEGOTIATING_BET" | "PRESENTING_ROUND";
-export type RoundEndReason = "DOMINO" | "BLOCKED";
+// Las dos uniones se declaran en `rules/phases.js` —son vocabulario del juego, no del wire— y
+// se re-exportan acá, que es de donde las importaba todo el mundo. El plazo del turno se
+// re-estampa entero al volver de `NEGOTIATING_BET`, que es lo que evita que negociar le coma el
+// reloj al que no propuso; el resto de la historia de las fases está allá.
+export type { RoundEndReason, RoundPhase } from "../rules/phases.js";
 
 // El turno: de quién es, y en qué tramo del plazo va. El instante de vencimiento vive
 // UNIFICADO en `MatchState.activeDeadline` —no acá—, así que no hay `startedAt`: sería

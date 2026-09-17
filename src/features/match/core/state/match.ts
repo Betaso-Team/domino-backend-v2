@@ -2,21 +2,9 @@ import { type SchemaType, schema, t } from "@colyseus/schema";
 import { PlayerState } from "./player.js";
 import { RoundState, RoundSummary } from "./round.js";
 
-// DOS PALABRAS, DOS HECHOS (truco negocio v26, changelog "Revancha" §3). `RESOLVED` es el
-// VEREDICTO —el juego dictaminó— y por eso vive SOLO en eventos (`ROUND_RESOLVED`,
-// `MATCH_RESOLVED`); `FINISHED` es el terminal de ESTA MÁQUINA —no queda nada por hacer en
-// esta mesa— y por eso vive SOLO en fases. Coinciden mientras la partida se apaga al
-// dictaminarse; la REVANCHA los separa, y ahí el nombre repetido pasa a mentir. Truco lo
-// pagó y lo renombró: acá se nace con la separación hecha.
-//
-// `FINISHED` es el ÚNICO terminal, y NO hay un `ABORTED` que lo acompañe: una partida que
-// muere sin veredicto no es una transición del juego, es la sala que se muere. Eso lo
-// cuenta `MATCH_ABORTED`, que es evento de PLATAFORMA (network/events.ts).
-//
-// Las dos fases de la REVANCHA (`REMATCH_WINDOW`, `REMATCH_NEGOTIATION`) van DESPUÉS del
-// veredicto y ANTES del terminal. NO entran en esta rebanada, pero el enum está ordenado
-// para recibirlas sin renombrar nada: es la razón entera de haber separado las palabras.
-export type MatchPhase = "NOT_STARTED" | "PLAYING" | "PRESENTING_MATCH" | "FINISHED";
+// La unión se declara en `rules/phases.js` —es vocabulario del juego, no del wire— y se
+// re-exporta acá, que es de donde la importaba todo el mundo.
+export type { MatchPhase } from "../rules/phases.js";
 
 export const Scoreboard = schema(
   { teamA: t.number().default(0), teamB: t.number().default(0) },

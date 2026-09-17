@@ -117,18 +117,8 @@ export function buildEngineGraph(
       // diferencia de fondo con los otros cinco: congelar y descongelar mueve la fase de la
       // MANO, no la de la mesa. Y reciben el juez del aumento aparte del `Referee` general
       // porque éste no es un juez del juego: no mira fichas, mira dinero.
-      PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(
-        matchReferee,
-        betReferee,
-        bet,
-        roundDriver,
-      ),
-      RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(
-        matchReferee,
-        betReferee,
-        bet,
-        roundDriver,
-      ),
+      PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(betReferee, bet, roundDriver),
+      RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(betReferee, bet, roundDriver),
     },
   };
 }

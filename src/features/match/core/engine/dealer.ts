@@ -1,9 +1,9 @@
 import { hashSeed, mulberry32, shuffled } from "../../../../shared/rng.js";
 import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../config.js";
+import { orderedTileSet } from "../rules/tiles.js";
 import { Tile } from "../state/index.js";
 import type { MatchState } from "../state/index.js";
 import { boneyardOf, currentRoundOf, playerOf } from "./state-projections.js";
-import { orderedTileSet } from "./tile-set.js";
 
 // Repartir no revela: Dealer no recibe el puerto de visibilidad. La única fuente de
 // aleatoriedad se deriva de (seed, roundNumber), sin estado compartido entre rondas.

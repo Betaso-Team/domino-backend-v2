@@ -1,9 +1,16 @@
 import type { PlayerId } from "../ids.js";
-import type { BoardSide, TileLike } from "../state/tile.js";
+import type { TileLike } from "../rules/tiles.js";
+import type { BoardSide } from "../state/tile.js";
 import type { MatchReferee } from "./match/referee.js";
 import type { RoundReferee } from "./round/referee.js";
 
 // FACADE solo-juez: agrega los assertCanX en una superficie. Read-only.
+//
+// YA NO COMPONE, SOLO REENVÍA, y la diferencia es dónde vive el orden de las guardas. Antes cada
+// método de acá encadenaba `assertIsPlaying` con el juez de la ronda, así que la secuencia
+// —y con ella qué motivo ve el jugador— estaba repartida entre este archivo y el otro. Ahora la
+// secuencia completa es de `rules/legality.js`, que la declara una vez por verbo y la deja
+// probar sin pasar por dos actores.
 export class Referee {
   constructor(
     private readonly matchReferee: MatchReferee,
@@ -15,22 +22,18 @@ export class Referee {
   }
 
   assertCanPlay(playerId: PlayerId, tile: TileLike, side: BoardSide): void {
-    this.matchReferee.assertIsPlaying(playerId);
     this.roundReferee.assertCanPlay(playerId, tile, side);
   }
 
   assertCanDraw(playerId: PlayerId): void {
-    this.matchReferee.assertIsPlaying(playerId);
     this.roundReferee.assertCanDraw(playerId);
   }
 
   assertCanPass(playerId: PlayerId): void {
-    this.matchReferee.assertIsPlaying(playerId);
     this.roundReferee.assertCanPass(playerId);
   }
 
   assertCanRevealTiles(playerId: PlayerId): void {
-    this.matchReferee.assertIsPlaying(playerId);
     this.roundReferee.assertCanRevealTiles(playerId);
   }
 }

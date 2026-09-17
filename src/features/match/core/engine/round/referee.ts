@@ -1,83 +1,58 @@
 import type { PlayerId } from "../../ids.js";
-import type { MatchState } from "../../state/index.js";
-import type { BoardSide, TileLike } from "../../state/tile.js";
-import { RuleViolationError } from "../errors.js";
 import {
-  boneyardCountOf,
-  currentRoundOf,
-  currentTurnOf,
-  handOf,
-  playerOf,
-  roundActivePlayers,
-  roundPhaseOf,
-} from "../state-projections.js";
-import { sameTile } from "../tile-set.js";
-import { boardEndsOf } from "./board-ends.js";
-import { hasPlayableTile, playableSides } from "./playable.js";
+  canDrawTile,
+  canPass,
+  canPlayTile,
+  canRevealTiles,
+  hasPlayable,
+  playersWithoutTilesSeen,
+} from "../../rules/legality.js";
+import { tileInHand } from "../../rules/projections.js";
+import type { TileLike } from "../../rules/tiles.js";
+import type { MatchView } from "../../rules/view.js";
+import type { MatchState } from "../../state/index.js";
+import type { BoardSide } from "../../state/tile.js";
+import { SchemaMatchView } from "../../state/view.js";
+import { assertLegal } from "../errors.js";
 
 // JUEZ de la RONDA. Read-only: valida y deriva, no muta.
+//
+// YA NO DECIDE NADA, y eso es todo lo que cambió: la decisión vive en `rules/legality.js`, que
+// dictamina en vez de lanzar. Acá quedó el MECANISMO —leer el veredicto y cortar el comando— más
+// las dos derivaciones que el conductor le pregunta. Es lo que deja que la misma regla la corra
+// el cliente para apagar un botón, sin un `try/catch` y sin copiarla.
 export class RoundReferee {
-  constructor(private readonly match: MatchState) {}
+  private readonly view: MatchView;
+
+  constructor(match: MatchState) {
+    this.view = new SchemaMatchView(match);
+  }
 
   assertCanPlay(playerId: PlayerId, tile: TileLike, side: BoardSide): void {
-    this.assertIsTurn(playerId);
-    const held = this.tileInHand(playerId, tile);
-    if (!held) throw new RuleViolationError("TILE_NOT_IN_HAND");
-    const ends = boardEndsOf(currentRoundOf(this.match).board);
-    if (!playableSides(tile, ends).includes(side)) {
-      throw new RuleViolationError("SIDE_NOT_PLAYABLE");
-    }
+    assertLegal(canPlayTile(playerId, tile, side, this.view));
   }
 
   assertCanDraw(playerId: PlayerId): void {
-    this.assertIsTurn(playerId);
-    const round = currentRoundOf(this.match);
-    if (this.hasPlayable(playerId)) {
-      throw new RuleViolationError("MUST_PLAY_INSTEAD_OF_DRAWING");
-    }
-    if (boneyardCountOf(round) === 0) throw new RuleViolationError("BONEYARD_EMPTY");
+    assertLegal(canDrawTile(playerId, this.view));
   }
 
   assertCanPass(playerId: PlayerId): void {
-    this.assertIsTurn(playerId);
-    const round = currentRoundOf(this.match);
-    if (this.hasPlayable(playerId)) {
-      throw new RuleViolationError("MUST_PLAY_INSTEAD_OF_DRAWING");
-    }
-    if (boneyardCountOf(round) > 0) {
-      throw new RuleViolationError("MUST_DRAW_INSTEAD_OF_PASSING");
-    }
+    assertLegal(canPass(playerId, this.view));
   }
 
   assertCanRevealTiles(playerId: PlayerId): void {
-    if (roundPhaseOf(currentRoundOf(this.match)) !== "DEALING") {
-      throw new RuleViolationError("NOT_DEALING");
-    }
-    if (playerOf(playerId, this.match).hasSeenTiles) {
-      throw new RuleViolationError("TILES_ALREADY_SEEN");
-    }
+    assertLegal(canRevealTiles(playerId, this.view));
   }
 
   playersWithoutTilesSeen(): readonly PlayerId[] {
-    return roundActivePlayers(this.match)
-      .filter((player) => !player.hasSeenTiles)
-      .map((player) => player.playerId);
+    return playersWithoutTilesSeen(this.view);
   }
 
   hasPlayable(playerId: PlayerId): boolean {
-    const ends = boardEndsOf(currentRoundOf(this.match).board);
-    return hasPlayableTile([...handOf(playerId, this.match).tiles], ends);
+    return hasPlayable(playerId, this.view);
   }
 
   tileInHand(playerId: PlayerId, tile: TileLike): TileLike | undefined {
-    return [...handOf(playerId, this.match).tiles].find((held) => sameTile(held, tile));
-  }
-
-  private assertIsTurn(playerId: PlayerId): void {
-    const round = currentRoundOf(this.match);
-    if (roundPhaseOf(round) !== "PLAYING") throw new RuleViolationError("NOT_PLAYING");
-    if (currentTurnOf(round).playerId !== playerId) {
-      throw new RuleViolationError("NOT_YOUR_TURN");
-    }
+    return tileInHand(playerId, tile, this.view);
   }
 }

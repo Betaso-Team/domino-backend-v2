@@ -37,6 +37,8 @@ export const PlacedTile = schema(
 );
 export type PlacedTile = SchemaType<typeof PlacedTile>;
 
-export type BoardSide = "LEFT" | "RIGHT";
-
-export type { TileLike } from "../engine/tile-set.js";
+// EL VOCABULARIO SE RE-EXPORTA, no se declara acá. `BoardSide` y `TileLike` son del JUEGO —qué
+// fichas existen, de qué punta se cuelgan— y por eso viven en `rules/`, que es lo que algún día
+// viaja al cliente. Lo que este archivo declara es CÓMO se guardan y se sincronizan.
+export type { BoardSide } from "../rules/board-ends.js";
+export type { TileLike } from "../rules/tiles.js";

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
+import { DOMINO_SET_SIZE, handValue, sameTile } from "../../rules/tiles.js";
 import { BoardState, BoneyardState, RoundState, Tile } from "../../state/index.js";
 import { Dealer } from "../dealer.js";
 import { createMatchState } from "../genesis.js";
 import { handOf } from "../state-projections.js";
-import { DOMINO_SET_SIZE, handValue, sameTile } from "../tile-set.js";
 import { matchConfig } from "./match-config-fixture.js";
 
 function build(seed = "seed-1") {

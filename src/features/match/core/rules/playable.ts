@@ -1,5 +1,5 @@
-import type { BoardSide, TileLike } from "../../state/tile.js";
-import type { BoardEnds } from "./board-ends.js";
+import type { BoardEnds, BoardSide } from "./board-ends.js";
+import type { TileLike } from "./tiles.js";
 
 export function playableSides(tile: TileLike, ends: BoardEnds): BoardSide[] {
   // Tablero vacío: la primera ficha entra, y la cadena todavía no tiene lados,
@@ -19,4 +19,5 @@ export function hasPlayableTile(tiles: readonly TileLike[], ends: BoardEnds): bo
 
 // No hay `lockedNumberFor`: el número de engarce no se guarda (ver el comentario de
 // `PlacedTile`), así que nadie del lado del servidor lo necesita. El front lo deriva
-// recorriendo `board.tiles` con `side`, exactamente como `boardEndsOf`.
+// recorriendo `board.tiles` con `side`, exactamente como `boardEndsOf` — y desde que estas dos
+// funciones viven en `rules/`, lo deriva con ÉSTAS y no con una copia.

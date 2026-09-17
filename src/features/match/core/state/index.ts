@@ -22,3 +22,7 @@ export * from "./match.js";
 export * from "./player.js";
 export * from "./round.js";
 export * from "./tile.js";
+// LA MITAD SERVIDOR DE LA FRONTERA DE LAS REGLAS. Sale por el barril del estado —y no por el de
+// `rules/`— porque es lo que ADAPTA este árbol a esa vista: la vista no conoce el schema, y ése
+// es el punto entero de que exista.
+export * from "./view.js";

@@ -1,9 +1,9 @@
 import type { PlayerId } from "../../ids.js";
+import { sameTile } from "../../rules/tiles.js";
 import { type MatchState, PlacedTile } from "../../state/index.js";
 import type { BoardSide, TileLike } from "../../state/tile.js";
 import { InvariantViolationError } from "../errors.js";
 import { boneyardOf, currentRoundOf, handOf, playerOf } from "../state-projections.js";
-import { sameTile } from "../tile-set.js";
 import type { SchemaVisibilityController } from "../visibility.js";
 
 // Solo MUTA. Referee-free: la legalidad ya la comprobó el juez.

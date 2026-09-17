@@ -1,14 +1,10 @@
 import type { PlayerId, TeamId } from "../../ids.js";
+import { canAct } from "../../rules/legality.js";
+import type { MatchView } from "../../rules/view.js";
 import type { MatchState } from "../../state/index.js";
-import { RuleViolationError } from "../errors.js";
-import {
-  hasTeamAbandoned,
-  isRoundActive,
-  matchPhaseOf,
-  opponentTeam,
-  playerOf,
-  scoreboardOf,
-} from "../state-projections.js";
+import { SchemaMatchView } from "../../state/view.js";
+import { assertLegal } from "../errors.js";
+import { hasTeamAbandoned, opponentTeam, scoreboardOf } from "../state-projections.js";
 
 export interface MatchOutcome {
   readonly winnerTeamId: TeamId;
@@ -16,18 +12,23 @@ export interface MatchOutcome {
 }
 
 // JUEZ: read-only. Valida, deriva, dictamina. No muta nada.
+//
+// Se quedó con el VEREDICTO DE LA PARTIDA (`outcome`), que es lo único de acá que no es una
+// legalidad: no contesta "¿se puede?" sino "¿ya terminó, y quién ganó?". Eso no es una consulta
+// que el cliente pueda hacer —depende del marcador y de los abandonos, que son del servidor— así
+// que no se fue a `rules/`.
 export class MatchReferee {
-  constructor(private readonly match: MatchState) {}
+  private readonly view: MatchView;
 
-  // Va delante de TODA acción de jugador. Repetida y no envuelta en un genérico,
-  // a propósito: así se ve de un vistazo cuáles la tienen, y es grepeable.
+  constructor(private readonly match: MatchState) {
+    this.view = new SchemaMatchView(match);
+  }
+
+  // Va delante de TODA acción de jugador, y desde que la legalidad se compone en `rules/` ya va
+  // ADENTRO de cada verbo. Sigue expuesta porque los dos comandos del aumento de apuesta la
+  // llaman sueltos —su juez no es éste— y porque es grepeable.
   assertIsPlaying(playerId: PlayerId): void {
-    if (matchPhaseOf(this.match) !== "PLAYING") {
-      throw new RuleViolationError("MATCH_NOT_IN_PROGRESS");
-    }
-    if (!isRoundActive(playerOf(playerId, this.match))) {
-      throw new RuleViolationError("NOT_PLAYING");
-    }
+    assertLegal(canAct(playerId, this.view));
   }
 
   assertCanAbandon(playerId: PlayerId): void {

@@ -163,13 +163,11 @@ export function engineWithHands(
     PASS: new PassCommand(referee, matchDriver),
     REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
     PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(
-      matchReferee,
       new BetReferee(match, config),
       bet,
       roundDriver,
     ),
     RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(
-      matchReferee,
       new BetReferee(match, config),
       bet,
       roundDriver,

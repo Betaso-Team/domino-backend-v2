@@ -1,6 +1,7 @@
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
 import type { MatchEvent } from "../../events.js";
 import type { PlayerId } from "../../ids.js";
+import { DOMINO_SET_SIZE, tileValue } from "../../rules/tiles.js";
 import { BoardState, BoneyardState, RoundState, Turn } from "../../state/index.js";
 import type { MatchState } from "../../state/index.js";
 import type { BetNegotiation } from "../bet/index.js";
@@ -19,7 +20,6 @@ import {
   teamOf,
   turnOrderFrom,
 } from "../state-projections.js";
-import { DOMINO_SET_SIZE, tileValue } from "../tile-set.js";
 import { blockVerdictOf, isBlocked } from "./block.js";
 import { firstPlayerOf } from "./first-turn.js";
 import type { RoundPlayer } from "./player.js";

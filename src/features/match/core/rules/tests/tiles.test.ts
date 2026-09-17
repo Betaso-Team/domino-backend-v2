@@ -7,9 +7,9 @@ import {
   orderedTileSet,
   sameTile,
   tileValue,
-} from "./tile-set.js";
+} from "../tiles.js";
 
-describe("tile-set", () => {
+describe("tiles", () => {
   it("son 28 fichas", () => {
     expect(orderedTileSet()).toHaveLength(DOMINO_SET_SIZE);
     expect(DOMINO_SET_SIZE).toBe(28);

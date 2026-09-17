@@ -1,5 +1,6 @@
 import type { PlayerRef } from "../../../shared/player-ref.js";
 import type { PlayerId } from "./ids.js";
+import type { BetLevel } from "./rules/config.js";
 
 // Value-object INMUTABLE, fuera del estado de Colyseus e inyectado por DI.
 // Acá vive el `seed`: hace el reparto determinista y reproducible, y como no está
@@ -82,22 +83,11 @@ export interface DominoMatchConfig {
   readonly isFreeRoom: boolean;
 }
 
-/**
- * UN NIVEL DEL CATÁLOGO DE AUMENTO, con los tres números de v1 (`BetIncreaseOption`):
- * `extra` es lo que se SUMA al multiplicador del modo —o sea, lo que termina en los puntos
- * de ranking— y los otros dos son lo que le cambia el dinero a la mesa si se acepta.
- *
- * `level` es la identidad que el cliente manda: elige un NIVEL del catálogo, nunca un
- * importe. Es la misma decisión que el catálogo de reacciones de truco —el cliente manda un
- * id y el servidor pone el contenido—, y acá pesa más, porque lo que el servidor pone es
- * cuánto se cobra.
- */
-export interface BetLevel {
-  readonly level: number;
-  readonly extra: number;
-  readonly additionalEntryFee: number;
-  readonly additionalPrize: number;
-}
+// El nivel se declara en `rules/config.js` —es lo que la legalidad de una oferta JUZGA, así que
+// es vocabulario de regla— y se re-exporta acá, que es de donde lo importaba todo el mundo.
+// `DominoMatchConfig` satisface `DominoRulesConfig` por estructura: los dos campos que las
+// reglas necesitan (`betLevels`, `isFreeRoom`) están arriba, sin adaptador y sin cast.
+export type { BetLevel };
 
 /** Los ids OPACOS de la mesa, en orden de asiento. Es lo único que el motor consume. */
 export const playerIdsOf = (config: DominoMatchConfig): readonly PlayerId[] =>

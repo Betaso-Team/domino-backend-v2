@@ -1,6 +1,6 @@
 import type { PlayerId } from "../../ids.js";
+import { DOMINO_MAX_PIP, type TileLike, isDouble, tileValue } from "../../rules/tiles.js";
 import { InvariantViolationError } from "../errors.js";
-import { DOMINO_MAX_PIP, type TileLike, isDouble, tileValue } from "../tile-set.js";
 
 export interface SeatHand {
   readonly playerId: PlayerId;

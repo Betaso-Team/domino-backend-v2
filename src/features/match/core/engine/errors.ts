@@ -1,3 +1,11 @@
+import type { RuleViolationCode } from "../rules/codes.js";
+import type { Ruling } from "../rules/ruling.js";
+
+// El catálogo de motivos se MUDÓ a `rules/codes.js` —es vocabulario de regla, no el mecanismo
+// con el que el servidor lo cuenta— y se re-exporta acá, que es de donde lo importaba todo el
+// mundo. Ver la cabecera de ese archivo.
+export type { RuleViolationCode };
+
 export abstract class DominoError extends Error {
   constructor(message: string) {
     super(message);
@@ -7,42 +15,20 @@ export abstract class DominoError extends Error {
 
 // El jugador intentó algo ilegal. Se traduce a un mensaje al cliente; NO cierra la partida
 // y NO entra al historial (spec §5.1): va al log como rastro antifraude.
-export type RuleViolationCode =
-  | "NOT_PLAYING"
-  | "NOT_YOUR_TURN"
-  | "TILE_NOT_IN_HAND"
-  | "TILE_NOT_PLAYABLE"
-  | "SIDE_NOT_PLAYABLE"
-  | "MUST_PLAY_INSTEAD_OF_DRAWING"
-  | "MUST_DRAW_INSTEAD_OF_PASSING"
-  | "BONEYARD_EMPTY"
-  // Los dos de la ventana de reparto (reglas §3.1): levantar fichas fuera de la ventana,
-  // y levantarlas dos veces.
-  | "NOT_DEALING"
-  | "TILES_ALREADY_SEEN"
-  | "MATCH_NOT_IN_PROGRESS"
-  // LOS DEL AUMENTO DE APUESTA. Son siete y no uno solo a propósito: con plata de por medio,
-  // un "no se puede" genérico no le deja al jugador saber si le conviene reintentar en la
-  // ronda siguiente, cambiar de nivel, o dejar de insistir. Los seis primeros son los
-  // límites que v1 comprueba.
-  //
-  // EL BALANCE NO ESTÁ ACÁ, y la ausencia es deliberada: comprobarlo es preguntarle a otro
-  // servicio —o sea red— y estos comandos son síncronos por contrato. Lo rechaza el cobro,
-  // cuando el cobro exista (ver `BetChargePort` en `network/`).
-  | "BETTING_DISABLED"
-  | "UNKNOWN_BET_LEVEL"
-  | "BET_WINDOW_CLOSED"
-  | "BET_ALREADY_PENDING"
-  | "BET_ALREADY_ACCEPTED"
-  | "NO_BET_PENDING"
-  // Contestar una oferta que no es para vos. En una mesa de dos es, sobre todo, el
-  // proponente intentando aceptarse a sí mismo.
-  | "NOT_YOUR_BET";
-
 export class RuleViolationError extends DominoError {
   constructor(readonly code: RuleViolationCode) {
     super(`Regla violada: ${code}`);
   }
+}
+
+// EL PUENTE ENTRE EL VEREDICTO Y LA EXCEPCIÓN, y es el único lugar donde una regla se vuelve un
+// throw. Las reglas dictaminan (`rules/ruling.js`); el motor necesita cortar la ejecución del
+// comando, y eso solo lo hace una excepción.
+//
+// Vive acá y no en `rules/` a propósito: el día que las reglas viajen en un paquete, este
+// archivo NO viaja — el cliente no aborta nada, pinta un botón apagado.
+export function assertLegal(ruling: Ruling): void {
+  if (!ruling.legal) throw new RuleViolationError(ruling.code);
 }
 
 // El estado dejó de ser confiable. Es un bug: la política de errores lo traduce a
