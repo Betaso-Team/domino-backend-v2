@@ -1,8 +1,10 @@
 import type { DependencyContainer } from "tsyringe";
+import type { CommandName } from "../../../core/command.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config.js";
 import type { Clock } from "../../../core/engine/clock.js";
 import type { TimeoutScheduler } from "../../../core/engine/timeout-scheduler.js";
 import type { SchemaVisibilityController } from "../../../core/engine/visibility.js";
+import type { MatchEvent } from "../../../core/events.js";
 import type { MatchState } from "../../../core/state/index.js";
 import { buildEngineGraph } from "../../../history/engine-factory.js";
 import {
@@ -11,7 +13,9 @@ import {
   MatchHistory,
   type MatchPieces,
 } from "../../../network/index.js";
+import { MessageRouter } from "../messages.js";
 import { CommandCatalog } from "./catalog.js";
+import { CommandHandler } from "./command-handler.js";
 import { identityDecoder } from "./decoders.js";
 
 export type MatchStarter = () => void;
@@ -45,6 +49,12 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   child.register("Command:DRAW_TILE", { useValue: graph.commands.DRAW_TILE });
   child.register("Command:PASS", { useValue: graph.commands.PASS });
   child.register("Command:REVEAL_TILES", { useValue: graph.commands.REVEAL_TILES });
+  child.register("Command:PROPOSE_BET_MULTIPLIER", {
+    useValue: graph.commands.PROPOSE_BET_MULTIPLIER,
+  });
+  child.register("Command:RESPOND_BET_MULTIPLIER", {
+    useValue: graph.commands.RESPOND_BET_MULTIPLIER,
+  });
 
   // MatchDriver no se registra: la sala puede iniciar la partida por MatchStarter, pero
   // no puede alcanzar advance/timeout y saltarse los comandos. Ahora tampoco puede
@@ -59,6 +69,8 @@ export function buildCatalog(child: DependencyContainer): CommandCatalog {
       DRAW_TILE: identityDecoder("DRAW_TILE"),
       PASS: identityDecoder("PASS"),
       REVEAL_TILES: identityDecoder("REVEAL_TILES"),
+      PROPOSE_BET_MULTIPLIER: identityDecoder("PROPOSE_BET_MULTIPLIER"),
+      RESPOND_BET_MULTIPLIER: identityDecoder("RESPOND_BET_MULTIPLIER"),
     },
     {
       ABANDON: child.resolve("Command:ABANDON"),
@@ -66,7 +78,45 @@ export function buildCatalog(child: DependencyContainer): CommandCatalog {
       DRAW_TILE: child.resolve("Command:DRAW_TILE"),
       PASS: child.resolve("Command:PASS"),
       REVEAL_TILES: child.resolve("Command:REVEAL_TILES"),
+      PROPOSE_BET_MULTIPLIER: child.resolve("Command:PROPOSE_BET_MULTIPLIER"),
+      RESPOND_BET_MULTIPLIER: child.resolve("Command:RESPOND_BET_MULTIPLIER"),
     },
+  );
+}
+
+// ARMA LA TABLA DEL SOCKET. Los verbos del dominó entran acá como entradas del router, no
+// como su definición: mañana una reacción se registra en esta misma tabla con su propio
+// decoder y su propio handler, y no hay ninguna lista de excepciones que tocar.
+//
+// Se recorre `catalog.names()` en vez de escribir los cinco a mano, y eso es lo que hace
+// que sumar un verbo al motor lo rutee solo. El tipo mapeado del catálogo ya garantizó que
+// están todos.
+export function buildRouter(
+  catalog: CommandCatalog,
+  history: MatchHistory,
+  notify: (events: readonly MatchEvent[]) => void,
+): MessageRouter {
+  const router = new MessageRouter();
+  for (const name of catalog.names()) {
+    registerVerb(router, catalog, name, history, notify);
+  }
+  return router;
+}
+
+// El genérico existe para que `N` quede FIJO entre el decoder y su handler. Sin esta
+// función intermedia los dos se instancian por separado sobre la unión y el par deja de
+// verse como un par: es la misma razón por la que `router.on` los recibe juntos.
+function registerVerb<N extends CommandName>(
+  router: MessageRouter,
+  catalog: CommandCatalog,
+  name: N,
+  history: MatchHistory,
+  notify: (events: readonly MatchEvent[]) => void,
+): void {
+  router.on(
+    name,
+    catalog.decoder(name),
+    new CommandHandler(name, catalog.command(name), history, notify),
   );
 }
 

@@ -65,6 +65,38 @@ export interface DominoMatchConfig {
    */
   readonly entryFee: number;
   readonly prize: number;
+  /**
+   * LOS NIVELES DE AUMENTO que esta mesa ofrece, congelados al crearse igual que el resto.
+   * **Lista vacía = la mesa no ofrece aumentar**, y ése es el reposo: el catálogo de niveles
+   * es de otro repo (en v1, `internal/bet-increase/config` del backend principal) y el v1
+   * falla CERRADO cuando no lo consigue. Copiar ese default importa: con una lista que se
+   * llenara sola ante un error, una mesa que no debía cobrar de más cobraría de más.
+   */
+  readonly betLevels: readonly BetLevel[];
+  /**
+   * Una mesa gratis NO PUEDE AUMENTAR, y es un chequeo propio en vez de deducirse de
+   * `betLevels` vacío: son dos hechos distintos —"no hay catálogo" y "acá no se juega por
+   * plata"— y un catálogo mal cargado sobre una mesa gratis terminaría cobrando una entrada
+   * que nadie pagó.
+   */
+  readonly isFreeRoom: boolean;
+}
+
+/**
+ * UN NIVEL DEL CATÁLOGO DE AUMENTO, con los tres números de v1 (`BetIncreaseOption`):
+ * `extra` es lo que se SUMA al multiplicador del modo —o sea, lo que termina en los puntos
+ * de ranking— y los otros dos son lo que le cambia el dinero a la mesa si se acepta.
+ *
+ * `level` es la identidad que el cliente manda: elige un NIVEL del catálogo, nunca un
+ * importe. Es la misma decisión que el catálogo de reacciones de truco —el cliente manda un
+ * id y el servidor pone el contenido—, y acá pesa más, porque lo que el servidor pone es
+ * cuánto se cobra.
+ */
+export interface BetLevel {
+  readonly level: number;
+  readonly extra: number;
+  readonly additionalEntryFee: number;
+  readonly additionalPrize: number;
 }
 
 /** Los ids OPACOS de la mesa, en orden de asiento. Es lo único que el motor consume. */
@@ -102,6 +134,12 @@ export interface GlobalDominoConfig {
    */
   readonly reconnectionWindowSeconds: number;
   readonly tilesPerPlayer: number;
+  /**
+   * Cuánto tiene el rival para contestar un aumento de apuesta. Al vencer NO se queda en
+   * silencio: se responde que NO en su nombre (reglas de v1), porque la mesa está congelada
+   * esperando y el turno de otro no puede quedar rehén de una propuesta que nadie contesta.
+   */
+  readonly betResponseTimeoutMs: number;
 }
 
 // Los plazos son los del v1, verificados en docs/reglas-de-juego-v1.md §5.1: 60 s de
@@ -118,6 +156,8 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   seatingTimeoutMs: 30_000,
   reconnectionWindowSeconds: 120,
   tilesPerPlayer: 7,
+  // El número del v1 (`actionResponseTimeRemaining` del que responde un aumento).
+  betResponseTimeoutMs: 10_000,
 };
 
 export function globalConfigWith(overrides: Partial<GlobalDominoConfig>): GlobalDominoConfig {

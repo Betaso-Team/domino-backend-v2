@@ -3,14 +3,17 @@ import {
   DrawTileCommand,
   PassCommand,
   PlayTileCommand,
+  ProposeBetMultiplierCommand,
+  RespondBetMultiplierCommand,
   RevealTilesCommand,
 } from "../../commands/index.js";
-import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
+import type { BetLevel, DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
 import { DEFAULT_GLOBAL_CONFIG, playerIdsOf } from "../../config.js";
 import type { MatchEvent } from "../../events.js";
 import type { MatchState } from "../../state/index.js";
 import { Tile } from "../../state/index.js";
 import type { BoardSide } from "../../state/tile.js";
+import { BetNegotiation, BetReferee } from "../bet/index.js";
 import type { Clock } from "../clock.js";
 import { Dealer } from "../dealer.js";
 import { createMatchState } from "../genesis.js";
@@ -74,6 +77,7 @@ class FixedDealer extends Dealer {
 interface EngineOptions {
   readonly extraTimeReserveMs?: number;
   readonly isDealWindowEnabled?: boolean;
+  readonly betLevels?: readonly BetLevel[];
 }
 
 export function engineWithHands(
@@ -100,6 +104,9 @@ export function engineWithHands(
   };
   const config: DominoMatchConfig = matchConfig(seats, {
     isDealWindowEnabled: options.isDealWindowEnabled ?? false,
+    // Vacío salvo que la suite lo pida: una mesa sin catálogo no ofrece aumentar, que es el
+    // reposo de producción.
+    betLevels: options.betLevels ?? [],
   });
   const match = createMatchState(config);
   const clockBox = { now: 1_000 };
@@ -128,6 +135,7 @@ export function engineWithHands(
   );
   const players = new Player(repository);
   const referee = new Referee(matchReferee, roundReferee);
+  const bet = new BetNegotiation(match);
   const roundDriver = new RoundDriver(
     match,
     clock,
@@ -137,6 +145,7 @@ export function engineWithHands(
     dealer,
     scorer,
     (playerId) => repository.round(playerId),
+    bet,
   );
   const matchDriver = new MatchDriver(
     match,
@@ -153,6 +162,18 @@ export function engineWithHands(
     DRAW_TILE: new DrawTileCommand(referee, players, matchDriver),
     PASS: new PassCommand(referee, matchDriver),
     REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
+    PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(
+      matchReferee,
+      new BetReferee(match, config),
+      bet,
+      roundDriver,
+    ),
+    RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(
+      matchReferee,
+      new BetReferee(match, config),
+      bet,
+      roundDriver,
+    ),
   };
 
   return {
@@ -171,6 +192,10 @@ export function engineWithHands(
     pass: (playerId: string) => commands.PASS.execute({ playerId }),
     revealTiles: (playerId: string) => commands.REVEAL_TILES.execute({ playerId }),
     abandon: (playerId: string) => commands.ABANDON.execute({ playerId }),
+    proposeBet: (playerId: string, level: number) =>
+      commands.PROPOSE_BET_MULTIPLIER.execute({ playerId, level }),
+    respondBet: (playerId: string, accept: boolean) =>
+      commands.RESPOND_BET_MULTIPLIER.execute({ playerId, accept }),
     fireTimeout(): readonly MatchEvent[] {
       if (!pending) throw new Error("no hay timeout programado");
       const run = pending;

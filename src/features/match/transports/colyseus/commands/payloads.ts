@@ -23,6 +23,14 @@ export const COMMAND_PAYLOADS = {
   DRAW_TILE: z.object({}).strict(),
   PASS: z.object({}).strict(),
   REVEAL_TILES: z.object({}).strict(),
+  // EL ÚNICO NÚMERO QUE EL CLIENTE ELIGE en todo el wire, y por eso viene apretado: entero,
+  // positivo y acotado. Lo que este schema NO decide es si ese nivel EXISTE —eso es del
+  // dominio, que tiene el catálogo de la mesa—; acá muere lo que no puede ser un nivel de
+  // ninguna mesa, como un `-1` o un `1e9`.
+  PROPOSE_BET_MULTIPLIER: z.object({ level: z.number().int().positive().max(100) }).strict(),
+  // Booleano OBLIGATORIO y sin default: un "sí" por omisión es lo último que puede tener un
+  // mensaje que mueve dinero. Si no vino, el mensaje está mal — y mal es rechazo.
+  RESPOND_BET_MULTIPLIER: z.object({ accept: z.boolean() }).strict(),
 } satisfies Record<CommandName, z.ZodType>;
 
 export type WirePayload<N extends CommandName> = z.infer<(typeof COMMAND_PAYLOADS)[N]>;

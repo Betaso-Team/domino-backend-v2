@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { DominoMatchConfig } from "../core/config.js";
+import { DEFAULT_GLOBAL_CONFIG, type DominoMatchConfig } from "../core/config.js";
 import { replay } from "../history/replay.js";
 import type { HistoryEntry } from "../network/history.js";
 import { replayConfigOf } from "../transports/match-contract.js";
@@ -122,7 +122,11 @@ describe("replay", () => {
   it("reproduce la partida golden hasta el estado final exacto", () => {
     const state = replay({
       meta: replayConfigOf(golden.meta),
-      globalConfig: golden.globalConfig,
+      // EL GOLDEN NO TRAE LOS PLAZOS QUE SE INVENTARON DESPUÉS de grabarlo, y no se lo
+      // regraba por eso: un fixture golden vale justamente porque es viejo. Los plazos nuevos
+      // —hoy `betResponseTimeoutMs`— entran por el default, y los que el golden SÍ trae le
+      // ganan al default, que es lo que esta prueba mide.
+      globalConfig: { ...DEFAULT_GLOBAL_CONFIG, ...golden.globalConfig },
       startedAt: golden.startedAt,
       entries: golden.entries as HistoryEntry[],
     });

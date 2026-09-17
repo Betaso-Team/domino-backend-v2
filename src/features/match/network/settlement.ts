@@ -179,6 +179,11 @@ export function settlementOf(
     case "ROUND_RESOLVED":
     case "DEADLINE_EXPIRED":
     case "ABANDON":
+    // NO paga ni cobra: es un aumento que NO prosperó, así que la mesa vale lo mismo que
+    // antes. El que sí va a mover dinero es el aumento ACEPTADO, y todavía no existe como
+    // desenlace acá — se asienta en `MatchState.acceptedBetExtra` y lo cobra el adaptador
+    // que falta (ver `BetChargePort`). Cuando llegue, entra por este mismo `switch`.
+    case "BET_MULTIPLIER_REJECTED":
     case "PLAYER_DISCONNECTED":
     case "PLAYER_RECONNECTED":
       return undefined;

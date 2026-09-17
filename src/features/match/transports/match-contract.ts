@@ -137,6 +137,24 @@ const matchSnapshot = z
     rateId: z.uuid(),
     entryFee: ucAmount,
     prize: ucAmount,
+    // LOS DOS DEL AUMENTO LLEVAN DEFAULT, y es lo único de este schema que lo lleva: los
+    // goldens y las partidas grabadas ANTES de que el aumento existiera no los tienen, y un
+    // campo obligatorio acá rompería el replay de todo lo anterior — que es justamente lo
+    // que el replay existe para poder hacer.
+    //
+    // Los defaults son el reposo seguro: sin catálogo no se ofrece aumentar, y una mesa vieja
+    // nunca lo ofreció. Reconstruye exactamente lo que pasó.
+    betLevels: z
+      .array(
+        z.strictObject({
+          level: z.number().int().positive().safe(),
+          extra: z.number().nonnegative().safe(),
+          additionalEntryFee: ucAmount,
+          additionalPrize: ucAmount,
+        }),
+      )
+      .default([]),
+    isFreeRoom: z.boolean().default(false),
   })
   .superRefine(({ seats }, context) => checkTableShape(seats, context, "seats"));
 
@@ -240,6 +258,16 @@ export function configOf(request: CreateMatchRequest, mode: GameMode): DominoMat
     rateId: request.rateId,
     entryFee: mode.entryFee,
     prize: mode.prize,
+    isFreeRoom: mode.isFreeRoom,
+    // VACÍO, y por ahora siempre: el catálogo de niveles de aumento vive en el backend
+    // principal (en v1, `internal/bet-increase/config`) y este repo todavía no lo consulta.
+    // Lista vacía = la mesa no ofrece aumentar, que es exactamente lo que hace el v1 cuando
+    // no consigue el catálogo — falla CERRADO.
+    //
+    // Es el reposo correcto y no un pendiente disimulado: mientras el cobro no exista, una
+    // mesa que aceptara aumentos estaría prometiendo un premio mayor sin haber cobrado la
+    // diferencia. El día que el adaptador aparezca, llena esta lista y nada más cambia.
+    betLevels: [],
   };
 }
 

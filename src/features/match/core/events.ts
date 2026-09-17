@@ -6,7 +6,14 @@ import type { PlayerId, TeamId } from "./ids.js";
 // `DEALING` es la ventana de reparto (reglas §3.1). Es de nivel RONDA como el turno, pero
 // a diferencia del turno **no es de nadie en particular**: corre para todos a la vez, y
 // eso es exactamente para lo que existe —el reloj del turno solo mira al que le toca—.
-export type DeadlineKind = "DEALING" | "TURN" | "PRESENTING_ROUND" | "PRESENTING_MATCH";
+// `NEGOTIATING_BET` es la ventana de respuesta del aumento de apuesta, y es de nivel RONDA
+// como las otras dos: la oferta muere con la ronda en la que se hizo.
+export type DeadlineKind =
+  | "DEALING"
+  | "TURN"
+  | "NEGOTIATING_BET"
+  | "PRESENTING_ROUND"
+  | "PRESENTING_MATCH";
 
 // EL CRITERIO (spec §5.1): un evento existe SOLO si ocurre un hecho que no se puede
 // reconstruir del comando ni del estado resultante. Si el payload del evento solo
@@ -33,5 +40,14 @@ export type MatchEvent =
   // que el criterio prohíbe. Éste, en cambio, no lo pidió nadie — y para soporte
   // es toda la diferencia entre "se fue" y "lo sacaron".
   | { type: "ABANDON"; playerId: PlayerId }
+  // El aumento RECHAZADO POR EL RELOJ, nunca por el verbo voluntario — mismo criterio que
+  // `ABANDON`: el "no" dicho a mano ya quedó registrado como comando, y emitirlo encima
+  // sería la transcripción 1:1 que el criterio prohíbe. Éste no lo dijo nadie: la mesa
+  // estaba congelada esperando una respuesta que no llegó, y alguien tenía que darla.
+  //
+  // El `playerId` es el del que CALLÓ, que es la información que no está en ningún otro
+  // lado: la oferta se borra al resolverse, así que sin esto no queda rastro de quién dejó
+  // correr el reloj. Para soporte es la diferencia entre "dijo que no" y "no contestó".
+  | { type: "BET_MULTIPLIER_REJECTED"; playerId: PlayerId }
   // ── Hitos terminales ────────────────────────────────────────────────────
   | { type: "MATCH_RESOLVED"; winnerTeamId: TeamId; reason: "SCORE" | "ABANDONMENT" };

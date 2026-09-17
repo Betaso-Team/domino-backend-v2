@@ -34,5 +34,11 @@ export const matchConfig = (
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
   entryFee: 125,
   prize: 250,
+  // SIN AUMENTO por default, igual que una mesa real sin catálogo: la suite que lo prueba
+  // pasa sus niveles por `overrides`. Que el reposo sea la lista vacía es lo mismo que hace
+  // producción, así que ninguna otra suite hereda por accidente una mesa que puede cobrar
+  // de más.
+  betLevels: [],
+  isFreeRoom: false,
   ...overrides,
 });

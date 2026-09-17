@@ -3,6 +3,7 @@ import type { MatchEvent } from "../../events.js";
 import type { PlayerId } from "../../ids.js";
 import { BoardState, BoneyardState, RoundState, Turn } from "../../state/index.js";
 import type { MatchState } from "../../state/index.js";
+import type { BetNegotiation } from "../bet/index.js";
 import type { Clock } from "../clock.js";
 import type { Dealer } from "../dealer.js";
 import type { Driver, RoundAction, TransitionResult } from "../driver.js";
@@ -34,6 +35,10 @@ export class RoundDriver implements Driver {
     private readonly dealer: Dealer,
     private readonly scorer: Scorer,
     private readonly playerAt: (playerId: PlayerId) => RoundPlayer,
+    // El dueño del DATO del aumento. El conductor lo necesita solo para el camino del
+    // reloj: cuando el plazo de la negociación vence, alguien tiene que cerrarla, y el que
+    // conduce las fases es éste.
+    private readonly bet: BetNegotiation,
   ) {}
 
   begin(): void {
@@ -108,7 +113,55 @@ export class RoundDriver implements Driver {
   timeout(): TransitionResult {
     const phase = roundPhaseOf(currentRoundOf(this.match));
     if (phase === "PRESENTING_ROUND") return { events: [], finished: true };
+    // EL SILENCIO ES UN NO. La mesa está congelada esperando una respuesta, así que dejarla
+    // esperar no puede ser gratis: el turno de otro quedaría rehén de una propuesta que nadie
+    // contesta. Es la regla de v1 y es la única que puede ser, con el juego detenido.
+    // EL SILENCIO ES UN NO. La mesa está congelada esperando una respuesta, así que dejarla
+    // esperar no puede salir gratis: el turno de otro quedaría rehén de una propuesta que
+    // nadie contesta. Es la regla de v1, y con el juego detenido es la única que puede ser.
+    if (phase === "NEGOTIATING_BET") {
+      // LOS DOS SE PREGUNTAN ANTES DE CERRAR: `settle` borra la oferta, y con ella el rastro
+      // de quién tenía que contestar y de cuánto reloj había congelado.
+      const silent = this.bet.pendingRespondent((proposerId) => this.nextPlayerAfter(proposerId));
+      const remaining = this.bet.frozenTurnMs();
+      this.bet.settle(false);
+      this.resumeFromBet(remaining);
+      // El rechazo por reloj SÍ es evento: es lo único de esta transición que no se puede
+      // reconstruir de un comando, porque no hubo comando.
+      const events: readonly MatchEvent[] = silent
+        ? [{ type: "BET_MULTIPLIER_REJECTED", playerId: silent }]
+        : [];
+      return { events, finished: false };
+    }
     throw new InvariantViolationError(`el conductor de RONDA no maneja la fase ${phase}`);
+  }
+
+  // CONGELA LA RONDA para que se conteste el aumento. El turno no se toca —sigue siendo de
+  // quien era— y lo único que cambia es la fase y a qué sirve el plazo.
+  //
+  // Se llama DESPUÉS de que la oferta exista: es la oferta la que guarda el reloj congelado.
+  freezeForBet(): void {
+    const round = currentRoundOf(this.match);
+    // Primero se le liquida al que estaba jugando la reserva que estuviera consumiendo: el
+    // plazo que estamos por pisar era el suyo.
+    this.settleExtraTime();
+    if (round.betOffer) {
+      round.betOffer.turnRemainingMs = Math.max(0, this.match.activeDeadline - this.clock.now());
+    }
+    round.phase = "NEGOTIATING_BET";
+    this.stampDeadline(this.config.betResponseTimeoutMs);
+  }
+
+  // DESCONGELA, devolviendo el reloj donde estaba. El remanente entra POR PARÁMETRO y no se
+  // lee de la oferta a propósito: para cuando esto corre, la oferta ya se cerró —cerrarla es
+  // lo que impide contestarla dos veces— así que leerla acá devolvería siempre cero, y cero
+  // acá es un turno entero regalado.
+  resumeFromBet(turnRemainingMs: number): void {
+    currentRoundOf(this.match).phase = "PLAYING";
+    // Cero significa que el turno ya estaba vencido cuando entró la propuesta. Ahí se estampa
+    // el plazo entero en vez de un turno imposible: el que no propuso no tiene por qué pagar
+    // ese borde.
+    this.stampDeadline(turnRemainingMs > 0 ? turnRemainingMs : this.config.turnTimeoutMs);
   }
 
   playersMissingTiles(): readonly PlayerId[] {

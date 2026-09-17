@@ -39,15 +39,16 @@ import {
   type MatchStarter,
   buildCatalog,
   buildPieces,
+  buildRouter,
   registerIndividualCommands,
 } from "./commands/di-wiring.js";
-import type { CommandCatalog } from "./commands/index.js";
 import {
   PlayerAlreadyOutError,
   SeatNotReservedError,
   UnknownCommandError,
   ValidationError,
 } from "./errors.js";
+import type { MessageRouter } from "./messages.js";
 import { RoomTimeoutScheduler } from "./timeout-scheduler.js";
 import { StateViewVisibilityController } from "./visibility.js";
 
@@ -62,7 +63,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
   // perdería el asiento en el acto.
   private reconnectionWindowSeconds = DEFAULT_GLOBAL_CONFIG.reconnectionWindowSeconds;
-  private catalog!: CommandCatalog;
+  // LA TABLA DEL SOCKET, y no el catálogo de verbos: lo que la sala necesita saber es a
+  // quién le toca cada `type` que entra, no cuáles son las jugadas del dominó.
+  private router!: MessageRouter;
   private notifier!: MatchEventNotifier;
   private scheduler!: RoomTimeoutScheduler;
   private history!: MatchHistory;
@@ -165,7 +168,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // queda registrado por el wiring y la sala lo recibe ya armado.
     registerIndividualCommands(child);
     const match = child.resolve<MatchState>("MatchState");
-    this.catalog = buildCatalog(child);
+    const catalog = buildCatalog(child);
 
     const pieces = buildPieces(child, (events: readonly NetworkMatchEvent[]) =>
       this.notifier.notify(events),
@@ -176,6 +179,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       (events) => this.broadcast("events", events),
       pieces.sinks,
     );
+    // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
+    // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
+    // que queda es la tabla.
+    this.router = buildRouter(catalog, this.history, (events) => this.notifier.notify(events));
     this.hasOutcome = child.resolve<MatchHasOutcome>("MatchHasOutcome");
     this.isStillPlaying = child.resolve<MatchSeatGuard>("MatchSeatGuard");
     this.startMatch = child.resolve<MatchStarter>("MatchStarter");
@@ -375,37 +382,54 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.crash(cause, methodName);
   }
 
+  // DE DÓNDE VINO Y A QUIÉN CONTESTARLE. La frontera y qué significa atender un mensaje son
+  // del router y de su handler (`./messages.ts`); acá queda lo que de verdad es de la sala.
+  //
+  // Antes esto tenía los cinco pasos desplegados —frontera, decodificar, ejecutar, grabar,
+  // difundir— y por eso "mensaje del cliente" y "verbo del dominó" eran indistinguibles: el
+  // `type` ERA un `CommandName`. Ahora los verbos son entradas de una tabla que admite otras.
   private handleMessage(client: Client, type: string, payload: unknown): void {
     const playerId = this.playerIdOf(client);
     if (!playerId) return;
     try {
-      if (!this.catalog.accepts(type)) throw new UnknownCommandError(type);
-      const decoded = this.catalog.decoder(type).decode(payload, playerId);
-      const events = this.catalog.command(type).execute(decoded);
-      // El acto se registra antes de sus hechos, pero solo después de ejecutar: un rechazo
-      // del dominio no es un acto de juego y no debe contaminar el historial.
-      this.history.command("PLAYER", type, decoded);
-      this.notifier.notify(events);
+      const pending = this.router.route(type, payload, playerId);
+      // Un handler puede ser asíncrono (`MessageHandler`) y una promesa rechazada NO la
+      // atrapa el `catch` de abajo: sin esto se escaparía como `unhandledRejection` y se
+      // llevaría el proceso entero, con todas las demás partidas adentro. Los dos caminos
+      // desembocan en el mismo manejo.
+      //
+      // Los verbos del dominó no pasan por acá: son síncronos por contrato, así que `route`
+      // devuelve `undefined` y para ellos esta línea no existe.
+      if (pending)
+        void pending.catch((e: unknown) => this.rejectMessage(e, client, type, playerId));
     } catch (error: unknown) {
-      if (error instanceof RuleViolationError) {
-        this.log.warn("comando ilegal", { playerId, type, code: error.code });
-        client.send("illegal", { code: error.code });
-        return;
-      }
-      if (error instanceof ValidationError) {
-        this.log.warn("payload malformado", { playerId, type, detail: error.detail });
-        client.send("illegal", { code: "MALFORMED", detail: error.detail });
-        return;
-      }
-      if (error instanceof UnknownCommandError) {
-        this.log.warn("comando desconocido", { playerId, type });
-        client.send("illegal", { code: "UNKNOWN_COMMAND" });
-        return;
-      }
-      // Los handlers de mensajes son síncronos: Colyseus 0.18 no los envuelve, así que
-      // propagar este error dejaría la sala viva con estado posiblemente inconsistente.
-      this.crash(error, "onMessage");
+      this.rejectMessage(error, client, type, playerId);
     }
+  }
+
+  // QUÉ SE LE CONTESTA AL CLIENTE cuando su mensaje no prosperó. Es un método y no el `catch`
+  // de arriba porque los mensajes asíncronos fallan por otro camino y tienen que caer
+  // exactamente acá: dos políticas de error para la misma puerta es cómo se consiguen dos
+  // comportamientos distintos para el mismo rechazo.
+  private rejectMessage(error: unknown, client: Client, type: string, playerId: PlayerId): void {
+    if (error instanceof RuleViolationError) {
+      this.log.warn("comando ilegal", { playerId, type, code: error.code });
+      client.send("illegal", { code: error.code });
+      return;
+    }
+    if (error instanceof ValidationError) {
+      this.log.warn("payload malformado", { playerId, type, detail: error.detail });
+      client.send("illegal", { code: "MALFORMED", detail: error.detail });
+      return;
+    }
+    if (error instanceof UnknownCommandError) {
+      this.log.warn("comando desconocido", { playerId, type });
+      client.send("illegal", { code: "UNKNOWN_COMMAND" });
+      return;
+    }
+    // Los handlers de mensajes son síncronos: Colyseus 0.18 no los envuelve, así que
+    // propagar este error dejaría la sala viva con estado posiblemente inconsistente.
+    this.crash(error, "onMessage");
   }
 
   private startIfSeated(): void {

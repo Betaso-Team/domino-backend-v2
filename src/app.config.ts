@@ -16,6 +16,7 @@ import {
 import type { Logger } from "./logger.js";
 import { httpErrorHandler } from "./shared/http/error-handler.js";
 import { type DependencyChecks, registerHealth } from "./shared/http/health.js";
+import { exposeServerTime } from "./shared/http/server-time.js";
 
 const rooms = { lobby: defineRoom(LobbyRoom), domino: defineRoom(DominoRoom) };
 
@@ -106,6 +107,10 @@ const hardDependencies: DependencyChecks = {
 const registerHttp = (app: Application) => {
   const logger = rootContainer.resolve<Logger>("Logger");
   app.use(express.json());
+  // PRIMERO DE TODOS, porque es de la costura y no de una ruta: así la cabecera sale también
+  // en las respuestas de los chequeos y en las de error, que son las que el cliente tiene a
+  // mano cuando algo va mal.
+  app.use(exposeServerTime());
   // LOS DOS CHEQUEOS DEL BALANCEADOR, y van ANTES de las rutas de la feature por nada
   // profundo: no se solapan con ninguna. Son dos a propósito y la diferencia está argumentada
   // en `shared/http/health.ts` — `/health` no consulta nada porque "reiniciame" es la única

@@ -315,6 +315,62 @@ por `POST /internal/lobby/maintenance`, bloquea únicamente mesas nuevas y falla
 corrupto. ⚠ El `entryFee`/`prize` de UC minor que este bloque describía lo corrigió la Tarea 1 del
 incremento siguiente: son UC completas.
 
+## Incremento completo — router de mensajes y aumento de apuesta
+
+Sin plan escrito: salió de revisar el changelog de truco (negocio v28 / app-infra v20 /
+estructura v22) contra lo que este repo tenía. Baseline **710 tests / 69 archivos**, con
+`typecheck`, lint y suite en verde.
+
+**El router de mensajes** (portado de truco `51a23d5`). El `type` del mensaje del socket ERA un
+`CommandName`, así que "lo que el cliente puede mandar" y "los verbos del dominó" eran el mismo
+conjunto POR CONSTRUCCIÓN. Ahora son tres actores en `transports/colyseus/messages.ts`:
+`MessageDecoder<P>` valida y tipa, `MessageHandler<P>` hace el trabajo, `MessageRouter` los
+empareja. `router.on(type, decoder, handler)` los registra JUNTOS y eso es todo el punto: no
+existe un camino de un `raw` a un handler que no pase por su decoder. `CommandCatalog` perdió
+`accepts()` —se fue al router, y con él el `Object.hasOwn` que esquivaba el prototipo, que un
+`Map` no necesita— y conservó los dos tipos mapeados sobre `CommandName`, que son los que hacen
+imposible sumar un verbo y olvidarse de rutearlo. `CommandHandler` compone los tres pasos del
+verbo (ejecutar, grabar, notificar) y deja dicho que **el historial es del VERBO, no del
+mensaje**. La sala se quedó con rutear y con `rejectMessage`, que es método aparte porque un
+handler asíncrono falla por otro camino y su rechazo tiene que caer en la misma política.
+
+**El reloj del servidor** (`shared/http/server-time.ts`): `Access-Control-Expose-Headers: Date`.
+No reemplaza al `serverNow` de `/config/:roomId` —ése sigue siendo la fuente del offset
+inicial—; agrega que el desfase se pueda remedir contra cualquier respuesta ya pedida.
+
+**El aumento de apuesta**, y acá **NO se portó truco**: se portó el v1 del DOMINÓ, que lo
+resuelve distinto. Truco tiene `OFFER_MULTIPLIER` + QUIERO/NO_QUIERO compartidos, valor libre,
+multiplicativo y leído al cerrar. El dominó v1 tiene `PROPOSE_BET_MULTIPLIER` /
+`RESPOND_BET_MULTIPLIER {accept}`, nivel de un catálogo remoto, **aditivo**
+(`multiplier + acceptedBetExtra`), cobrado al aceptar y con timeout de 10 s que auto-rechaza.
+Copiar la forma de truco habría cambiado lo que se paga.
+
+Piezas: `RoundPhase` gana `NEGOTIATING_BET` (fase propia porque hay UN SOLO `activeDeadline`);
+`RoundState.betOffer` es rama nula y muere con su ronda; `MatchState.acceptedBetExtra` /
+`acceptedBetLevel` son el escalar de la partida con neutro 0. El módulo `core/engine/bet/` es un
+dúo pelado —`BetReferee` juzga, `BetNegotiation` posee el dato— y las transiciones son del
+conductor de RONDA (`freezeForBet` / `resumeFromBet`), **no** de `advance`: congelar no
+reconcilia nada.
+
+Dos cosas que aparecieron implementando y conviene no volver a descubrir:
+
+- **El reloj del turno se congela y se devuelve** (`BetOffer.turnRemainingMs`). Re-estampar el
+  turno entero al descongelar es un turno gratis para el que propone: proponés, te rechazan y
+  volvés con el reloj a cero.
+- **`settle` borra la oferta**, así que el remanente y el que calló se preguntan ANTES. El
+  primer diseño los leía después y devolvía siempre cero.
+
+⚠ **No cobra.** `configOf` deja `betLevels: []`, o sea que ninguna mesa ofrece aumentar y
+`PROPOSE_BET_MULTIPLIER` siempre se rechaza con `BETTING_DISABLED`. La negociación está entera y
+probada; el dinero no. `network/bet-charge.ts` es el contrato del cobro y el argumento de por
+qué falta: cobrar es red y los comandos son síncronos por contrato, así que el cobro tiene que
+colgarse del acuerdo ya asentado — y queda una decisión de producto, compensar o reservar, que
+está escrita ahí.
+
+Los dos campos nuevos del snapshot (`betLevels`, `isFreeRoom`) llevan **default en el schema del
+replay**: sin eso, toda la historia grabada antes de la feature dejaba de rebobinarse. El golden
+2P se regrabó solo para sumar los dos campos neutros del árbol.
+
 ## Incremento planificado — catálogo v1 y entrega RabbitMQ durable
 
 Diseño aprobado:

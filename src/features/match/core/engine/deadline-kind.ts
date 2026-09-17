@@ -21,6 +21,11 @@ export function deadlineKindOf(match: MatchState): DeadlineKind {
   // La ventana de reparto tiene plazo PROPIO, distinto del turno: cuando vence no se
   // retira a uno, se retira a todos los que no levantaron sus fichas (reglas §3.1).
   if (match.currentRound && roundPhaseOf(match.currentRound) === "DEALING") return "DEALING";
+  // El aumento va ANTES que el turno: mientras se negocia, el plazo vigente es el de la
+  // respuesta, aunque el turno siga asignado al mismo de antes —se congeló, no se movió—.
+  if (match.currentRound && roundPhaseOf(match.currentRound) === "NEGOTIATING_BET") {
+    return "NEGOTIATING_BET";
+  }
   if (match.currentRound && roundPhaseOf(match.currentRound) === "PLAYING") return "TURN";
   // Dos causas MUY distintas caen en esta misma línea, y el mensaje no las separa:
   // (a) `match.phase` genuinamente no tiene ventana propia (p. ej. "NOT_STARTED"), o

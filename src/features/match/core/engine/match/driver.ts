@@ -79,6 +79,17 @@ export class MatchDriver implements Driver {
       return { events: [...events, ...transition.events], finished: transition.finished };
     }
 
+    // EL AUMENTO SIN CONTESTAR. Se delega entero al conductor de RONDA —la negociación es de
+    // la mano— y a diferencia del turno vencido NO retira a nadie: callarse ante una oferta
+    // de plata es una respuesta legítima, y la más barata. Lo único que hace falta acá es
+    // volver a programar el reloj, porque la ronda quedó corriendo con el plazo del turno que
+    // el conductor de ronda le devolvió.
+    if (kind === "NEGOTIATING_BET") {
+      const inner = this.roundDriver.timeout();
+      this.syncTimeout();
+      return { events: [...events, ...inner.events], finished: false };
+    }
+
     if (kind === "PRESENTING_ROUND") {
       const inner = this.roundDriver.timeout();
       const transition = {

@@ -1,14 +1,18 @@
 import type { CommandName, CommandPayload } from "../../../core/command.js";
 import type { PlayerId } from "../../../core/ids.js";
 import { ValidationError } from "../errors.js";
+import type { MessageDecoder } from "../messages.js";
 import { COMMAND_PAYLOADS } from "./payloads.js";
 
-export interface MessageDecoder<N extends CommandName> {
-  decode(raw: unknown, playerId: PlayerId): CommandPayload<N>;
-}
+// `MessageDecoder` YA NO VIVE ACÁ, y ese movimiento es el refactor entero en una línea:
+// mientras la interfaz estaba en este archivo su parámetro era `N extends CommandName`, o
+// sea que "lo que se puede decodificar del cable" y "los verbos del dominó" eran el mismo
+// conjunto POR CONSTRUCCIÓN. Ahora es `MessageDecoder<P>` sobre cualquier payload (ver
+// `../messages.ts`) y los verbos pasan a ser UN caso de él: éste, el que valida contra el
+// catálogo del motor y le pega la identidad.
 
 // Valida con zod y le suma la identidad AUTENTICADA. El cliente no elige quién es.
-export function identityDecoder<N extends CommandName>(name: N): MessageDecoder<N> {
+export function identityDecoder<N extends CommandName>(name: N): MessageDecoder<CommandPayload<N>> {
   return {
     decode(raw: unknown, playerId: PlayerId): CommandPayload<N> {
       const result = COMMAND_PAYLOADS[name].safeParse(raw ?? {});

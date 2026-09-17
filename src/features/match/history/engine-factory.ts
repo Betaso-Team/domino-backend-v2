@@ -4,9 +4,12 @@ import {
   DrawTileCommand,
   PassCommand,
   PlayTileCommand,
+  ProposeBetMultiplierCommand,
+  RespondBetMultiplierCommand,
   RevealTilesCommand,
 } from "../core/commands/index.js";
 import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../core/config.js";
+import { BetNegotiation, BetReferee } from "../core/engine/bet/index.js";
 import type { Clock } from "../core/engine/clock.js";
 import { Dealer } from "../core/engine/dealer.js";
 import { createMatchState } from "../core/engine/genesis.js";
@@ -74,6 +77,8 @@ export function buildEngineGraph(
   );
   const players = new Player(repository);
   const referee = new Referee(matchReferee, roundReferee);
+  const betReferee = new BetReferee(match, config);
+  const bet = new BetNegotiation(match);
   const roundDriver = new RoundDriver(
     match,
     deps.clock,
@@ -83,6 +88,7 @@ export function buildEngineGraph(
     dealer,
     scorer,
     (playerId) => repository.round(playerId),
+    bet,
   );
   const matchDriver = new MatchDriver(
     match,
@@ -107,6 +113,22 @@ export function buildEngineGraph(
       DRAW_TILE: new DrawTileCommand(referee, players, matchDriver),
       PASS: new PassCommand(referee, matchDriver),
       REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
+      // LOS DOS DEL AUMENTO reciben el conductor de RONDA y no el de partida, que es la
+      // diferencia de fondo con los otros cinco: congelar y descongelar mueve la fase de la
+      // MANO, no la de la mesa. Y reciben el juez del aumento aparte del `Referee` general
+      // porque éste no es un juez del juego: no mira fichas, mira dinero.
+      PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(
+        matchReferee,
+        betReferee,
+        bet,
+        roundDriver,
+      ),
+      RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(
+        matchReferee,
+        betReferee,
+        bet,
+        roundDriver,
+      ),
     },
   };
 }

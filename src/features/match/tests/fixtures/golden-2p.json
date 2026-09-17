@@ -2675,6 +2675,8 @@
     ],
     "pointsToWin": 100,
     "activeDeadline": 0,
-    "startedAt": 1789507723196
+    "startedAt": 1789507723196,
+    "acceptedBetExtra": 0,
+    "acceptedBetLevel": 0
   }
 }

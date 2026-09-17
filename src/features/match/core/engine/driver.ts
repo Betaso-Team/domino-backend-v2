@@ -20,6 +20,11 @@ export interface TransitionResult {
 // en la misma unión porque entra por el mismo `advance`, pero se reconcilia ANTES que
 // todo lo demás y no llega a la guarda de `PLAYING` —es la única fase, además de esa, en
 // la que un verbo de jugador es legal—.
+// EL AUMENTO DE APUESTA NO ESTÁ EN ESTA UNIÓN, y es deliberado: `advance` es "alguien actuó
+// en la mano, reconciliá", y congelar o descongelar la ronda no reconcilia nada —no hay ficha
+// que mirar, ni mano que pueda cerrarse—. Entra por métodos propios del conductor de RONDA
+// (`freezeForBet` / `resumeFromBet`), como ya lo hace la ventana de reparto con
+// `resumeAfterDealWindow`.
 export type RoundAction = "PLAYED" | "DREW" | "PASSED" | "ABANDONED" | "REVEALED";
 
 // La superficie pública de un conductor son estos tres verbos y nada más.

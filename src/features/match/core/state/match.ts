@@ -54,6 +54,24 @@ export const MatchState = schema(
     pointsToWin: t.number().default(0),
     activeDeadline: t.number().default(0),
     startedAt: t.number().default(0),
+    // LO ACORDADO en el aumento de apuesta, y por eso es de la PARTIDA y no de la ronda: se
+    // negocia una vez y vale hasta el final, mientras que la oferta que lo produjo muere con
+    // su ronda (`RoundState.betOffer`). Es la misma partición que hay entre `currentRound`,
+    // que se reemplaza entera, y `scoreboard`, que sobrevive.
+    //
+    // SUMAN, NO MULTIPLICAN, y el neutro es 0: el v1 liquida con
+    // `multiplier + acceptedBetExtra`, donde el primero es el del modo y vive en la config.
+    // Truco usa un escalar multiplicativo con neutro 1; copiar esa forma acá habría cambiado
+    // lo que se paga.
+    //
+    // `acceptedBetLevel` en 0 es "ninguno aceptado", y es lo que responde la regla de v1 de
+    // UN SOLO aumento aceptado por partida. Se guarda además del extra porque es lo que viaja
+    // en la traza del ranking, y dos niveles distintos podrían dar el mismo extra.
+    //
+    // EL MOTOR NO CALCULA CON ESTOS DOS NÚMEROS: son económicos. Las piedras se cuentan igual
+    // con aumento que sin él — quien los lee es la liquidación, al cerrar.
+    acceptedBetExtra: t.number().default(0),
+    acceptedBetLevel: t.number().default(0),
   },
   "MatchState",
 );
