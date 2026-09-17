@@ -371,6 +371,124 @@ Los dos campos nuevos del snapshot (`betLevels`, `isFreeRoom`) llevan **default 
 replay**: sin eso, toda la historia grabada antes de la feature dejaba de rebobinarse. El golden
 2P se regrabó solo para sumar los dos campos neutros del árbol.
 
+## Incremento completo — las reglas dictaminan, y las dos tablas del cierre
+
+Sin plan escrito: salió de barrer el changelog de truco contra este repo y quedarse SOLO con lo
+que el dominó necesita. Baseline **761 → 779 tests / 74 archivos**, con `typecheck`, lint,
+`depcruise` y suite en verde.
+
+### `core/rules/`: las reglas dictaminan, no lanzan
+
+Portado de la serie de truco (`e6766c1` … `20583cd`). Todo lo de esa carpeta es CONSULTA: dado el
+estado, qué ficha engancha, qué verbo es legal, cuánto vale una mano. Nada muta y nada conoce
+Colyseus — es la condición para que algún día viva en un paquete que el cliente también consuma, y
+con eso se acabe la única forma real de que las reglas se desincronicen: tenerlas escritas dos
+veces.
+
+Dos cosas cambian de forma y el resto se sigue de ahí:
+
+- **El veredicto es DATO** (`Ruling`). Una excepción solo le sirve a un servidor: "lanza" no se
+  puede pintar, y el cliente necesita preguntar ANTES y saber POR QUÉ el botón está apagado. Los
+  jueces conservan sus `assertX`, que ahora leen el veredicto y lanzan por **un solo puente**,
+  `assertLegal` — que vive en `engine/errors.ts` a propósito: el día que las reglas viajen, ese
+  archivo NO viaja.
+- **`MatchView` es la frontera anti-trampa vuelta TIPO.** No declara los dos campos `.view()` del
+  schema, así que una regla que estire la mano hacia la mano de otro **no compila**. La única
+  puerta es `privateOf(playerId)`, y `SchemaMatchView` (`core/state/view.ts`) es la mitad servidor:
+  getters sobre el árbol VIVO, sin copia y sin adaptador.
+
+Tres cosas que aparecieron implementando y conviene no volver a descubrir:
+
+- **La vista pide `string` donde el dominio tiene una unión**, y acá el repo se aparta de truco.
+  Allá el schema declara el campo con el tipo TS de la unión sobre un wire `string`, así que la
+  vista puede pedir `RoundPhase` y el árbol la satisface. La API builder de schema 5 infiere
+  `string` a secas, así que pedir la unión dejaba al `MatchState` SIN satisfacer la vista y
+  obligaba a COPIAR el árbol para angostarlo. Se pide `string` —que el nodo del servidor y el
+  literal del cliente satisfacen los dos— y el angostamiento vive en `rules/projections.ts`.
+- **Las proyecciones son DOS juegos y los dos están bien.** Las del motor revientan la invariante
+  (`currentRoundOf` lanza); las de las reglas son TOTALES y devuelven `undefined`. El motor
+  pregunta desde un comando, o sea con la partida en juego, y ahí "no hay ronda" es un bug; una
+  regla que el cliente corre se lo pregunta con la mesa recién abierta, y ahí es la respuesta
+  correcta. De eso salió el código nuevo `NO_ROUND_IN_PROGRESS`.
+- **No hay `firstIllegal(...rulings)`.** Evaluaría TODOS sus argumentos antes de elegir el primero,
+  y las guardas están ordenadas justamente porque las de atrás asumen lo que las de adelante ya
+  comprobó. La composición es un `if` con `return` temprano, que es perezosa por construcción.
+
+⚠ **NO HAY `stakes.ts`, y la ausencia es la diferencia con truco.** Allá el tarifado es una TABLA
+—cada escalón vale N piedras— y tenerla dos veces es cómo los dos lados se desincronizan. En el
+dominó los puntos de una ronda son los pips del que perdió: no hay tabla que compartir, hay una
+suma, y ya vive en `rules/tiles.ts`.
+
+De paso se hizo **`528ff7a`** (el vocabulario sale del schema): `MatchPhase`, `RoundPhase`,
+`RoundEndReason`, `BoardSide`, `TileLike` y `BetLevel` se declaran en `rules/` y el schema los
+**re-exporta**, así que la mudanza no le cambió el import a nadie. `RuleViolationCode` hizo lo
+mismo hacia `rules/codes.ts`, y sigue siendo una unión CERRADA —truco la abrió a `string` porque
+el front lo pidió; acá la mitad de los motivos existen para que el jugador sepa si le conviene
+reintentar, y con `string` un motivo mal escrito compilaría—.
+
+El fixture de los tests de reglas arma la mesa como **objeto PLANO**. Es la mitad de la afirmación
+del módulo que ningún `expect` podría hacer: estas reglas corren sin un solo nodo de Colyseus.
+
+### Las dos tablas del cierre
+
+Portado de truco `9b3fd36`, pero **leído de v1**, que lo resuelve distinto en los dos puntos que
+importan. El ranking del dominó y la liga eran lo único de v1 que al cerrar una partida no tenía
+equivalente acá.
+
+Son **dos puertos y no uno** porque no comparten ni destino ni condición, y la asimetría es de v1:
+
+| | destino | condición |
+|---|---|---|
+| ranking | cola `rankings_queue`, envoltorio NestJS | **solo mesas pagas** (adentro del `if (!isFreeRoom)`) |
+| liga | `POST leagues/save`, sin credencial | **también las gratis** (afuera de ese `if`) |
+
+Juntarlos escondería la segunda diferencia adentro de un `if`. Y los dos defectos que leer v1
+corrigió:
+
+- **El aumento de apuesta SÍ pesa en el ranking.** Truco manda el peso de la mesa y nada del
+  aumento, con el argumento de que hacerlo pesar sería una decisión de producto. En el dominó ya
+  está decidida: v1 calcula `multiplier + acceptedBetExtra` y manda además la traza
+  `betIncrease {level, extra, baseMultiplier}`. Copiar la forma de truco cambiaba los puntos que
+  el jugador recibe.
+- **Lo que viaja como `userId` es el `userUuid`, NUNCA el `playerId`.** En truco el `playerId` ES
+  la identidad de plataforma y el transporte lo manda tal cual. Acá es opaco y POSICIONAL
+  (`seat-1`), idéntico en todas las mesas: portar la línea le sumaba los puntos de todos los
+  ganadores del sistema a una cuenta que no existe.
+
+`DominoMatchConfig` gana `multiplier` —el peso del modo en el ranking, congelado como el resto,
+porque el panel puede repesar un modo mientras la mesa se juega—. Es el **tercer** campo con
+default en el schema del replay, y el único cuyo default no es del todo inocuo: rebobinar una
+partida vieja da peso 1. Hoy no importa —el replay no reporta nada afuera— y queda escrito ahí
+para el día que alguien quiera re-liquidar desde el historial.
+
+`publishPattern` **existe ahora que tiene llamador**: el camino de COLA con el envoltorio
+`{pattern, data, id}` que el `@EventPattern` del otro lado espera, y que el incremento del catálogo
+había dejado afuera justamente por no tenerlo. Mezclarlo con `publishTopic` produce un mensaje que
+nadie consume, en silencio; los dos contratos están fijados campo por campo en la suite, porque un
+nombre que no coincide no falla de este lado.
+
+La liga usa el **`fetch` de la plataforma** y no un cliente HTTP propio (truco tiene
+`shared/http`): un solo consumidor saliente, sin credencial y sin reintentos. `BACKEND_URL` se suma
+a las obligatorias de producción, y con eso son **cuatro**.
+
+⚠ **Falta el tercer flujo de v1**: `lastWinners.saveWin`, el carrusel de últimos ganadores. Su
+payload es `Math.round(entryFee * rate * 100)`, o sea que exige CONVERTIR la moneda, y este repo no
+convierte nada por decisión escrita (`network/settlement.ts`). Portarlo es traer el servicio de
+tasas de v1: es un incremento propio, no una línea.
+
+### Lo que se decidió NO portar
+
+- **Las reacciones** (truco `f8713f3`). Allá el argumento era que existen en v1 y el día del corte
+  dejarían de funcionar. **El dominó v1 no las tiene** —verificado: no hay una sola mención en
+  `Betaso-Domino-Backend/src`—, así que acá no sería una regresión que se tapa sino una feature
+  nueva que nadie pidió.
+- **El catálogo fuera de matchmaking** (`a1605d2`), **el registrar y su API administrativa**
+  (`c51b4cd`), **la llave interna** (`3308781`) y **el `PUT` como parche** (`d1f23fc`): ya estaban
+  hechos, y el último **mejor que en truco**. Allá el `PUT` exigía los seis campos y lo destapó
+  probando contra dev; acá `UPDATE_BODY` se escribió a mano todo-opcional en vez de con
+  `.partial()`, justamente porque `.partial()` deja los defaults vivos y un `PUT` de un solo campo
+  le habría reescrito los otros con el default. El `$set` de Mongo ya llevaba solo lo que vino.
+
 ## Incremento planificado — catálogo v1 y entrega RabbitMQ durable
 
 Diseño aprobado:
