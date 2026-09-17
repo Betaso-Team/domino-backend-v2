@@ -8,15 +8,26 @@ import type { Logger } from "../logger.js";
 // feature sabe es el CONTRATO (a qué exchange, con qué routing key y con qué campos), que se queda
 // del otro lado, en `features/game-mode/events.ts`.
 //
-// PORTADO DE `truco-backend-v2` (`src/shared/amqp.ts`) SIN UN MÉTODO, y la ausencia es la decisión:
-//   - `publishPattern()`, que manda a una COLA con el envoltorio `{pattern, data, id}` de NestJS.
-//     Allá existe porque el backend principal consume de las dos maneras. Acá el único consumidor
-//     real de este incremento lee el topic exchange `betaso`, y el envoltorio lo dejaría sin
-//     entender el mensaje. Un método sin llamador es una segunda forma de publicar que alguien va a
-//     elegir mal.
-//   - Los `headers` con la traza en curso, que allá salen de `shared/trace.ts`. Acá no hay
-//     propagación de trazas todavía, y un header vacío no es compatibilidad: es una clave que hay
-//     que explicar.
+// SON DOS FORMAS DE PUBLICAR Y NO SE PUEDEN MEZCLAR, porque el backend principal consume de dos
+// maneras distintas:
+//
+//   publishPattern  → a una COLA, con el envoltorio `{pattern, data, id}` de NestJS, porque del
+//                     otro lado lo recibe un `@EventPattern` que despacha por ese `pattern`.
+//                     Es el camino del RANKING (`rankings_queue`).
+//   publishTopic    → a un EXCHANGE topic, con el payload CRUDO, porque ese consumidor no es un
+//                     `@EventPattern` y el envoltorio lo dejaría sin entender el mensaje. Es el
+//                     camino del CATÁLOGO (exchange `betaso`).
+//
+// Mezclarlas produce un mensaje que nadie consume, EN SILENCIO. Los dos contratos son de v1
+// (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts`) y se conservan enteros.
+//
+// `publishPattern` NACIÓ SIN LLAMADOR EN EL INCREMENTO DEL CATÁLOGO y por eso no se escribió
+// entonces —un método sin llamador es una segunda forma de publicar que alguien va a elegir mal—.
+// Llegó con el ranking, que es su primer consumidor real.
+//
+// Lo que sigue SIN portarse de truco son los `headers` con la traza en curso, que allá salen de
+// `shared/trace.ts`. Acá no hay propagación de trazas todavía, y un header vacío no es
+// compatibilidad: es una clave que hay que explicar.
 //
 // Y con una diferencia que NO es una omisión, medida sobre la `amqplib` 2.0.1 instalada: truco, al
 // soltar el canal, vuelve a llamar `connect()`. Con `recovery: true` eso abandona un
@@ -52,6 +63,7 @@ export class AmqpDeliveryError extends Error {
 // del composition root, no suyo—, y de paso un doble de test no tiene que fingir un `close()` que
 // nadie llama.
 export interface AmqpDelivery {
+  publishPattern(queue: string, pattern: string, data: unknown): Promise<void>;
   publishTopic(exchange: string, routingKey: string, body: unknown): Promise<void>;
 }
 
@@ -70,6 +82,28 @@ export class AmqpPublisher implements AmqpDelivery {
   // entero: `persistent`, `contentType` y un `messageId` propio de cada mensaje. El envoltorio
   // `{pattern, data, id}` de NestJS es del OTRO camino de v1, el de las colas, y meterlo acá produce
   // un mensaje que nadie consume, en silencio.
+  // A UNA COLA, con el envoltorio de NestJS. Sin él, el `@EventPattern` del otro lado no sabe a qué
+  // handler mandarlo y el mensaje se descarta en silencio.
+  //
+  // LA COLA NO SE DECLARA, y es lo contrario de lo que hace `publishTopic` con su exchange: la cola
+  // la crea el microservicio de NestJS, que es su dueño y quien decide sus opciones. v1 tampoco la
+  // declara (`publisher.ts`, `sendToQueue` a secas), y declararla desde acá con opciones distintas
+  // de las suyas MATA el canal — que es el mismo accidente que el exchange sin declarar, con los
+  // papeles al revés.
+  async publishPattern(queue: string, pattern: string, data: unknown): Promise<void> {
+    const channel = await this.ready();
+    const messageId = randomUUID();
+    await this.confirm((done) =>
+      channel.sendToQueue(
+        queue,
+        Buffer.from(JSON.stringify({ pattern, data, id: messageId })),
+        { persistent: true, contentType: "application/json", messageId },
+        done,
+      ),
+    );
+    this.log.debug("publicado a la cola", { messageId, queue, pattern });
+  }
+
   async publishTopic(exchange: string, routingKey: string, body: unknown): Promise<void> {
     const channel = await this.ready();
     // EL EXCHANGE SE DECLARA ANTES DE CADA PUBLICACIÓN, como hace v1: si el consumidor todavía no

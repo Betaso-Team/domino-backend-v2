@@ -67,6 +67,19 @@ export interface DominoMatchConfig {
   readonly entryFee: number;
   readonly prize: number;
   /**
+   * EL PESO DE LA MESA EN EL RANKING, congelado con el resto. Es el `multiplier` del modo de
+   * juego, y multiplica los PUNTOS que el ganador suma al ranking — **no el premio**, que sale de
+   * `prize`. Confundirlos es pagar de más.
+   *
+   * EL MOTOR NO LO LEE, y por eso llegó tarde: las piedras de una ronda se cuentan igual en una
+   * mesa de peso 1 que en una de peso 5. Lo consume el reporte del cierre
+   * (`network/report-standings.ts`), que suma `acceptedBetExtra` encima — así lo hace v1
+   * (`domino-room-state.ts:582`), y esa suma es la razón por la que el peso tiene que estar
+   * congelado acá y no releerse del catálogo al cerrar: el modo pudo cambiar de peso mientras la
+   * partida se jugaba.
+   */
+  readonly multiplier: number;
+  /**
    * LOS NIVELES DE AUMENTO que esta mesa ofrece, congelados al crearse igual que el resto.
    * **Lista vacía = la mesa no ofrece aumentar**, y ése es el reposo: el catálogo de niveles
    * es de otro repo (en v1, `internal/bet-increase/config` del backend principal) y el v1

@@ -3,8 +3,8 @@ import { parseEnv } from "./env.js";
 
 describe("parseEnv", () => {
   it("acepta un entorno completo", () => {
-    // Producción exige además las tres de infraestructura (ver el describe de más abajo), así que
-    // el "entorno completo" de este test es el completo de verdad y no el mínimo que compila.
+    // Producción exige además las cuatro de infraestructura (ver el describe de más abajo), así
+    // que el "entorno completo" de este test es el completo de verdad y no el mínimo que compila.
     const env = parseEnv({
       NODE_ENV: "production",
       PORT: "3000",
@@ -12,6 +12,7 @@ describe("parseEnv", () => {
       MONGO_URI: "mongodb://mongo:27017/domino",
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       INTERNAL_API_KEY: "k".repeat(16),
+      BACKEND_URL: "https://api.elbetaso.com/api/",
     });
     expect(env.port).toBe(3000);
     expect(env.nodeEnv).toBe("production");
@@ -57,6 +58,7 @@ describe("parseEnv", () => {
       MONGO_URI: "mongodb://mongo:27017/domino",
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       INTERNAL_API_KEY: "k".repeat(16),
+      BACKEND_URL: "https://api.elbetaso.com/api/",
     });
     expect(env.logLevel).toBe("info");
   });
@@ -100,12 +102,30 @@ describe("parseEnv", () => {
     expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).rabbitmqUrl).toBeUndefined();
   });
 
-  // EN PRODUCCIÓN LAS TRES SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera de
-  // producción, "ausente" es la decisión legítima de una instancia que corre sola y sin
+  // `BACKEND_URL` sigue el mismo criterio, y afuera de producción su ausencia es la que deja a la
+  // suite sin tocar la red: sin ella no se construye el destino de liga y el cierre de la partida
+  // anota que no reportó, en vez de intentar un POST contra un host que no existe.
+  it("sin BACKEND_URL el entorno es válido y la URL queda indefinida", () => {
+    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).backendUrl).toBeUndefined();
+  });
+
+  // Se valida como URL y no como cadena no vacía, y es la única de las cuatro que lo hace: las
+  // otras tres son URIs de esquemas propios (`mongodb://`, `amqp://`) o un secreto. Acá el valor
+  // se CONCATENA con la ruta, así que un `api.elbetaso.com` sin esquema produciría un `fetch` que
+  // falla por razones que no dicen que la variable está mal escrita.
+  it("rechaza un BACKEND_URL que no es una URL", () => {
+    expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), BACKEND_URL: "api.elbetaso.com" })).toThrow(
+      /BACKEND_URL/,
+    );
+  });
+
+  // EN PRODUCCIÓN LAS CUATRO SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera
+  // de producción, "ausente" es la decisión legítima de una instancia que corre sola y sin
   // infraestructura. En producción es lo contrario — un despliegue productivo sin `MONGO_URI`
-  // arranca creyendo que persiste, sin `RABBITMQ_URL` acumula eventos que nadie va a publicar, y
-  // sin `INTERNAL_API_KEY` deja el catálogo sin su API administrativa. Las tres fallan en
-  // SILENCIO, que es exactamente la clase de error que un arranque tiene que rechazar.
+  // arranca creyendo que persiste, sin `RABBITMQ_URL` acumula eventos que nadie va a publicar,
+  // sin `INTERNAL_API_KEY` deja el catálogo sin su API administrativa, y sin `BACKEND_URL` la
+  // liga no recibe ninguna partida. Las cuatro fallan en SILENCIO, que es exactamente la clase de
+  // error que un arranque tiene que rechazar.
   describe("en producción exige la infraestructura completa", () => {
     const productivo = {
       NODE_ENV: "production",
@@ -113,6 +133,7 @@ describe("parseEnv", () => {
       MONGO_URI: "mongodb://mongo:27017/domino",
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       INTERNAL_API_KEY: "k".repeat(16),
+      BACKEND_URL: "https://api.elbetaso.com/api/",
     };
 
     it("acepta el entorno productivo completo", () => {
@@ -120,9 +141,10 @@ describe("parseEnv", () => {
       expect(env.mongoUri).toBe("mongodb://mongo:27017/domino");
       expect(env.rabbitmqUrl).toBe("amqp://guest:guest@rabbitmq:5672");
       expect(env.internalApiKey).toBe("k".repeat(16));
+      expect(env.backendUrl).toBe("https://api.elbetaso.com/api/");
     });
 
-    it.each([["MONGO_URI"], ["RABBITMQ_URL"], ["INTERNAL_API_KEY"]] as const)(
+    it.each([["MONGO_URI"], ["RABBITMQ_URL"], ["INTERNAL_API_KEY"], ["BACKEND_URL"]] as const)(
       "rechaza producción sin %s",
       (faltante) => {
         const { [faltante]: _, ...incompleto } = productivo;
@@ -138,6 +160,7 @@ describe("parseEnv", () => {
       expect(intento).toThrow(/MONGO_URI/);
       expect(intento).toThrow(/RABBITMQ_URL/);
       expect(intento).toThrow(/INTERNAL_API_KEY/);
+      expect(intento).toThrow(/BACKEND_URL/);
     });
 
     // La misma ausencia FUERA de producción no es un error: es el despliegue de desarrollo.

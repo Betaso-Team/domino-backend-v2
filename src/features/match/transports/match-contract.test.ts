@@ -239,16 +239,22 @@ describe("replayConfigOf", () => {
     prize: 250,
   };
 
-  // EL SNAPSHOT DE ARRIBA ES UNO VIEJO A PROPÓSITO: no tiene los dos campos del aumento,
-  // porque se grabó antes de que la feature existiera. Que rebobine igual —y que salga con el
-  // aumento APAGADO— es la razón entera de que esos dos lleven default en el schema: sin
-  // ellos, el día que se agregó la feature todos los goldens y toda la historia en Mongo
-  // dejaban de poder reconstruirse, que es justo lo que el replay existe para poder hacer.
+  // EL SNAPSHOT DE ARRIBA ES UNO VIEJO A PROPÓSITO: no tiene los dos campos del aumento ni el
+  // peso del modo en el ranking, porque se grabó antes de que existieran. Que rebobine igual —y
+  // que salga con el aumento APAGADO y el peso en su neutro— es la razón entera de que esos tres
+  // lleven default en el schema: sin ellos, el día que se agregó cada feature todos los goldens y
+  // toda la historia en Mongo dejaban de poder reconstruirse, que es justo lo que el replay existe
+  // para poder hacer.
   //
   // Sigue siendo `toEqual` y no `toMatchObject`: lo que se agrega se escribe acá, así que un
   // campo que aparezca de más —o un grabado que se pierda— pone esto en rojo igual.
   it("reconstruye el snapshot completo tal cual se grabó, con el aumento apagado", () => {
-    expect(replayConfigOf(snapshot)).toEqual({ ...snapshot, betLevels: [], isFreeRoom: false });
+    expect(replayConfigOf(snapshot)).toEqual({
+      ...snapshot,
+      betLevels: [],
+      isFreeRoom: false,
+      multiplier: 1,
+    });
   });
 
   // UNA MESA DE CUATRO GRABADA SÍ SE REBOBINA, y la asimetría con `configOf` es deliberada: el

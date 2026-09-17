@@ -58,6 +58,12 @@ function recordingDelivery() {
         if (gate) await gate;
         if (failure) throw failure;
       },
+      // EL CATÁLOGO NO PUBLICA A COLAS, y el doble lo dice reventando en vez de no hacer nada: un
+      // `async () => {}` acá dejaría pasar en silencio el día que alguien mande un evento de
+      // catálogo por el camino equivocado — que es el accidente que `shared/amqp.ts` documenta.
+      async publishPattern(): Promise<void> {
+        throw new Error("el outbox del catálogo publica al exchange, no a una cola");
+      },
     } satisfies AmqpDelivery,
   };
 }

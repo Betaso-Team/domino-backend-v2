@@ -137,13 +137,18 @@ const matchSnapshot = z
     rateId: z.uuid(),
     entryFee: ucAmount,
     prize: ucAmount,
-    // LOS DOS DEL AUMENTO LLEVAN DEFAULT, y es lo único de este schema que lo lleva: los
-    // goldens y las partidas grabadas ANTES de que el aumento existiera no los tienen, y un
+    // LOS TRES CAMPOS CON DEFAULT, y son los únicos de este schema que lo llevan: los goldens y
+    // las partidas grabadas ANTES de que el aumento y el peso existieran no los tienen, y un
     // campo obligatorio acá rompería el replay de todo lo anterior — que es justamente lo
     // que el replay existe para poder hacer.
     //
-    // Los defaults son el reposo seguro: sin catálogo no se ofrece aumentar, y una mesa vieja
-    // nunca lo ofreció. Reconstruye exactamente lo que pasó.
+    // Los defaults son el reposo seguro: sin catálogo no se ofrece aumentar, una mesa vieja nunca
+    // lo ofreció, y peso 1 es el neutro del ranking. Reconstruye exactamente lo que pasó.
+    //
+    // ⚠ El default del PESO no es inocuo del todo, y conviene tenerlo escrito: rebobinar una
+    // partida vieja con peso 1 y volver a reportarla al ranking le daría menos puntos de los que
+    // le dio. No pasa —el replay NO reporta nada afuera, solo reconstruye el árbol— pero el día
+    // que alguien quiera re-liquidar desde el historial, esto es lo que tiene que mirar primero.
     betLevels: z
       .array(
         z.strictObject({
@@ -155,6 +160,7 @@ const matchSnapshot = z
       )
       .default([]),
     isFreeRoom: z.boolean().default(false),
+    multiplier: z.number().positive().safe().default(1),
   })
   .superRefine(({ seats }, context) => checkTableShape(seats, context, "seats"));
 
@@ -258,6 +264,10 @@ export function configOf(request: CreateMatchRequest, mode: GameMode): DominoMat
     rateId: request.rateId,
     entryFee: mode.entryFee,
     prize: mode.prize,
+    // EL PESO DEL MODO EN EL RANKING. Sale del catálogo como los otros tres números y se congela
+    // por la misma razón: el panel puede cambiarle el peso al modo mientras la mesa se juega, y el
+    // ganador tiene que sumar con el peso que aceptó al sentarse.
+    multiplier: mode.multiplier,
     isFreeRoom: mode.isFreeRoom,
     // VACÍO, y por ahora siempre: el catálogo de niveles de aumento vive en el backend
     // principal (en v1, `internal/bet-increase/config`) y este repo todavía no lo consulta.

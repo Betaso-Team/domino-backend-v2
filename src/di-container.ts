@@ -16,6 +16,9 @@ import { LobbySettings } from "./features/lobby/settings.js";
 import { type GlobalDominoConfig, globalConfigWith } from "./features/match/core/config.js";
 import type { Clock } from "./features/match/core/engine/clock.js";
 import type { HistoryPort, HistoryReader } from "./features/match/network/history.js";
+import type { StandingsFeeds } from "./features/match/network/standings.js";
+import { AmqpRankingFeed } from "./features/match/network/transports/amqp-ranking.js";
+import { HttpLeagueFeed } from "./features/match/network/transports/http-leagues.js";
 import { MemoryHistory } from "./features/match/network/transports/memory-history.js";
 import { MongoHistory } from "./features/match/network/transports/mongo-history.js";
 import { MatchRegistry } from "./features/match/transports/match-registry.js";
@@ -127,6 +130,25 @@ rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
 // `app.config.ts` lo meta en readiness y `main.ts` lo cierre—, y para nada más: publicar es cosa
 // del despachador.
 export const amqp = env.rabbitmqUrl ? new AmqpPublisher(env.rabbitmqUrl, logger) : undefined;
+
+// ── LAS DOS TABLAS DEL CIERRE ───────────────────────────────────────────────────────────────────
+//
+// El ranking y la liga, que son lo que se cuenta afuera cuando una partida cierra con ganador y no
+// es plata (ver `network/standings.ts`). Se registran JUNTOS en un solo token porque el único
+// consumidor es el mismo listener, y dos tokens opcionales obligarían al wiring de la sala a
+// preguntar `isRegistered` dos veces por algo que se decide una.
+//
+// CADA UNO DEPENDE DE LO SUYO Y POR SEPARADO: el ranking del broker, la liga del backend
+// principal. Una instancia con broker y sin `BACKEND_URL` reporta puntos y no liga, que es un
+// estado legítimo y no un error — el mismo criterio que el outbox que acumula sin publicador.
+//
+// SON DEL PROCESO y no de la sala: el publicador ya es único y el destino de liga no tiene estado.
+// Lo per-partida es el listener, que lo arma `buildPieces` con el árbol y el snapshot a la vista.
+const standings: StandingsFeeds = {
+  ranking: amqp ? new AmqpRankingFeed(amqp) : undefined,
+  leagues: env.backendUrl ? new HttpLeagueFeed(env.backendUrl) : undefined,
+};
+rootContainer.register<StandingsFeeds>("StandingsFeeds", { useValue: standings });
 
 // EL CATÁLOGO DE MODOS, que desde la Tarea 10 es la AUTORIDAD sobre la economía de una mesa: la
 // sala resuelve acá el modo que el request nombró y de él salen `pointsToWin`, `entryFee` y

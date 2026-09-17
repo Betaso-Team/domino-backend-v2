@@ -214,6 +214,19 @@ const schema = z.object({
    */
   RABBITMQ_URL: z.string().min(1).optional(),
   /**
+   * LA BASE DEL BACKEND PRINCIPAL (`https://.../api/`), por donde sale el ÚNICO reporte saliente
+   * que no va por cola: el resultado de la partida hacia la liga (`POST leagues/save`).
+   *
+   * OPCIONAL Y SU PRESENCIA ELIGE, igual que las tres de arriba: sin ella no se construye el
+   * destino de liga y el cierre de la partida lo anota en vez de reportarlo. Un default sería peor
+   * que no tenerla — una instancia mal configurada mandándole resultados de partidas reales al
+   * backend de otro ambiente.
+   *
+   * ⚠ La ruta del otro lado va SIN credencial, tal como está en v1. No es una decisión de este
+   * repo y está anotada donde se usa (`network/transports/http-leagues.ts`).
+   */
+  BACKEND_URL: z.string().url().optional(),
+  /**
    * CÓMO SE LLEGA A ESTE PROCESO DESDE AFUERA, sin el puerto. Colyseus se lo manda al cliente en
    * la reserva de asiento, y por eso cada instancia anuncia la SUYA: con las salas repartidas, el
    * jugador tiene que conectarse al proceso que hospeda la suya, no a cualquiera.
@@ -269,6 +282,7 @@ export interface Env {
   readonly redisUrl: string | undefined;
   /** `undefined` ⇒ esta instancia no publica: el outbox acumula. Ver RABBITMQ_URL. */
   readonly rabbitmqUrl: string | undefined;
+  readonly backendUrl: string | undefined;
   /** `undefined` ⇒ este proceso no anuncia dirección. Ver SERVER_ADDRESS. */
   readonly publicAddress: string | undefined;
   readonly turnTimeoutMs: number;
@@ -292,10 +306,10 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     throw new Error(`Entorno inválido — ${detail}`);
   }
   const parsed = result.data;
-  // EN PRODUCCIÓN LAS TRES SON OBLIGATORIAS, y la asimetría con el schema es la decisión: para zod
-  // siguen siendo opcionales porque FUERA de producción "ausente" es una elección legítima —una
+  // EN PRODUCCIÓN LAS CUATRO SON OBLIGATORIAS, y la asimetría con el schema es la decisión: para
+  // zod siguen siendo opcionales porque FUERA de producción "ausente" es una elección legítima —una
   // instancia sola, sin infraestructura, que es el despliegue de desarrollo y el de la suite—.
-  // Adentro de producción las tres ausencias fallan en SILENCIO, que es lo que las hace caras:
+  // Adentro de producción las cuatro ausencias fallan en SILENCIO, que es lo que las hace caras:
   // sin `MONGO_URI` el proceso arranca creyendo que persiste y el catálogo entero muere con él;
   // sin `RABBITMQ_URL` el outbox acumula eventos que nadie va a publicar nunca, y el consumidor
   // se queda con un catálogo viejo sin que falle nada de los dos lados; sin `INTERNAL_API_KEY`
@@ -310,6 +324,10 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         ["MONGO_URI", parsed.MONGO_URI],
         ["RABBITMQ_URL", parsed.RABBITMQ_URL],
         ["INTERNAL_API_KEY", parsed.INTERNAL_API_KEY],
+        // Sin `BACKEND_URL` la LIGA no recibe ninguna partida —ni las pagas ni las gratis— y el
+        // jugador ve su tabla congelada sin que nada falle de los dos lados. Es la cuarta
+        // ausencia silenciosa, y entra acá por el mismo argumento que las otras tres.
+        ["BACKEND_URL", parsed.BACKEND_URL],
       ] as const
     )
       .filter(([, valor]) => valor === undefined)
@@ -329,6 +347,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     mongoUri: parsed.MONGO_URI,
     redisUrl: parsed.REDIS_URL,
     rabbitmqUrl: parsed.RABBITMQ_URL,
+    backendUrl: parsed.BACKEND_URL,
     // TRES CASOS (ver SERVER_ADDRESS). El puerto va COMO PATH y no como `host:puerto` —es el
     // esquema de v1, lo que hace que el proxy que ya rutea v1 rutee esto sin aprender nada— y es
     // el EFECTIVO, no la base. Se arma acá —el único lector del entorno— y no en el composition

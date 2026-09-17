@@ -1,4 +1,5 @@
 import type { DependencyContainer } from "tsyringe";
+import type { Logger } from "../../../../../logger.js";
 import type { CommandName } from "../../../core/command.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config.js";
 import type { Clock } from "../../../core/engine/clock.js";
@@ -12,6 +13,8 @@ import {
   type MatchEventSink,
   MatchHistory,
   type MatchPieces,
+  type StandingsFeeds,
+  reportStandings,
 } from "../../../network/index.js";
 import { MessageRouter } from "../messages.js";
 import { CommandCatalog } from "./catalog.js";
@@ -127,8 +130,25 @@ export function buildPieces(child: DependencyContainer, emit: MatchEventSink): M
   const port = child.resolve<HistoryPort>("HistoryPort");
   const history = new MatchHistory(config.matchId, match, clock, port);
 
-  // Los listeners por scope llegan en tareas posteriores; conservar la firma evita que
-  // la sala tenga que cambiar cuando aparezcan.
+  // EL PRIMER LISTENER DEL REPO, y llena el hueco que este archivo tenía reservado. Los destinos
+  // son del PROCESO —el publicador es único, el de liga no tiene estado— y lo que se arma por
+  // partida es el traductor, que necesita el árbol y el snapshot de ESTA mesa.
+  //
+  // Se arma SIEMPRE, aunque los dos destinos falten: el listener anota lo que no puede reportar, y
+  // saltearlo acá convertiría una instancia sin configurar en una que reporta en silencio nada.
+  const feeds = child.resolve<StandingsFeeds>("StandingsFeeds");
+  const listeners = [
+    reportStandings({
+      config,
+      match,
+      ranking: feeds.ranking,
+      leagues: feeds.leagues,
+      log: child.resolve<Logger>("Logger"),
+    }),
+  ];
+
+  // `emit` sigue sin usarse: es el canal para el listener que PRODUZCA eventos, y el del cierre no
+  // produce ninguno a propósito (las dos tablas son de plataforma y nadie de esta partida las mira).
   void emit;
-  return { history, listeners: [], sinks: [(events) => history.events(events)] };
+  return { history, listeners, sinks: [(events) => history.events(events)] };
 }

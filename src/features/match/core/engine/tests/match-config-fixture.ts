@@ -40,5 +40,8 @@ export const matchConfig = (
   // de más.
   betLevels: [],
   isFreeRoom: false,
+  // PESO 1, el neutro del ranking: el motor no lo lee y estas suites no reportan nada afuera. La
+  // suite del reporte del cierre pasa el peso que quiere medir por `overrides`.
+  multiplier: 1,
   ...overrides,
 });
