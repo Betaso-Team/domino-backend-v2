@@ -5,10 +5,10 @@ import {
   GAME_MODE_OUTBOX_COLLECTION,
   type GameModeOutboxDocument,
   MongoGameModeOutbox,
-} from "./mongo-outbox.js";
-import type { CollectionSource } from "./mongo-repository.js";
-import { clasica, describeGameModeOutboxContract } from "./tests/outbox-contract.js";
-import { BASE_INSTANT, mutableClock } from "./tests/repository-contract.js";
+} from "./mongo-outbox";
+import type { CollectionSource } from "./mongo-repository";
+import { clasica, describeGameModeOutboxContract } from "./tests/outbox-contract";
+import { BASE_INSTANT, mutableClock } from "./tests/repository-contract";
 
 // CONTRA UN DOBLE DEL DRIVER, y no contra un Mongo de verdad, por la misma razón que
 // `mongo-repository.test.ts`: `vitest.setup.ts` BORRA `MONGO_URI` a propósito y la suite no depende de

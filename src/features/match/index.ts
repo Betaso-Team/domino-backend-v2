@@ -3,7 +3,7 @@
 // `app.config.ts`— porque son los tipos con los que el root NOMBRA lo que le pasa al
 // transporte: si el root tuviera que bajar a `core/engine/clock.js` para escribirlos, la
 // frontera de la feature existiría solo para los que ya están adentro.
-export type { Clock } from "./core/engine/clock.js";
+export type { Clock } from "./core/engine/clock";
 // LOS TIPOS DE LOS PARÁMETROS DE `settlementOf`, y salen porque una firma cuyos parámetros
 // no se pueden NOMBRAR obliga a importar hondo, que es justo lo que la Regla 4 evita. Por
 // tipado estructural un consumidor puede pasar un literal, pero no puede declarar la
@@ -13,10 +13,10 @@ export type { Clock } from "./core/engine/clock.js";
 //
 // `MatchState` y `DominoMatchConfig` salen como TIPO y no como valor: nombrar el árbol y el
 // snapshot es lo que hace falta para pasarlos; construirlos afuera de la feature no.
-export type { DominoMatchConfig } from "./core/config.js";
-export type { MatchState } from "./core/state/index.js";
-export type { NetworkMatchEvent } from "./network/events.js";
-export type { HistoryReader } from "./network/history.js";
+export type { DominoMatchConfig } from "./core/config";
+export type { MatchState } from "./core/state/index";
+export type { NetworkMatchEvent } from "./network/events";
+export type { HistoryReader } from "./network/history";
 // La proyección monetaria sale por acá porque su consumidor está AFUERA de la feature: hoy
 // el smoke, mañana el adaptador que efectivamente pague. Sale la función y salen sus tipos:
 // una instrucción que nadie puede nombrar no se puede recibir, ni loguear, ni auditar.
@@ -25,15 +25,15 @@ export {
   type SettlementEntry,
   type SettlementInstruction,
   type SettlementKind,
-} from "./network/settlement.js";
-export { DominoRoom } from "./transports/colyseus/domino-room.js";
+} from "./network/settlement";
+export { DominoRoom } from "./transports/colyseus/domino-room";
 // El reparto de partidas entre procesos. Sale por acá porque lo entrega el composition root al
 // servidor, que es el único que puede: `matchMaker` no se importa desde ningún otro lado.
 // `NoProcessAvailableError` NO sale: nadie lo atrapa —quien recibe el rechazo es Colyseus, que lo
 // convierte en un error de matchmaking—, y una superficie pública con tipos que nadie nombra es
 // una superficie que nadie puede podar después.
-export { selectProcessIdToCreateRoom } from "./transports/colyseus/load-balancer.js";
-export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/register-http.js";
+export { selectProcessIdToCreateRoom } from "./transports/colyseus/load-balancer";
+export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/register-http";
 // LAS TRES FUNCIONES DE LA FRONTERA Y SUS TIPOS. `requestOf`/`configOf` son el camino de una mesa
 // que NACE —el segundo pide el `GameMode` ya resuelto contra el catálogo— y `replayConfigOf` el de
 // una que se REBOBINA. Los tres errores salen también: el que pide crear una sala tiene que poder
@@ -49,9 +49,9 @@ export {
   type SeatCredentials,
   UnknownGameModeError,
   UnsupportedGameModeError,
-} from "./transports/match-contract.js";
+} from "./transports/match-contract";
 export {
   MatchRegistry,
   type MatchConfigResponse,
   type PublicMatchConfig,
-} from "./transports/match-registry.js";
+} from "./transports/match-registry";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPlayerOf } from "../first-turn.js";
+import { firstPlayerOf } from "../first-turn";
 
 const hands = (entries: [string, [number, number][]][]) =>
   entries.map(([playerId, tiles]) => ({

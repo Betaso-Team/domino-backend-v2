@@ -1,4 +1,4 @@
-import type { PlayerId } from "../../ids.js";
+import type { PlayerId } from "../../ids";
 import {
   canDrawTile,
   canPass,
@@ -6,14 +6,14 @@ import {
   canRevealTiles,
   hasPlayable,
   playersWithoutTilesSeen,
-} from "../../rules/legality.js";
-import { tileInHand } from "../../rules/projections.js";
-import type { TileLike } from "../../rules/tiles.js";
-import type { MatchView } from "../../rules/view.js";
-import type { MatchState } from "../../state/index.js";
-import type { BoardSide } from "../../state/tile.js";
-import { SchemaMatchView } from "../../state/view.js";
-import { assertLegal } from "../errors.js";
+} from "../../rules/legality";
+import { tileInHand } from "../../rules/projections";
+import type { TileLike } from "../../rules/tiles";
+import type { MatchView } from "../../rules/view";
+import type { MatchState } from "../../state/index";
+import type { BoardSide } from "../../state/tile";
+import { SchemaMatchView } from "../../state/view";
+import { assertLegal } from "../errors";
 
 // JUEZ de la RONDA. Read-only: valida y deriva, no muta.
 //

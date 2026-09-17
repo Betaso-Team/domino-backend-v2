@@ -18,7 +18,7 @@
 // ordenadas justamente porque las de atrás asumen lo que las de adelante ya comprobó —"no hay
 // ronda en curso" tiene que contestarse antes de mirar el turno de esa ronda—. La composición
 // es un `if` con `return` temprano, que es perezosa por construcción.
-import type { RuleViolationCode } from "./codes.js";
+import type { RuleViolationCode } from "./codes";
 
 export type Ruling =
   | { readonly legal: true }

@@ -1,15 +1,15 @@
-import type { DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
-import type { MatchEvent } from "../../events.js";
-import type { PlayerId } from "../../ids.js";
-import { DOMINO_SET_SIZE, tileValue } from "../../rules/tiles.js";
-import { BoardState, BoneyardState, RoundState, Turn } from "../../state/index.js";
-import type { MatchState } from "../../state/index.js";
-import type { BetNegotiation } from "../bet/index.js";
-import type { Clock } from "../clock.js";
-import type { Dealer } from "../dealer.js";
-import type { Driver, RoundAction, TransitionResult } from "../driver.js";
-import { InvariantViolationError } from "../errors.js";
-import type { RoundVerdict, Scorer } from "../scorer.js";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../../config";
+import type { MatchEvent } from "../../events";
+import type { PlayerId } from "../../ids";
+import { DOMINO_SET_SIZE, tileValue } from "../../rules/tiles";
+import { BoardState, BoneyardState, RoundState, Turn } from "../../state/index";
+import type { MatchState } from "../../state/index";
+import type { BetNegotiation } from "../bet/index";
+import type { Clock } from "../clock";
+import type { Dealer } from "../dealer";
+import type { Driver, RoundAction, TransitionResult } from "../driver";
+import { InvariantViolationError } from "../errors";
+import type { RoundVerdict, Scorer } from "../scorer";
 import {
   currentRoundOf,
   currentTurnOf,
@@ -19,11 +19,11 @@ import {
   roundPhaseOf,
   teamOf,
   turnOrderFrom,
-} from "../state-projections.js";
-import { blockVerdictOf, isBlocked } from "./block.js";
-import { firstPlayerOf } from "./first-turn.js";
-import type { RoundPlayer } from "./player.js";
-import type { RoundReferee } from "./referee.js";
+} from "../state-projections";
+import { blockVerdictOf, isBlocked } from "./block";
+import { firstPlayerOf } from "./first-turn";
+import type { RoundPlayer } from "./player";
+import type { RoundReferee } from "./referee";
 
 export class RoundDriver implements Driver {
   constructor(

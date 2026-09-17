@@ -1,8 +1,8 @@
-import type { Command, CommandPayload } from "../command.js";
-import type { Driver } from "../engine/driver.js";
-import type { Player } from "../engine/player-facade.js";
-import type { Referee } from "../engine/referee-facade.js";
-import type { MatchEvent } from "../events.js";
+import type { Command, CommandPayload } from "../command";
+import type { Driver } from "../engine/driver";
+import type { Player } from "../engine/player-facade";
+import type { Referee } from "../engine/referee-facade";
+import type { MatchEvent } from "../events";
 
 export class PlayTileCommand implements Command<"PLAY_TILE", MatchEvent> {
   constructor(

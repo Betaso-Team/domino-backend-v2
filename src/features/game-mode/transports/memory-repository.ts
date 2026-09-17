@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { GameModeRepository } from "../core/catalog.js";
-import type { CreateGameMode, GameMode, UpdateGameMode } from "../core/game-mode.js";
-import type { Clock } from "./mongo-repository.js";
+import type { GameModeRepository } from "../core/catalog";
+import type { CreateGameMode, GameMode, UpdateGameMode } from "../core/game-mode";
+import type { Clock } from "./mongo-repository";
 
 // EL CATÁLOGO DE LA INSTANCIA QUE NO TIENE MONGO, y NO un doble de test. Es la misma decisión que
 // `MemoryHistory`: la presencia de `MONGO_URI` elige, y sin ella el proceso levanta igual y el

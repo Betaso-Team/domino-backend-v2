@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import dotenv from "dotenv";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { env, loadEnvFileUnlessTest } from "./env.js";
+import { env, loadEnvFileUnlessTest } from "./env";
 
 // LA PROPIEDAD QUE SE DEFIENDE: `npm test` no depende de NINGÚN servicio externo, y eso tiene
 // que ser del repo y no del shell —ni del `.env`— de quien lo corre. `vitest.setup.ts` borra

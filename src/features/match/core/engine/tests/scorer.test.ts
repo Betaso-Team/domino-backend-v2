@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createMatchState } from "../genesis.js";
-import { Scorer } from "../scorer.js";
-import { scoreboardOf } from "../state-projections.js";
-import { matchConfig } from "./match-config-fixture.js";
+import { createMatchState } from "../genesis";
+import { Scorer } from "../scorer";
+import { scoreboardOf } from "../state-projections";
+import { matchConfig } from "./match-config-fixture";
 
 const build = (pointsToWin = 100) => createMatchState(matchConfig(["u1", "u2"], { pointsToWin }));
 

@@ -1,21 +1,21 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
-import { env } from "@/env.js";
-import type { GameMode } from "@/features/game-mode/index.js";
-import type { DominoMatchConfig } from "@/features/match/core/config.js";
-import { createMatchState } from "@/features/match/core/engine/genesis.js";
-import { boneyardCountOf } from "@/features/match/core/engine/state-projections.js";
-import { boardEndsOf } from "@/features/match/core/rules/board-ends.js";
-import { playableSides } from "@/features/match/core/rules/playable.js";
-import { MatchState } from "@/features/match/core/state/index.js";
-import type { BoardSide } from "@/features/match/core/state/tile.js";
-import { settlementOf } from "@/features/match/index.js";
+import { env } from "@/env";
+import type { GameMode } from "@/features/game-mode/index";
+import type { DominoMatchConfig } from "@/features/match/core/config";
+import { createMatchState } from "@/features/match/core/engine/genesis";
+import { boneyardCountOf } from "@/features/match/core/engine/state-projections";
+import { boardEndsOf } from "@/features/match/core/rules/board-ends";
+import { playableSides } from "@/features/match/core/rules/playable";
+import { MatchState } from "@/features/match/core/state/index";
+import type { BoardSide } from "@/features/match/core/state/tile";
+import { settlementOf } from "@/features/match/index";
 import {
   type CreateMatchRequest,
   configOf,
   requestOf,
-} from "@/features/match/transports/match-contract.js";
-import { logger } from "@/logger.js";
+} from "@/features/match/transports/match-contract";
+import { logger } from "@/logger";
 import { ColyseusSDK, type Room } from "@colyseus/sdk";
 import jwt from "jsonwebtoken";
 

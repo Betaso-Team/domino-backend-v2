@@ -1,9 +1,9 @@
 import type { AddressInfo } from "node:net";
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import express, { type Application as Express } from "express";
 import { describe, expect, it, vi } from "vitest";
-import type { HistoryEntry } from "../../network/history.js";
-import { registerInternalHistoryHttp } from "./register-http.js";
+import type { HistoryEntry } from "../../network/history";
+import { registerInternalHistoryHttp } from "./register-http";
 
 // El logger entra por parámetro, así que el doble se arma acá y no hay container que
 // preparar: ésa es justamente la propiedad que el transporte ganó al dejar de resolver.

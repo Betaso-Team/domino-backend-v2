@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { describe, expect, it } from "vitest";
-import { InvalidTokenError } from "../identity.js";
-import { JwtVerifier } from "./jwt-verifier.js";
+import { InvalidTokenError } from "../identity";
+import { JwtVerifier } from "./jwt-verifier";
 
 const SECRET = "s".repeat(32);
 const verifier = new JwtVerifier(SECRET);

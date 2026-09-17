@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BoardState, BoneyardState, PlacedTile, RoundState, Tile } from "../../../state/index.js";
-import { createMatchState } from "../../genesis.js";
-import { handOf } from "../../state-projections.js";
-import { matchConfig } from "../../tests/match-config-fixture.js";
-import { blockVerdictOf, isBlocked } from "../block.js";
+import { BoardState, BoneyardState, PlacedTile, RoundState, Tile } from "../../../state/index";
+import { createMatchState } from "../../genesis";
+import { handOf } from "../../state-projections";
+import { matchConfig } from "../../tests/match-config-fixture";
+import { blockVerdictOf, isBlocked } from "../block";
 
 function build(handsBySeat: Record<string, [number, number][]>, boneyard: [number, number][] = []) {
   const seats = Object.keys(handsBySeat);

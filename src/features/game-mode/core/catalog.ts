@@ -1,4 +1,4 @@
-import type { CreateGameMode, GameMode, UpdateGameMode } from "./game-mode.js";
+import type { CreateGameMode, GameMode, UpdateGameMode } from "./game-mode";
 
 // El puerto de LECTURA, separado del de escritura y no por simetría: sus consumidores son
 // distintos y sus permisos también. Los GET del catálogo son públicos y el nacimiento de una

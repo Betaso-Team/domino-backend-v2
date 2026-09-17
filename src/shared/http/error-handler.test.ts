@@ -1,7 +1,7 @@
-import type { LogFields, Logger } from "@/logger.js";
+import type { LogFields, Logger } from "@/logger";
 import type { NextFunction, Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
-import { httpErrorHandler } from "./error-handler.js";
+import { httpErrorHandler } from "./error-handler";
 
 function recordingLogger(): { logger: Logger; calls: Array<[string, LogFields | undefined]> } {
   const calls: Array<[string, LogFields | undefined]> = [];

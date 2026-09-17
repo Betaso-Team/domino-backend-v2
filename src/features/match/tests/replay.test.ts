@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GLOBAL_CONFIG, type DominoMatchConfig } from "../core/config.js";
-import { replay } from "../history/replay.js";
-import type { HistoryEntry } from "../network/history.js";
-import { replayConfigOf } from "../transports/match-contract.js";
+import { DEFAULT_GLOBAL_CONFIG, type DominoMatchConfig } from "../core/config";
+import { replay } from "../history/replay";
+import type { HistoryEntry } from "../network/history";
+import { replayConfigOf } from "../transports/match-contract";
 import golden from "./fixtures/golden-2p.json" with { type: "json" };
 
 // El meta sale de `replayConfigOf` y NO de `configOf`: rebobinar una partida no puede depender del
@@ -156,12 +156,12 @@ describe("el CLI de replay: sus dependencias", () => {
     // vecinos de `replay.ts` en `src/`. La lista sigue siendo exacta, así que un import nuevo
     // —empezando por el catálogo, que es el que esta guarda existe para prohibir— pasa por acá.
     expect([...imported].sort()).toEqual([
-      "./di-container.js",
-      "./logger.js",
-      "@/features/match/core/config.js",
-      "@/features/match/history/replay.js",
-      "@/features/match/network/history.js",
-      "@/features/match/transports/match-contract.js",
+      "./di-container",
+      "./logger",
+      "@/features/match/core/config",
+      "@/features/match/history/replay",
+      "@/features/match/network/history",
+      "@/features/match/transports/match-contract",
     ]);
   });
 });

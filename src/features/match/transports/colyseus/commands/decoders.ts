@@ -1,8 +1,8 @@
-import type { CommandName, CommandPayload } from "../../../core/command.js";
-import type { PlayerId } from "../../../core/ids.js";
-import { ValidationError } from "../errors.js";
-import type { MessageDecoder } from "../messages.js";
-import { COMMAND_PAYLOADS } from "./payloads.js";
+import type { CommandName, CommandPayload } from "../../../core/command";
+import type { PlayerId } from "../../../core/ids";
+import { ValidationError } from "../errors";
+import type { MessageDecoder } from "../messages";
+import { COMMAND_PAYLOADS } from "./payloads";
 
 // `MessageDecoder` YA NO VIVE ACÁ, y ese movimiento es el refactor entero en una línea:
 // mientras la interfaz estaba en este archivo su parámetro era `N extends CommandName`, o

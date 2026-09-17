@@ -1,6 +1,6 @@
 import express from "express";
 import { describe, expect, it } from "vitest";
-import { exposeServerTime } from "./server-time.js";
+import { exposeServerTime } from "./server-time";
 
 // CONTRA UN EXPRESS DE VERDAD Y CON `fetch`, igual que `health.test.ts`: lo que hay que
 // medir es la cabecera que sale POR EL CABLE. Un handler invocado a mano no produce

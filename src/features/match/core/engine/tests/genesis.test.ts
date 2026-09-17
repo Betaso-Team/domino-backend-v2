@@ -1,11 +1,11 @@
 // src/features/match/core/engine/tests/genesis.test.ts
 import { describe, expect, it } from "vitest";
-import { createMatchState } from "../genesis.js";
-import { scoreboardOf } from "../state-projections.js";
+import { createMatchState } from "../genesis";
+import { scoreboardOf } from "../state-projections";
 // El test compara contra la política DIRECTAMENTE, y por eso la importa: así afirma que la
 // génesis la DELEGA en vez de reimplementar `i % 2` y coincidir por casualidad.
-import { assignTeams } from "../team-assignment.js";
-import { matchConfig as config } from "./match-config-fixture.js";
+import { assignTeams } from "../team-assignment";
+import { matchConfig as config } from "./match-config-fixture";
 
 // El fixture sortea con `SEAT_ORDER` por default; las tres pruebas del sorteo piden
 // `SHUFFLED` explícito, que es lo que estaba bajo prueba desde siempre.

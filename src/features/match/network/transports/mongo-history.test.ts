@@ -1,13 +1,13 @@
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import type { Collection } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
-import type { HistoryEntry } from "../history.js";
+import type { HistoryEntry } from "../history";
 import {
   HISTORY_COLLECTION,
   type HistoryStore,
   type MatchHistoryDocument,
   MongoHistory,
-} from "./mongo-history.js";
+} from "./mongo-history";
 
 // CONTRA UN DOBLE DEL DRIVER, y no contra un Mongo de verdad. La suite del dominó no
 // depende de NINGÚN servicio externo y ésa es una propiedad que se decidió no perder: un

@@ -30,15 +30,15 @@
 // que puede llamarla porque es el único que tiene el servicio armado y el único que lee
 // `env.internalApiKey`. Los CUATRO ERRORES siguen sin salir: quien los traduce a 404/409/503 es esa
 // misma función, acá adentro.
-export type { GameModeReader } from "./core/catalog.js";
-export type { GameMode } from "./core/game-mode.js";
-export { OutboxDispatcher } from "./outbox.js";
-export { GameModeService } from "./service.js";
+export type { GameModeReader } from "./core/catalog";
+export type { GameMode } from "./core/game-mode";
+export { OutboxDispatcher } from "./outbox";
+export { GameModeService } from "./service";
 export {
   type GameModeHttpDeps,
   registerGameModeHttp,
-} from "./transports/http/register-http.js";
-export { MemoryGameModeOutbox } from "./transports/memory-outbox.js";
-export { MemoryGameModeRepository } from "./transports/memory-repository.js";
-export { MongoGameModeOutbox } from "./transports/mongo-outbox.js";
-export { MongoGameModeRepository } from "./transports/mongo-repository.js";
+} from "./transports/http/register-http";
+export { MemoryGameModeOutbox } from "./transports/memory-outbox";
+export { MemoryGameModeRepository } from "./transports/memory-repository";
+export { MongoGameModeOutbox } from "./transports/mongo-outbox";
+export { MongoGameModeRepository } from "./transports/mongo-repository";

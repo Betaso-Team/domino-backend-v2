@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
-import type { Logger } from "@/logger.js";
-import { requireInternalKey } from "@/shared/http/internal-key.js";
-import { validated } from "@/shared/http/validated.js";
+import type { Logger } from "@/logger";
+import { requireInternalKey } from "@/shared/http/internal-key";
+import { validated } from "@/shared/http/validated";
 import type { Application, Response } from "express";
 import {
   DuplicateGameModeError,
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
-} from "../../core/catalog.js";
-import type { GameModeService } from "../../service.js";
+} from "../../core/catalog";
+import type { GameModeService } from "../../service";
 import {
   CREATE_BODY,
   UPDATE_BODY,
@@ -17,7 +17,7 @@ import {
   createInputOf,
   toDTO,
   updateInputOf,
-} from "./schemas.js";
+} from "./schemas";
 
 // LAS SIETE RUTAS DEL CATÁLOGO DE v1, con sus métodos, sus paths y su envelope
 // (`Betaso-Domino-Backend/src/game-modes/routes.ts`). Este archivo hace DOS cosas y ninguna más:

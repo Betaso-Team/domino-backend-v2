@@ -1,4 +1,4 @@
-import type { LeagueFeed, LeaguePlayer, LeagueResult } from "../standings.js";
+import type { LeagueFeed, LeaguePlayer, LeagueResult } from "../standings";
 
 // LA LIGA, que va por HTTP y no por cola. Es la excepción entre los reportes del cierre —el
 // premio, el ranking y el historial salen todos por cola o por Mongo— y no por diseño nuestro: el

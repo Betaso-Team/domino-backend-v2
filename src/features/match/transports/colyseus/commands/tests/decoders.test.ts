@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ValidationError } from "../../errors.js";
-import { identityDecoder } from "../decoders.js";
+import { ValidationError } from "../../errors";
+import { identityDecoder } from "../decoders";
 
 describe("identityDecoder", () => {
   // EL INVARIANTE DEL WIRE: el playerId no viaja en el mensaje. Lo inyecta el

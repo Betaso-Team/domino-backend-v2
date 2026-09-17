@@ -1,5 +1,5 @@
 import { type SchemaType, schema, t } from "@colyseus/schema";
-import { Tile } from "./tile.js";
+import { Tile } from "./tile";
 
 // NODO MIXTO, y es la pieza que cierra el agujero de trampa del v1 (spec §7.1):
 // `tileCount` es público —el front tiene que saber cuántas fichas le quedan al rival—

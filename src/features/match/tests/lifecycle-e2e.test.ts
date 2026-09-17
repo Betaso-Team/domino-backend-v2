@@ -1,5 +1,5 @@
-import { env } from "@/env.js";
-import { CASUAL_2P } from "@/tests/game-mode-catalog.js";
+import { env } from "@/env";
+import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -14,7 +14,7 @@ import {
   revealHands,
   seatPair,
   waitUntil,
-} from "./e2e-harness.js";
+} from "./e2e-harness";
 
 let server: ColyseusTestServer;
 

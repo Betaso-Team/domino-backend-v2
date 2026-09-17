@@ -1,6 +1,6 @@
-import type { KeyValueStore } from "@/shared/kv.js";
+import type { KeyValueStore } from "@/shared/kv";
 import { z } from "zod";
-import { DEFAULT_MAINTENANCE_MESSAGE } from "./core/state.js";
+import { DEFAULT_MAINTENANCE_MESSAGE } from "./core/state";
 
 const KEY = "lobby:maintenance";
 const maintenance = z.strictObject({

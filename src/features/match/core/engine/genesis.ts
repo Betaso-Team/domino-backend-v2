@@ -1,8 +1,8 @@
 // src/features/match/core/engine/genesis.ts
-import { type DominoMatchConfig, playerIdsOf } from "../config.js";
-import { Hand, MatchState, PlayerState, Scoreboard } from "../state/index.js";
-import { InvariantViolationError } from "./errors.js";
-import { assignTeams } from "./team-assignment.js";
+import { type DominoMatchConfig, playerIdsOf } from "../config";
+import { Hand, MatchState, PlayerState, Scoreboard } from "../state/index";
+import { InvariantViolationError } from "./errors";
+import { assignTeams } from "./team-assignment";
 
 // El árbol inicial. Vive en el DOMINIO y no en la sala, porque formar la mesa
 // —quién se sienta dónde y con quién juega— es una regla del juego.

@@ -1,6 +1,6 @@
-import type { Command, CommandName, CommandPayload } from "../../../core/command.js";
-import type { MatchEvent } from "../../../core/events.js";
-import type { MessageDecoder } from "../messages.js";
+import type { Command, CommandName, CommandPayload } from "../../../core/command";
+import type { MatchEvent } from "../../../core/events";
+import type { MessageDecoder } from "../messages";
 
 type Decoders = { readonly [N in CommandName]: MessageDecoder<CommandPayload<N>> };
 type Commands = { readonly [N in CommandName]: Command<N, MatchEvent> };

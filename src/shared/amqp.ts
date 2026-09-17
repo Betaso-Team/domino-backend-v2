@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import { type ConfirmChannel, type RecoveringChannelModel, connect } from "amqplib";
 
 // LA ENTREGA por cola, sin saber QUÉ entrega. Vive en `shared/` y no dentro de

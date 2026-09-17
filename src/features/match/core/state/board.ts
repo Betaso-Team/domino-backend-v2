@@ -1,5 +1,5 @@
 import { type SchemaType, schema, t } from "@colyseus/schema";
-import { PlacedTile } from "./tile.js";
+import { PlacedTile } from "./tile";
 
 // La cadena jugada. Los extremos NO son campos: se derivan de `tiles`
 // (spec §7.1, "sin campos derivados") con boardEndsOf().

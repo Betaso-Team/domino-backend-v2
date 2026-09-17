@@ -1,25 +1,25 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { testConfig } from "@/app.config.js";
-import { rootContainer } from "@/di-container.js";
-import { env } from "@/env.js";
-import type { PlayerRef } from "@/shared/player-ref.js";
-import { CASUAL_2P } from "@/tests/game-mode-catalog.js";
+import { testConfig } from "@/app.config";
+import { rootContainer } from "@/di-container";
+import { env } from "@/env";
+import type { PlayerRef } from "@/shared/player-ref";
+import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { Room } from "@colyseus/sdk";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
-import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config.js";
-import { boardEndsOf } from "../core/rules/board-ends.js";
-import { playableSides } from "../core/rules/playable.js";
-import type { MatchState } from "../core/state/index.js";
-import type { BoardSide } from "../core/state/tile.js";
-import type { HistoryEntry, HistoryReader } from "../network/history.js";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
+import { boardEndsOf } from "../core/rules/board-ends";
+import { playableSides } from "../core/rules/playable";
+import type { MatchState } from "../core/state/index";
+import type { BoardSide } from "../core/state/tile";
+import type { HistoryEntry, HistoryReader } from "../network/history";
 import {
   type CreateMatchRequest,
   type MatchParticipant,
   configOf,
   requestOf,
-} from "../transports/match-contract.js";
+} from "../transports/match-contract";
 
 // UN STRING SIGUE ALCANZANDO para la mayoría de los tests: casi ninguno mide
 // multiplataforma, y obligarlos a escribir la pareja y el perfil enteros solo agregaría

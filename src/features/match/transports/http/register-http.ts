@@ -1,11 +1,11 @@
-import type { Logger } from "@/logger.js";
-import { requireInternalKey } from "@/shared/http/internal-key.js";
-import { validated } from "@/shared/http/validated.js";
+import type { Logger } from "@/logger";
+import { requireInternalKey } from "@/shared/http/internal-key";
+import { validated } from "@/shared/http/validated";
 import type { Application as Express } from "express";
 import { z } from "zod";
-import type { Clock } from "../../core/engine/clock.js";
-import type { HistoryReader } from "../../network/history.js";
-import type { MatchConfigResponse, MatchRegistry } from "../match-registry.js";
+import type { Clock } from "../../core/engine/clock";
+import type { HistoryReader } from "../../network/history";
+import type { MatchConfigResponse, MatchRegistry } from "../match-registry";
 
 // En una const para que el aviso de arranque y el `app.get` no puedan divergir: el warn
 // existe para que el operador encuentre ESTA ruta, no una parecida.

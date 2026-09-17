@@ -1,7 +1,7 @@
-import type { AmqpDelivery } from "@/shared/amqp.js";
+import type { AmqpDelivery } from "@/shared/amqp";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AmqpRankingFeed } from "../transports/amqp-ranking.js";
-import { HttpLeagueFeed } from "../transports/http-leagues.js";
+import { AmqpRankingFeed } from "../transports/amqp-ranking";
+import { HttpLeagueFeed } from "../transports/http-leagues";
 
 // LOS DOS CONTRATOS, CAMPO POR CAMPO. Es lo único que estos dos archivos hacen —traducir— y lo
 // único que nadie de este lado puede verificar corriendo: del otro lado hay un consumidor de v1

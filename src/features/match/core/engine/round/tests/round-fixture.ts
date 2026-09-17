@@ -7,11 +7,11 @@ import {
   RoundState,
   Tile,
   Turn,
-} from "../../../state/index.js";
-import type { BoardSide } from "../../../state/tile.js";
-import { createMatchState } from "../../genesis.js";
-import { handOf } from "../../state-projections.js";
-import { matchConfig } from "../../tests/match-config-fixture.js";
+} from "../../../state/index";
+import type { BoardSide } from "../../../state/tile";
+import { createMatchState } from "../../genesis";
+import { handOf } from "../../state-projections";
+import { matchConfig } from "../../tests/match-config-fixture";
 
 export interface RoundSetup {
   hands: Record<string, [number, number][]>;

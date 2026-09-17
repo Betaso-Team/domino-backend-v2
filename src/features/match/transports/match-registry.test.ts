@@ -1,7 +1,7 @@
-import { MemoryKeyValueStore } from "@/shared/kv.js";
+import { MemoryKeyValueStore } from "@/shared/kv";
 import { describe, expect, it } from "vitest";
-import { replayConfigOf } from "./match-contract.js";
-import { MatchRegistry, TTL_SECONDS } from "./match-registry.js";
+import { replayConfigOf } from "./match-contract";
+import { MatchRegistry, TTL_SECONDS } from "./match-registry";
 
 // El config se arma con el CONTRATO y no a mano: lo que el registro indexa son las parejas
 // del snapshot REAL, y un objeto escrito a mano podría describir una mesa que el contrato

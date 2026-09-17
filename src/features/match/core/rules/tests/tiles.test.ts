@@ -7,7 +7,7 @@ import {
   orderedTileSet,
   sameTile,
   tileValue,
-} from "../tiles.js";
+} from "../tiles";
 
 describe("tiles", () => {
   it("son 28 fichas", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { GameMode } from "../../core/game-mode.js";
-import type { GameModeOutbox } from "../../outbox.js";
-import { BASE_INSTANT, type MutableClock } from "./repository-contract.js";
+import type { GameMode } from "../../core/game-mode";
+import type { GameModeOutbox } from "../../outbox";
+import { BASE_INSTANT, type MutableClock } from "./repository-contract";
 
 // EL CONTRATO DEL OUTBOX, ESCRITO UNA SOLA VEZ Y CORRIDO CONTRA LOS DOS ADAPTADORES, por el mismo
 // argumento que `repository-contract.ts`: `MemoryGameModeOutbox` no es un doble de test, es el outbox

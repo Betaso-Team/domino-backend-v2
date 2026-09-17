@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PlayerId } from "../../core/ids.js";
-import { UnknownCommandError } from "./errors.js";
-import { MessageRouter } from "./messages.js";
+import type { PlayerId } from "../../core/ids";
+import { UnknownCommandError } from "./errors";
+import { MessageRouter } from "./messages";
 
 const PLAYER = "u1" as PlayerId;
 const passthrough = { decode: (raw: unknown) => raw };

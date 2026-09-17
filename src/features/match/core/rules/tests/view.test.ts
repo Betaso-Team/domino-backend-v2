@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { roundState } from "../../engine/round/tests/round-fixture.js";
-import { SchemaMatchView } from "../../state/view.js";
-import { canPlayTile, hasPlayable } from "../legality.js";
-import type { PublicMatchView } from "../view.js";
+import { roundState } from "../../engine/round/tests/round-fixture";
+import { SchemaMatchView } from "../../state/view";
+import { canPlayTile, hasPlayable } from "../legality";
+import type { PublicMatchView } from "../view";
 
 // LA FRONTERA, MEDIDA DE LOS DOS LADOS: que el ÁRBOL satisface la vista sin copiarse, y que la
 // PUERTA de lo privado es la única forma de llegar a una mano.

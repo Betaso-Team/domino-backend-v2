@@ -1,8 +1,8 @@
-import { rootContainer } from "@/di-container.js";
-import { InvalidTokenError, type TokenVerifier } from "@/features/auth/index.js";
-import type { GameModeReader } from "@/features/game-mode/index.js";
-import { LobbySettings, MaintenanceModeError } from "@/features/lobby/index.js";
-import type { Logger } from "@/logger.js";
+import { rootContainer } from "@/di-container";
+import { InvalidTokenError, type TokenVerifier } from "@/features/auth/index";
+import type { GameModeReader } from "@/features/game-mode/index";
+import { LobbySettings, MaintenanceModeError } from "@/features/lobby/index";
+import type { Logger } from "@/logger";
 import { StateView } from "@colyseus/schema";
 import {
   type AuthContext,
@@ -19,20 +19,15 @@ import {
   type DominoMatchConfig,
   type GlobalDominoConfig,
   playerIdsOf,
-} from "../../core/config.js";
-import { RuleViolationError } from "../../core/engine/errors.js";
-import type { SchemaVisibilityController } from "../../core/engine/visibility.js";
-import type { PlayerId } from "../../core/ids.js";
-import type { MatchState } from "../../core/state/index.js";
-import type { AbortReason, NetworkMatchEvent } from "../../network/events.js";
-import { MatchEventNotifier, type MatchHistory } from "../../network/index.js";
-import {
-  type SeatCredentials,
-  UnknownGameModeError,
-  configOf,
-  requestOf,
-} from "../match-contract.js";
-import { HEARTBEAT_MS, MatchRegistry } from "../match-registry.js";
+} from "../../core/config";
+import { RuleViolationError } from "../../core/engine/errors";
+import type { SchemaVisibilityController } from "../../core/engine/visibility";
+import type { PlayerId } from "../../core/ids";
+import type { MatchState } from "../../core/state/index";
+import type { AbortReason, NetworkMatchEvent } from "../../network/events";
+import { MatchEventNotifier, type MatchHistory } from "../../network/index";
+import { type SeatCredentials, UnknownGameModeError, configOf, requestOf } from "../match-contract";
+import { HEARTBEAT_MS, MatchRegistry } from "../match-registry";
 import {
   type MatchHasOutcome,
   type MatchSeatGuard,
@@ -41,16 +36,16 @@ import {
   buildPieces,
   buildRouter,
   registerIndividualCommands,
-} from "./commands/di-wiring.js";
+} from "./commands/di-wiring";
 import {
   PlayerAlreadyOutError,
   SeatNotReservedError,
   UnknownCommandError,
   ValidationError,
-} from "./errors.js";
-import type { MessageRouter } from "./messages.js";
-import { RoomTimeoutScheduler } from "./timeout-scheduler.js";
-import { StateViewVisibilityController } from "./visibility.js";
+} from "./errors";
+import type { MessageRouter } from "./messages";
+import { RoomTimeoutScheduler } from "./timeout-scheduler";
+import { StateViewVisibilityController } from "./visibility";
 
 export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private seats: readonly PlayerId[] = [];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { RuleViolationError } from "../../errors.js";
-import { RoundReferee } from "../referee.js";
-import { roundState } from "./round-fixture.js";
+import { RuleViolationError } from "../../errors";
+import { RoundReferee } from "../referee";
+import { roundState } from "./round-fixture";
 
 const refereeFor = (setup: Parameters<typeof roundState>[0]) => new RoundReferee(roundState(setup));
 

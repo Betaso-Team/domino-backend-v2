@@ -1,5 +1,5 @@
-import type { GameMode } from "../core/game-mode.js";
-import { type GameModeEvent, createdEventOf, updatedEventOf } from "../events.js";
+import type { GameMode } from "../core/game-mode";
+import { type GameModeEvent, createdEventOf, updatedEventOf } from "../events";
 import {
   type Clock,
   type GameModeOutbox,
@@ -8,7 +8,7 @@ import {
   revisionKeysOf,
   syncKeyOf,
   updatedKeyOf,
-} from "../outbox.js";
+} from "../outbox";
 
 // EL OUTBOX DE LA INSTANCIA QUE NO TIENE MONGO, y NO un doble de test: es la misma decisión que
 // `MemoryHistory` y `MemoryGameModeRepository`. La presencia de `MONGO_URI` elige, y sin ella el

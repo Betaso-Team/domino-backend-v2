@@ -1,10 +1,10 @@
 import { type SchemaType, schema, t } from "@colyseus/schema";
-import { PlayerState } from "./player.js";
-import { RoundState, RoundSummary } from "./round.js";
+import { PlayerState } from "./player";
+import { RoundState, RoundSummary } from "./round";
 
 // La unión se declara en `rules/phases.js` —es vocabulario del juego, no del wire— y se
 // re-exporta acá, que es de donde la importaba todo el mundo.
-export type { MatchPhase } from "../rules/phases.js";
+export type { MatchPhase } from "../rules/phases";
 
 export const Scoreboard = schema(
   { teamA: t.number().default(0), teamB: t.number().default(0) },

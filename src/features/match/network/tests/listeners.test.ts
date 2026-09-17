@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { InvariantViolationError } from "../../core/engine/errors.js";
-import type { NetworkMatchEvent } from "../events.js";
-import { MatchEventNotifier } from "../listeners.js";
+import { InvariantViolationError } from "../../core/engine/errors";
+import type { NetworkMatchEvent } from "../events";
+import { MatchEventNotifier } from "../listeners";
 
 describe("MatchEventNotifier", () => {
   it("difunde al cliente y a los sinks lo que el dominio produjo", () => {

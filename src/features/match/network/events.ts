@@ -1,5 +1,5 @@
-import type { MatchEvent } from "../core/events.js";
-import type { PlayerId } from "../core/ids.js";
+import type { MatchEvent } from "../core/events";
+import type { PlayerId } from "../core/ids";
 
 // Lo que solo la SALA sabe: que un socket se cayó, que volvió, y que esta partida
 // se murió sin veredicto. El dominio no tiene un final sin veredicto.

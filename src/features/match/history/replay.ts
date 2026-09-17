@@ -1,20 +1,20 @@
 // Reconstruir una partida = mismo config (mismo seed) + los COMANDOS y los vencimientos
 // reaplicados en orden de seq. Son las dos únicas entradas del motor; todo lo demás del
 // historial es consecuencia y se re-deriva.
-import type { Command, CommandName, CommandPayload } from "../core/command.js";
+import type { Command, CommandName, CommandPayload } from "../core/command";
 import {
   DEFAULT_GLOBAL_CONFIG,
   type DominoMatchConfig,
   type GlobalDominoConfig,
-} from "../core/config.js";
-import type { Clock } from "../core/engine/clock.js";
-import { deadlineKindOf } from "../core/engine/deadline-kind.js";
-import type { TimeoutScheduler } from "../core/engine/timeout-scheduler.js";
-import type { SchemaVisibilityController } from "../core/engine/visibility.js";
-import type { MatchEvent } from "../core/events.js";
-import type { MatchState } from "../core/state/index.js";
-import type { HistoryEntry } from "../network/history.js";
-import { buildEngineGraph } from "./engine-factory.js";
+} from "../core/config";
+import type { Clock } from "../core/engine/clock";
+import { deadlineKindOf } from "../core/engine/deadline-kind";
+import type { TimeoutScheduler } from "../core/engine/timeout-scheduler";
+import type { SchemaVisibilityController } from "../core/engine/visibility";
+import type { MatchEvent } from "../core/events";
+import type { MatchState } from "../core/state/index";
+import type { HistoryEntry } from "../network/history";
+import { buildEngineGraph } from "./engine-factory";
 
 export interface ReplayInput {
   readonly meta: DominoMatchConfig;

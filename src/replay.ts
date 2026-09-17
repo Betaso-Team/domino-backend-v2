@@ -1,7 +1,7 @@
-import type { GlobalDominoConfig, TeamAssignmentMode } from "@/features/match/core/config.js";
-import { replay } from "@/features/match/history/replay.js";
-import type { HistoryEntry, HistoryReader } from "@/features/match/network/history.js";
-import { replayConfigOf } from "@/features/match/transports/match-contract.js";
+import type { GlobalDominoConfig, TeamAssignmentMode } from "@/features/match/core/config";
+import { replay } from "@/features/match/history/replay";
+import type { HistoryEntry, HistoryReader } from "@/features/match/network/history";
+import { replayConfigOf } from "@/features/match/transports/match-contract";
 // npm run replay -- <matchId> <seed> <pointsToWin> <teamAssignment> <asiento...>
 //
 // Rebobina la partida desde el historial e IMPRIME el estado final reconstruido. Es la
@@ -18,8 +18,8 @@ import { replayConfigOf } from "@/features/match/transports/match-contract.js";
 // hace falta va en `match_meta` al cerrar la partida, no colgado de una entrada. Un campo
 // opcional que nadie escribe es peor que no tenerlo: hace creer que el replay puede
 // autoverificarse contra producción cuando no puede.
-import { mongo, rootContainer } from "./di-container.js";
-import { logger } from "./logger.js";
+import { mongo, rootContainer } from "./di-container";
+import { logger } from "./logger";
 
 const USAGE =
   "uso: npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER> <asiento...>";

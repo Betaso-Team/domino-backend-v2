@@ -1,14 +1,14 @@
-import type { Logger } from "@/logger.js";
-import type { AmqpDelivery } from "@/shared/amqp.js";
-import { type Lease, MemoryLease } from "@/shared/mongo-lease.js";
+import type { Logger } from "@/logger";
+import type { AmqpDelivery } from "@/shared/amqp";
+import { type Lease, MemoryLease } from "@/shared/mongo-lease";
 import { describe, expect, it, vi } from "vitest";
-import type { GameModeReader } from "./core/catalog.js";
-import type { GameMode } from "./core/game-mode.js";
-import type { GameModePayload } from "./events.js";
-import { OutboxDispatcher } from "./outbox.js";
-import { MemoryGameModeOutbox } from "./transports/memory-outbox.js";
-import { clasica } from "./transports/tests/outbox-contract.js";
-import { BASE_INSTANT, mutableClock } from "./transports/tests/repository-contract.js";
+import type { GameModeReader } from "./core/catalog";
+import type { GameMode } from "./core/game-mode";
+import type { GameModePayload } from "./events";
+import { OutboxDispatcher } from "./outbox";
+import { MemoryGameModeOutbox } from "./transports/memory-outbox";
+import { clasica } from "./transports/tests/outbox-contract";
+import { BASE_INSTANT, mutableClock } from "./transports/tests/repository-contract";
 
 // EL DISPATCHER, MEDIDO CONTRA EL OUTBOX DE MEMORIA Y NO CONTRA UN DOBLE DEL PUERTO. El outbox de
 // memoria es un adaptador que se despliega —la instancia sin `MONGO_URI` usa ése—, así que medir

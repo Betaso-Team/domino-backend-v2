@@ -1,8 +1,8 @@
-import type { PlayerId } from "../ids.js";
-import type { TileLike } from "../rules/tiles.js";
-import type { BoardSide } from "../state/tile.js";
-import type { MatchReferee } from "./match/referee.js";
-import type { RoundReferee } from "./round/referee.js";
+import type { PlayerId } from "../ids";
+import type { TileLike } from "../rules/tiles";
+import type { BoardSide } from "../state/tile";
+import type { MatchReferee } from "./match/referee";
+import type { RoundReferee } from "./round/referee";
 
 // FACADE solo-juez: agrega los assertCanX en una superficie. Read-only.
 //

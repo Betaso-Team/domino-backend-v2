@@ -1,7 +1,7 @@
-import type { Command, CommandPayload } from "../command.js";
-import type { Driver } from "../engine/driver.js";
-import type { Referee } from "../engine/referee-facade.js";
-import type { MatchEvent } from "../events.js";
+import type { Command, CommandPayload } from "../command";
+import type { Driver } from "../engine/driver";
+import type { Referee } from "../engine/referee-facade";
+import type { MatchEvent } from "../events";
 
 export class PassCommand implements Command<"PASS", MatchEvent> {
   constructor(

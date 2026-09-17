@@ -11,7 +11,7 @@ import {
   seatPair,
   turnHolderOf,
   waitUntil,
-} from "./e2e-harness.js";
+} from "./e2e-harness";
 
 let server: ColyseusTestServer;
 

@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AmqpDeliveryError, AmqpPublisher } from "./amqp.js";
+import { AmqpDeliveryError, AmqpPublisher } from "./amqp";
 
 // CONTRA UN DOBLE DE `amqplib`, y no contra un RabbitMQ de verdad, por lo mismo que
 // `mongo-lease.test.ts` y `mongo-history.test.ts`: la suite del dominó no depende de NINGÚN

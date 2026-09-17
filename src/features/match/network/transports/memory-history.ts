@@ -1,4 +1,4 @@
-import type { HistoryEntry, HistoryPort, HistoryReader } from "../history.js";
+import type { HistoryEntry, HistoryPort, HistoryReader } from "../history";
 
 // Implementación de memoria. YA NO ES "la de antes de que haya base": el adaptador de Mongo
 // existe (`./mongo-history.ts`) y el composition root elige entre los dos según haya o no

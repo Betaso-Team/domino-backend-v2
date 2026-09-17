@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { boardEndsOf } from "../../../rules/board-ends.js";
-import { currentRoundOf, handOf, playerOf } from "../../state-projections.js";
-import type { SchemaVisibilityController } from "../../visibility.js";
-import { RoundPlayer } from "../player.js";
-import { roundState } from "./round-fixture.js";
+import { boardEndsOf } from "../../../rules/board-ends";
+import { currentRoundOf, handOf, playerOf } from "../../state-projections";
+import type { SchemaVisibilityController } from "../../visibility";
+import { RoundPlayer } from "../player";
+import { roundState } from "./round-fixture";
 
 const visibility: SchemaVisibilityController = {
   makePublic() {},

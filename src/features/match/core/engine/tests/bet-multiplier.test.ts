@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { BetLevel } from "../../config.js";
-import { RuleViolationError } from "../errors.js";
-import { engineWithHands } from "./build-engine.js";
+import type { BetLevel } from "../../config";
+import { RuleViolationError } from "../errors";
+import { engineWithHands } from "./build-engine";
 
 // EL AUMENTO DE APUESTA. Lo que se prueba acá es sobre todo lo que NO se puede hacer: es
 // dinero real, así que cada límite que v1 comprueba tiene su caso, y un límite sin test es

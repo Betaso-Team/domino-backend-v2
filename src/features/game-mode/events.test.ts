@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { GameMode } from "./core/game-mode.js";
+import type { GameMode } from "./core/game-mode";
 import {
   GAME_MODE_CREATED_KEY,
   GAME_MODE_EXCHANGE,
   GAME_MODE_UPDATED_KEY,
   createdEventOf,
   updatedEventOf,
-} from "./events.js";
+} from "./events";
 
 // El modo lleva `id` y `uuid` DISTINTOS a propósito: son los dos candidatos a `payload.id` y
 // con el mismo valor ninguna aserción distingue cuál se mapeó. `id` tiene forma de hex de

@@ -1,9 +1,9 @@
-import type { PlayerId } from "../../ids.js";
-import type { BoardSide } from "../board-ends.js";
-import type { BetLevel, DominoRulesConfig } from "../config.js";
-import type { MatchPhase, RoundPhase } from "../phases.js";
-import type { TileLike } from "../tiles.js";
-import type { MatchView, PlayerView, RoundView } from "../view.js";
+import type { PlayerId } from "../../ids";
+import type { BoardSide } from "../board-ends";
+import type { BetLevel, DominoRulesConfig } from "../config";
+import type { MatchPhase, RoundPhase } from "../phases";
+import type { TileLike } from "../tiles";
+import type { MatchView, PlayerView, RoundView } from "../view";
 
 // LA MESA COMO OBJETO PLANO, y ése es el test.
 //

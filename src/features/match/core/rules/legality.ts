@@ -1,7 +1,7 @@
-import type { PlayerId } from "../ids.js";
-import { type BoardSide, boardEndsOf } from "./board-ends.js";
-import type { BetLevel, DominoRulesConfig } from "./config.js";
-import { hasPlayableTile, playableSides } from "./playable.js";
+import type { PlayerId } from "../ids";
+import { type BoardSide, boardEndsOf } from "./board-ends";
+import type { BetLevel, DominoRulesConfig } from "./config";
+import { hasPlayableTile, playableSides } from "./playable";
 import {
   boneyardCountOf,
   currentRoundOf,
@@ -12,10 +12,10 @@ import {
   playerOf,
   roundPhaseOf,
   tileInHand,
-} from "./projections.js";
-import { LEGAL, type Ruling, illegal } from "./ruling.js";
-import type { TileLike } from "./tiles.js";
-import type { MatchView, PublicMatchView, RoundView } from "./view.js";
+} from "./projections";
+import { LEGAL, type Ruling, illegal } from "./ruling";
+import type { TileLike } from "./tiles";
+import type { MatchView, PublicMatchView, RoundView } from "./view";
 
 // LA LEGALIDAD DEL DOMINÓ, COMPUESTA. Una función por VERBO, y el verbo es lo que el jugador
 // intenta —no el aspecto que lo juzga—.

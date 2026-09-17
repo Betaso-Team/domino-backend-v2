@@ -11,10 +11,10 @@
 // una sola vez. Sin este test, la guarda queda verde-y-muerta: se puede mover DESPUÉS
 // del `for` —dead code— y los 63 tests de todos modos pasan.
 import { describe, expect, it } from "vitest";
-import { createMatchState } from "../genesis.js";
-import { MatchReferee } from "../match/referee.js";
-import { playerOf } from "../state-projections.js";
-import { matchConfig } from "./match-config-fixture.js";
+import { createMatchState } from "../genesis";
+import { MatchReferee } from "../match/referee";
+import { playerOf } from "../state-projections";
+import { matchConfig } from "./match-config-fixture";
 
 // SEAT_ORDER, a propósito, misma razón que en build-engine.ts: este test prueba la
 // regla del juez, no el sorteo. Con SEAT_ORDER, "u1" es SIEMPRE team A y "u2" SIEMPRE

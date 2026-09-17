@@ -1,4 +1,4 @@
-import type { PlayerId } from "../core/ids.js";
+import type { PlayerId } from "../core/ids";
 
 /**
  * EL COBRO DEL AUMENTO DE APUESTA, que todavía NO TIENE ADAPTADOR. Este archivo es el

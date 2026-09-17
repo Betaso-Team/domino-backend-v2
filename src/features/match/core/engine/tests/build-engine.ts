@@ -6,31 +6,31 @@ import {
   ProposeBetMultiplierCommand,
   RespondBetMultiplierCommand,
   RevealTilesCommand,
-} from "../../commands/index.js";
-import type { BetLevel, DominoMatchConfig, GlobalDominoConfig } from "../../config.js";
-import { DEFAULT_GLOBAL_CONFIG, playerIdsOf } from "../../config.js";
-import type { MatchEvent } from "../../events.js";
-import type { MatchState } from "../../state/index.js";
-import { Tile } from "../../state/index.js";
-import type { BoardSide } from "../../state/tile.js";
-import { BetNegotiation, BetReferee } from "../bet/index.js";
-import type { Clock } from "../clock.js";
-import { Dealer } from "../dealer.js";
-import { createMatchState } from "../genesis.js";
-import { MatchDriver } from "../match/driver.js";
-import { MatchPlayer } from "../match/player.js";
-import { MatchReferee } from "../match/referee.js";
-import { Player } from "../player-facade.js";
-import { PlayerRepository } from "../player-repository.js";
-import { Referee } from "../referee-facade.js";
-import { RoundDriver } from "../round/driver.js";
-import { RoundPlayer } from "../round/player.js";
-import { RoundReferee } from "../round/referee.js";
-import { Scorer } from "../scorer.js";
-import { boneyardOf, currentRoundOf, handOf } from "../state-projections.js";
-import type { TimeoutScheduler } from "../timeout-scheduler.js";
-import type { SchemaVisibilityController } from "../visibility.js";
-import { matchConfig } from "./match-config-fixture.js";
+} from "../../commands/index";
+import type { BetLevel, DominoMatchConfig, GlobalDominoConfig } from "../../config";
+import { DEFAULT_GLOBAL_CONFIG, playerIdsOf } from "../../config";
+import type { MatchEvent } from "../../events";
+import type { MatchState } from "../../state/index";
+import { Tile } from "../../state/index";
+import type { BoardSide } from "../../state/tile";
+import { BetNegotiation, BetReferee } from "../bet/index";
+import type { Clock } from "../clock";
+import { Dealer } from "../dealer";
+import { createMatchState } from "../genesis";
+import { MatchDriver } from "../match/driver";
+import { MatchPlayer } from "../match/player";
+import { MatchReferee } from "../match/referee";
+import { Player } from "../player-facade";
+import { PlayerRepository } from "../player-repository";
+import { Referee } from "../referee-facade";
+import { RoundDriver } from "../round/driver";
+import { RoundPlayer } from "../round/player";
+import { RoundReferee } from "../round/referee";
+import { Scorer } from "../scorer";
+import { boneyardOf, currentRoundOf, handOf } from "../state-projections";
+import type { TimeoutScheduler } from "../timeout-scheduler";
+import type { SchemaVisibilityController } from "../visibility";
+import { matchConfig } from "./match-config-fixture";
 
 class FixedDealer extends Dealer {
   constructor(

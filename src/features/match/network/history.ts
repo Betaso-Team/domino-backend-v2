@@ -4,10 +4,10 @@
 // Se graban las DOS cosas —el ACTO y el HECHO— intercaladas en el orden en que
 // pasaron, porque por el criterio de MatchEvent la mayoría de los verbos no emite
 // nada: un historial de solo eventos tendría los desenlaces y ninguna jugada.
-import type { CommandPayloads } from "../core/command.js";
-import type { Clock } from "../core/engine/clock.js";
-import type { MatchState } from "../core/state/index.js";
-import type { NetworkMatchEvent } from "./events.js";
+import type { CommandPayloads } from "../core/command";
+import type { Clock } from "../core/engine/clock";
+import type { MatchState } from "../core/state/index";
+import type { NetworkMatchEvent } from "./events";
 
 // EL VOCABULARIO DEL HISTORIAL ES CERRADO, y eso es el punto entero de la corrección
 // del v1. Ahí una entrada era un tipo único discriminado por dos booleanos

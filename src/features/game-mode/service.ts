@@ -1,13 +1,13 @@
-import type { Lease } from "@/shared/mongo-lease.js";
+import type { Lease } from "@/shared/mongo-lease";
 import {
   DuplicateGameModeError,
   GameModeNotFoundError,
   type GameModeRepository,
   GameModeStateConflictError,
   GameModeWriteBusyError,
-} from "./core/catalog.js";
-import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode.js";
-import type { GameModeOutbox } from "./outbox.js";
+} from "./core/catalog";
+import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode";
+import type { GameModeOutbox } from "./outbox";
 
 // LOS CASOS DE USO DEL CATÁLOGO, y son el reemplazo del `GameModeService` de v1
 // (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts`). Lo que cambia respecto de aquél es

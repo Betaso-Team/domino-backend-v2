@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type GameAction, legalActionsFor } from "../actions.js";
-import { type ViewSetup, rulesConfig, viewOf } from "./fixture.js";
+import { type GameAction, legalActionsFor } from "../actions";
+import { type ViewSetup, rulesConfig, viewOf } from "./fixture";
 
 const base: ViewSetup = {
   hands: {

@@ -1,12 +1,12 @@
 import { type SchemaType, schema, t } from "@colyseus/schema";
-import { BoardState } from "./board.js";
-import { BoneyardState } from "./boneyard.js";
+import { BoardState } from "./board";
+import { BoneyardState } from "./boneyard";
 
 // Las dos uniones se declaran en `rules/phases.js` —son vocabulario del juego, no del wire— y
 // se re-exportan acá, que es de donde las importaba todo el mundo. El plazo del turno se
 // re-estampa entero al volver de `NEGOTIATING_BET`, que es lo que evita que negociar le coma el
 // reloj al que no propuso; el resto de la historia de las fases está allá.
-export type { RoundEndReason, RoundPhase } from "../rules/phases.js";
+export type { RoundEndReason, RoundPhase } from "../rules/phases";
 
 // El turno: de quién es, y en qué tramo del plazo va. El instante de vencimiento vive
 // UNIFICADO en `MatchState.activeDeadline` —no acá—, así que no hay `startedAt`: sería

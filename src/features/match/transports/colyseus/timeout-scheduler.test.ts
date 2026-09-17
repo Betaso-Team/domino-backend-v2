@@ -1,8 +1,8 @@
 import type { Delayed } from "colyseus";
 import { describe, expect, it, vi } from "vitest";
-import type { MatchEvent } from "../../core/events.js";
-import type { DeadlineKind } from "../../core/events.js";
-import { RoomTimeoutScheduler } from "./timeout-scheduler.js";
+import type { MatchEvent } from "../../core/events";
+import type { DeadlineKind } from "../../core/events";
+import { RoomTimeoutScheduler } from "./timeout-scheduler";
 
 type RecordedTimer = { callback: () => void; delay: number; cleared: boolean };
 

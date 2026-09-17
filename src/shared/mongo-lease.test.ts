@@ -6,7 +6,7 @@ import {
   type LeaseDocument,
   MemoryLease,
   MongoLease,
-} from "./mongo-lease.js";
+} from "./mongo-lease";
 
 // CONTRA UN DOBLE DEL DRIVER QUE SÍ ES ATÓMICO, y no contra un Mongo de verdad, por la misma razón
 // que `mongo-repository.test.ts` y `mongo-history.test.ts`: `vitest.setup.ts` BORRA `MONGO_URI` a

@@ -1,5 +1,5 @@
-import type { AmqpDelivery } from "@/shared/amqp.js";
-import type { RankingFeed, RankingParticipation } from "../standings.js";
+import type { AmqpDelivery } from "@/shared/amqp";
+import type { RankingFeed, RankingParticipation } from "../standings";
 
 // LA COLA DEL RANKING del backend principal, con el envoltorio de patrón de NestJS —del otro lado
 // hay un `@EventPattern` y no un consumidor crudo, así que sin el envoltorio el mensaje se

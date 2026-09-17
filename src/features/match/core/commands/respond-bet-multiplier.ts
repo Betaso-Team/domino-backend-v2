@@ -1,7 +1,7 @@
-import type { Command, CommandPayload } from "../command.js";
-import type { BetNegotiation, BetReferee } from "../engine/bet/index.js";
-import type { RoundDriver } from "../engine/round/driver.js";
-import type { MatchEvent } from "../events.js";
+import type { Command, CommandPayload } from "../command";
+import type { BetNegotiation, BetReferee } from "../engine/bet/index";
+import type { RoundDriver } from "../engine/round/driver";
+import type { MatchEvent } from "../events";
 
 // CONTESTAR UN AUMENTO DE APUESTA. Tampoco emite evento —el comando registra el sí o el no—,
 // a diferencia del rechazo que dicta el reloj, que sí lo emite porque detrás de aquél no hay

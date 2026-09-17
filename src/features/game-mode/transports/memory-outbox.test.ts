@@ -1,6 +1,6 @@
-import { MemoryGameModeOutbox } from "./memory-outbox.js";
-import { describeGameModeOutboxContract } from "./tests/outbox-contract.js";
-import { mutableClock } from "./tests/repository-contract.js";
+import { MemoryGameModeOutbox } from "./memory-outbox";
+import { describeGameModeOutboxContract } from "./tests/outbox-contract";
+import { mutableClock } from "./tests/repository-contract";
 
 // SÓLO EL CONTRATO, y eso es el archivo entero. `MemoryGameModeOutbox` no tiene nada que el puerto no
 // prometa —no hay documento BSON, ni índices, ni colección—, así que todo lo que se le puede medir ya

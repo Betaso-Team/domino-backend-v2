@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { GameModeRepository } from "../../core/catalog.js";
-import type { CreateGameMode } from "../../core/game-mode.js";
+import type { GameModeRepository } from "../../core/catalog";
+import type { CreateGameMode } from "../../core/game-mode";
 
 // EL CONTRATO, ESCRITO UNA SOLA VEZ Y CORRIDO CONTRA LOS DOS ADAPTADORES. `MemoryGameModeRepository`
 // no es un doble de test: es el adaptador de la instancia que corre sin Mongo, así que un modo que

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { Clock } from "../../core/engine/clock.js";
-import { createMatchState } from "../../core/engine/genesis.js";
-import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state/index.js";
-import { replayConfigOf } from "../../transports/match-contract.js";
-import type { HistoryEntry, HistoryPort } from "../history.js";
-import { MatchHistory } from "../history.js";
+import type { Clock } from "../../core/engine/clock";
+import { createMatchState } from "../../core/engine/genesis";
+import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state/index";
+import { replayConfigOf } from "../../transports/match-contract";
+import type { HistoryEntry, HistoryPort } from "../history";
+import { MatchHistory } from "../history";
 
 function build() {
   const recorded: HistoryEntry[] = [];

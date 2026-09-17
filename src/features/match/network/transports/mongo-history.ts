@@ -1,6 +1,6 @@
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import type { Collection, Document } from "mongodb";
-import type { HistoryEntry, HistoryPort, HistoryReader } from "../history.js";
+import type { HistoryEntry, HistoryPort, HistoryReader } from "../history";
 
 // EL HISTORIAL QUE SOBREVIVE AL REINICIO. `MemoryHistory` tiene tope de 200 partidas y muere
 // con el proceso, así que el endpoint interno de soporte y el CLI de replay —los dos ya

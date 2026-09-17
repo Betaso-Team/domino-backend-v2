@@ -1,8 +1,8 @@
-import type { PlayerId } from "../ids.js";
+import type { PlayerId } from "../ids";
 
-import type { MatchPhase, RoundPhase } from "./phases.js";
-import { type TileLike, sameTile } from "./tiles.js";
-import type { MatchView, PlayerView, PublicMatchView, RoundView, TurnView } from "./view.js";
+import type { MatchPhase, RoundPhase } from "./phases";
+import { type TileLike, sameTile } from "./tiles";
+import type { MatchView, PlayerView, PublicMatchView, RoundView, TurnView } from "./view";
 
 // LAS LECTURAS DE LA VISTA, y son TOTALES: ninguna lanza.
 //

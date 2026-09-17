@@ -1,5 +1,5 @@
-import type { BoardEnds, BoardSide } from "./board-ends.js";
-import type { TileLike } from "./tiles.js";
+import type { BoardEnds, BoardSide } from "./board-ends";
+import type { TileLike } from "./tiles";
 
 export function playableSides(tile: TileLike, ends: BoardEnds): BoardSide[] {
   // Tablero vacío: la primera ficha entra, y la cadena todavía no tiene lados,

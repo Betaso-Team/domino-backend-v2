@@ -1,4 +1,4 @@
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import type { ErrorRequestHandler } from "express";
 
 // LA RED de la capa HTTP: lo que un handler tiró y nadie manejó. Sin esto, Express responde

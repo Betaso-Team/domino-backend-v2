@@ -1,5 +1,5 @@
-import { InvariantViolationError } from "../core/engine/errors.js";
-import type { NetworkMatchEvent } from "./events.js";
+import { InvariantViolationError } from "../core/engine/errors";
+import type { NetworkMatchEvent } from "./events";
 
 // Reacciona DESPUÉS y solo PRODUCE: no puede rechazar nada. Es una de las dos
 // costuras del anillo; la otra es la admisión, que decide antes y sí puede rechazar.

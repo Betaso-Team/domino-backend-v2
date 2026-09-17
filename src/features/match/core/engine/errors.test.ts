@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DominoError, InvariantViolationError, RuleViolationError } from "./errors.js";
+import { DominoError, InvariantViolationError, RuleViolationError } from "./errors";
 
 describe("jerarquía de errores", () => {
   it("una violación de regla lleva un código para la UI y los logs", () => {

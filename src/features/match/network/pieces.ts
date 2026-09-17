@@ -1,5 +1,5 @@
-import type { MatchHistory } from "./history.js";
-import type { MatchEventListener, MatchEventSink } from "./listeners.js";
+import type { MatchHistory } from "./history";
+import type { MatchEventListener, MatchEventSink } from "./listeners";
 
 // Lo que el wiring le entrega a la sala. La sala no arma nada de esto: solo lo usa.
 export interface MatchPieces {

@@ -5,7 +5,7 @@
 //
 // Convención: el SUJETO va primero y el match al final, salvo cuando el match ES
 // el sujeto. Así `teamOf(playerId, match)` se lee "el equipo de playerId en esta partida".
-import type { PlayerId, TeamId } from "../ids.js";
+import type { PlayerId, TeamId } from "../ids";
 import type {
   BoneyardState,
   Hand,
@@ -17,9 +17,9 @@ import type {
   RoundState,
   Scoreboard,
   Turn,
-} from "../state/index.js";
-import type { BoardSide } from "../state/tile.js";
-import { InvariantViolationError } from "./errors.js";
+} from "../state/index";
+import type { BoardSide } from "../state/tile";
+import { InvariantViolationError } from "./errors";
 
 export function playerOf(playerId: PlayerId, match: MatchState): PlayerState {
   const player = match.players.find((candidate) => candidate.playerId === playerId);

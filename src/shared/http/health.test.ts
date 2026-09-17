@@ -1,6 +1,6 @@
 import express from "express";
 import { describe, expect, it } from "vitest";
-import { type DependencyChecks, registerHealth } from "./health.js";
+import { type DependencyChecks, registerHealth } from "./health";
 
 // CONTRA UN EXPRESS DE VERDAD Y CON `fetch`, no llamando al handler a mano: lo que este
 // archivo tiene que medir es el STATUS que ve el balanceador, y un handler invocado

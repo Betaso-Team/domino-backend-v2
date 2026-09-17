@@ -6,13 +6,13 @@ import {
   GAME_MODE_COLLECTION,
   type GameModeDocument,
   MongoGameModeRepository,
-} from "./mongo-repository.js";
+} from "./mongo-repository";
 import {
   BASE_INSTANT,
   clasica,
   describeGameModeRepositoryContract,
   mutableClock,
-} from "./tests/repository-contract.js";
+} from "./tests/repository-contract";
 
 // CONTRA UN DOBLE DEL DRIVER, y no contra un Mongo de verdad, por la misma razón que
 // `mongo-history.test.ts`: `vitest.setup.ts` BORRA `MONGO_URI` a propósito, así que la suite no

@@ -1,8 +1,8 @@
-import type { PlayerRef } from "@/shared/player-ref.js";
-import type { DominoMatchConfig, MatchSeat } from "../core/config.js";
-import { InvariantViolationError } from "../core/engine/errors.js";
-import type { MatchState } from "../core/state/index.js";
-import type { NetworkMatchEvent } from "./events.js";
+import type { PlayerRef } from "@/shared/player-ref";
+import type { DominoMatchConfig, MatchSeat } from "../core/config";
+import { InvariantViolationError } from "../core/engine/errors";
+import type { MatchState } from "../core/state/index";
+import type { NetworkMatchEvent } from "./events";
 
 // LA PROYECCIÓN, NO EL MOVIMIENTO. Acá se traduce el desenlace de una mesa a lo que
 // HABRÍA que pagar, y nada más: no hay puerto de wallet, ni adaptador remoto, ni outbox,

@@ -1,6 +1,6 @@
 // src/features/match/core/command.ts
-import type { PlayerId } from "./ids.js";
-import type { BoardSide } from "./state/tile.js";
+import type { PlayerId } from "./ids";
+import type { BoardSide } from "./state/tile";
 
 // El mapa de verbos. Crece de a uno: cada verbo nuevo rompe la compilación en TRES
 // lugares —el schema del wire, los decoders y los comandos— cada uno apuntando a lo

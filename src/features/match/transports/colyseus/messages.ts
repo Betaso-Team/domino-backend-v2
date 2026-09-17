@@ -1,5 +1,5 @@
-import type { PlayerId } from "../../core/ids.js";
-import { UnknownCommandError } from "./errors.js";
+import type { PlayerId } from "../../core/ids";
+import { UnknownCommandError } from "./errors";
 
 // LA FRONTERA DEL SOCKET, y los tres actores que la componen. Existe porque hasta acá
 // "mensaje que el cliente manda" y "verbo del dominó" eran el mismo conjunto por

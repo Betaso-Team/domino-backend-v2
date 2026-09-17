@@ -1156,13 +1156,27 @@ se pone rojo.
    son la misma arista, y la forma del especificador solo se ve leyendo el archivo — el mismo
    motivo por el que el guard del validador HTTP tampoco tiene depcruise detrás.
 
-   El alias se declara **tres veces**, y hay que saberlo antes de tocar cualquiera: el `paths`
+   El alias se declara **dos veces**, y hay que saberlo antes de tocar cualquiera: el `paths`
    del `tsconfig.json` (de donde lo leen `tsc`, `tsup`/esbuild y `depcruise` por su
-   `options.tsConfig`), el `resolve.alias` de `vitest.config.ts` —Vite no mira el tsconfig, y sin
-   esa línea el typecheck queda verde y la suite entera no resuelve un solo import— y nada más.
-   `tsx` (dev, replay, smokes) lo saca del tsconfig. **Las extensiones `.js` se conservan**: este
-   repo usa `moduleResolution: NodeNext` de verdad, no `Bundler` como truco, y el alias es
-   ortogonal a eso.
+   `options.tsConfig`) y el `resolve.alias` de `vitest.config.ts` —Vite no mira el tsconfig, y sin
+   esa línea el typecheck queda verde y la suite entera no resuelve un solo import—. `tsx` (dev,
+   replay, smokes) lo saca del tsconfig.
+
+   **Y SIN EXTENSIÓN**, como truco. El repo nació con `moduleResolution: NodeNext` y `.js` en cada
+   especificador, y eso compraba UNA propiedad concreta: el árbol que emitía `tsc` a secas corría
+   en Node sin bundler —medido, corría—. **El alias la rompió**, y no por descuido: TypeScript
+   NUNCA reescribe los `paths`, así que el emit quedaba con 23 archivos pidiendo
+   `"@/features/game-mode/index.js"`, que Node no resuelve. Con la propiedad ya perdida, el `.js`
+   no compraba nada: lo único que resuelve el árbol es `tsup` o `tsx`, y los dos hacen legal el
+   import sin extensión. Así que se fue a `moduleResolution: "Bundler"` + `module: "ESNext"` +
+   `noEmit: true` —el emit ya no sirve y decirlo evita que alguien despliegue uno roto—, con
+   `resolveJsonModule` para el golden.
+
+   ⚠ **SI ALGÚN DÍA HAY QUE VOLVER A CORRER SIN BUNDLER**, el camino es al revés y completo:
+   `NodeNext`, `.js` en todos los especificadores **y sacar el alias**, o reescribirlo en el emit
+   con una herramienta aparte. Las dos mitades van juntas; quedarse con el alias y las extensiones
+   —que es donde estuvo este repo un commit— es pagar el precio de las dos y no tener ninguna de
+   las dos propiedades.
 
 Más `no-circular`, que no es regla de imports sino invariante del grafo.
 

@@ -1,6 +1,6 @@
 // src/shared/rng.test.ts
 import { describe, expect, it } from "vitest";
-import { hashSeed, mulberry32, shuffled } from "./rng.js";
+import { hashSeed, mulberry32, shuffled } from "./rng";
 
 describe("rng sembrado", () => {
   it("la misma semilla y ronda dan el mismo hash", () => {

@@ -1,6 +1,6 @@
 import { Encoder, StateView } from "@colyseus/schema";
 import { describe, expect, it } from "vitest";
-import { Hand, MatchState, RoundState, Tile } from "./index.js";
+import { Hand, MatchState, RoundState, Tile } from "./index";
 
 describe("árbol de estado", () => {
   it("una ficha lleva sus dos números", () => {

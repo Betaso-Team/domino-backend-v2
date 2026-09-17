@@ -1,15 +1,15 @@
-import type { Logger } from "@/logger.js";
-import type { AmqpDelivery } from "@/shared/amqp.js";
-import type { Lease } from "@/shared/mongo-lease.js";
-import type { GameModeReader } from "./core/catalog.js";
-import type { GameMode } from "./core/game-mode.js";
+import type { Logger } from "@/logger";
+import type { AmqpDelivery } from "@/shared/amqp";
+import type { Lease } from "@/shared/mongo-lease";
+import type { GameModeReader } from "./core/catalog";
+import type { GameMode } from "./core/game-mode";
 import {
   GAME_MODE_CREATED_KEY,
   GAME_MODE_EXCHANGE,
   GAME_MODE_UPDATED_KEY,
   type GameModeEventKey,
   type GameModePayload,
-} from "./events.js";
+} from "./events";
 
 // EL OUTBOX: EL PUERTO Y EL DESPACHADOR. Existe para una sola propiedad — **el request administrativo
 // nunca espera a Rabbit**. La mutación escribe Mongo y escribe acá; el dispatcher publica después,

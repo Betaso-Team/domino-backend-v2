@@ -1,4 +1,4 @@
-import type { DominoMatchConfig, MatchSeat } from "../../config.js";
+import type { DominoMatchConfig, MatchSeat } from "../../config";
 
 // EL CONFIG DE UNA MESA PARA LOS TESTS DEL MOTOR, en un solo lugar. Antes cada suite
 // escribía el objeto entero a mano, así que un campo nuevo en `DominoMatchConfig` —y esta

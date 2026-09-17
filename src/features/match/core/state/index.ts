@@ -16,13 +16,13 @@
 //     abrir cada ronda respectivamente.
 //   · `boneyard` — CONDICIONALMENTE, según el modo tenga pozo o no (ausente en 4P). Ver
 //     `state.test.ts` para el test que fija esta distinción en ambas direcciones.
-export * from "./board.js";
-export * from "./boneyard.js";
-export * from "./match.js";
-export * from "./player.js";
-export * from "./round.js";
-export * from "./tile.js";
+export * from "./board";
+export * from "./boneyard";
+export * from "./match";
+export * from "./player";
+export * from "./round";
+export * from "./tile";
 // LA MITAD SERVIDOR DE LA FRONTERA DE LAS REGLAS. Sale por el barril del estado —y no por el de
 // `rules/`— porque es lo que ADAPTA este árbol a esa vista: la vista no conoce el schema, y ése
 // es el punto entero de que exista.
-export * from "./view.js";
+export * from "./view";

@@ -1,9 +1,9 @@
-import type { PlayerId } from "../../ids.js";
-import { boardEndsOf } from "../../rules/board-ends.js";
-import { hasPlayableTile } from "../../rules/playable.js";
-import { handValue } from "../../rules/tiles.js";
-import type { MatchState } from "../../state/index.js";
-import { currentRoundOf, roundActivePlayers } from "../state-projections.js";
+import type { PlayerId } from "../../ids";
+import { boardEndsOf } from "../../rules/board-ends";
+import { hasPlayableTile } from "../../rules/playable";
+import { handValue } from "../../rules/tiles";
+import type { MatchState } from "../../state/index";
+import { currentRoundOf, roundActivePlayers } from "../state-projections";
 
 // TRANCA: nadie puede jugar ni siquiera con las fichas que quedan en el pozo. No alcanza
 // con que el pozo tenga fichas: si ninguna conecta, la ronda ya está cerrada (§3.7).

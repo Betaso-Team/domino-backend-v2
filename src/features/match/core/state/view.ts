@@ -1,6 +1,6 @@
-import type { PlayerId } from "../ids.js";
-import type { MatchView, PrivatePlayerView, RoundView } from "../rules/view.js";
-import type { MatchState } from "./match.js";
+import type { PlayerId } from "../ids";
+import type { MatchView, PrivatePlayerView, RoundView } from "../rules/view";
+import type { MatchState } from "./match";
 
 // CÓMO ESTE ÁRBOL SE MUESTRA COMO UNA `MatchView`. Es la mitad SERVIDOR de la frontera de las
 // reglas.

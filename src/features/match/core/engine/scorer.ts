@@ -1,8 +1,8 @@
-import type { PlayerId } from "../ids.js";
-import { RoundSummary } from "../state/index.js";
-import type { MatchState } from "../state/index.js";
-import type { RoundEndReason } from "../state/round.js";
-import { scoreboardOf, teamOf } from "./state-projections.js";
+import type { PlayerId } from "../ids";
+import { RoundSummary } from "../state/index";
+import type { MatchState } from "../state/index";
+import type { RoundEndReason } from "../state/round";
+import { scoreboardOf, teamOf } from "./state-projections";
 
 export interface RoundVerdict {
   readonly roundNumber: number;

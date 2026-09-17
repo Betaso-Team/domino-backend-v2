@@ -1,6 +1,6 @@
 // src/features/match/core/engine/tests/team-assignment.test.ts
 import { describe, expect, it } from "vitest";
-import { assignTeams } from "../team-assignment.js";
+import { assignTeams } from "../team-assignment";
 
 const seats4 = ["u1", "u2", "u3", "u4"];
 

@@ -2,10 +2,10 @@
 // nada de este archivo sabe que el catálogo tiene un repositorio, un outbox ni una API. La arista
 // va en un solo sentido —`game-mode` redeclaró su `Clock` estructural en la Tarea 4 justamente
 // para no tener que importar de acá— y eso es lo que mantiene el grafo acíclico.
-import type { GameMode } from "@/features/game-mode/index.js";
-import type { PlayerRef } from "@/shared/player-ref.js";
+import type { GameMode } from "@/features/game-mode/index";
+import type { PlayerRef } from "@/shared/player-ref";
 import { z } from "zod";
-import type { DominoMatchConfig } from "../core/config.js";
+import type { DominoMatchConfig } from "../core/config";
 
 // Contrato en la raíz de transports porque matchmaking crea las salas. `mode` lo deja
 // discriminado para sumar otros orígenes sin adivinar por campos opcionales.

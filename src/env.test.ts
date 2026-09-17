@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "./env.js";
+import { parseEnv } from "./env";
 
 describe("parseEnv", () => {
   it("acepta un entorno completo", () => {

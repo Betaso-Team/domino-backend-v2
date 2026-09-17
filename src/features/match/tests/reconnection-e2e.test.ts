@@ -1,8 +1,8 @@
-import { rootContainer } from "@/di-container.js";
+import { rootContainer } from "@/di-container";
 import { CloseCode } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type GlobalDominoConfig, globalConfigWith } from "../core/config.js";
+import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
 import {
   type SeatedMatch,
   bootServer,
@@ -12,7 +12,7 @@ import {
   rejoinAs,
   seatPair,
   waitUntil,
-} from "./e2e-harness.js";
+} from "./e2e-harness";
 
 let server: ColyseusTestServer;
 let originalGlobalConfig: GlobalDominoConfig;

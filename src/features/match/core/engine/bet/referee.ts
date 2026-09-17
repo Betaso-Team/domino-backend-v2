@@ -1,11 +1,11 @@
-import type { DominoMatchConfig } from "../../config.js";
-import type { PlayerId } from "../../ids.js";
-import type { BetLevel } from "../../rules/config.js";
-import { betLevelOf, canProposeBet, canRespondBet } from "../../rules/legality.js";
-import type { MatchView } from "../../rules/view.js";
-import type { MatchState } from "../../state/index.js";
-import { SchemaMatchView } from "../../state/view.js";
-import { RuleViolationError, assertLegal } from "../errors.js";
+import type { DominoMatchConfig } from "../../config";
+import type { PlayerId } from "../../ids";
+import type { BetLevel } from "../../rules/config";
+import { betLevelOf, canProposeBet, canRespondBet } from "../../rules/legality";
+import type { MatchView } from "../../rules/view";
+import type { MatchState } from "../../state/index";
+import { SchemaMatchView } from "../../state/view";
+import { RuleViolationError, assertLegal } from "../errors";
 
 // EL JUEZ DEL AUMENTO DE APUESTA. Read-only, como los otros dos: dice si se puede, nunca toca el
 // estado. Los límites de v1 y el por qué de cada uno están en `rules/legality.js#canProposeBet`,

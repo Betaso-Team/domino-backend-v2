@@ -1,6 +1,6 @@
-import { MatchState } from "@/features/match/core/state/index.js";
+import { MatchState } from "@/features/match/core/state/index";
 import { describe, expect, it } from "vitest";
-import { nextAction, requireSmokeFlag } from "./engine-smoke.js";
+import { nextAction, requireSmokeFlag } from "./engine-smoke";
 
 describe("engine smoke", () => {
   it("se niega a correr sin flag", () => {

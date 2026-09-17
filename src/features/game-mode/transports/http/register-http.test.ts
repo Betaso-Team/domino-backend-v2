@@ -1,16 +1,16 @@
 import type { AddressInfo } from "node:net";
-import type { Logger } from "@/logger.js";
-import { httpErrorHandler } from "@/shared/http/error-handler.js";
-import type { Lease } from "@/shared/mongo-lease.js";
+import type { Logger } from "@/logger";
+import { httpErrorHandler } from "@/shared/http/error-handler";
+import type { Lease } from "@/shared/mongo-lease";
 import express, { type Application } from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GameModeRepository } from "../../core/catalog.js";
-import type { GameMode } from "../../core/game-mode.js";
-import { GameModeService } from "../../service.js";
-import { MemoryGameModeOutbox } from "../memory-outbox.js";
-import { MemoryGameModeRepository } from "../memory-repository.js";
-import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contract.js";
-import { registerGameModeHttp } from "./register-http.js";
+import type { GameModeRepository } from "../../core/catalog";
+import type { GameMode } from "../../core/game-mode";
+import { GameModeService } from "../../service";
+import { MemoryGameModeOutbox } from "../memory-outbox";
+import { MemoryGameModeRepository } from "../memory-repository";
+import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contract";
+import { registerGameModeHttp } from "./register-http";
 
 // LA FRONTERA MEDIDA CONTRA EL SERVICIO DE VERDAD y los adaptadores de memoria, no contra un doble
 // del servicio. Es el mismo argumento de `service.test.ts`: `MemoryGameModeRepository` y

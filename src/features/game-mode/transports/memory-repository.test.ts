@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { MemoryGameModeRepository } from "./memory-repository.js";
+import { MemoryGameModeRepository } from "./memory-repository";
 import {
   clasica,
   describeGameModeRepositoryContract,
   mutableClock,
-} from "./tests/repository-contract.js";
+} from "./tests/repository-contract";
 
 // EL MISMO CONTRATO QUE EL ADAPTADOR MONGO, corrido contra el adaptador que usa la instancia sin
 // Mongo. `MemoryGameModeRepository` NO es un doble de test —igual que `MemoryHistory`, es la

@@ -1,5 +1,5 @@
-import type { PlayerId, TeamId } from "../ids.js";
-import type { TileLike } from "./tiles.js";
+import type { PlayerId, TeamId } from "../ids";
+import type { TileLike } from "./tiles";
 
 // LA PARTIDA COMO LA VE UNA REGLA, y la frontera anti-trampa vuelta tipo.
 //

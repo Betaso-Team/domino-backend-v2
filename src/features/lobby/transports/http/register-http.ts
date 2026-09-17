@@ -1,8 +1,8 @@
-import { requireInternalKey } from "@/shared/http/internal-key.js";
+import { requireInternalKey } from "@/shared/http/internal-key";
 import type { Application } from "express";
 import { z } from "zod";
-import { DEFAULT_MAINTENANCE_MESSAGE } from "../../core/state.js";
-import type { LobbySettings } from "../../settings.js";
+import { DEFAULT_MAINTENANCE_MESSAGE } from "../../core/state";
+import type { LobbySettings } from "../../settings";
 
 const body = z.strictObject({
   isUnderMaintenance: z.boolean(),

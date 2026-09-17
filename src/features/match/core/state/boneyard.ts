@@ -1,5 +1,5 @@
 import { type SchemaType, schema, t } from "@colyseus/schema";
-import { Tile } from "./tile.js";
+import { Tile } from "./tile";
 
 // El pozo. Este nodo solo se INSTANCIA en los modos que tienen pozo: en 4P la rama
 // `RoundState.boneyard` queda ausente (ver el comentario de `RoundState`).

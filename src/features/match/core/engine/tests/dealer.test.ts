@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
-import { DOMINO_SET_SIZE, handValue, sameTile } from "../../rules/tiles.js";
-import { BoardState, BoneyardState, RoundState, Tile } from "../../state/index.js";
-import { Dealer } from "../dealer.js";
-import { createMatchState } from "../genesis.js";
-import { handOf } from "../state-projections.js";
-import { matchConfig } from "./match-config-fixture.js";
+import { DEFAULT_GLOBAL_CONFIG } from "../../config";
+import { DOMINO_SET_SIZE, handValue, sameTile } from "../../rules/tiles";
+import { BoardState, BoneyardState, RoundState, Tile } from "../../state/index";
+import { Dealer } from "../dealer";
+import { createMatchState } from "../genesis";
+import { handOf } from "../state-projections";
+import { matchConfig } from "./match-config-fixture";
 
 function build(seed = "seed-1") {
   const config = matchConfig(["u1", "u2"], { seed, teamAssignment: "SHUFFLED" });

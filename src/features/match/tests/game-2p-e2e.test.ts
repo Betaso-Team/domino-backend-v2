@@ -1,6 +1,6 @@
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { boneyardCountOf } from "../core/engine/state-projections.js";
+import { boneyardCountOf } from "../core/engine/state-projections";
 import {
   type SeatedMatch,
   act,
@@ -11,7 +11,7 @@ import {
   seatPair,
   waitUntil,
   writeGolden,
-} from "./e2e-harness.js";
+} from "./e2e-harness";
 
 const MATCH_ID = "m-g1-g2";
 

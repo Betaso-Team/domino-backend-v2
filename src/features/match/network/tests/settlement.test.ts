@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createMatchState } from "../../core/engine/genesis.js";
-import { replayConfigOf } from "../../transports/match-contract.js";
-import type { AbortReason } from "../events.js";
-import { settlementOf } from "../settlement.js";
+import { createMatchState } from "../../core/engine/genesis";
+import { replayConfigOf } from "../../transports/match-contract";
+import type { AbortReason } from "../events";
+import { settlementOf } from "../settlement";
 
 // EL SNAPSHOT DE LA MESA, Y SE ARMA CON `replayConfigOf` Y NO CON `configOf`. Lo que `settlementOf`
 // recibe es la mesa YA CONGELADA —asientos numerados, dinero adentro—, que es exactamente lo que

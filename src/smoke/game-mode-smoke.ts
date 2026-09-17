@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { env } from "@/env.js";
-import { logger } from "@/logger.js";
+import { env } from "@/env";
+import { logger } from "@/logger";
 import { connect } from "amqplib";
 import { MongoClient } from "mongodb";
 

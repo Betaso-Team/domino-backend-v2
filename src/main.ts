@@ -1,8 +1,8 @@
 import { listen } from "@colyseus/tools";
-import app from "./app.config.js";
-import { shutdown } from "./di-container.js";
-import { env } from "./env.js";
-import { logger } from "./logger.js";
+import app from "./app.config";
+import { shutdown } from "./di-container";
+import { env } from "./env";
+import { logger } from "./logger";
 
 // EL ARCHIVO QUE SE EJECUTA, y está separado del que se IMPORTA (`app.config.ts`, que compone
 // las dos superficies y del que cuelga la suite entera). Se llamaba `index.ts` y el rename no

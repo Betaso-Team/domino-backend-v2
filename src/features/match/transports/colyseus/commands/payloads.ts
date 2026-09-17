@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CommandName } from "../../../core/command.js";
+import type { CommandName } from "../../../core/command";
 
 // EL WIRE NO EXPONE PALANCAS. `.strict()` en todos: un campo de más es un rechazo,
 // no algo que se ignore en silencio. Y el playerId NO está en ningún schema —lo

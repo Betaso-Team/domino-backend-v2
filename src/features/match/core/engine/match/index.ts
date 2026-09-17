@@ -1,3 +1,3 @@
-export * from "./driver.js";
-export * from "./player.js";
-export * from "./referee.js";
+export * from "./driver";
+export * from "./player";
+export * from "./referee";

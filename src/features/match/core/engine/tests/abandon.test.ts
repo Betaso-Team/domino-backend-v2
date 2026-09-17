@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GLOBAL_CONFIG } from "../../config.js";
-import { RuleViolationError } from "../errors.js";
-import { playerOf } from "../state-projections.js";
-import { engineWithHands } from "./build-engine.js";
+import { DEFAULT_GLOBAL_CONFIG } from "../../config";
+import { RuleViolationError } from "../errors";
+import { playerOf } from "../state-projections";
+import { engineWithHands } from "./build-engine";
 
 function engine() {
   const harness = engineWithHands({ u1: [[6, 6]], u2: [[5, 5]] }, [], {

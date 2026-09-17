@@ -1,22 +1,22 @@
 import { readFileSync } from "node:fs";
-import type { Lease } from "@/shared/mongo-lease.js";
+import type { Lease } from "@/shared/mongo-lease";
 import { describe, expect, it, vi } from "vitest";
 import {
   DuplicateGameModeError,
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
-} from "./core/catalog.js";
-import type { GameModeOutbox, GameModeOutboxEntry } from "./outbox.js";
-import { GameModeService } from "./service.js";
-import { MemoryGameModeOutbox } from "./transports/memory-outbox.js";
-import { MemoryGameModeRepository } from "./transports/memory-repository.js";
+} from "./core/catalog";
+import type { GameModeOutbox, GameModeOutboxEntry } from "./outbox";
+import { GameModeService } from "./service";
+import { MemoryGameModeOutbox } from "./transports/memory-outbox";
+import { MemoryGameModeRepository } from "./transports/memory-repository";
 import {
   BASE_INSTANT,
   type MutableClock,
   clasica,
   mutableClock,
-} from "./transports/tests/repository-contract.js";
+} from "./transports/tests/repository-contract";
 
 // EL SERVICIO, MEDIDO CONTRA LOS ADAPTADORES DE MEMORIA Y NO CONTRA DOBLES DE LOS PUERTOS, por el
 // mismo argumento que `outbox.test.ts`: `MemoryGameModeRepository` y `MemoryGameModeOutbox` son los
@@ -638,13 +638,13 @@ describe("GameModeService: sus dependencias", () => {
     // parsea TypeScript miente de otras maneras. Lo que de verdad sostiene la propiedad es el
     // comentario de cabecera de `service.ts` y la revisión; esto es el piso, no el techo.
     expect([...imported].sort()).toEqual([
-      "./core/catalog.js",
-      "./core/game-mode.js",
-      "./outbox.js",
-      // CON `@/` Y NO `../../shared/…`, que es lo que decía antes de que el alias existiera. La
-      // lista sigue siendo exacta, y de paso esto es lo que hace que la convención no se pueda
-      // abandonar de a un archivo sin que algo se ponga rojo.
-      "@/shared/mongo-lease.js",
+      "./core/catalog",
+      "./core/game-mode",
+      "./outbox",
+      // CON `@/` Y SIN EXTENSIÓN, que es la convención del repo: el alias marca que el import SALE
+      // del módulo. La lista sigue siendo exacta, y de paso esto es lo que hace que la convención
+      // no se pueda abandonar de a un archivo sin que algo se ponga rojo.
+      "@/shared/mongo-lease",
     ]);
   });
 });

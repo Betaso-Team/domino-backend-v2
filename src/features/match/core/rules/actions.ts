@@ -1,6 +1,6 @@
-import type { PlayerId } from "../ids.js";
-import { type BoardSide, boardEndsOf } from "./board-ends.js";
-import type { DominoRulesConfig } from "./config.js";
+import type { PlayerId } from "../ids";
+import { type BoardSide, boardEndsOf } from "./board-ends";
+import type { DominoRulesConfig } from "./config";
 import {
   canAbandon,
   canDrawTile,
@@ -9,11 +9,11 @@ import {
   canProposeBet,
   canRespondBet,
   canRevealTiles,
-} from "./legality.js";
-import { playableSides } from "./playable.js";
-import { currentRoundOf, handOf } from "./projections.js";
-import type { TileLike } from "./tiles.js";
-import type { MatchView } from "./view.js";
+} from "./legality";
+import { playableSides } from "./playable";
+import { currentRoundOf, handOf } from "./projections";
+import type { TileLike } from "./tiles";
+import type { MatchView } from "./view";
 
 // QUÉ PUEDE HACER ESTE JUGADOR AHORA MISMO. Es la consulta que arma la barra de botones, y no
 // agrega ni una regla: recorre los verbos preguntándole a la legalidad compuesta por cada uno.

@@ -1,7 +1,7 @@
-import type { PlayerId } from "../ids.js";
-import { InvariantViolationError } from "./errors.js";
-import type { MatchPlayer } from "./match/player.js";
-import type { RoundPlayer } from "./round/player.js";
+import type { PlayerId } from "../ids";
+import { InvariantViolationError } from "./errors";
+import type { MatchPlayer } from "./match/player";
+import type { RoundPlayer } from "./round/player";
 
 // Los Player son match-bound y por ASIENTO. El repositorio los arma una vez y
 // los sirve por id, así que el facade no fabrica nada en caliente.

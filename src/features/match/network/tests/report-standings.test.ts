@@ -1,11 +1,11 @@
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import { describe, expect, it, vi } from "vitest";
-import type { DominoMatchConfig } from "../../core/config.js";
-import { createMatchState } from "../../core/engine/genesis.js";
-import { matchConfig } from "../../core/engine/tests/match-config-fixture.js";
-import type { MatchState } from "../../core/state/index.js";
-import { reportStandings } from "../report-standings.js";
-import type { LeagueResult, RankingParticipation } from "../standings.js";
+import type { DominoMatchConfig } from "../../core/config";
+import { createMatchState } from "../../core/engine/genesis";
+import { matchConfig } from "../../core/engine/tests/match-config-fixture";
+import type { MatchState } from "../../core/state/index";
+import { reportStandings } from "../report-standings";
+import type { LeagueResult, RankingParticipation } from "../standings";
 
 // Las identidades de plataforma de los dos asientos. El `playerId` interno es `u1`/`u2` (el fixture
 // del motor), y la diferencia entre ESE id y el `userUuid` es justamente lo que estos tests miden.

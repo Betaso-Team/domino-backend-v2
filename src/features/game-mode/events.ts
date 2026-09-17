@@ -1,4 +1,4 @@
-import type { GameMode } from "./core/game-mode.js";
+import type { GameMode } from "./core/game-mode";
 
 // El exchange productivo de Betaso, `topic` y durable. Es de v1 y no se renombra: hay
 // consumidores con sus colas ya bindeadas contra este nombre, y el corte a v2 no los toca.

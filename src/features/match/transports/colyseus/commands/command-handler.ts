@@ -1,7 +1,7 @@
-import type { Command, CommandName, CommandPayload } from "../../../core/command.js";
-import type { MatchEvent } from "../../../core/events.js";
-import type { MatchHistory } from "../../../network/index.js";
-import type { MessageHandler } from "../messages.js";
+import type { Command, CommandName, CommandPayload } from "../../../core/command";
+import type { MatchEvent } from "../../../core/events";
+import type { MatchHistory } from "../../../network/index";
+import type { MessageHandler } from "../messages";
 
 // QUÉ SIGNIFICA ATENDER UN VERBO DEL DOMINÓ, en un solo lugar. Son tres pasos y son los
 // mismos para todos, así que se componen una vez y no se escriben a mano en la sala.

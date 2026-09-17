@@ -1,9 +1,9 @@
-import { rootContainer } from "@/di-container.js";
-import type { TokenVerifier } from "@/features/auth/index.js";
-import type { Logger } from "@/logger.js";
+import { rootContainer } from "@/di-container";
+import type { TokenVerifier } from "@/features/auth/index";
+import type { Logger } from "@/logger";
 import { type AuthContext, type Client, Room, matchMaker } from "colyseus";
-import { DEFAULT_MAINTENANCE_MESSAGE, GameModeCount, LobbyRoomState } from "../../core/state.js";
-import { LobbySettings } from "../../settings.js";
+import { DEFAULT_MAINTENANCE_MESSAGE, GameModeCount, LobbyRoomState } from "../../core/state";
+import { LobbySettings } from "../../settings";
 
 interface DominoRoomMetadata {
   readonly gameModeId?: string;

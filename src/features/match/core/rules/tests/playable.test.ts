@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasPlayableTile, playableSides } from "../playable.js";
+import { hasPlayableTile, playableSides } from "../playable";
 
 const empty = { left: undefined, right: undefined };
 const ends = { left: 6, right: 2 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BoardState, PlacedTile, Tile } from "../../state/index.js";
-import { boardEndsOf } from "../board-ends.js";
+import { BoardState, PlacedTile, Tile } from "../../state/index";
+import { boardEndsOf } from "../board-ends";
 
 function board(placements: [number, number, "LEFT" | "RIGHT"][]): BoardState {
   const state = new BoardState();

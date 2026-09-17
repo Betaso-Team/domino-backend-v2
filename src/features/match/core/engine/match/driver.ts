@@ -1,16 +1,16 @@
-import type { GlobalDominoConfig } from "../../config.js";
-import type { MatchEvent } from "../../events.js";
-import type { PlayerId } from "../../ids.js";
-import type { MatchState } from "../../state/index.js";
-import type { Clock } from "../clock.js";
-import { deadlineKindOf } from "../deadline-kind.js";
-import type { Driver, RoundAction, TransitionResult } from "../driver.js";
-import { InvariantViolationError } from "../errors.js";
-import type { Player } from "../player-facade.js";
-import type { RoundDriver } from "../round/driver.js";
-import { matchPhaseOf, roundActivePlayers } from "../state-projections.js";
-import type { TimeoutScheduler } from "../timeout-scheduler.js";
-import type { MatchReferee } from "./referee.js";
+import type { GlobalDominoConfig } from "../../config";
+import type { MatchEvent } from "../../events";
+import type { PlayerId } from "../../ids";
+import type { MatchState } from "../../state/index";
+import type { Clock } from "../clock";
+import { deadlineKindOf } from "../deadline-kind";
+import type { Driver, RoundAction, TransitionResult } from "../driver";
+import { InvariantViolationError } from "../errors";
+import type { Player } from "../player-facade";
+import type { RoundDriver } from "../round/driver";
+import { matchPhaseOf, roundActivePlayers } from "../state-projections";
+import type { TimeoutScheduler } from "../timeout-scheduler";
+import type { MatchReferee } from "./referee";
 
 export class MatchDriver implements Driver {
   constructor(

@@ -234,12 +234,16 @@ describe("reglas de arquitectura", () => {
 
     // Y el que lo usa lo importa de ahí. Sin esta parte, un `validated.ts` renombrado dentro
     // de una feature dejaría el guard verde sobre la misma duplicación. Los archivos de
-    // `shared/http/` quedan afuera porque el import correcto desde ahí es `./validated.js`.
+    // `shared/http/` quedan afuera porque el import correcto desde ahí es `./validated`.
+    //
+    // SIN EXTENSIÓN, y el detalle importa: cuando los especificadores llevaban `.js`, este patrón
+    // la exigía. Al sacarlas dejó de matchear nada y la guarda pasó a ser VACUA —verde sobre
+    // cualquier duplicación—, que es el modo de fallar de todo test que mide texto de imports.
     const offenders = files
       .filter((file) => !file.startsWith("src/shared/http/"))
       .filter((file) => {
-        const specifiers = readFileSync(file, "utf8").match(/from "[^"]*validated\.js"/g) ?? [];
-        return specifiers.some((specifier) => !specifier.endsWith('shared/http/validated.js"'));
+        const specifiers = readFileSync(file, "utf8").match(/from "[^"]*validated"/g) ?? [];
+        return specifiers.some((specifier) => !specifier.endsWith('shared/http/validated"'));
       });
     expect(offenders).toEqual([]);
   });
@@ -247,7 +251,7 @@ describe("reglas de arquitectura", () => {
   // LA QUINTA REGLA: un import que SALE del módulo se escribe con `@/`, nunca trepando con `../`.
   //
   // No es cosmética, y la razón es la misma por la que existen las otras cuatro: `../../../../` no
-  // dice de dónde a dónde va la arista. `@/logger.js` sí, y con eso "este archivo cruza una
+  // dice de dónde a dónde va la arista. `@/logger` sí, y con eso "este archivo cruza una
   // frontera" se lee de un vistazo en vez de contando puntos — que es exactamente lo que las cuatro
   // reglas de arriba gobiernan. De paso, mover un archivo deja de reescribir los imports de sus
   // vecinos.
@@ -261,7 +265,7 @@ describe("reglas de arquitectura", () => {
   // forma del especificador solo se ve leyendo el archivo.
   it("Regla 5: lo que sale del módulo se importa con `@/`, no trepando con `../`", () => {
     // El módulo de un archivo: su feature si vive en una, su directorio de primer nivel si no, y
-    // `src` a secas para los archivos de la raíz —donde `./vecino.js` sí es lo correcto—.
+    // `src` a secas para los archivos de la raíz —donde `./vecino` sí es lo correcto—.
     const moduleRootOf = (file: string): string => {
       const parts = file.split("/");
       if (parts.length > 3 && parts[1] === "features") return parts.slice(0, 3).join("/");

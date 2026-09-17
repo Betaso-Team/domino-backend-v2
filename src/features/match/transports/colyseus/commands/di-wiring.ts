@@ -1,13 +1,13 @@
-import type { Logger } from "@/logger.js";
+import type { Logger } from "@/logger";
 import type { DependencyContainer } from "tsyringe";
-import type { CommandName } from "../../../core/command.js";
-import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config.js";
-import type { Clock } from "../../../core/engine/clock.js";
-import type { TimeoutScheduler } from "../../../core/engine/timeout-scheduler.js";
-import type { SchemaVisibilityController } from "../../../core/engine/visibility.js";
-import type { MatchEvent } from "../../../core/events.js";
-import type { MatchState } from "../../../core/state/index.js";
-import { buildEngineGraph } from "../../../history/engine-factory.js";
+import type { CommandName } from "../../../core/command";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config";
+import type { Clock } from "../../../core/engine/clock";
+import type { TimeoutScheduler } from "../../../core/engine/timeout-scheduler";
+import type { SchemaVisibilityController } from "../../../core/engine/visibility";
+import type { MatchEvent } from "../../../core/events";
+import type { MatchState } from "../../../core/state/index";
+import { buildEngineGraph } from "../../../history/engine-factory";
 import {
   type HistoryPort,
   type MatchEventSink,
@@ -15,11 +15,11 @@ import {
   type MatchPieces,
   type StandingsFeeds,
   reportStandings,
-} from "../../../network/index.js";
-import { MessageRouter } from "../messages.js";
-import { CommandCatalog } from "./catalog.js";
-import { CommandHandler } from "./command-handler.js";
-import { identityDecoder } from "./decoders.js";
+} from "../../../network/index";
+import { MessageRouter } from "../messages";
+import { CommandCatalog } from "./catalog";
+import { CommandHandler } from "./command-handler";
+import { identityDecoder } from "./decoders";
 
 export type MatchStarter = () => void;
 export type MatchSeatGuard = (playerId: string) => boolean;

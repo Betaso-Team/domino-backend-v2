@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { validated } from "./validated.js";
+import { validated } from "./validated";
 
 // Un `res` mínimo que recuerda con qué lo llamaron. No hace falta más: la pieza solo puede
 // hacer dos cosas con la respuesta —dejar pasar al handler, o cortar con un 400—.

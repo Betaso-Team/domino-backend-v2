@@ -1,8 +1,8 @@
 // src/features/match/core/engine/tests/state-projections.test.ts
 import { describe, expect, it } from "vitest";
-import { BoardState, BoneyardState, MatchState, RoundState, Turn } from "../../state/index.js";
-import { InvariantViolationError } from "../errors.js";
-import { createMatchState } from "../genesis.js";
+import { BoardState, BoneyardState, MatchState, RoundState, Turn } from "../../state/index";
+import { InvariantViolationError } from "../errors";
+import { createMatchState } from "../genesis";
 import {
   currentRoundOf,
   currentTurnOf,
@@ -13,8 +13,8 @@ import {
   scoreboardOf,
   teamOf,
   turnOrderFrom,
-} from "../state-projections.js";
-import { matchConfig } from "./match-config-fixture.js";
+} from "../state-projections";
+import { matchConfig } from "./match-config-fixture";
 
 // SEAT_ORDER y no SHUFFLED, a propósito: este test prueba las PROYECCIONES, no el sorteo.
 // Con SHUFFLED las aserciones de abajo (u1→A, u2→B, u3→A) dependerían de que la permutación

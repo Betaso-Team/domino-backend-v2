@@ -1,7 +1,7 @@
-import type { Command, CommandPayload } from "../command.js";
-import type { BetNegotiation, BetReferee } from "../engine/bet/index.js";
-import type { RoundDriver } from "../engine/round/driver.js";
-import type { MatchEvent } from "../events.js";
+import type { Command, CommandPayload } from "../command";
+import type { BetNegotiation, BetReferee } from "../engine/bet/index";
+import type { RoundDriver } from "../engine/round/driver";
+import type { MatchEvent } from "../events";
 
 // PROPONER UN AUMENTO DE APUESTA. No emite evento: el comando ya es el registro de lo que
 // pasó, y lo que provoca —la ronda congelada, la oferta en el árbol— se lee del estado.

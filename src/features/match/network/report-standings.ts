@@ -1,9 +1,9 @@
-import type { Logger } from "@/logger.js";
-import type { DominoMatchConfig, MatchSeat } from "../core/config.js";
-import type { MatchState } from "../core/state/index.js";
-import type { NetworkMatchEvent } from "./events.js";
-import type { MatchEventListener } from "./listeners.js";
-import type { LeagueFeed, LeaguePlayer, RankingFeed } from "./standings.js";
+import type { Logger } from "@/logger";
+import type { DominoMatchConfig, MatchSeat } from "../core/config";
+import type { MatchState } from "../core/state/index";
+import type { NetworkMatchEvent } from "./events";
+import type { MatchEventListener } from "./listeners";
+import type { LeagueFeed, LeaguePlayer, RankingFeed } from "./standings";
 
 // CERRÓ LA PARTIDA CON GANADOR: se le cuenta a las dos tablas que el jugador mira. Es un
 // TRADUCTOR, como `settlementOf` —lee el estado y el snapshot y arma dos llamadas— y por eso vive

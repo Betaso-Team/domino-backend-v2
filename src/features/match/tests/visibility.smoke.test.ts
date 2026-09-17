@@ -1,6 +1,6 @@
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { MatchState } from "../core/state/index.js";
+import type { MatchState } from "../core/state/index";
 import {
   type SeatedMatch,
   bootServer,
@@ -12,7 +12,7 @@ import {
   seatPair,
   turnHolderOf,
   waitUntil,
-} from "./e2e-harness.js";
+} from "./e2e-harness";
 
 let server: ColyseusTestServer;
 

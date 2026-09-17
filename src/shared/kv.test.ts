@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryKeyValueStore } from "./kv.js";
+import { MemoryKeyValueStore } from "./kv";
 
 // El reloj se INYECTA, y por eso no hay un solo `await sleep()` acá abajo: el vencimiento se
 // mide moviendo el reloj, no esperando. Un test que espera dos minutos para ver caducar una

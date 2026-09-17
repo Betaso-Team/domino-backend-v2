@@ -1,6 +1,6 @@
-import type { PlayerId } from "../ids.js";
-import type { BoardSide, TileLike } from "../state/tile.js";
-import type { PlayerRepository } from "./player-repository.js";
+import type { PlayerId } from "../ids";
+import type { BoardSide, TileLike } from "../state/tile";
+import type { PlayerRepository } from "./player-repository";
 
 // FACADE de mutación: redirige cada verbo al sub-player del asiento.
 // Lo que esconde es la multiplicidad por asiento, no la lógica.

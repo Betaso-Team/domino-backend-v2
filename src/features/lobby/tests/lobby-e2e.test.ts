@@ -1,7 +1,7 @@
-import { testConfig } from "@/app.config.js";
-import { env } from "@/env.js";
-import type { PlayerRef } from "@/shared/player-ref.js";
-import { CASUAL_2P } from "@/tests/game-mode-catalog.js";
+import { testConfig } from "@/app.config";
+import { env } from "@/env";
+import type { PlayerRef } from "@/shared/player-ref";
+import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";

@@ -19,12 +19,12 @@
 // angostamiento de los ejes, la puerta de `privateOf`—, no una API: quien consuma esto tiene la
 // vista y la puede leer. Exportarlas sería ofrecer dos formas de preguntar lo mismo, y una de
 // ellas sin la regla puesta.
-export type { GameAction, LegalAction, TilePlacement } from "./actions.js";
-export { legalActionsFor } from "./actions.js";
-export type { BoardEnds, BoardSide } from "./board-ends.js";
-export { boardEndsOf } from "./board-ends.js";
-export type { RuleViolationCode } from "./codes.js";
-export type { BetLevel, DominoRulesConfig } from "./config.js";
+export type { GameAction, LegalAction, TilePlacement } from "./actions";
+export { legalActionsFor } from "./actions";
+export type { BoardEnds, BoardSide } from "./board-ends";
+export { boardEndsOf } from "./board-ends";
+export type { RuleViolationCode } from "./codes";
+export type { BetLevel, DominoRulesConfig } from "./config";
 export {
   betLevelOf,
   canAbandon,
@@ -37,12 +37,12 @@ export {
   canRevealTiles,
   hasPlayable,
   playersWithoutTilesSeen,
-} from "./legality.js";
-export type { MatchPhase, RoundEndReason, RoundPhase } from "./phases.js";
-export { hasPlayableTile, playableSides } from "./playable.js";
-export type { Ruling } from "./ruling.js";
-export { LEGAL, illegal, isIllegal } from "./ruling.js";
-export type { TileLike } from "./tiles.js";
+} from "./legality";
+export type { MatchPhase, RoundEndReason, RoundPhase } from "./phases";
+export { hasPlayableTile, playableSides } from "./playable";
+export type { Ruling } from "./ruling";
+export { LEGAL, illegal, isIllegal } from "./ruling";
+export type { TileLike } from "./tiles";
 export {
   DOMINO_MAX_PIP,
   DOMINO_SET_SIZE,
@@ -51,7 +51,7 @@ export {
   orderedTileSet,
   sameTile,
   tileValue,
-} from "./tiles.js";
+} from "./tiles";
 export type {
   BetOfferView,
   BoardView,
@@ -67,5 +67,5 @@ export type {
   RoundView,
   ScoreboardView,
   TurnView,
-} from "./view.js";
-export { teamIdOf } from "./view.js";
+} from "./view";
+export { teamIdOf } from "./view";

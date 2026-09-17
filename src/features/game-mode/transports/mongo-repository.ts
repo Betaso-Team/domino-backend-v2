@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Collection, Document, IndexDescription, ObjectId, WithId } from "mongodb";
-import type { GameModeRepository } from "../core/catalog.js";
-import type { CreateGameMode, GameMode, UpdateGameMode } from "../core/game-mode.js";
+import type { GameModeRepository } from "../core/catalog";
+import type { CreateGameMode, GameMode, UpdateGameMode } from "../core/game-mode";
 
 // EL CATÁLOGO PRODUCTIVO, LEÍDO Y ESCRITO SIN MONGOOSE. Domino v2 pasa a ser el ÚNICO escritor de
 // una colección que hoy escribe v1 a través de un `mongoose.Schema`, así que el documento que sale

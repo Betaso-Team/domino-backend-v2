@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CreateGameMode, GameMode, UpdateGameMode } from "../../core/game-mode.js";
+import type { CreateGameMode, GameMode, UpdateGameMode } from "../../core/game-mode";
 
 // LA FRONTERA DE FORMA DEL CATÁLOGO: lo que entra por HTTP y lo que sale. No hay routing acá —eso es
 // `register-http.ts`— y no hay reglas de negocio: qué cuenta como duplicado o qué se puede reactivar

@@ -1,7 +1,7 @@
-import { MemoryKeyValueStore } from "@/shared/kv.js";
+import { MemoryKeyValueStore } from "@/shared/kv";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MAINTENANCE_MESSAGE } from "./core/state.js";
-import { LobbySettings } from "./settings.js";
+import { DEFAULT_MAINTENANCE_MESSAGE } from "./core/state";
+import { LobbySettings } from "./settings";
 
 describe("LobbySettings", () => {
   it("nace disponible con el mensaje histórico", async () => {

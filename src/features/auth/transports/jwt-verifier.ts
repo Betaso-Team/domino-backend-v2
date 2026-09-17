@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
-import type { Identity, TokenVerifier } from "../identity.js";
-import { InvalidTokenError } from "../identity.js";
+import type { Identity, TokenVerifier } from "../identity";
+import { InvalidTokenError } from "../identity";
 
 // La lista explícita evita que el token elija un algoritmo distinto al contratado.
 const ALGORITHMS: jwt.Algorithm[] = ["HS256"];

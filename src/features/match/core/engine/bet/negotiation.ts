@@ -1,8 +1,8 @@
-import type { BetLevel } from "../../config.js";
-import type { PlayerId } from "../../ids.js";
-import type { MatchState } from "../../state/index.js";
-import { BetOffer } from "../../state/round.js";
-import { currentRoundOf } from "../state-projections.js";
+import type { BetLevel } from "../../config";
+import type { PlayerId } from "../../ids";
+import type { MatchState } from "../../state/index";
+import { BetOffer } from "../../state/round";
+import { currentRoundOf } from "../state-projections";
 
 // EL DUEÑO DEL DATO del aumento: la oferta viva y lo acordado. **No decide transiciones ni
 // arma plazos** —eso es del conductor de RONDA, que es el dueño de la máquina de fases— y no

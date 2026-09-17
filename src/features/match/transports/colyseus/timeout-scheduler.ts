@@ -1,6 +1,6 @@
 import type { Delayed } from "colyseus";
-import type { TimeoutScheduler } from "../../core/engine/timeout-scheduler.js";
-import type { MatchEvent } from "../../core/events.js";
+import type { TimeoutScheduler } from "../../core/engine/timeout-scheduler";
+import type { MatchEvent } from "../../core/events";
 
 interface TimeoutClock {
   setTimeout(fn: () => void, ms: number): Delayed;

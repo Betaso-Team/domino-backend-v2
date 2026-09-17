@@ -1,4 +1,4 @@
-import type { PlayerId, TeamId } from "./ids.js";
+import type { PlayerId, TeamId } from "./ids";
 
 // A qué ventana sirve el único plazo del juego. Un solo campo en el estado
 // ⇒ un solo evento de vencimiento y un solo eje que lo discrimine.

@@ -1,4 +1,4 @@
-import type { BoardView, PlacedTileView } from "./view.js";
+import type { BoardView, PlacedTileView } from "./view";
 
 // DE QUÉ PUNTA DE LA CADENA se cuelga una ficha. Vive con los extremos —y no junto al schema,
 // que es de donde salió— porque es vocabulario de REGLA: `playableSides` lo devuelve y

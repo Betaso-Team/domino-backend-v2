@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { currentTurnOf, scoreboardOf } from "../state-projections.js";
-import { engineWithHands } from "./build-engine.js";
+import { currentTurnOf, scoreboardOf } from "../state-projections";
+import { engineWithHands } from "./build-engine";
 
 describe("flujo de la ronda", () => {
   it("reparte, elige quién arranca y entra en PLAYING", () => {

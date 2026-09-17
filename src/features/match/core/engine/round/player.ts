@@ -1,10 +1,10 @@
-import type { PlayerId } from "../../ids.js";
-import { sameTile } from "../../rules/tiles.js";
-import { type MatchState, PlacedTile } from "../../state/index.js";
-import type { BoardSide, TileLike } from "../../state/tile.js";
-import { InvariantViolationError } from "../errors.js";
-import { boneyardOf, currentRoundOf, handOf, playerOf } from "../state-projections.js";
-import type { SchemaVisibilityController } from "../visibility.js";
+import type { PlayerId } from "../../ids";
+import { sameTile } from "../../rules/tiles";
+import { type MatchState, PlacedTile } from "../../state/index";
+import type { BoardSide, TileLike } from "../../state/tile";
+import { InvariantViolationError } from "../errors";
+import { boneyardOf, currentRoundOf, handOf, playerOf } from "../state-projections";
+import type { SchemaVisibilityController } from "../visibility";
 
 // Solo MUTA. Referee-free: la legalidad ya la comprobó el juez.
 export class RoundPlayer {

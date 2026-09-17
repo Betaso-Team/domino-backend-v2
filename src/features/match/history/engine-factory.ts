@@ -1,4 +1,4 @@
-import type { Command, CommandName } from "../core/command.js";
+import type { Command, CommandName } from "../core/command";
 import {
   AbandonCommand,
   DrawTileCommand,
@@ -7,27 +7,27 @@ import {
   ProposeBetMultiplierCommand,
   RespondBetMultiplierCommand,
   RevealTilesCommand,
-} from "../core/commands/index.js";
-import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../core/config.js";
-import { BetNegotiation, BetReferee } from "../core/engine/bet/index.js";
-import type { Clock } from "../core/engine/clock.js";
-import { Dealer } from "../core/engine/dealer.js";
-import { createMatchState } from "../core/engine/genesis.js";
-import { MatchDriver } from "../core/engine/match/driver.js";
-import { MatchPlayer } from "../core/engine/match/player.js";
-import { MatchReferee } from "../core/engine/match/referee.js";
-import { Player } from "../core/engine/player-facade.js";
-import { PlayerRepository } from "../core/engine/player-repository.js";
-import { Referee } from "../core/engine/referee-facade.js";
-import { RoundDriver } from "../core/engine/round/driver.js";
-import { RoundPlayer } from "../core/engine/round/player.js";
-import { RoundReferee } from "../core/engine/round/referee.js";
-import { Scorer } from "../core/engine/scorer.js";
-import type { TimeoutScheduler } from "../core/engine/timeout-scheduler.js";
-import type { SchemaVisibilityController } from "../core/engine/visibility.js";
-import type { MatchEvent } from "../core/events.js";
-import type { PlayerId } from "../core/ids.js";
-import type { MatchState } from "../core/state/index.js";
+} from "../core/commands/index";
+import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../core/config";
+import { BetNegotiation, BetReferee } from "../core/engine/bet/index";
+import type { Clock } from "../core/engine/clock";
+import { Dealer } from "../core/engine/dealer";
+import { createMatchState } from "../core/engine/genesis";
+import { MatchDriver } from "../core/engine/match/driver";
+import { MatchPlayer } from "../core/engine/match/player";
+import { MatchReferee } from "../core/engine/match/referee";
+import { Player } from "../core/engine/player-facade";
+import { PlayerRepository } from "../core/engine/player-repository";
+import { Referee } from "../core/engine/referee-facade";
+import { RoundDriver } from "../core/engine/round/driver";
+import { RoundPlayer } from "../core/engine/round/player";
+import { RoundReferee } from "../core/engine/round/referee";
+import { Scorer } from "../core/engine/scorer";
+import type { TimeoutScheduler } from "../core/engine/timeout-scheduler";
+import type { SchemaVisibilityController } from "../core/engine/visibility";
+import type { MatchEvent } from "../core/events";
+import type { PlayerId } from "../core/ids";
+import type { MatchState } from "../core/state/index";
 
 export interface EngineGraph {
   readonly match: MatchState;

@@ -1,5 +1,5 @@
 import pino from "pino";
-import { env } from "./env.js";
+import { env } from "./env";
 
 export type LogFields = Record<string, unknown>;
 

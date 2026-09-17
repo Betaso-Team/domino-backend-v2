@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CommandCatalog } from "../catalog.js";
+import { CommandCatalog } from "../catalog";
 
 // LA FRONTERA ANTI-TRAMPA YA NO SE PRUEBA ACÁ: se fue con `accepts()` al router, y su test
 // —incluido el de los nombres del prototipo— vive en `../../messages.test.ts`. Lo que el

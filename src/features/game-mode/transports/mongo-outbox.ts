@@ -1,7 +1,7 @@
 import type { Collection, IndexDescription, WithId } from "mongodb";
 import { ObjectId } from "mongodb";
-import type { GameMode } from "../core/game-mode.js";
-import { type GameModeEvent, createdEventOf, updatedEventOf } from "../events.js";
+import type { GameMode } from "../core/game-mode";
+import { type GameModeEvent, createdEventOf, updatedEventOf } from "../events";
 import {
   type Clock,
   type GameModeOutbox,
@@ -11,8 +11,8 @@ import {
   revisionKeysOf,
   syncKeyOf,
   updatedKeyOf,
-} from "../outbox.js";
-import type { CollectionSource } from "./mongo-repository.js";
+} from "../outbox";
+import type { CollectionSource } from "./mongo-repository";
 
 // EL OUTBOX DURABLE. Es la mitad del incremento que hace que el request administrativo no espere a
 // Rabbit: la mutación escribe el modo y escribe acá, las dos en Mongo, y el dispatcher publica

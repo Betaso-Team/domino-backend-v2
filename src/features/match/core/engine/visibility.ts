@@ -1,5 +1,5 @@
 import type { Ref } from "@colyseus/schema";
-import type { PlayerId } from "../ids.js";
+import type { PlayerId } from "../ids";
 
 // La audiencia es de DOMINIO: un JUGADOR o la mesa, nunca una conexión. Eso es lo que
 // permite que la vista sea del ASIENTO y no del socket (spec §7.3).

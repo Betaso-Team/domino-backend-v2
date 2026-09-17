@@ -1,6 +1,6 @@
-import type { PlayerRef } from "@/shared/player-ref.js";
-import type { PlayerId } from "./ids.js";
-import type { BetLevel } from "./rules/config.js";
+import type { PlayerRef } from "@/shared/player-ref";
+import type { PlayerId } from "./ids";
+import type { BetLevel } from "./rules/config";
 
 // Value-object INMUTABLE, fuera del estado de Colyseus e inyectado por DI.
 // Acá vive el `seed`: hace el reparto determinista y reproducible, y como no está

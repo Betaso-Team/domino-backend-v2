@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { GameMode } from "../../core/game-mode.js";
-import { CREATE_BODY, UPDATE_BODY, UUID_PARAMS, createInputOf, toDTO } from "./schemas.js";
+import type { GameMode } from "../../core/game-mode";
+import { CREATE_BODY, UPDATE_BODY, UUID_PARAMS, createInputOf, toDTO } from "./schemas";
 
 // EL FIXTURE LLEVA `id` Y `uuid` DISTINTOS a propósito, igual que el de `events.test.ts`: el `toDTO`
 // mapea `id → _id` y el modo tiene los dos identificadores, así que con el mismo valor en los dos

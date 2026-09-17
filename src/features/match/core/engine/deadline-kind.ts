@@ -1,7 +1,7 @@
-import type { DeadlineKind } from "../events.js";
-import type { MatchState } from "../state/index.js";
-import { InvariantViolationError } from "./errors.js";
-import { matchPhaseOf, roundPhaseOf } from "./state-projections.js";
+import type { DeadlineKind } from "../events";
+import type { MatchState } from "../state/index";
+import { InvariantViolationError } from "./errors";
+import { matchPhaseOf, roundPhaseOf } from "./state-projections";
 
 // A qué VENTANA sirve el plazo vigente. Un solo campo en el estado ⇒ un solo evento
 // de vencimiento y un solo eje que lo discrimine. La usan los conductores para

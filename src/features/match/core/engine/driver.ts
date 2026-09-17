@@ -1,5 +1,5 @@
-import type { MatchEvent } from "../events.js";
-import type { PlayerId } from "../ids.js";
+import type { MatchEvent } from "../events";
+import type { PlayerId } from "../ids";
 
 export interface TransitionResult {
   readonly events: readonly MatchEvent[];

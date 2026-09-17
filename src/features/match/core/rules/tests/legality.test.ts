@@ -9,8 +9,8 @@ import {
   canRevealTiles,
   hasPlayable,
   playersWithoutTilesSeen,
-} from "../legality.js";
-import { type ViewSetup, rulesConfig, viewOf } from "./fixture.js";
+} from "../legality";
+import { type ViewSetup, rulesConfig, viewOf } from "./fixture";
 
 // Se asserta el CÓDIGO y no solo que sea ilegal: el motivo es lo único que el cliente puede
 // pintar, así que un test que solo mire `legal: false` dejaría pasar un cambio de motivo — que es

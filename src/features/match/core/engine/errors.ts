@@ -1,5 +1,5 @@
-import type { RuleViolationCode } from "../rules/codes.js";
-import type { Ruling } from "../rules/ruling.js";
+import type { RuleViolationCode } from "../rules/codes";
+import type { Ruling } from "../rules/ruling";
 
 // El catálogo de motivos se MUDÓ a `rules/codes.js` —es vocabulario de regla, no el mecanismo
 // con el que el servidor lo cuenta— y se re-exporta acá, que es de donde lo importaba todo el

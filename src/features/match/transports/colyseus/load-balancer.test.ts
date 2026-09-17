@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NoProcessAvailableError, leastLoaded } from "./load-balancer.js";
+import { NoProcessAvailableError, leastLoaded } from "./load-balancer";
 
 // SE PRUEBA EL CRITERIO Y NO LA LECTURA, y por eso el criterio está separado: los números los
 // anuncia `matchMaker.stats.fetchAll()` contra el presence compartido, y esta función recibe la
