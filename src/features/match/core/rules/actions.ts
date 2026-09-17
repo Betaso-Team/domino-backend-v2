@@ -1,6 +1,6 @@
-import type { PlayerId } from "../ids";
 import { type BoardSide, boardEndsOf } from "./board-ends";
 import type { DominoRulesConfig } from "./config";
+import type { PlayerId } from "./ids";
 import {
   canAbandon,
   canDrawTile,

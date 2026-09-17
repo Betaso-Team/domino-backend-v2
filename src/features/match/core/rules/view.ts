@@ -1,4 +1,4 @@
-import type { PlayerId, TeamId } from "../ids";
+import type { PlayerId, TeamId } from "./ids";
 import type { TileLike } from "./tiles";
 
 // LA PARTIDA COMO LA VE UNA REGLA, y la frontera anti-trampa vuelta tipo.

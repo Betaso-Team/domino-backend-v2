@@ -124,6 +124,40 @@ module.exports = {
       to: { path: "^src/features/(?!$1/)[^/]+/.+", pathNot: "^src/features/[^/]+/index\\.ts$" },
     },
     {
+      // LAS REGLAS SON UN PAQUETE, y estas dos son lo que sostiene esa afirmación en vez de
+      // dejarla en el comentario de `rules/index.ts`. La carpeta se describe como algo que algún
+      // día viaja al cliente, y eso pide dos cosas que nada más comprueba: que no importe nada de
+      // afuera de sí misma, y que no conozca Colyseus.
+      //
+      // La primera grieta ya existió: `PlayerId`/`TeamId` vivían en `core/ids.ts`, así que "el
+      // paquete" era esta carpeta MÁS un archivo suelto de otra. Se mudaron adentro; esta regla es
+      // lo que impide que la próxima se cuele igual.
+      name: "rules-self-contained",
+      comment:
+        "features/X/core/rules/ no importa NADA de afuera de sí misma: es lo que la vuelve " +
+        "portable a un paquete que el cliente también consuma.",
+      severity: "error",
+      from: { path: "^src/features/([^/]+)/core/rules/", pathNot: "/tests/" },
+      to: {
+        dependencyTypes: ["local"],
+        pathNot: "^src/features/$1/core/rules/",
+      },
+    },
+    {
+      // LA OTRA MITAD, y es la que `core-no-runtime` NO cubre: esa regla concede `@colyseus/schema`
+      // como excepción única para todo el core, porque el estado ES el Schema. Las reglas no son el
+      // estado: reciben una VISTA que el nodo satisface por estructura (`rules/view.ts`), así que
+      // un import del schema acá sería la vista dejando de ser una vista.
+      name: "rules-no-colyseus",
+      comment: "features/X/core/rules/ no conoce Colyseus, ni siquiera su schema.",
+      severity: "error",
+      from: { path: "^src/features/[^/]+/core/rules/", pathNot: "/tests/" },
+      to: {
+        dependencyTypes: ["npm", "npm-dev"],
+        path: "^node_modules/(colyseus|@colyseus/)",
+      },
+    },
+    {
       name: "no-circular",
       comment: "El grafo de actores es un DAG acíclico solo hacia abajo (spec §3.5).",
       severity: "error",

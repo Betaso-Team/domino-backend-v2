@@ -248,6 +248,32 @@ describe("reglas de arquitectura", () => {
     expect(offenders).toEqual([]);
   });
 
+  // LAS REGLAS SON UN PAQUETE, y estas dos aserciones son lo que sostiene la afirmación que
+  // `rules/index.ts` hace en voz alta. Las dos grietas que tapan son distintas: importar algo de
+  // `core/` —que ya pasó una vez, con `PlayerId` viviendo afuera— e importar el schema, que
+  // `core-no-runtime` CONCEDE como excepción única para todo el core y que acá no corresponde: las
+  // reglas reciben una VISTA que el nodo satisface por estructura, no el nodo.
+  it("Regla 6: `core/rules/` no importa nada de afuera de sí misma", () => {
+    writeFile(`${CORE_DIR}/thing.ts`, "export const thing = 1;\n");
+    writeFile(
+      `${CORE_DIR}/rules/violation.ts`,
+      `import { thing } from "../thing";\nexport const x = thing;\n`,
+    );
+    const { ok, output } = depcruise();
+    expect(ok).toBe(false);
+    expect(output).toContain("rules-self-contained");
+  });
+
+  it("Regla 6: `core/rules/` no conoce Colyseus, ni su schema", () => {
+    writeFile(
+      `${CORE_DIR}/rules/violation.ts`,
+      `import { schema, t } from "@colyseus/schema";\nexport const X = schema({ a: t.number() }, "X");\n`,
+    );
+    const { ok, output } = depcruise();
+    expect(ok).toBe(false);
+    expect(output).toContain("rules-no-colyseus");
+  });
+
   // LA QUINTA REGLA: un import que SALE del módulo se escribe con `@/`, nunca trepando con `../`.
   //
   // No es cosmética, y la razón es la misma por la que existen las otras cuatro: `../../../../` no

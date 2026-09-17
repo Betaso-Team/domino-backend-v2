@@ -1139,11 +1139,11 @@ adelantes el catálogo para que el test compile.
 `docs:` que explica qué estaba mal y cómo se descubrió. El plan es un documento vivo; si
 lo dejás mentir, la próxima tarea arranca del mismo pozo.
 
-## Las cinco reglas de imports
+## Las seis reglas de imports
 
-Las cuatro primeras las aplica `.dependency-cruiser.cjs` y las testea
-`src/architecture.test.ts`; la quinta la aplica solo el test. No son guía de estilo: el test
-se pone rojo.
+Todas menos la quinta las aplica `.dependency-cruiser.cjs`, y todas las testea
+`src/architecture.test.ts`; la quinta la aplica solo el test, porque depcruise resuelve los alias
+antes de mirar el grafo. No son guía de estilo: el test se pone rojo.
 
 1. **core-allowlist** — `features/X/core/` solo importa de `features/X/core/` y de
    `shared/`. Es allowlist. Lo de afuera (`network/`, `transports/`) sí puede importar
@@ -1204,6 +1204,23 @@ se pone rojo.
    con una herramienta aparte. Las dos mitades van juntas; quedarse con el alias y las extensiones
    —que es donde estuvo este repo un commit— es pagar el precio de las dos y no tener ninguna de
    las dos propiedades.
+
+6. **`core/rules/` es un paquete** — son DOS reglas (`rules-self-contained`, `rules-no-colyseus`)
+   porque son dos grietas distintas, y las dos sostienen lo que `rules/index.ts` afirma en voz
+   alta: que algún día viaje en un paquete que el cliente también consuma.
+
+   No importa NADA de afuera de sí misma, ni siquiera de `core/`. La grieta ya existió:
+   `PlayerId`/`TeamId` vivían en `core/ids.ts`, así que "el paquete" era esta carpeta MÁS un
+   archivo suelto de otra — o sea una carpeta con una nota al pie. Se mudaron a `rules/ids.ts` y
+   `core/ids.ts` los re-exporta.
+
+   Y no conoce Colyseus, **ni su schema**, que es la mitad que `core-no-runtime` NO cubre: esa
+   regla concede `@colyseus/schema` como excepción única para todo el core, porque el estado ES el
+   Schema. Las reglas no son el estado: reciben una VISTA que el nodo satisface por estructura
+   (`rules/view.ts`), así que un import del schema acá sería la vista dejando de ser una vista.
+
+   Los tests quedan afuera de las dos (`pathNot: "/tests/"`): `rules/tests/view.test.ts` mide
+   justamente la frontera contra el árbol de verdad, así que tiene que poder construirlo.
 
 Más `no-circular`, que no es regla de imports sino invariante del grafo.
 

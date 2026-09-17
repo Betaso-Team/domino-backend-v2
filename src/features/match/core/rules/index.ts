@@ -24,6 +24,7 @@ export { legalActionsFor } from "./actions";
 export type { BoardEnds, BoardSide } from "./board-ends";
 export { boardEndsOf } from "./board-ends";
 export type { RuleViolationCode } from "./codes";
+export type { PlayerId, TeamId } from "./ids";
 export type { BetLevel, DominoRulesConfig } from "./config";
 export {
   betLevelOf,

@@ -1,4 +1,4 @@
-import type { PlayerId } from "../ids";
+import type { PlayerId } from "./ids";
 
 import type { MatchPhase, RoundPhase } from "./phases";
 import { type TileLike, sameTile } from "./tiles";

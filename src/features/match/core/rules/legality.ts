@@ -1,6 +1,6 @@
-import type { PlayerId } from "../ids";
 import { type BoardSide, boardEndsOf } from "./board-ends";
 import type { BetLevel, DominoRulesConfig } from "./config";
+import type { PlayerId } from "./ids";
 import { hasPlayableTile, playableSides } from "./playable";
 import {
   boneyardCountOf,

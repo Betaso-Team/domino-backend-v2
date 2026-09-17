@@ -1,6 +1,4 @@
-// Sin consumidores todavía dentro de esta tarea (Tarea 4): son los identificadores que
-// las tareas siguientes —génesis, proyecciones, engine— usan para tipar `playerId` /
-// `teamId` en vez de repetir `string` a mano. Viven acá, y no junto a `state/`, porque no
-// son Schema: son los tipos que el CÓDIGO ALREDEDOR del árbol usa para hablar de él.
-export type PlayerId = string;
-export type TeamId = "A" | "B";
+// Los dos identificadores se declaran en `rules/ids` —son vocabulario del juego, no del motor ni
+// del schema— y se re-exportan acá, que es de donde los importaba todo el mundo. Ver la cabecera
+// de ese archivo: con ellos adentro, `rules/` dejó de importar nada de `core/`.
+export type { PlayerId, TeamId } from "./rules/ids";
