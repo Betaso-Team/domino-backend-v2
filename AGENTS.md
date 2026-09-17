@@ -1156,11 +1156,20 @@ se pone rojo.
    son la misma arista, y la forma del especificador solo se ve leyendo el archivo — el mismo
    motivo por el que el guard del validador HTTP tampoco tiene depcruise detrás.
 
-   El alias se declara **dos veces**, y hay que saberlo antes de tocar cualquiera: el `paths`
-   del `tsconfig.json` (de donde lo leen `tsc`, `tsup`/esbuild y `depcruise` por su
-   `options.tsConfig`) y el `resolve.alias` de `vitest.config.ts` —Vite no mira el tsconfig, y sin
-   esa línea el typecheck queda verde y la suite entera no resuelve un solo import—. `tsx` (dev,
-   replay, smokes) lo saca del tsconfig.
+   El alias se declara **dos veces y necesita una tercera cosa**, y las tres las pinea
+   `src/entrypoint.test.ts`, que es donde ya viven los contratos escritos en N lugares que no se
+   leen entre sí:
+
+   1. el `paths` del `tsconfig.json` — de ahí lo leen `tsc`, `tsup`/esbuild, `depcruise` (por su
+      `options.tsConfig`) y **`tsx`**, o sea `dev`, `replay` y los dos smokes;
+   2. el `resolve.alias` de `vitest.config.ts` — Vite NO mira el tsconfig, y sin esa línea el
+      typecheck queda verde y la suite entera no resuelve un solo import;
+   3. **el `tsconfig.json` ADENTRO de la imagen del smoke**, que no es una declaración sino un
+      archivo presente: `smoke:client` corre con `tsx` en el contenedor. Lo trae el `COPY . .` de
+      la etapa `build`, y `smoke-client` deriva de ella. Derivarla de `runtime` para adelgazarla
+      —ahí solo hay `dist/` y `package*.json`— da un `ERR_MODULE_NOT_FOUND: Cannot find package
+      '@/features'` que no dice que falta un archivo de configuración. Es la única de las tres que
+      no avisa en ninguna herramienta local; medido forzando un tsconfig sin `paths`.
 
    **Y SIN EXTENSIÓN**, como truco. El repo nació con `moduleResolution: NodeNext` y `.js` en cada
    especificador, y eso compraba UNA propiedad concreta: el árbol que emitía `tsc` a secas corría

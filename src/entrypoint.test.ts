@@ -105,3 +105,52 @@ describe("el piso de node se dice en voz alta y en todos lados", () => {
     expect(read("ecosystem.config.cjs")).toContain("interpreter");
   });
 });
+
+// EL ALIAS `@/` ESTÁ DECLARADO EN DOS LUGARES QUE NO SE LEEN ENTRE SÍ, y tiene un TERCER
+// requisito que no es una declaración sino un archivo presente. Es el mismo modo de falla que el
+// nombre del entrypoint —nada de esto rompe el gate al desincronizarse— y se mide igual, como
+// texto.
+//
+// Las dos declaraciones:
+//   · `tsconfig.json` → de ahí lo leen `tsc`, `tsup`/esbuild, `depcruise` (por su
+//     `options.tsConfig`) y `tsx` (dev, replay, smokes).
+//   · `vitest.config.ts` → Vite NO mira el tsconfig. Sin esa línea el typecheck queda verde y la
+//     suite entera no resuelve un solo import.
+//
+// El tercero está medido abajo y es el único que no avisa en ninguna herramienta local.
+describe("el alias `@/` está declarado donde cada herramienta lo busca", () => {
+  it("el tsconfig mapea `@/*` a `src/*`", () => {
+    const paths = JSON.parse(read("tsconfig.json")).compilerOptions.paths as Record<
+      string,
+      string[]
+    >;
+    expect(paths["@/*"]).toEqual(["./src/*"]);
+  });
+
+  // Se mide como TEXTO y no importando la config: importarla la ejecutaría —y con ella el plugin
+  // de Vite— para leer un valor que está escrito en una línea.
+  it("vitest declara el mismo alias, porque Vite no lee el tsconfig", () => {
+    const source = read("vitest.config.ts");
+    expect(source).toContain('alias: { "@"');
+    expect(source).toContain("./src");
+  });
+
+  // LA TERCERA PUERTA, y la única que no falla en ninguna herramienta local: el smoke del deploy
+  // corre con `tsx` DENTRO DE LA IMAGEN, así que necesita el `tsconfig.json` ahí adentro. Lo trae
+  // el `COPY . .` de la etapa `build`, y esta etapa deriva de ella.
+  //
+  // Lo que rompe es derivarla de `runtime` para adelgazarla —ahí solo hay `dist/` y
+  // `package*.json`— o sumar el tsconfig al `.dockerignore`. Las dos cosas dan un
+  // `ERR_MODULE_NOT_FOUND: Cannot find package '@/features'` (verificado a mano forzando un
+  // tsconfig sin `paths`), que no dice que falta un archivo de configuración.
+  it("la imagen del smoke deriva de una etapa que tiene el tsconfig", () => {
+    expect(read("Dockerfile")).toContain("FROM build AS smoke-client");
+    // El `.dockerignore` no lo excluye. Se busca la línea EXACTA: `tsconfig` a secas también
+    // matchearía el comentario que lo menciona.
+    const ignored = read(".dockerignore")
+      .split(/\r?\n/)
+      .map((line) => line.trim());
+    expect(ignored).not.toContain("tsconfig.json");
+    expect(ignored).not.toContain("*.json");
+  });
+});

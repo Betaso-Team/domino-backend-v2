@@ -33,5 +33,12 @@ EXPOSE 2568
 CMD ["pm2-runtime", "ecosystem.config.cjs"]
 
 # El cliente necesita TypeScript y las devDependencies, ya presentes en build.
+#
+# ⚠ **Y NECESITA EL `tsconfig.json`**, que es lo que no se ve: `smoke:client` corre con `tsx`, y
+# desde que los imports usan el alias `@/` es de ahí de donde `tsx` saca el `paths`. Lo trae el
+# `COPY . .` de la etapa `build` —`.dockerignore` no lo excluye—, así que hoy funciona. Lo que
+# rompe es DERIVAR ESTA ETAPA DE `runtime` para adelgazarla: ahí solo hay `dist/` y
+# `package*.json`, y el smoke muere con un `ERR_MODULE_NOT_FOUND` sobre `@/env` que no dice que
+# falta un archivo de configuración. Falla ruidoso, no en silencio, pero cuesta media hora.
 FROM build AS smoke-client
 CMD ["npm", "run", "smoke:client"]
