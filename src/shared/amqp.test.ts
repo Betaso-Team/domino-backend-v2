@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
+import type { Logger } from "@/logger.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Logger } from "../logger.js";
 import { AmqpDeliveryError, AmqpPublisher } from "./amqp.js";
 
 // CONTRA UN DOBLE DE `amqplib`, y no contra un RabbitMQ de verdad, por lo mismo que

@@ -244,6 +244,65 @@ describe("reglas de arquitectura", () => {
     expect(offenders).toEqual([]);
   });
 
+  // LA QUINTA REGLA: un import que SALE del módulo se escribe con `@/`, nunca trepando con `../`.
+  //
+  // No es cosmética, y la razón es la misma por la que existen las otras cuatro: `../../../../` no
+  // dice de dónde a dónde va la arista. `@/logger.js` sí, y con eso "este archivo cruza una
+  // frontera" se lee de un vistazo en vez de contando puntos — que es exactamente lo que las cuatro
+  // reglas de arriba gobiernan. De paso, mover un archivo deja de reescribir los imports de sus
+  // vecinos.
+  //
+  // EL MÓDULO ES LA FEATURE, no el directorio: adentro de `features/match/` los imports son
+  // relativos y eso es lo correcto —son cortos, y sobreviven a que la feature entera se mueva—. El
+  // alias marca la SALIDA.
+  //
+  // DEPCRUISE NO PUEDE APLICARLO, por lo mismo que el guard del validador: resuelve los alias antes
+  // de mirar el grafo, así que para él las dos formas del mismo import son la MISMA arista. La
+  // forma del especificador solo se ve leyendo el archivo.
+  it("Regla 5: lo que sale del módulo se importa con `@/`, no trepando con `../`", () => {
+    // El módulo de un archivo: su feature si vive en una, su directorio de primer nivel si no, y
+    // `src` a secas para los archivos de la raíz —donde `./vecino.js` sí es lo correcto—.
+    const moduleRootOf = (file: string): string => {
+      const parts = file.split("/");
+      if (parts.length > 3 && parts[1] === "features") return parts.slice(0, 3).join("/");
+      if (parts.length > 2) return parts.slice(0, 2).join("/");
+      return "src";
+    };
+
+    const files = walkTs("src").filter((file) => file !== "src/architecture.test.ts");
+    expect(files.length).toBeGreaterThan(100);
+
+    const offenders = files.flatMap((file) => {
+      const root = moduleRootOf(file);
+      const dir = file.slice(0, file.lastIndexOf("/"));
+      const specifiers = [...readFileSync(file, "utf8").matchAll(/from "(\.\.?\/[^"]*)"/g)].map(
+        (match) => match[1] ?? "",
+      );
+      return specifiers
+        .filter((specifier) => {
+          // Se normaliza a mano y no con `node:path`: `posix.normalize` en Windows deja
+          // separadores mezclados, y este test compara CADENAS.
+          const segments = `${dir}/${specifier}`.split("/");
+          const resolved: string[] = [];
+          for (const segment of segments) {
+            if (segment === "..") resolved.pop();
+            else if (segment !== ".") resolved.push(segment);
+          }
+          const target = resolved.join("/");
+          const inside =
+            root === "src"
+              ? target.slice(0, target.lastIndexOf("/")) === "src"
+              : target.startsWith(`${root}/`);
+          return !inside;
+        })
+        .map((specifier) => `${file} → ${specifier}`);
+    });
+
+    // Se nombran los infractores en vez de contarlos: un `toHaveLength(0)` deja al que lo rompe
+    // buscando cuál de doscientos archivos fue.
+    expect(offenders).toEqual([]);
+  });
+
   it("no-circular: dos módulos que se importan mutuamente forman un ciclo prohibido", () => {
     writeFile(
       `${FEATURE_A_DIR}/circular-a.ts`,

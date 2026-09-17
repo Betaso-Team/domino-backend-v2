@@ -1,5 +1,5 @@
+import { MemoryKeyValueStore } from "@/shared/kv.js";
 import { describe, expect, it } from "vitest";
-import { MemoryKeyValueStore } from "../../shared/kv.js";
 import { DEFAULT_MAINTENANCE_MESSAGE } from "./core/state.js";
 import { LobbySettings } from "./settings.js";
 

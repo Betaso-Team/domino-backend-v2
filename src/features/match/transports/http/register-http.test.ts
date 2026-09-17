@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
+import type { Logger } from "@/logger.js";
 import express, { type Application as Express } from "express";
 import { describe, expect, it, vi } from "vitest";
-import type { Logger } from "../../../../logger.js";
 import type { HistoryEntry } from "../../network/history.js";
 import { registerInternalHistoryHttp } from "./register-http.js";
 

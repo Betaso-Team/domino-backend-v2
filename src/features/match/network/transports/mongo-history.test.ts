@@ -1,6 +1,6 @@
+import type { Logger } from "@/logger.js";
 import type { Collection } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
-import type { Logger } from "../../../../logger.js";
 import type { HistoryEntry } from "../history.js";
 import {
   HISTORY_COLLECTION,

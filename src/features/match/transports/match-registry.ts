@@ -1,5 +1,5 @@
-import type { KeyValueStore } from "../../../shared/kv.js";
-import type { PlayerRef } from "../../../shared/player-ref.js";
+import type { KeyValueStore } from "@/shared/kv.js";
+import type { PlayerRef } from "@/shared/player-ref.js";
 import type { DominoMatchConfig } from "../core/config.js";
 
 export interface PublicMatchConfig {

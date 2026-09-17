@@ -1,5 +1,5 @@
+import type { GameMode } from "@/features/game-mode/index.js";
 import { describe, expect, it } from "vitest";
-import type { GameMode } from "../../game-mode/index.js";
 import { configOf, replayConfigOf, requestOf } from "./match-contract.js";
 
 // LAS DOS FRONTERAS, y desde esta tarea son dos porque las entradas son dos cosas distintas.

@@ -1,4 +1,4 @@
-import type { Logger } from "../../../logger.js";
+import type { Logger } from "@/logger.js";
 import type { DominoMatchConfig, MatchSeat } from "../core/config.js";
 import type { MatchState } from "../core/state/index.js";
 import type { NetworkMatchEvent } from "./events.js";

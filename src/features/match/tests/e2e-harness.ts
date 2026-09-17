@@ -1,13 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { testConfig } from "@/app.config.js";
+import { rootContainer } from "@/di-container.js";
+import { env } from "@/env.js";
+import type { PlayerRef } from "@/shared/player-ref.js";
+import { CASUAL_2P } from "@/tests/game-mode-catalog.js";
 import type { Room } from "@colyseus/sdk";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
-import { testConfig } from "../../../app.config.js";
-import { rootContainer } from "../../../di-container.js";
-import { env } from "../../../env.js";
-import type { PlayerRef } from "../../../shared/player-ref.js";
-import { CASUAL_2P } from "../../../tests/game-mode-catalog.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config.js";
 import { boardEndsOf } from "../core/rules/board-ends.js";
 import { playableSides } from "../core/rules/playable.js";

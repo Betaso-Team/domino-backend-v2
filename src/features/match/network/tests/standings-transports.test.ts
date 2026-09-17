@@ -1,5 +1,5 @@
+import type { AmqpDelivery } from "@/shared/amqp.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AmqpDelivery } from "../../../../shared/amqp.js";
 import { AmqpRankingFeed } from "../transports/amqp-ranking.js";
 import { HttpLeagueFeed } from "../transports/http-leagues.js";
 

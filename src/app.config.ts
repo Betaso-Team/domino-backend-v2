@@ -1,10 +1,5 @@
-import config from "@colyseus/tools";
-import { type ServerOptions, defineRoom, defineServer } from "colyseus";
-import express, { type Application } from "express";
-import { amqp, driver, mongo, presence, rootContainer } from "./di-container.js";
-import { env } from "./env.js";
-import { GameModeService, registerGameModeHttp } from "./features/game-mode/index.js";
-import { LobbyRoom, LobbySettings, registerLobbyHttp } from "./features/lobby/index.js";
+import { GameModeService, registerGameModeHttp } from "@/features/game-mode/index.js";
+import { LobbyRoom, LobbySettings, registerLobbyHttp } from "@/features/lobby/index.js";
 import {
   type Clock,
   DominoRoom,
@@ -12,11 +7,16 @@ import {
   MatchRegistry,
   registerMatchHttp,
   selectProcessIdToCreateRoom,
-} from "./features/match/index.js";
+} from "@/features/match/index.js";
+import { httpErrorHandler } from "@/shared/http/error-handler.js";
+import { type DependencyChecks, registerHealth } from "@/shared/http/health.js";
+import { exposeServerTime } from "@/shared/http/server-time.js";
+import config from "@colyseus/tools";
+import { type ServerOptions, defineRoom, defineServer } from "colyseus";
+import express, { type Application } from "express";
+import { amqp, driver, mongo, presence, rootContainer } from "./di-container.js";
+import { env } from "./env.js";
 import type { Logger } from "./logger.js";
-import { httpErrorHandler } from "./shared/http/error-handler.js";
-import { type DependencyChecks, registerHealth } from "./shared/http/health.js";
-import { exposeServerTime } from "./shared/http/server-time.js";
 
 const rooms = { lobby: defineRoom(LobbyRoom), domino: defineRoom(DominoRoom) };
 

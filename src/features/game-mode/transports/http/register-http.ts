@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { Logger } from "@/logger.js";
+import { requireInternalKey } from "@/shared/http/internal-key.js";
+import { validated } from "@/shared/http/validated.js";
 import type { Application, Response } from "express";
-import type { Logger } from "../../../../logger.js";
-import { requireInternalKey } from "../../../../shared/http/internal-key.js";
-import { validated } from "../../../../shared/http/validated.js";
 import {
   DuplicateGameModeError,
   GameModeNotFoundError,

@@ -1,5 +1,5 @@
+import type { Logger } from "@/logger.js";
 import type { ErrorRequestHandler } from "express";
-import type { Logger } from "../../logger.js";
 
 // LA RED de la capa HTTP: lo que un handler tiró y nadie manejó. Sin esto, Express responde
 // su página de error HTML por defecto —con el stack adentro mientras `NODE_ENV` no sea

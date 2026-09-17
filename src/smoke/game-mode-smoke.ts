@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { env } from "@/env.js";
+import { logger } from "@/logger.js";
 import { connect } from "amqplib";
 import { MongoClient } from "mongodb";
-import { env } from "../env.js";
-import { logger } from "../logger.js";
 
 // LA CERTIFICACIÓN DEL CATÁLOGO CONTRA SERVICIOS DE VERDAD, y es lo único de este incremento que
 // ninguna suite puede reemplazar. Los adaptadores se miden con dobles del driver —correcto, porque

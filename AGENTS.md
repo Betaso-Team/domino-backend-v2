@@ -1121,10 +1121,11 @@ adelantes el catálogo para que el test compile.
 `docs:` que explica qué estaba mal y cómo se descubrió. El plan es un documento vivo; si
 lo dejás mentir, la próxima tarea arranca del mismo pozo.
 
-## Las cuatro reglas de imports
+## Las cinco reglas de imports
 
-Las aplica `.dependency-cruiser.cjs` y las testea `src/architecture.test.ts`. No son
-guía de estilo: el test se pone rojo.
+Las cuatro primeras las aplica `.dependency-cruiser.cjs` y las testea
+`src/architecture.test.ts`; la quinta la aplica solo el test. No son guía de estilo: el test
+se pone rojo.
 
 1. **core-allowlist** — `features/X/core/` solo importa de `features/X/core/` y de
    `shared/`. Es allowlist. Lo de afuera (`network/`, `transports/`) sí puede importar
@@ -1141,6 +1142,27 @@ guía de estilo: el test se pone rojo.
    `.../colyseus/commands/di-wiring.ts`. Los tests quedan afuera por categoría
    (`*.test.ts`, `/tests/`), con el argumento en el comentario del config.
 4. **feature-boundary** — una feature importa de otra solo vía su `index.ts`.
+5. **`@/` al salir del módulo** — un import que sale de su módulo se escribe `@/...`, nunca
+   trepando con `../`. Adentro del módulo se usa relativo, y eso es lo correcto: son cortos y
+   sobreviven a que el módulo entero se mueva. **El módulo es la FEATURE**, no el directorio —
+   adentro de `features/match/` todo es relativo—; para lo de afuera de `features/` el módulo es
+   el directorio de primer nivel (`shared/`, `smoke/`), y para los archivos de la raíz de `src/`
+   sus vecinos son relativos y todo lo demás lleva alias.
+
+   No es cosmética, y es la misma razón que sostiene a las otras cuatro: `../../../../` no dice
+   de dónde a dónde va la arista. El alias marca la SALIDA, así que "este archivo cruza una
+   frontera" se lee de un vistazo en vez de contando puntos. **DEPCRUISE NO PUEDE APLICARLA**:
+   resuelve los alias ANTES de mirar el grafo, así que para él las dos formas del mismo import
+   son la misma arista, y la forma del especificador solo se ve leyendo el archivo — el mismo
+   motivo por el que el guard del validador HTTP tampoco tiene depcruise detrás.
+
+   El alias se declara **tres veces**, y hay que saberlo antes de tocar cualquiera: el `paths`
+   del `tsconfig.json` (de donde lo leen `tsc`, `tsup`/esbuild y `depcruise` por su
+   `options.tsConfig`), el `resolve.alias` de `vitest.config.ts` —Vite no mira el tsconfig, y sin
+   esa línea el typecheck queda verde y la suite entera no resuelve un solo import— y nada más.
+   `tsx` (dev, replay, smokes) lo saca del tsconfig. **Las extensiones `.js` se conservan**: este
+   repo usa `moduleResolution: NodeNext` de verdad, no `Bundler` como truco, y el alias es
+   ortogonal a eso.
 
 Más `no-circular`, que no es regla de imports sino invariante del grafo.
 

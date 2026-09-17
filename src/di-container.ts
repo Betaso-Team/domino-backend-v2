@@ -1,8 +1,5 @@
 import "reflect-metadata";
-import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
-import { container } from "tsyringe";
-import { env } from "./env.js";
-import { JwtVerifier } from "./features/auth/index.js";
+import { JwtVerifier } from "@/features/auth/index.js";
 import {
   type GameModeReader,
   GameModeService,
@@ -11,22 +8,25 @@ import {
   MongoGameModeOutbox,
   MongoGameModeRepository,
   OutboxDispatcher,
-} from "./features/game-mode/index.js";
-import { LobbySettings } from "./features/lobby/settings.js";
-import { type GlobalDominoConfig, globalConfigWith } from "./features/match/core/config.js";
-import type { Clock } from "./features/match/core/engine/clock.js";
-import type { HistoryPort, HistoryReader } from "./features/match/network/history.js";
-import type { StandingsFeeds } from "./features/match/network/standings.js";
-import { AmqpRankingFeed } from "./features/match/network/transports/amqp-ranking.js";
-import { HttpLeagueFeed } from "./features/match/network/transports/http-leagues.js";
-import { MemoryHistory } from "./features/match/network/transports/memory-history.js";
-import { MongoHistory } from "./features/match/network/transports/mongo-history.js";
-import { MatchRegistry } from "./features/match/transports/match-registry.js";
+} from "@/features/game-mode/index.js";
+import { LobbySettings } from "@/features/lobby/settings.js";
+import { type GlobalDominoConfig, globalConfigWith } from "@/features/match/core/config.js";
+import type { Clock } from "@/features/match/core/engine/clock.js";
+import type { HistoryPort, HistoryReader } from "@/features/match/network/history.js";
+import type { StandingsFeeds } from "@/features/match/network/standings.js";
+import { AmqpRankingFeed } from "@/features/match/network/transports/amqp-ranking.js";
+import { HttpLeagueFeed } from "@/features/match/network/transports/http-leagues.js";
+import { MemoryHistory } from "@/features/match/network/transports/memory-history.js";
+import { MongoHistory } from "@/features/match/network/transports/mongo-history.js";
+import { MatchRegistry } from "@/features/match/transports/match-registry.js";
+import { AmqpPublisher } from "@/shared/amqp.js";
+import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv.js";
+import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease.js";
+import { Mongo } from "@/shared/mongo.js";
+import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
+import { container } from "tsyringe";
+import { env } from "./env.js";
 import { type Logger, logger } from "./logger.js";
-import { AmqpPublisher } from "./shared/amqp.js";
-import { type KeyValueStore, MemoryKeyValueStore } from "./shared/kv.js";
-import { type Lease, MemoryLease, MongoLease } from "./shared/mongo-lease.js";
-import { Mongo } from "./shared/mongo.js";
 
 // Acá viven solo dependencias globales y sin estado de partida. Los actores del motor
 // se arman dentro de cada sala porque pertenecen a una partida concreta.

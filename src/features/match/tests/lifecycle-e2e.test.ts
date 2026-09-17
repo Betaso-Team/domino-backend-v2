@@ -1,7 +1,7 @@
+import { env } from "@/env.js";
+import { CASUAL_2P } from "@/tests/game-mode-catalog.js";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { env } from "../../../env.js";
-import { CASUAL_2P } from "../../../tests/game-mode-catalog.js";
 import {
   act,
   bootServer,

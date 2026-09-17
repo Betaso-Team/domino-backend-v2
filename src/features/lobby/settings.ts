@@ -1,5 +1,5 @@
+import type { KeyValueStore } from "@/shared/kv.js";
 import { z } from "zod";
-import type { KeyValueStore } from "../../shared/kv.js";
 import { DEFAULT_MAINTENANCE_MESSAGE } from "./core/state.js";
 
 const KEY = "lobby:maintenance";

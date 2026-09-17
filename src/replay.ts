@@ -1,3 +1,7 @@
+import type { GlobalDominoConfig, TeamAssignmentMode } from "@/features/match/core/config.js";
+import { replay } from "@/features/match/history/replay.js";
+import type { HistoryEntry, HistoryReader } from "@/features/match/network/history.js";
+import { replayConfigOf } from "@/features/match/transports/match-contract.js";
 // npm run replay -- <matchId> <seed> <pointsToWin> <teamAssignment> <asiento...>
 //
 // Rebobina la partida desde el historial e IMPRIME el estado final reconstruido. Es la
@@ -15,10 +19,6 @@
 // opcional que nadie escribe es peor que no tenerlo: hace creer que el replay puede
 // autoverificarse contra producción cuando no puede.
 import { mongo, rootContainer } from "./di-container.js";
-import type { GlobalDominoConfig, TeamAssignmentMode } from "./features/match/core/config.js";
-import { replay } from "./features/match/history/replay.js";
-import type { HistoryEntry, HistoryReader } from "./features/match/network/history.js";
-import { replayConfigOf } from "./features/match/transports/match-contract.js";
 import { logger } from "./logger.js";
 
 const USAGE =

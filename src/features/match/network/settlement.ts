@@ -1,4 +1,4 @@
-import type { PlayerRef } from "../../../shared/player-ref.js";
+import type { PlayerRef } from "@/shared/player-ref.js";
 import type { DominoMatchConfig, MatchSeat } from "../core/config.js";
 import { InvariantViolationError } from "../core/engine/errors.js";
 import type { MatchState } from "../core/state/index.js";

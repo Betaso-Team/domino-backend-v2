@@ -1,7 +1,7 @@
+import type { Logger } from "@/logger.js";
+import type { AmqpDelivery } from "@/shared/amqp.js";
+import { type Lease, MemoryLease } from "@/shared/mongo-lease.js";
 import { describe, expect, it, vi } from "vitest";
-import type { Logger } from "../../logger.js";
-import type { AmqpDelivery } from "../../shared/amqp.js";
-import { type Lease, MemoryLease } from "../../shared/mongo-lease.js";
 import type { GameModeReader } from "./core/catalog.js";
 import type { GameMode } from "./core/game-mode.js";
 import type { GameModePayload } from "./events.js";

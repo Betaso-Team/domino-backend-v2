@@ -1,4 +1,4 @@
-import type { PlayerRef } from "../../shared/player-ref.js";
+import type { PlayerRef } from "@/shared/player-ref.js";
 
 /**
  * Identidad mínima que el dominio necesita conocer del principal autenticado: la PAREJA

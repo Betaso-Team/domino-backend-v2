@@ -151,13 +151,17 @@ describe("el CLI de replay: sus dependencias", () => {
     const source = readFileSync("src/replay.ts", "utf8");
     const imported = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
 
+    // LOS DE LA FEATURE VAN CON `@/` Y LOS DOS DE LA RAÍZ RELATIVOS, que es exactamente la
+    // convención: el alias marca que el import SALE del módulo, y `di-container` y `logger` son
+    // vecinos de `replay.ts` en `src/`. La lista sigue siendo exacta, así que un import nuevo
+    // —empezando por el catálogo, que es el que esta guarda existe para prohibir— pasa por acá.
     expect([...imported].sort()).toEqual([
       "./di-container.js",
-      "./features/match/core/config.js",
-      "./features/match/history/replay.js",
-      "./features/match/network/history.js",
-      "./features/match/transports/match-contract.js",
       "./logger.js",
+      "@/features/match/core/config.js",
+      "@/features/match/history/replay.js",
+      "@/features/match/network/history.js",
+      "@/features/match/transports/match-contract.js",
     ]);
   });
 });

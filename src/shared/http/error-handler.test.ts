@@ -1,6 +1,6 @@
+import type { LogFields, Logger } from "@/logger.js";
 import type { NextFunction, Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
-import type { LogFields, Logger } from "../../logger.js";
 import { httpErrorHandler } from "./error-handler.js";
 
 function recordingLogger(): { logger: Logger; calls: Array<[string, LogFields | undefined]> } {

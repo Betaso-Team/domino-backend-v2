@@ -1,7 +1,7 @@
+import { rootContainer } from "@/di-container.js";
 import { CloseCode } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { rootContainer } from "../../../di-container.js";
 import { type GlobalDominoConfig, globalConfigWith } from "../core/config.js";
 import {
   type SeatedMatch,

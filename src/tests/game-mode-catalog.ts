@@ -1,5 +1,5 @@
-import { gameModes } from "../di-container.js";
-import type { GameMode } from "../features/game-mode/index.js";
+import { gameModes } from "@/di-container.js";
+import type { GameMode } from "@/features/game-mode/index.js";
 
 // EL MODO QUE SIENTA LAS MESAS DE LA SUITE, sembrado UNA vez y en UN solo lugar.
 //

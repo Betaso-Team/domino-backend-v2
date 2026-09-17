@@ -1,23 +1,23 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
-import { ColyseusSDK, type Room } from "@colyseus/sdk";
-import jwt from "jsonwebtoken";
-import { env } from "../env.js";
-import type { GameMode } from "../features/game-mode/index.js";
-import type { DominoMatchConfig } from "../features/match/core/config.js";
-import { createMatchState } from "../features/match/core/engine/genesis.js";
-import { boneyardCountOf } from "../features/match/core/engine/state-projections.js";
-import { boardEndsOf } from "../features/match/core/rules/board-ends.js";
-import { playableSides } from "../features/match/core/rules/playable.js";
-import { MatchState } from "../features/match/core/state/index.js";
-import type { BoardSide } from "../features/match/core/state/tile.js";
-import { settlementOf } from "../features/match/index.js";
+import { env } from "@/env.js";
+import type { GameMode } from "@/features/game-mode/index.js";
+import type { DominoMatchConfig } from "@/features/match/core/config.js";
+import { createMatchState } from "@/features/match/core/engine/genesis.js";
+import { boneyardCountOf } from "@/features/match/core/engine/state-projections.js";
+import { boardEndsOf } from "@/features/match/core/rules/board-ends.js";
+import { playableSides } from "@/features/match/core/rules/playable.js";
+import { MatchState } from "@/features/match/core/state/index.js";
+import type { BoardSide } from "@/features/match/core/state/tile.js";
+import { settlementOf } from "@/features/match/index.js";
 import {
   type CreateMatchRequest,
   configOf,
   requestOf,
-} from "../features/match/transports/match-contract.js";
-import { logger } from "../logger.js";
+} from "@/features/match/transports/match-contract.js";
+import { logger } from "@/logger.js";
+import { ColyseusSDK, type Room } from "@colyseus/sdk";
+import jwt from "jsonwebtoken";
 
 const WS_URL = "ws://nginx:8080";
 const HTTP_URL = "http://nginx:8080";

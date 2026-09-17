@@ -1,3 +1,8 @@
+import { rootContainer } from "@/di-container.js";
+import { InvalidTokenError, type TokenVerifier } from "@/features/auth/index.js";
+import type { GameModeReader } from "@/features/game-mode/index.js";
+import { LobbySettings, MaintenanceModeError } from "@/features/lobby/index.js";
+import type { Logger } from "@/logger.js";
 import { StateView } from "@colyseus/schema";
 import {
   type AuthContext,
@@ -9,11 +14,6 @@ import {
   type RoomException,
   type RoomMethodName,
 } from "colyseus";
-import { rootContainer } from "../../../../di-container.js";
-import type { Logger } from "../../../../logger.js";
-import { InvalidTokenError, type TokenVerifier } from "../../../auth/index.js";
-import type { GameModeReader } from "../../../game-mode/index.js";
-import { LobbySettings, MaintenanceModeError } from "../../../lobby/index.js";
 import {
   DEFAULT_GLOBAL_CONFIG,
   type DominoMatchConfig,

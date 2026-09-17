@@ -5,7 +5,7 @@
 // viven acá y se eligen por config, así que cambiar de modelo no toca el motor.
 // El día que aparezcan parejas elegidas por los jugadores o armadas por ranking,
 // es un caso más en este switch.
-import { hashSeed, mulberry32, shuffled } from "../../../../shared/rng.js";
+import { hashSeed, mulberry32, shuffled } from "@/shared/rng.js";
 import type { TeamAssignmentMode } from "../config.js";
 import type { PlayerId, TeamId } from "../ids.js";
 import { InvariantViolationError } from "./errors.js";

@@ -1,8 +1,8 @@
+import type { Logger } from "@/logger.js";
+import { requireInternalKey } from "@/shared/http/internal-key.js";
+import { validated } from "@/shared/http/validated.js";
 import type { Application as Express } from "express";
 import { z } from "zod";
-import type { Logger } from "../../../../logger.js";
-import { requireInternalKey } from "../../../../shared/http/internal-key.js";
-import { validated } from "../../../../shared/http/validated.js";
 import type { Clock } from "../../core/engine/clock.js";
 import type { HistoryReader } from "../../network/history.js";
 import type { MatchConfigResponse, MatchRegistry } from "../match-registry.js";

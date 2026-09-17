@@ -1,6 +1,6 @@
+import { requireInternalKey } from "@/shared/http/internal-key.js";
 import type { Application } from "express";
 import { z } from "zod";
-import { requireInternalKey } from "../../../../shared/http/internal-key.js";
 import { DEFAULT_MAINTENANCE_MESSAGE } from "../../core/state.js";
 import type { LobbySettings } from "../../settings.js";
 

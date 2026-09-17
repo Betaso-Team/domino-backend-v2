@@ -1,4 +1,4 @@
-import type { Lease } from "../../shared/mongo-lease.js";
+import type { Lease } from "@/shared/mongo-lease.js";
 import {
   DuplicateGameModeError,
   GameModeNotFoundError,

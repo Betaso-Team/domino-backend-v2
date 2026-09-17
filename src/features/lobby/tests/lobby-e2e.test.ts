@@ -1,11 +1,11 @@
+import { testConfig } from "@/app.config.js";
+import { env } from "@/env.js";
+import type { PlayerRef } from "@/shared/player-ref.js";
+import { CASUAL_2P } from "@/tests/game-mode-catalog.js";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { testConfig } from "../../../app.config.js";
-import { env } from "../../../env.js";
-import type { PlayerRef } from "../../../shared/player-ref.js";
-import { CASUAL_2P } from "../../../tests/game-mode-catalog.js";
 
 const participantOf = (userUuid: string) => ({
   platformId: "betaso",

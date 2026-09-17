@@ -1,5 +1,5 @@
+import { MemoryKeyValueStore } from "@/shared/kv.js";
 import { describe, expect, it } from "vitest";
-import { MemoryKeyValueStore } from "../../../shared/kv.js";
 import { replayConfigOf } from "./match-contract.js";
 import { MatchRegistry, TTL_SECONDS } from "./match-registry.js";
 

@@ -1,5 +1,5 @@
+import type { Logger } from "@/logger.js";
 import { describe, expect, it, vi } from "vitest";
-import type { Logger } from "../../../../logger.js";
 import type { DominoMatchConfig } from "../../core/config.js";
 import { createMatchState } from "../../core/engine/genesis.js";
 import { matchConfig } from "../../core/engine/tests/match-config-fixture.js";

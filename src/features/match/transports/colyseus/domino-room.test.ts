@@ -1,12 +1,12 @@
+import { testConfig } from "@/app.config.js";
+import { gameModes, rootContainer } from "@/di-container.js";
+import { env } from "@/env.js";
+import type { PlayerRef } from "@/shared/player-ref.js";
+import { CASUAL_2P } from "@/tests/game-mode-catalog.js";
 import { ColyseusSDK } from "@colyseus/sdk";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { testConfig } from "../../../../app.config.js";
-import { gameModes, rootContainer } from "../../../../di-container.js";
-import { env } from "../../../../env.js";
-import type { PlayerRef } from "../../../../shared/player-ref.js";
-import { CASUAL_2P } from "../../../../tests/game-mode-catalog.js";
 import type { HistoryReader } from "../../network/history.js";
 import type { CreateMatchRequest, MatchParticipant } from "../match-contract.js";
 import type { DominoRoom } from "./domino-room.js";

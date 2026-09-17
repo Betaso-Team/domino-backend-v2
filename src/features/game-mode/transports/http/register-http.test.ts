@@ -1,9 +1,9 @@
 import type { AddressInfo } from "node:net";
+import type { Logger } from "@/logger.js";
+import { httpErrorHandler } from "@/shared/http/error-handler.js";
+import type { Lease } from "@/shared/mongo-lease.js";
 import express, { type Application } from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Logger } from "../../../../logger.js";
-import { httpErrorHandler } from "../../../../shared/http/error-handler.js";
-import type { Lease } from "../../../../shared/mongo-lease.js";
 import type { GameModeRepository } from "../../core/catalog.js";
 import type { GameMode } from "../../core/game-mode.js";
 import { GameModeService } from "../../service.js";

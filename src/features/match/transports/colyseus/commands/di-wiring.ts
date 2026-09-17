@@ -1,5 +1,5 @@
+import type { Logger } from "@/logger.js";
 import type { DependencyContainer } from "tsyringe";
-import type { Logger } from "../../../../../logger.js";
 import type { CommandName } from "../../../core/command.js";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config.js";
 import type { Clock } from "../../../core/engine/clock.js";

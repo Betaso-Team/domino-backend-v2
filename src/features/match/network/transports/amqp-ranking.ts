@@ -1,4 +1,4 @@
-import type { AmqpDelivery } from "../../../../shared/amqp.js";
+import type { AmqpDelivery } from "@/shared/amqp.js";
 import type { RankingFeed, RankingParticipation } from "../standings.js";
 
 // LA COLA DEL RANKING del backend principal, con el envoltorio de patrón de NestJS —del otro lado

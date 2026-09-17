@@ -1,5 +1,5 @@
+import { MatchState } from "@/features/match/core/state/index.js";
 import { describe, expect, it } from "vitest";
-import { MatchState } from "../features/match/core/state/index.js";
 import { nextAction, requireSmokeFlag } from "./engine-smoke.js";
 
 describe("engine smoke", () => {

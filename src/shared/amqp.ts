@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { Logger } from "@/logger.js";
 import { type ConfirmChannel, type RecoveringChannelModel, connect } from "amqplib";
-import type { Logger } from "../logger.js";
 
 // LA ENTREGA por cola, sin saber QUÉ entrega. Vive en `shared/` y no dentro de
 // `features/game-mode/` por el mismo argumento que `shared/mongo.ts`: `amqplib` es un paquete de
@@ -77,11 +77,6 @@ export class AmqpPublisher implements AmqpDelivery {
     private readonly log: Logger,
   ) {}
 
-  // A UN EXCHANGE TOPIC, con el cuerpo CRUDO. Es el contrato que v1 ya publica en `betaso`
-  // (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts:49-68`) y este incremento lo conserva
-  // entero: `persistent`, `contentType` y un `messageId` propio de cada mensaje. El envoltorio
-  // `{pattern, data, id}` de NestJS es del OTRO camino de v1, el de las colas, y meterlo acá produce
-  // un mensaje que nadie consume, en silencio.
   // A UNA COLA, con el envoltorio de NestJS. Sin él, el `@EventPattern` del otro lado no sabe a qué
   // handler mandarlo y el mensaje se descarta en silencio.
   //
@@ -104,6 +99,9 @@ export class AmqpPublisher implements AmqpDelivery {
     this.log.debug("publicado a la cola", { messageId, queue, pattern });
   }
 
+  // A UN EXCHANGE TOPIC, con el cuerpo CRUDO. Es el contrato que v1 ya publica en `betaso`
+  // (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts:49-68`) y este incremento lo conserva
+  // entero: `persistent`, `contentType` y un `messageId` propio de cada mensaje.
   async publishTopic(exchange: string, routingKey: string, body: unknown): Promise<void> {
     const channel = await this.ready();
     // EL EXCHANGE SE DECLARA ANTES DE CADA PUBLICACIÓN, como hace v1: si el consumidor todavía no

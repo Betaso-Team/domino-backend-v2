@@ -1,4 +1,4 @@
-import { hashSeed, mulberry32, shuffled } from "../../../../shared/rng.js";
+import { hashSeed, mulberry32, shuffled } from "@/shared/rng.js";
 import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../config.js";
 import { orderedTileSet } from "../rules/tiles.js";
 import { Tile } from "../state/index.js";

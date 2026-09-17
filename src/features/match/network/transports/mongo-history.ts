@@ -1,5 +1,5 @@
+import type { Logger } from "@/logger.js";
 import type { Collection, Document } from "mongodb";
-import type { Logger } from "../../../../logger.js";
 import type { HistoryEntry, HistoryPort, HistoryReader } from "../history.js";
 
 // EL HISTORIAL QUE SOBREVIVE AL REINICIO. `MemoryHistory` tiene tope de 200 partidas y muere

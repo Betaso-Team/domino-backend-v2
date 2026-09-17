@@ -1,4 +1,4 @@
-import type { PlayerRef } from "../../../shared/player-ref.js";
+import type { PlayerRef } from "@/shared/player-ref.js";
 import type { PlayerId } from "./ids.js";
 import type { BetLevel } from "./rules/config.js";
 

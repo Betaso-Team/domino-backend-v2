@@ -3,6 +3,8 @@
     "target": "ES2023",
     "lib": ["ES2023"],
     "module": "NodeNext",
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": "src",

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
+import type { Lease } from "@/shared/mongo-lease.js";
 import { describe, expect, it, vi } from "vitest";
-import type { Lease } from "../../shared/mongo-lease.js";
 import {
   DuplicateGameModeError,
   GameModeNotFoundError,
@@ -638,10 +638,13 @@ describe("GameModeService: sus dependencias", () => {
     // parsea TypeScript miente de otras maneras. Lo que de verdad sostiene la propiedad es el
     // comentario de cabecera de `service.ts` y la revisión; esto es el piso, no el techo.
     expect([...imported].sort()).toEqual([
-      "../../shared/mongo-lease.js",
       "./core/catalog.js",
       "./core/game-mode.js",
       "./outbox.js",
+      // CON `@/` Y NO `../../shared/…`, que es lo que decía antes de que el alias existiera. La
+      // lista sigue siendo exacta, y de paso esto es lo que hace que la convención no se pueda
+      // abandonar de a un archivo sin que algo se ponga rojo.
+      "@/shared/mongo-lease.js",
     ]);
   });
 });
