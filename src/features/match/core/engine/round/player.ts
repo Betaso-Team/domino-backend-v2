@@ -1,6 +1,6 @@
 import type { PlayerId } from "../../ids";
 import { sameTile } from "../../rules/tiles";
-import { type MatchState, PlacedTile } from "../../state/index";
+import { type MatchState, PlacedTile } from "../../state";
 import type { BoardSide, TileLike } from "../../state/tile";
 import { InvariantViolationError } from "../errors";
 import { boneyardOf, currentRoundOf, handOf, playerOf } from "../state-projections";

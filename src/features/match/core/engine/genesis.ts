@@ -1,6 +1,6 @@
 // src/features/match/core/engine/genesis.ts
 import { type DominoMatchConfig, playerIdsOf } from "../config";
-import { Hand, MatchState, PlayerState, Scoreboard } from "../state/index";
+import { Hand, MatchState, PlayerState, Scoreboard } from "../state";
 import { InvariantViolationError } from "./errors";
 import { assignTeams } from "./team-assignment";
 

@@ -7,9 +7,9 @@ import {
   ProposeBetMultiplierCommand,
   RespondBetMultiplierCommand,
   RevealTilesCommand,
-} from "../core/commands/index";
+} from "../core/commands";
 import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../core/config";
-import { BetNegotiation, BetReferee } from "../core/engine/bet/index";
+import { BetNegotiation, BetReferee } from "../core/engine/bet";
 import type { Clock } from "../core/engine/clock";
 import { Dealer } from "../core/engine/dealer";
 import { createMatchState } from "../core/engine/genesis";
@@ -27,7 +27,7 @@ import type { TimeoutScheduler } from "../core/engine/timeout-scheduler";
 import type { SchemaVisibilityController } from "../core/engine/visibility";
 import type { MatchEvent } from "../core/events";
 import type { PlayerId } from "../core/ids";
-import type { MatchState } from "../core/state/index";
+import type { MatchState } from "../core/state";
 
 export interface EngineGraph {
   readonly match: MatchState;

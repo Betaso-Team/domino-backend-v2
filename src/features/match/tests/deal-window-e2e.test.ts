@@ -1,6 +1,6 @@
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { MatchState } from "../core/state/index";
+import type { MatchState } from "../core/state";
 import {
   type SeatedMatch,
   act,

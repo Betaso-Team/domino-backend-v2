@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BoardState, PlacedTile, Tile } from "../../state/index";
+import { BoardState, PlacedTile, Tile } from "../../state";
 import { boardEndsOf } from "../board-ends";
 
 function board(placements: [number, number, "LEFT" | "RIGHT"][]): BoardState {

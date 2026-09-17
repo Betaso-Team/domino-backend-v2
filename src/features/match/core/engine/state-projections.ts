@@ -17,7 +17,7 @@ import type {
   RoundState,
   Scoreboard,
   Turn,
-} from "../state/index";
+} from "../state";
 import type { BoardSide } from "../state/tile";
 import { InvariantViolationError } from "./errors";
 

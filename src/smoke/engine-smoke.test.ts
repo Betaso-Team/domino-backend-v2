@@ -1,4 +1,4 @@
-import { MatchState } from "@/features/match/core/state/index";
+import { MatchState } from "@/features/match/core/state";
 import { describe, expect, it } from "vitest";
 import { nextAction, requireSmokeFlag } from "./engine-smoke";
 

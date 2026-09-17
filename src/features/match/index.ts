@@ -1,7 +1,7 @@
 // Superficie pública de la feature (Regla 4): lo que el composition root y otras features
 // consumen. `Clock` y `HistoryReader` salen por acá —y no por un import profundo desde
 // `app.config.ts`— porque son los tipos con los que el root NOMBRA lo que le pasa al
-// transporte: si el root tuviera que bajar a `core/engine/clock.js` para escribirlos, la
+// transporte: si el root tuviera que bajar a `core/engine/clock` para escribirlos, la
 // frontera de la feature existiría solo para los que ya están adentro.
 export type { Clock } from "./core/engine/clock";
 // LOS TIPOS DE LOS PARÁMETROS DE `settlementOf`, y salen porque una firma cuyos parámetros
@@ -14,7 +14,7 @@ export type { Clock } from "./core/engine/clock";
 // `MatchState` y `DominoMatchConfig` salen como TIPO y no como valor: nombrar el árbol y el
 // snapshot es lo que hace falta para pasarlos; construirlos afuera de la feature no.
 export type { DominoMatchConfig } from "./core/config";
-export type { MatchState } from "./core/state/index";
+export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
 export type { HistoryReader } from "./network/history";
 // La proyección monetaria sale por acá porque su consumidor está AFUERA de la feature: hoy

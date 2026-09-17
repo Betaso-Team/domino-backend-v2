@@ -1,5 +1,5 @@
 import type { Command, CommandPayload } from "../command";
-import type { BetNegotiation, BetReferee } from "../engine/bet/index";
+import type { BetNegotiation, BetReferee } from "../engine/bet";
 import type { RoundDriver } from "../engine/round/driver";
 import type { MatchEvent } from "../events";
 

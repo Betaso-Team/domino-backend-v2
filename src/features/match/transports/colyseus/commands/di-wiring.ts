@@ -6,7 +6,7 @@ import type { Clock } from "../../../core/engine/clock";
 import type { TimeoutScheduler } from "../../../core/engine/timeout-scheduler";
 import type { SchemaVisibilityController } from "../../../core/engine/visibility";
 import type { MatchEvent } from "../../../core/events";
-import type { MatchState } from "../../../core/state/index";
+import type { MatchState } from "../../../core/state";
 import { buildEngineGraph } from "../../../history/engine-factory";
 import {
   type HistoryPort,
@@ -15,7 +15,7 @@ import {
   type MatchPieces,
   type StandingsFeeds,
   reportStandings,
-} from "../../../network/index";
+} from "../../../network";
 import { MessageRouter } from "../messages";
 import { CommandCatalog } from "./catalog";
 import { CommandHandler } from "./command-handler";

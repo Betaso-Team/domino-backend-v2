@@ -249,7 +249,7 @@ Lo que dejó la Tarea 2:
 - **La superficie exporta los tipos de los tres parámetros** (`NetworkMatchEvent`,
   `DominoMatchConfig`, `MatchState`, los tres como tipo): una firma cuyos parámetros no se pueden
   nombrar obliga a importar hondo, que es lo que la Regla 4 evita. **El smoke de la Task 3 tiene
-  que importar de `features/match/index.js`**, no de `network/settlement.js`.
+  que importar de `@/features/match`**, no de `@/features/match/network/settlement`.
 - **Las claves de idempotencia se assertan como literal** (`'["money-1","REWARD","betaso","same"]'`)
   y no recalculadas con el mismo `JSON.stringify` del código: recalcularlas mide que dos
   expresiones idénticas dan lo mismo, y acompaña cualquier cambio de formato sin ponerse roja.

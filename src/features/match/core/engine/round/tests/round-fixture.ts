@@ -7,7 +7,7 @@ import {
   RoundState,
   Tile,
   Turn,
-} from "../../../state/index";
+} from "../../../state";
 import type { BoardSide } from "../../../state/tile";
 import { createMatchState } from "../../genesis";
 import { handOf } from "../../state-projections";

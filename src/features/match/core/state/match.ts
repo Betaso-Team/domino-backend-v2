@@ -2,7 +2,7 @@ import { type SchemaType, schema, t } from "@colyseus/schema";
 import { PlayerState } from "./player";
 import { RoundState, RoundSummary } from "./round";
 
-// La unión se declara en `rules/phases.js` —es vocabulario del juego, no del wire— y se
+// La unión se declara en `rules/phases` —es vocabulario del juego, no del wire— y se
 // re-exporta acá, que es de donde la importaba todo el mundo.
 export type { MatchPhase } from "../rules/phases";
 

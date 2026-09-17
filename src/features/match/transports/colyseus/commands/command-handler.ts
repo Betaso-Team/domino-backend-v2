@@ -1,6 +1,6 @@
 import type { Command, CommandName, CommandPayload } from "../../../core/command";
 import type { MatchEvent } from "../../../core/events";
-import type { MatchHistory } from "../../../network/index";
+import type { MatchHistory } from "../../../network";
 import type { MessageHandler } from "../messages";
 
 // QUÉ SIGNIFICA ATENDER UN VERBO DEL DOMINÓ, en un solo lugar. Son tres pasos y son los

@@ -1,7 +1,7 @@
 import type { PlayerRef } from "@/shared/player-ref";
 import type { DominoMatchConfig, MatchSeat } from "../core/config";
 import { InvariantViolationError } from "../core/engine/errors";
-import type { MatchState } from "../core/state/index";
+import type { MatchState } from "../core/state";
 import type { NetworkMatchEvent } from "./events";
 
 // LA PROYECCIÓN, NO EL MOVIMIENTO. Acá se traduce el desenlace de una mesa a lo que

@@ -1,7 +1,7 @@
 import type { RuleViolationCode } from "../rules/codes";
 import type { Ruling } from "../rules/ruling";
 
-// El catálogo de motivos se MUDÓ a `rules/codes.js` —es vocabulario de regla, no el mecanismo
+// El catálogo de motivos se MUDÓ a `rules/codes` —es vocabulario de regla, no el mecanismo
 // con el que el servidor lo cuenta— y se re-exporta acá, que es de donde lo importaba todo el
 // mundo. Ver la cabecera de ese archivo.
 export type { RuleViolationCode };
@@ -22,7 +22,7 @@ export class RuleViolationError extends DominoError {
 }
 
 // EL PUENTE ENTRE EL VEREDICTO Y LA EXCEPCIÓN, y es el único lugar donde una regla se vuelve un
-// throw. Las reglas dictaminan (`rules/ruling.js`); el motor necesita cortar la ejecución del
+// throw. Las reglas dictaminan (`rules/ruling`); el motor necesita cortar la ejecución del
 // comando, y eso solo lo hace una excepción.
 //
 // Vive acá y no en `rules/` a propósito: el día que las reglas viajen en un paquete, este

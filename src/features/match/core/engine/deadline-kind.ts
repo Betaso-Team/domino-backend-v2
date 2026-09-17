@@ -1,5 +1,5 @@
 import type { DeadlineKind } from "../events";
-import type { MatchState } from "../state/index";
+import type { MatchState } from "../state";
 import { InvariantViolationError } from "./errors";
 import { matchPhaseOf, roundPhaseOf } from "./state-projections";
 

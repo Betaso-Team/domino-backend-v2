@@ -2,7 +2,7 @@ import { type SchemaType, schema, t } from "@colyseus/schema";
 import { BoardState } from "./board";
 import { BoneyardState } from "./boneyard";
 
-// Las dos uniones se declaran en `rules/phases.js` —son vocabulario del juego, no del wire— y
+// Las dos uniones se declaran en `rules/phases` —son vocabulario del juego, no del wire— y
 // se re-exportan acá, que es de donde las importaba todo el mundo. El plazo del turno se
 // re-estampa entero al volver de `NEGOTIATING_BET`, que es lo que evita que negociar le coma el
 // reloj al que no propuso; el resto de la historia de las fases está allá.

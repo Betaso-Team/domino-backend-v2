@@ -1,7 +1,7 @@
 import type { PlayerId, TeamId } from "../../ids";
 import { canAct } from "../../rules/legality";
 import type { MatchView } from "../../rules/view";
-import type { MatchState } from "../../state/index";
+import type { MatchState } from "../../state";
 import { SchemaMatchView } from "../../state/view";
 import { assertLegal } from "../errors";
 import { hasTeamAbandoned, opponentTeam, scoreboardOf } from "../state-projections";

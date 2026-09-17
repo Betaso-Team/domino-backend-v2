@@ -1,6 +1,6 @@
 // src/features/match/core/engine/tests/state-projections.test.ts
 import { describe, expect, it } from "vitest";
-import { BoardState, BoneyardState, MatchState, RoundState, Turn } from "../../state/index";
+import { BoardState, BoneyardState, MatchState, RoundState, Turn } from "../../state";
 import { InvariantViolationError } from "../errors";
 import { createMatchState } from "../genesis";
 import {

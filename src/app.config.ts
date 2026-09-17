@@ -1,5 +1,5 @@
-import { GameModeService, registerGameModeHttp } from "@/features/game-mode/index";
-import { LobbyRoom, LobbySettings, registerLobbyHttp } from "@/features/lobby/index";
+import { GameModeService, registerGameModeHttp } from "@/features/game-mode";
+import { LobbyRoom, LobbySettings, registerLobbyHttp } from "@/features/lobby";
 import {
   type Clock,
   DominoRoom,
@@ -7,7 +7,7 @@ import {
   MatchRegistry,
   registerMatchHttp,
   selectProcessIdToCreateRoom,
-} from "@/features/match/index";
+} from "@/features/match";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, registerHealth } from "@/shared/http/health";
 import { exposeServerTime } from "@/shared/http/server-time";

@@ -1,6 +1,6 @@
 import type { BetLevel } from "../../config";
 import type { PlayerId } from "../../ids";
-import type { MatchState } from "../../state/index";
+import type { MatchState } from "../../state";
 import { BetOffer } from "../../state/round";
 import { currentRoundOf } from "../state-projections";
 

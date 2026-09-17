@@ -1,7 +1,7 @@
 import { rootContainer } from "@/di-container";
-import { InvalidTokenError, type TokenVerifier } from "@/features/auth/index";
-import type { GameModeReader } from "@/features/game-mode/index";
-import { LobbySettings, MaintenanceModeError } from "@/features/lobby/index";
+import { InvalidTokenError, type TokenVerifier } from "@/features/auth";
+import type { GameModeReader } from "@/features/game-mode";
+import { LobbySettings, MaintenanceModeError } from "@/features/lobby";
 import type { Logger } from "@/logger";
 import { StateView } from "@colyseus/schema";
 import {
@@ -23,9 +23,9 @@ import {
 import { RuleViolationError } from "../../core/engine/errors";
 import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
-import type { MatchState } from "../../core/state/index";
+import type { MatchState } from "../../core/state";
+import { MatchEventNotifier, type MatchHistory } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
-import { MatchEventNotifier, type MatchHistory } from "../../network/index";
 import { type SeatCredentials, UnknownGameModeError, configOf, requestOf } from "../match-contract";
 import { HEARTBEAT_MS, MatchRegistry } from "../match-registry";
 import {

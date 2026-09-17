@@ -1,5 +1,5 @@
 import { rootContainer } from "@/di-container";
-import type { TokenVerifier } from "@/features/auth/index";
+import type { TokenVerifier } from "@/features/auth";
 import type { Logger } from "@/logger";
 import { type AuthContext, type Client, Room, matchMaker } from "colyseus";
 import { DEFAULT_MAINTENANCE_MESSAGE, GameModeCount, LobbyRoomState } from "../../core/state";

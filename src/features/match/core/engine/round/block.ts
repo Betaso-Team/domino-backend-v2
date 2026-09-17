@@ -2,7 +2,7 @@ import type { PlayerId } from "../../ids";
 import { boardEndsOf } from "../../rules/board-ends";
 import { hasPlayableTile } from "../../rules/playable";
 import { handValue } from "../../rules/tiles";
-import type { MatchState } from "../../state/index";
+import type { MatchState } from "../../state";
 import { currentRoundOf, roundActivePlayers } from "../state-projections";
 
 // TRANCA: nadie puede jugar ni siquiera con las fichas que quedan en el pozo. No alcanza

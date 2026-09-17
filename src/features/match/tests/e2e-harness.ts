@@ -11,7 +11,7 @@ import jwt from "jsonwebtoken";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
 import { boardEndsOf } from "../core/rules/board-ends";
 import { playableSides } from "../core/rules/playable";
-import type { MatchState } from "../core/state/index";
+import type { MatchState } from "../core/state";
 import type { BoardSide } from "../core/state/tile";
 import type { HistoryEntry, HistoryReader } from "../network/history";
 import {

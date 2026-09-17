@@ -1,6 +1,6 @@
 import type { Logger } from "@/logger";
 import type { DominoMatchConfig, MatchSeat } from "../core/config";
-import type { MatchState } from "../core/state/index";
+import type { MatchState } from "../core/state";
 import type { NetworkMatchEvent } from "./events";
 import type { MatchEventListener } from "./listeners";
 import type { LeagueFeed, LeaguePlayer, RankingFeed } from "./standings";

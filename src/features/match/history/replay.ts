@@ -12,7 +12,7 @@ import { deadlineKindOf } from "../core/engine/deadline-kind";
 import type { TimeoutScheduler } from "../core/engine/timeout-scheduler";
 import type { SchemaVisibilityController } from "../core/engine/visibility";
 import type { MatchEvent } from "../core/events";
-import type { MatchState } from "../core/state/index";
+import type { MatchState } from "../core/state";
 import type { HistoryEntry } from "../network/history";
 import { buildEngineGraph } from "./engine-factory";
 

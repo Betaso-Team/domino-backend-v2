@@ -1,4 +1,4 @@
-import type { GameMode } from "@/features/game-mode/index";
+import type { GameMode } from "@/features/game-mode";
 import { describe, expect, it } from "vitest";
 import { configOf, replayConfigOf, requestOf } from "./match-contract";
 

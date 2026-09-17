@@ -9,7 +9,7 @@ import type { RoundReferee } from "./round/referee";
 // YA NO COMPONE, SOLO REENVÍA, y la diferencia es dónde vive el orden de las guardas. Antes cada
 // método de acá encadenaba `assertIsPlaying` con el juez de la ronda, así que la secuencia
 // —y con ella qué motivo ve el jugador— estaba repartida entre este archivo y el otro. Ahora la
-// secuencia completa es de `rules/legality.js`, que la declara una vez por verbo y la deja
+// secuencia completa es de `rules/legality`, que la declara una vez por verbo y la deja
 // probar sin pasar por dos actores.
 export class Referee {
   constructor(

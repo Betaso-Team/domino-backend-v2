@@ -1,8 +1,8 @@
 import { hashSeed, mulberry32, shuffled } from "@/shared/rng";
 import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../config";
 import { orderedTileSet } from "../rules/tiles";
-import { Tile } from "../state/index";
-import type { MatchState } from "../state/index";
+import { Tile } from "../state";
+import type { MatchState } from "../state";
 import { boneyardOf, currentRoundOf, playerOf } from "./state-projections";
 
 // Repartir no revela: Dealer no recibe el puerto de visibilidad. La única fuente de

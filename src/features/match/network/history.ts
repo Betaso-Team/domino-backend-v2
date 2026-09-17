@@ -6,7 +6,7 @@
 // nada: un historial de solo eventos tendría los desenlaces y ninguna jugada.
 import type { CommandPayloads } from "../core/command";
 import type { Clock } from "../core/engine/clock";
-import type { MatchState } from "../core/state/index";
+import type { MatchState } from "../core/state";
 import type { NetworkMatchEvent } from "./events";
 
 // EL VOCABULARIO DEL HISTORIAL ES CERRADO, y eso es el punto entero de la corrección

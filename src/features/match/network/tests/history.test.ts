@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Clock } from "../../core/engine/clock";
 import { createMatchState } from "../../core/engine/genesis";
-import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state/index";
+import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state";
 import { replayConfigOf } from "../../transports/match-contract";
 import type { HistoryEntry, HistoryPort } from "../history";
 import { MatchHistory } from "../history";

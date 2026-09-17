@@ -1,6 +1,6 @@
 import type { PlayerId } from "../ids";
-import { RoundSummary } from "../state/index";
-import type { MatchState } from "../state/index";
+import { RoundSummary } from "../state";
+import type { MatchState } from "../state";
 import type { RoundEndReason } from "../state/round";
 import { scoreboardOf, teamOf } from "./state-projections";
 

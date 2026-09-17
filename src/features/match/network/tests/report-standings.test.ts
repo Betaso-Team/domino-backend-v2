@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DominoMatchConfig } from "../../core/config";
 import { createMatchState } from "../../core/engine/genesis";
 import { matchConfig } from "../../core/engine/tests/match-config-fixture";
-import type { MatchState } from "../../core/state/index";
+import type { MatchState } from "../../core/state";
 import { reportStandings } from "../report-standings";
 import type { LeagueResult, RankingParticipation } from "../standings";
 

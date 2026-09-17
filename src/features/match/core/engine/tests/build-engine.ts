@@ -6,14 +6,14 @@ import {
   ProposeBetMultiplierCommand,
   RespondBetMultiplierCommand,
   RevealTilesCommand,
-} from "../../commands/index";
+} from "../../commands";
 import type { BetLevel, DominoMatchConfig, GlobalDominoConfig } from "../../config";
 import { DEFAULT_GLOBAL_CONFIG, playerIdsOf } from "../../config";
 import type { MatchEvent } from "../../events";
-import type { MatchState } from "../../state/index";
-import { Tile } from "../../state/index";
+import type { MatchState } from "../../state";
+import { Tile } from "../../state";
 import type { BoardSide } from "../../state/tile";
-import { BetNegotiation, BetReferee } from "../bet/index";
+import { BetNegotiation, BetReferee } from "../bet";
 import type { Clock } from "../clock";
 import { Dealer } from "../dealer";
 import { createMatchState } from "../genesis";

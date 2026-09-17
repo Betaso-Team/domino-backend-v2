@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG } from "../../config";
 import { DOMINO_SET_SIZE, handValue, sameTile } from "../../rules/tiles";
-import { BoardState, BoneyardState, RoundState, Tile } from "../../state/index";
+import { BoardState, BoneyardState, RoundState, Tile } from "../../state";
 import { Dealer } from "../dealer";
 import { createMatchState } from "../genesis";
 import { handOf } from "../state-projections";

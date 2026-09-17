@@ -1,7 +1,7 @@
 import type { GlobalDominoConfig } from "../../config";
 import type { MatchEvent } from "../../events";
 import type { PlayerId } from "../../ids";
-import type { MatchState } from "../../state/index";
+import type { MatchState } from "../../state";
 import type { Clock } from "../clock";
 import { deadlineKindOf } from "../deadline-kind";
 import type { Driver, RoundAction, TransitionResult } from "../driver";

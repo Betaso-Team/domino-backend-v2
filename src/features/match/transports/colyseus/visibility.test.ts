@@ -1,7 +1,7 @@
 import { Encoder, StateView } from "@colyseus/schema";
 import { describe, expect, it } from "vitest";
 import { InvariantViolationError } from "../../core/engine/errors";
-import { Hand, Tile } from "../../core/state/index";
+import { Hand, Tile } from "../../core/state";
 import { StateViewVisibilityController } from "./visibility";
 
 function build() {

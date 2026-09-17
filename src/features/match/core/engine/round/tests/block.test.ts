@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BoardState, BoneyardState, PlacedTile, RoundState, Tile } from "../../../state/index";
+import { BoardState, BoneyardState, PlacedTile, RoundState, Tile } from "../../../state";
 import { createMatchState } from "../../genesis";
 import { handOf } from "../../state-projections";
 import { matchConfig } from "../../tests/match-config-fixture";

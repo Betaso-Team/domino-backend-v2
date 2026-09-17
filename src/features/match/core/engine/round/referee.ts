@@ -10,14 +10,14 @@ import {
 import { tileInHand } from "../../rules/projections";
 import type { TileLike } from "../../rules/tiles";
 import type { MatchView } from "../../rules/view";
-import type { MatchState } from "../../state/index";
+import type { MatchState } from "../../state";
 import type { BoardSide } from "../../state/tile";
 import { SchemaMatchView } from "../../state/view";
 import { assertLegal } from "../errors";
 
 // JUEZ de la RONDA. Read-only: valida y deriva, no muta.
 //
-// YA NO DECIDE NADA, y eso es todo lo que cambió: la decisión vive en `rules/legality.js`, que
+// YA NO DECIDE NADA, y eso es todo lo que cambió: la decisión vive en `rules/legality`, que
 // dictamina en vez de lanzar. Acá quedó el MECANISMO —leer el veredicto y cortar el comando— más
 // las dos derivaciones que el conductor le pregunta. Es lo que deja que la misma regla la corra
 // el cliente para apagar un botón, sin un `try/catch` y sin copiarla.

@@ -96,7 +96,7 @@ export interface DominoMatchConfig {
   readonly isFreeRoom: boolean;
 }
 
-// El nivel se declara en `rules/config.js` —es lo que la legalidad de una oferta JUZGA, así que
+// El nivel se declara en `rules/config` —es lo que la legalidad de una oferta JUZGA, así que
 // es vocabulario de regla— y se re-exporta acá, que es de donde lo importaba todo el mundo.
 // `DominoMatchConfig` satisface `DominoRulesConfig` por estructura: los dos campos que las
 // reglas necesitan (`betLevels`, `isFreeRoom`) están arriba, sin adaptador y sin cast.

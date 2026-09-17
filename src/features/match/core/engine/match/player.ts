@@ -1,5 +1,5 @@
 import type { PlayerId } from "../../ids";
-import type { MatchState } from "../../state/index";
+import type { MatchState } from "../../state";
 import { playerOf } from "../state-projections";
 
 // ÚNICO escritor de hasAbandoned. Que sea el único es verificable con grep, y es

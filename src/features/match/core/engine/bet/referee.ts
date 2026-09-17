@@ -3,7 +3,7 @@ import type { PlayerId } from "../../ids";
 import type { BetLevel } from "../../rules/config";
 import { betLevelOf, canProposeBet, canRespondBet } from "../../rules/legality";
 import type { MatchView } from "../../rules/view";
-import type { MatchState } from "../../state/index";
+import type { MatchState } from "../../state";
 import { SchemaMatchView } from "../../state/view";
 import { RuleViolationError, assertLegal } from "../errors";
 

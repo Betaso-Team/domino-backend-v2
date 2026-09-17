@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { JwtVerifier } from "@/features/auth/index";
+import { JwtVerifier } from "@/features/auth";
 import {
   type GameModeReader,
   GameModeService,
@@ -8,7 +8,7 @@ import {
   MongoGameModeOutbox,
   MongoGameModeRepository,
   OutboxDispatcher,
-} from "@/features/game-mode/index";
+} from "@/features/game-mode";
 import { LobbySettings } from "@/features/lobby/settings";
 import { type GlobalDominoConfig, globalConfigWith } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
