@@ -1,0 +1,9 @@
+{
+  "name": "matchmaking-mvp",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ioredis": "^5.4.1",
+    "ws": "^8.18.0"
+  }
+}

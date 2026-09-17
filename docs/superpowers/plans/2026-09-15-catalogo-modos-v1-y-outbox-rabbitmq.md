@@ -1,5 +1,12 @@
 # Catálogo de modos v1 y outbox RabbitMQ Implementation Plan
 
+> ⚠ **SUPERSEDIDO EN PARTE (2026-09-17): RabbitMQ y el outbox se eliminaron del repo.** El catálogo
+> vive en Mongo y este servicio lo LEE; quien lo edita es el panel administrativo externo. Todo lo
+> que este documento dice sobre el exchange `betaso`, el outbox durable, el dispatcher, el
+> reconciliador y `POST /game-modes/sync` describe código que ya no existe. Lo demás —la colección de
+> v1, sus defaults e índices, los montos en UC, el lease y las rutas HTTP— sigue vigente. Ver
+> `AGENTS.md`, sección «Incremento completo — catálogo de modos v1 sobre Mongo».
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reemplazar el catálogo de modos de Domino v1 con una implementación v2 compatible con su colección Mongo, API HTTP y eventos RabbitMQ, sin acoplar el juego a Betaso y sin perder cambios cuando el broker esté caído.

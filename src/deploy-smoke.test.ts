@@ -31,11 +31,10 @@ describe("smoke del deploy", () => {
     expect(compose).toContain("target: smoke-client");
   });
 
-  // ⚠ EL `--exit-code-from` YA NO ESTÁ, y su ausencia es la decisión. El runner dejó de ser un
-  // `compose up --abort-on-container-exit` cuando la Tarea 12 sumó el escenario que APAGA y PRENDE
-  // RabbitMQ en el medio: eso no se puede expresar con una sola invocación de Compose. Ahora el
-  // código sale de las fases, y lo que hay que pinear es que se propague el PRIMER no cero —el que
-  // explica— y que la limpieza esté en un `finally` y no al final del camino feliz.
+  // ⚠ EL `--exit-code-from` YA NO ESTÁ, y su ausencia es la decisión: el runner dejó de ser un
+  // `compose up --abort-on-container-exit` para poder correr dos smokes de cliente contra el mismo
+  // stack. Ahora el código sale de esos pasos, y lo que hay que pinear es que se propague el PRIMER
+  // no cero —el que explica— y que la limpieza esté en un `finally` y no al final del camino feliz.
   it("el wrapper exige flag, propaga el primer fallo y limpia pase lo que pase", () => {
     const runner = read("scripts/run-engine-smoke.mjs");
     const processEnv = ["process", "env"].join(".");

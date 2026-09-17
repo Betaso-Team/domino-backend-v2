@@ -62,9 +62,8 @@ export class MemoryGameModeRepository implements GameModeRepository {
       // misma trampa que del lado de Mongo, donde termina siendo un `null` en la base.
       ...definedOf(input),
       updatedAt: new Date(this.clock.now()),
-      // LA REVISIÓN AVANZA DESDE LA REVISIÓN, no desde el reloj. Dos ediciones del mismo
-      // milisegundo tienen que dar 1 y 2: el outbox deduplica por `uuid + version`, y dos cambios
-      // reales con la misma revisión son un evento publicado y otro descartado en silencio.
+      // LA REVISIÓN AVANZA DESDE LA REVISIÓN, no desde el reloj: dos ediciones del mismo
+      // milisegundo tienen que dar 1 y 2, y con el reloj colapsarían en la misma.
       version: current.version + 1,
     };
     this.modes[index] = updated;
@@ -94,7 +93,7 @@ export class MemoryGameModeRepository implements GameModeRepository {
   // algo que el otro adaptador no puede cumplir.
   //
   // Se copia cada modo al salir: quien reciba uno y lo mute cambiaría el catálogo de todos sin
-  // pasar por `update`, o sea sin avanzar la revisión que el outbox mira.
+  // pasar por `update`, o sea sin avanzar la revisión.
   private newestFirst(modes: readonly GameMode[]): readonly GameMode[] {
     return [...modes]
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())

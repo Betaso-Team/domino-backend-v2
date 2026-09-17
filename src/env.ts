@@ -199,21 +199,6 @@ const schema = z.object({
    */
   REDIS_URL: z.string().min(1).optional(),
   /**
-   * LA URL DEL BROKER (`amqp://usuario:clave@host:puerto`), por donde salen los eventos del
-   * catálogo de modos (`game_mode.created` / `game_mode.updated`) hacia el exchange `betaso`.
-   *
-   * OPCIONAL, Y SU PRESENCIA ES LA QUE ELIGE, igual que `MONGO_URI` y `REDIS_URL`: sin ella no se
-   * construye ningún publicador y el despachador del outbox no arranca. Eso NO pierde eventos —el
-   * outbox es durable y sigue acumulando—, que es exactamente el punto de que la entrega esté
-   * desacoplada del request administrativo. No hay ningún `AMQP_DRIVER` ni lo va a haber, por la
-   * misma razón que no hay `HISTORY_DRIVER`: un interruptor que NOMBRA la implementación deja
-   * escribir "rabbit" sin URL.
-   *
-   * NO tiene default: un default haría que una instancia mal configurada arranque creyendo que
-   * publica, contra un broker que no es el suyo o que no existe.
-   */
-  RABBITMQ_URL: z.string().min(1).optional(),
-  /**
    * CÓMO SE LLEGA A ESTE PROCESO DESDE AFUERA, sin el puerto. Colyseus se lo manda al cliente en
    * la reserva de asiento, y por eso cada instancia anuncia la SUYA: con las salas repartidas, el
    * jugador tiene que conectarse al proceso que hospeda la suya, no a cualquiera.
@@ -267,8 +252,6 @@ export interface Env {
   readonly mongoUri: string | undefined;
   /** `undefined` ⇒ este proceso es un clúster de uno: driver, presence y registro locales. */
   readonly redisUrl: string | undefined;
-  /** `undefined` ⇒ esta instancia no publica: el outbox acumula. Ver RABBITMQ_URL. */
-  readonly rabbitmqUrl: string | undefined;
   /** `undefined` ⇒ este proceso no anuncia dirección. Ver SERVER_ADDRESS. */
   readonly publicAddress: string | undefined;
   readonly turnTimeoutMs: number;
@@ -292,14 +275,13 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     throw new Error(`Entorno inválido — ${detail}`);
   }
   const parsed = result.data;
-  // EN PRODUCCIÓN LAS TRES SON OBLIGATORIAS, y la asimetría con el schema es la decisión: para zod
+  // EN PRODUCCIÓN LAS DOS SON OBLIGATORIAS, y la asimetría con el schema es la decisión: para zod
   // siguen siendo opcionales porque FUERA de producción "ausente" es una elección legítima —una
   // instancia sola, sin infraestructura, que es el despliegue de desarrollo y el de la suite—.
-  // Adentro de producción las tres ausencias fallan en SILENCIO, que es lo que las hace caras:
+  // Adentro de producción las dos ausencias fallan en SILENCIO, que es lo que las hace caras:
   // sin `MONGO_URI` el proceso arranca creyendo que persiste y el catálogo entero muere con él;
-  // sin `RABBITMQ_URL` el outbox acumula eventos que nadie va a publicar nunca, y el consumidor
-  // se queda con un catálogo viejo sin que falle nada de los dos lados; sin `INTERNAL_API_KEY`
-  // las mutaciones no se registran y el panel recibe 404 donde espera administrar.
+  // sin `INTERNAL_API_KEY` las mutaciones no se registran y el panel recibe 404 donde espera
+  // administrar.
   //
   // UN SOLO ERROR QUE LAS ENUMERA, no el primero que aparece: corregir de a una es un despliegue
   // productivo por variable, y cada intento cuesta una ventana. Es el mismo criterio con el que
@@ -308,7 +290,6 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     const faltan = (
       [
         ["MONGO_URI", parsed.MONGO_URI],
-        ["RABBITMQ_URL", parsed.RABBITMQ_URL],
         ["INTERNAL_API_KEY", parsed.INTERNAL_API_KEY],
       ] as const
     )
@@ -328,7 +309,6 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     internalApiKey: parsed.INTERNAL_API_KEY,
     mongoUri: parsed.MONGO_URI,
     redisUrl: parsed.REDIS_URL,
-    rabbitmqUrl: parsed.RABBITMQ_URL,
     // TRES CASOS (ver SERVER_ADDRESS). El puerto va COMO PATH y no como `host:puerto` —es el
     // esquema de v1, lo que hace que el proxy que ya rutea v1 rutee esto sin aprender nada— y es
     // el EFECTIVO, no la base. Se arma acá —el único lector del entorno— y no en el composition

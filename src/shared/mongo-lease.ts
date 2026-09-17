@@ -5,8 +5,7 @@ import type { Collection, Document } from "mongodb";
 // pisen el mismo trabajo administrativo: el catálogo de modos no tiene un índice único sobre
 // `name + playersQuantity` —v1 no lo tiene y esta migración conserva la colección tal cual—, así que
 // la regla de "no repetir" es una consulta seguida de una escritura. Sin lease, dos procesos pasan
-// los dos la consulta y insertan los dos. Lo mismo del otro lado: dos dispatchers del outbox
-// publicarían el mismo evento.
+// los dos la consulta y insertan los dos.
 //
 // ⚠ **v1 NO SERIALIZA NADA DE ESTO, y por eso esta pieza es nueva y no un port.** Su
 // `GameModeService.create` hace `findOne({ name, playersQuantity })` y después `create(...)` sin
@@ -16,10 +15,9 @@ import type { Collection, Document } from "mongodb";
 // del matchmaking del lobby (`rooms/domino-four-room.ts:47`, `rooms/lobby-room.ts:42`) — el catálogo
 // no toca ninguno. O sea: v2 es estrictamente más fuerte que v1 acá, no compatible-y-distinto.
 //
-// Vive en `shared/` porque su ciclo de vida es del PROCESO y no de una feature, y porque lo usan dos
-// consumidores de la misma feature por caminos distintos (el servicio del catálogo y el dispatcher
-// del outbox). No importa nada de `features/`: es la regla de imports que lo obliga y también lo que
-// lo hace verdad — un lease no sabe qué se serializa adentro.
+// Vive en `shared/` porque su ciclo de vida es del PROCESO y no de una feature. No importa nada de
+// `features/`: es la regla de imports que lo obliga y también lo que lo hace verdad — un lease no
+// sabe qué se serializa adentro.
 
 // LA COLECCIÓN, en una constante y no en una variable de entorno, por el mismo argumento que
 // `HISTORY_COLLECTION` y `GAME_MODE_COLLECTION`: el dominó es su único escritor, así que un nombre
@@ -36,12 +34,11 @@ const DUPLICATE_KEY = 11000;
 
 // LA PRIMITIVA, y es una sola. `within` corre el trabajo SÓLO si consiguió el lease.
 //
-// **`undefined` SIGNIFICA "NO SE ADQUIRIÓ", y es un desenlace normal y no un error.** De eso cuelgan
-// los dos consumidores: el servicio del catálogo lo convierte en un 503 (`GameModeWriteBusyError`) y
-// el dispatcher del outbox se saltea el tick. Un `within` que lanzara en vez de devolver `undefined`
-// haría que un catálogo ocupado se viera como una caída, y el operador buscaría el problema en la
-// base. El precio del contrato está escrito: un `work()` que devuelve `undefined` de verdad no se
-// distingue de un lease no adquirido. Ninguno de los dos llamadores lo hace.
+// **`undefined` SIGNIFICA "NO SE ADQUIRIÓ", y es un desenlace normal y no un error.** El servicio
+// del catálogo lo convierte en un 503 (`GameModeWriteBusyError`); un `within` que lanzara en vez de
+// devolver `undefined` haría que un catálogo ocupado se viera como una caída, y el operador buscaría
+// el problema en la base. El precio del contrato está escrito: un `work()` que devuelve `undefined`
+// de verdad no se distingue de un lease no adquirido, y el llamador no lo hace.
 //
 // NO RENUEVA el lease mientras el trabajo corre, y eso es deliberado. Lo que hay que saber: si
 // `work()` tarda MÁS que `ttlMs`, otro proceso puede tomar el lease y ejecutar en paralelo, y el
@@ -76,7 +73,7 @@ export interface Clock {
 // aparte: el `_id` ya es único por construcción, así que la unicidad la da la base sin un índice que
 // crear ni mantener — y por eso este adaptador no llama `createIndexes` ni memoiza la colección.
 //
-// Sin TTL index: los documentos son DOS (`catalog-writer` y `outbox-publisher`) y no crecen. Un
+// Sin TTL index: el documento es UNO (`catalog-writer`) y no crece. Un
 // índice TTL borraría el documento vencido en segundo plano, que es trabajo de la base para algo que
 // el filtro de adquisición ya resuelve leyendo `until`.
 export interface LeaseDocument {
@@ -116,10 +113,9 @@ export class MongoLease implements Lease {
       await this.release(name).catch(() => {});
       throw error;
     }
-    // Acá, en cambio, el fallo SÍ sube: el trabajo salió bien y lo único que falló es la base. Es la
-    // misma ambigüedad que la spec ya declara para la ventana modo→outbox (§9.2, "el HTTP devuelve
-    // 503 aunque el cambio puede haber quedado aplicado; el orquestador debe releer el catálogo
-    // antes de reintentar"), y tragársela acá sería inventar una segunda regla para el mismo caso.
+    // Acá, en cambio, el fallo SÍ sube: el trabajo salió bien y lo único que falló es la base. El
+    // HTTP devuelve 503 aunque el cambio puede haber quedado aplicado, y quien reintente tiene que
+    // releer el catálogo antes. Tragárselo acá sería mentir sobre lo que pasó.
     await this.release(name);
     return result;
   }

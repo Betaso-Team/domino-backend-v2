@@ -63,17 +63,6 @@ delete process.env.MONGO_URI;
 // Es además lo que garantiza que `npm test` no dependa de NINGÚN servicio externo: sin esta
 // línea la propiedad no sería del repo sino del entorno de quien lo corre.
 delete process.env.REDIS_URL;
-// SE BORRA POR LA TERCERA VEZ Y POR LA MISMA RAZÓN. La presencia de `RABBITMQ_URL` es lo que hace
-// que el composition root construya un `AmqpPublisher` y arranque el despachador del outbox: un
-// desarrollador que la tenga exportada en su shell —porque corre el truco al lado, o el compose de
-// otro proyecto— haría que `npm test` abra una conexión de verdad al broker y PUBLIQUE eventos de
-// catálogo al exchange `betaso` compartido, desde cuarenta archivos que corren en paralelo.
-//
-// Y acá el daño sale del repo: los otros dos ensucian una base que es nuestra, éste le manda
-// mensajes a los CONSUMIDORES de otro sistema. `amqplib` con `recovery: true` además no rechaza
-// cuando el broker no está —cuelga, ver `src/shared/amqp.ts`—, así que el modo de falla del
-// olvido no sería un rojo sino una suite que se queda esperando.
-delete process.env.RABBITMQ_URL;
 process.env.PORT ??= "2567";
 process.env.PRESENTING_MATCH_MS ??= "120";
 process.env.PRESENTING_ROUND_MS ??= "120";

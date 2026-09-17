@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel del orquestador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #eef1f0;
+    --surface: #f8faf9;
+    --ink: #10181a;
+    --muted: #57676a;
+    --line: #d3dbda;
+    --line-soft: #e2e8e7;
+    --accent: #0c6b6e;
+    --accent-ink: #ffffff;
+    --accent-soft: #e0eeed;
+    --signal: #8c5200;
+    --signal-soft: #f6ead9;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0c1112; --surface: #141b1c; --ink: #e2e9e7; --muted: #8b9c9d;
+      --line: #273234; --line-soft: #1d2627; --accent: #46b5b1; --accent-ink: #06201f;
+      --accent-soft: #13302f; --signal: #d9a03f; --signal-soft: #2c2314;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--display); font-size: 15px; padding: 2rem 1.25rem 4rem;
+  }
+  .hoja { max-width: 62rem; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem; }
+  header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 1rem; }
+  h1 { font-size: 1.2rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sub { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .cifras { display: flex; flex-wrap: wrap; gap: 1.6rem; }
+  .cifra { display: flex; flex-direction: column; gap: 0.15rem; }
+  .cifra b { font-family: var(--mono); font-size: 1.5rem; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; }
+  .cifra span { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  section { display: flex; flex-direction: column; gap: 0.75rem; }
+  h2 { font-size: 0.95rem; font-weight: 600; margin: 0; }
+  .barra { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  button {
+    font-family: var(--display); font-size: 0.82rem; font-weight: 600;
+    padding: 0.5rem 0.8rem; border: 1px solid var(--line); border-radius: 3px;
+    background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  button.fuerte { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  button.chico { font-size: 0.72rem; padding: 0.28rem 0.5rem; font-weight: 500; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .scroll { overflow-x: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  table { border-collapse: collapse; width: 100%; min-width: 40rem; }
+  th {
+    font-family: var(--mono); font-weight: 500; font-size: 0.64rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--muted); text-align: left;
+    padding: 0.6rem 0.9rem 0.6rem 0; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 0.55rem 0.9rem 0.55rem 0; border-bottom: 1px solid var(--line-soft); font-family: var(--mono); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: 0; }
+  th:last-child, td:last-child { padding-right: 0; }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 0.68rem; padding: 0.12rem 0.45rem; border-radius: 2px; }
+  .pill.busca { background: var(--signal-soft); color: var(--signal); }
+  .pill.sala { background: var(--accent-soft); color: var(--accent); }
+  .pill.libre { color: var(--muted); }
+  .nivel { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.1rem 0.4rem; border-radius: 2px; border: 1px solid var(--line); color: var(--muted); }
+  .nivel.medio { border-color: var(--signal); color: var(--signal); }
+  .nivel.avanzado { border-color: var(--accent); color: var(--accent); }
+  .grupo { display: grid; grid-template-columns: 6rem auto auto; gap: 0.5rem; align-items: center; max-width: 24rem; }
+  .grupo .quien { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .reglas { display: flex; flex-wrap: wrap; gap: 0.5rem 1.4rem; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+  .reglas b { color: var(--ink); font-weight: 500; }
+  .tenue { color: var(--muted); }
+  .vacio { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); padding: 0.8rem 0; }
+  a { color: var(--muted); font-family: var(--mono); font-size: 0.72rem; }
+</style>
+</head>
+<body>
+<div class="hoja">
+  <header>
+    <div>
+      <div class="sub">Panel · solo lectura + bots</div>
+      <h1>Orquestador <span id="orq" class="tenue">—</span></h1>
+    </div>
+    <div class="cifras">
+      <div class="cifra"><b id="c-total">0</b><span>en la pool</span></div>
+      <div class="cifra"><b id="c-busca">0</b><span>buscando</span></div>
+      <div class="cifra"><b id="c-sala">0</b><span>en sala</span></div>
+      <div class="cifra"><b id="c-salas">0</b><span>salas</span></div>
+      <div class="cifra"><b id="c-bots">0</b><span>bots</span></div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Bots</h2>
+    <div class="grupo">
+      <span class="quien">Básico</span>
+      <button class="fuerte" data-bots="1" data-busca="1" data-nivel="basico">+1 buscando</button>
+      <button data-bots="1" data-busca="0" data-nivel="basico">+1 quieto</button>
+
+      <span class="quien">Medio</span>
+      <button class="fuerte" data-bots="1" data-busca="1" data-nivel="medio">+1 buscando</button>
+      <button data-bots="1" data-busca="0" data-nivel="medio">+1 quieto</button>
+
+      <span class="quien">Avanzado</span>
+      <button class="fuerte" data-bots="1" data-busca="1" data-nivel="avanzado">+1 buscando</button>
+      <button data-bots="1" data-busca="0" data-nivel="avanzado">+1 quieto</button>
+    </div>
+    <div class="barra">
+      <button id="vaciar">Vaciar bots</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Regla de espera</h2>
+    <div class="reglas">
+      <span>misma categoría · <b>al instante</b></span>
+      <span>Básico ↔ Medio · <b>5 s</b></span>
+      <span>Medio ↔ Avanzado · <b>5 s</b></span>
+      <span>Básico ↔ Avanzado · <b>10 s</b></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Conexiones</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Nombre</th><th>Categoría</th><th>userId</th><th>Tipo</th><th>Orquestador</th><th>Estado</th><th>Acción</th></tr>
+        </thead>
+        <tbody id="usuarios"></tbody>
+      </table>
+    </div>
+    <div class="vacio" id="sin-usuarios" hidden>nadie conectado</div>
+  </section>
+
+  <section>
+    <h2>Salas</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Sala</th><th>Jugadores</th><th>Cruce</th><th>Dentro</th><th>Edad</th></tr>
+        </thead>
+        <tbody id="salas"></tbody>
+      </table>
+    </div>
+    <div class="vacio" id="sin-salas" hidden>ninguna sala abierta</div>
+  </section>
+
+  <a href="/">← ir a la página de jugador</a>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id)
+  const NIVELES = ['basico', 'medio', 'avanzado']
+  const ETIQUETA = { basico: 'Básico', medio: 'Medio', avanzado: 'Avanzado' }
+  const chip = (n) => '<span class="nivel ' + n + '">' + ETIQUETA[n] + '</span>'
+
+  const reloj = (ms, ahora) => {
+    const s = Math.max(0, Math.floor((ahora - ms) / 1000))
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
+  }
+
+  const pedir = (ruta, metodo, cuerpo) =>
+    fetch(ruta, {
+      method: metodo,
+      headers: { 'content-type': 'application/json' },
+      body: cuerpo ? JSON.stringify(cuerpo) : undefined
+    })
+
+  for (const b of document.querySelectorAll('[data-bots]'))
+    b.onclick = () =>
+      pedir('/admin/bots', 'POST', {
+        cantidad: Number(b.dataset.bots),
+        buscando: b.dataset.busca === '1',
+        nivel: b.dataset.nivel
+      }).then(refrescar)
+
+  $('vaciar').onclick = () => pedir('/admin/bots', 'DELETE').then(refrescar)
+
+  const alternar = (userId, buscando) =>
+    pedir('/admin/buscar', 'POST', { userId, buscando }).then(refrescar)
+
+  window.alternar = alternar
+
+  const refrescar = async () => {
+    const e = await (await fetch('/admin/estado')).json()
+    $('orq').textContent = e.orquestador
+
+    const buscando = e.usuarios.filter((u) => u.buscando)
+    const enSala = e.usuarios.filter((u) => u.sala)
+    const bots = e.usuarios.filter((u) => u.esBot)
+
+    $('c-total').textContent = e.usuarios.length
+    $('c-busca').textContent = buscando.length
+    $('c-sala').textContent = enSala.length
+    $('c-salas').textContent = e.salas.length
+    $('c-bots').textContent = bots.length
+
+    $('usuarios').innerHTML = e.usuarios
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+      .map((u) => {
+        const estado = u.sala
+          ? '<span class="pill sala">en sala ' + u.sala + '</span>'
+          : u.buscando
+            ? '<span class="pill busca">buscando ' + reloj(u.desde, e.ahora) + '</span>'
+            : '<span class="pill libre">libre</span>'
+        const accion = u.esBot
+          ? '<button class="chico" onclick="alternar(\'' + u.userId + '\', ' + (u.buscando ? 'false' : 'true') + ')">' +
+            (u.buscando ? 'parar' : 'buscar') + '</button>'
+          : '<span class="tenue">—</span>'
+        return (
+          '<tr><td>' + u.nombre + '</td><td>' + chip(u.nivel) + '</td><td class="tenue">' + u.userId +
+          '</td><td>' + (u.esBot ? 'bot' : 'humano') + '</td><td class="tenue">' + u.orquestador +
+          '</td><td>' + estado + '</td><td>' + accion + '</td></tr>'
+        )
+      })
+      .join('')
+    $('sin-usuarios').hidden = e.usuarios.length > 0
+
+    $('salas').innerHTML = e.salas
+      .sort((a, b) => b.creada - a.creada)
+      .map((s) => {
+        const d = Math.abs(NIVELES.indexOf(s.jugadores[0].nivel) - NIVELES.indexOf(s.jugadores[1].nivel))
+        const cruce = d === 0 ? '<span class="tenue">mismo nivel</span>' : 'distancia ' + d
+        return (
+          '<tr><td>' + s.salaId + '</td><td>' +
+          s.jugadores.map((j) => j.nombre + ' ' + chip(j.nivel)).join(' + ') +
+          '</td><td>' + cruce + '</td><td>' + s.conectados.length + '/' + s.jugadores.length +
+          '</td><td class="tenue">' + reloj(s.creada, e.ahora) + '</td></tr>'
+        )
+      })
+      .join('')
+    $('sin-salas').hidden = e.salas.length > 0
+  }
+
+  refrescar()
+  setInterval(refrescar, 1000)
+</script>
+</body>
+</html>

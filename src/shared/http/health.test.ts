@@ -54,36 +54,6 @@ describe("los dos chequeos del balanceador", () => {
     await server.close();
   });
 
-  // RABBIT ENTRA AL MAPA COMO TERCERA DEPENDENCIA DURA, y su chequeo es `ping()`: abre el canal
-  // SIN publicar, porque una sonda que publicara mandaría un evento de catálogo a los consumidores
-  // en cada latido del balanceador.
-  //
-  // ⚠ SE MIDE CON `colgada` Y NO CON `caída`, y ésa es la parte que importa: `amqplib` con
-  // `recovery: true` usa `maxRetries: Infinity`, así que contra un broker apagado el connect NO
-  // rechaza — se queda esperando (§`src/shared/amqp.ts`). Lo único que convierte eso en un 503 es
-  // el plazo POR CHEQUEO de este archivo. Un test con una promesa rechazada daría verde aunque el
-  // plazo no existiera, y el síntoma en producción sería un `/ready` que no contesta NADA: el
-  // balanceador sacaría la instancia por timeout suyo, sin decir qué falta.
-  it("LISTO nombra a rabbit cuando el broker cuelga en vez de rechazar", async () => {
-    const server = await serve({ mongo: arriba, redis: arriba, rabbit: colgada }, 30);
-
-    const response = await server.get("/ready");
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ status: "not-ready", missing: ["rabbit"] });
-    await server.close();
-  });
-
-  // Y VIVO SIGUE EN 200 CON EL BROKER COLGADO, por lo mismo que con Mongo: el dominó sigue jugando
-  // sin publicar. Los eventos quedan en el outbox durable y salen cuando el broker vuelve; reiniciar
-  // la instancia no arreglaría el broker y sí se llevaría puestas las partidas en curso.
-  it("VIVO contesta 200 con el broker colgado", async () => {
-    const server = await serve({ mongo: arriba, redis: arriba, rabbit: colgada }, 30);
-
-    expect((await server.get("/health")).status).toBe(200);
-    await server.close();
-  });
-
   it("con todo arriba los dos contestan que sí", async () => {
     const server = await serve({ mongo: arriba, redis: arriba });
 

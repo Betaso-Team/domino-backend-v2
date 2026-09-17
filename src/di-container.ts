@@ -6,11 +6,8 @@ import { JwtVerifier } from "./features/auth/index.js";
 import {
   type GameModeReader,
   GameModeService,
-  MemoryGameModeOutbox,
   MemoryGameModeRepository,
-  MongoGameModeOutbox,
   MongoGameModeRepository,
-  OutboxDispatcher,
 } from "./features/game-mode/index.js";
 import { LobbySettings } from "./features/lobby/settings.js";
 import { type GlobalDominoConfig, globalConfigWith } from "./features/match/core/config.js";
@@ -20,7 +17,6 @@ import { MemoryHistory } from "./features/match/network/transports/memory-histor
 import { MongoHistory } from "./features/match/network/transports/mongo-history.js";
 import { MatchRegistry } from "./features/match/transports/match-registry.js";
 import { type Logger, logger } from "./logger.js";
-import { AmqpPublisher } from "./shared/amqp.js";
 import { type KeyValueStore, MemoryKeyValueStore } from "./shared/kv.js";
 import { type Lease, MemoryLease, MongoLease } from "./shared/mongo-lease.js";
 import { Mongo } from "./shared/mongo.js";
@@ -118,47 +114,19 @@ const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
 rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
 rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
 
-// EL PUBLICADOR DEL BROKER, que es la ÚNICA instancia del proceso: `AmqpPublisher` memoiza una
-// conexión y un canal confirm adentro, así que dos instancias serían dos conexiones al mismo
-// broker y ninguna de las dos sabría de la otra al cerrarse.
-//
-// LA PRESENCIA DE LA URL ELIGE, igual que `MONGO_URI` y `REDIS_URL`, y `undefined` acá NO es una
-// falla: el outbox es durable y sigue acumulando. Se exporta por lo mismo que `mongo` —para que
-// `app.config.ts` lo meta en readiness y `main.ts` lo cierre—, y para nada más: publicar es cosa
-// del despachador.
-export const amqp = env.rabbitmqUrl ? new AmqpPublisher(env.rabbitmqUrl, logger) : undefined;
-
 // EL CATÁLOGO DE MODOS, que desde la Tarea 10 es la AUTORIDAD sobre la economía de una mesa: la
 // sala resuelve acá el modo que el request nombró y de él salen `pointsToWin`, `entryFee` y
 // `prize`. Sin este registro ninguna sala puede nacer, así que el token no es opcional.
 //
-// LA PRESENCIA DE `MONGO_URI` ELIGE LAS TRES PIEZAS A LA VEZ —repositorio, outbox y lease— y no
-// una por una, porque las tres son la MISMA base: un catálogo en Mongo con un outbox en memoria
-// perdería en cada reinicio justamente los eventos que el outbox existe para no perder, y un lease
-// de memoria no excluiría a la otra instancia, que es lo único que ese lease hace. Se reutiliza la
-// instancia `Mongo` de arriba: son colecciones distintas del mismo cliente, y abrir un segundo
-// cliente sería un pool de conexiones que nadie cierra.
+// LA PRESENCIA DE `MONGO_URI` ELIGE LAS DOS PIEZAS A LA VEZ —repositorio y lease— y no una por
+// una, porque son la MISMA base: un catálogo en Mongo con un lease de memoria no excluiría a la
+// otra instancia, que es lo único que ese lease hace. Se reutiliza la instancia `Mongo` de arriba:
+// son colecciones distintas del mismo cliente, y abrir un segundo cliente sería un pool de
+// conexiones que nadie cierra.
 const gameModeRepository = mongo
   ? new MongoGameModeRepository(mongo, clock)
   : new MemoryGameModeRepository(clock);
-const gameModeOutbox = mongo
-  ? new MongoGameModeOutbox(mongo, clock)
-  : new MemoryGameModeOutbox(clock);
 const catalogLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
-
-// EL DESPACHADOR SOLO EXISTE CON LAS DOS COSAS, y la conjunción es la decisión: sin Mongo el outbox
-// es de memoria y despacharlo sería publicar lo que se va a perder igual; sin publicador no hay a
-// dónde despachar. Con una sola de las dos, el proceso administra el catálogo y acumula — que es un
-// estado legítimo y no un error, exactamente como el historial de memoria.
-//
-// `wake()` sin despachador es un no-op y NO un error: el servicio no puede saber si esta instancia
-// publica, y hacérselo saber sería devolverle al caso de uso la dependencia que el callback
-// inyectado vino a sacarle.
-export const outboxDispatcher =
-  mongo && amqp
-    ? new OutboxDispatcher(gameModeRepository, gameModeOutbox, amqp, catalogLease, clock, logger)
-    : undefined;
-outboxDispatcher?.start();
 
 // Se registra SOLO el puerto de LECTURA aunque el adaptador sepa escribir: quien crea y edita es
 // la API administrativa del catálogo, que recibe su propio servicio. Un token de escritura acá
@@ -170,9 +138,7 @@ outboxDispatcher?.start();
 export const gameModes = gameModeRepository;
 rootContainer.register<GameModeReader>("GameModeReader", { useValue: gameModeRepository });
 rootContainer.register(GameModeService, {
-  useValue: new GameModeService(gameModeRepository, gameModeOutbox, catalogLease, () =>
-    outboxDispatcher?.wake(),
-  ),
+  useValue: new GameModeService(gameModeRepository, catalogLease),
 });
 
 // CERRAR LO QUE ESTE ARCHIVO ABRIÓ, que es la deuda que el incremento del clúster dejó
@@ -198,18 +164,8 @@ rootContainer.register(GameModeService, {
 // Nadie más que el entrypoint puede llamar a esto: una sala que cierre Mongo se lleva puesto
 // el historial de las otras cuarenta que siguen jugando.
 export async function shutdown(): Promise<void> {
-  // 0. PARAR EL DESPACHADOR, y va PRIMERO por lo mismo que el historial va antes que Mongo: tiene
-  //    una entrega EN VUELO. `close()` cancela el temporizador y espera el `inFlight`, así que lo
-  //    que estaba publicado y confirmado alcanza a marcarse `SENT`. Cortarle la base debajo dejaría
-  //    un evento entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
-  //    duplicado que el consumidor ya deduplica, pero el costo de esperar son milisegundos.
-  await outboxDispatcher?.close();
   await history.drain();
-  // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
-  //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`
-  //    tolera una conexión ya cerrada, así que no hay nada que proteger acá.
-  await amqp?.close();
-  // 3. CERRAR MONGO ÚLTIMO. Los tres pasos de arriba escriben ahí: el despachador marca `SENT`, el
-  //    historial drena su último lote. Al revés se pierde exactamente lo que se acaba de esperar.
+  // MONGO ÚLTIMO: el paso de arriba escribe ahí. Al revés se pierde exactamente lo que se acaba de
+  // esperar.
   await mongo?.close();
 }

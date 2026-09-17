@@ -7,18 +7,15 @@ import type { Lease } from "../../../../shared/mongo-lease.js";
 import type { GameModeRepository } from "../../core/catalog.js";
 import type { GameMode } from "../../core/game-mode.js";
 import { GameModeService } from "../../service.js";
-import { MemoryGameModeOutbox } from "../memory-outbox.js";
 import { MemoryGameModeRepository } from "../memory-repository.js";
-import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contract.js";
+import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contract.test.js";
 import { registerGameModeHttp } from "./register-http.js";
 
-// LA FRONTERA MEDIDA CONTRA EL SERVICIO DE VERDAD y los adaptadores de memoria, no contra un doble
-// del servicio. Es el mismo argumento de `service.test.ts`: `MemoryGameModeRepository` y
-// `MemoryGameModeOutbox` son los que despliega la instancia sin `MONGO_URI`, así que medir contra
-// ellos mide el sistema. Un doble con `create: vi.fn()` mediría que el handler llama al método que
-// el propio test le enseñó a devolver, y lo que importa acá —el 409 del duplicado, el 409 de la baja
-// repetida, el 404 del inactivo, el default que NO se pisa en un `PUT` parcial— nace del ida y
-// vuelta entre los tres.
+// LA FRONTERA MEDIDA CONTRA EL SERVICIO DE VERDAD y el adaptador de memoria, no contra un doble del
+// servicio. Es el mismo argumento de `service.test.ts`: `MemoryGameModeRepository` es el que
+// despliega la instancia sin `MONGO_URI`, así que medir contra él mide el sistema. Lo que importa
+// acá —el 409 del duplicado, el 409 de la baja repetida, el 404 del inactivo, el default que NO se
+// pisa en un `PUT` parcial— nace del ida y vuelta entre los tres.
 //
 // Lo único que se escribe a mano son los desenlaces que ningún adaptador de memoria produce: el
 // lease negado (503) y el repositorio que revienta (500).
@@ -34,7 +31,6 @@ interface Response {
 
 interface Harness {
   readonly repository: GameModeRepository;
-  readonly outbox: MemoryGameModeOutbox;
   readonly logger: Logger;
   get(path: string, key?: string): Promise<Response>;
   post(path: string, body?: unknown, key?: string): Promise<Response>;
@@ -68,16 +64,13 @@ function harness(
 ): Harness {
   const clock = mutableClock();
   const repository = over.repository ?? new MemoryGameModeRepository(clock);
-  const outbox = new MemoryGameModeOutbox(clock);
   const service = new GameModeService(
     repository,
-    outbox,
     over.lease ?? {
       async within(_name, _ttlMs, work) {
         return work();
       },
     },
-    vi.fn(),
   );
   const logger = fakeLogger();
   const app = express();
@@ -126,7 +119,6 @@ function harness(
 
   return {
     repository,
-    outbox,
     logger,
     get: (path, key) => call("GET", path, undefined, key),
     post: (path, body, key) => call("POST", path, body, key),
@@ -154,20 +146,6 @@ function wireDtoOf(mode: GameMode): Record<string, unknown> {
   };
 }
 
-// LAS CLAVES DE DEDUPLICACIÓN DE LO ENCOLADO, leídas por la ÚNICA ventana que el puerto tiene
-// (`next` + `sent`), que es la misma que usa el despachador en producción. No hay inspector de
-// "todas las entradas" a propósito — ver `transports/tests/outbox-contract.ts`.
-async function drain(outbox: MemoryGameModeOutbox): Promise<string[]> {
-  const keys: string[] = [];
-  const later = new Date(BASE_INSTANT + 60_000);
-  for (;;) {
-    const entry = await outbox.next(later);
-    if (!entry) return keys;
-    keys.push(entry.dedupeKey);
-    await outbox.sent(entry.id, later);
-  }
-}
-
 // EL REGISTRO, MEDIDO SIN SERVIDOR. Lo que se mide acá es una decisión de wiring —qué rutas llegan a
 // existir y EN QUÉ ORDEN—, y eso un servidor no lo muestra: dos órdenes distintos pueden responder
 // igual hoy y dejar de hacerlo con la ruta que se agregue mañana.
@@ -184,35 +162,28 @@ function routesRegisteredWith(internalApiKey: string | undefined): string[] {
   } as unknown as Application;
   const clock = mutableClock();
   registerGameModeHttp(app, {
-    service: new GameModeService(
-      new MemoryGameModeRepository(clock),
-      new MemoryGameModeOutbox(clock),
-      {
-        async within(_name, _ttlMs, work) {
-          return work();
-        },
+    service: new GameModeService(new MemoryGameModeRepository(clock), {
+      async within(_name, _ttlMs, work) {
+        return work();
       },
-      vi.fn(),
-    ),
+    }),
     logger: fakeLogger(),
     internalApiKey,
   });
   return seen;
 }
 
-describe("registerGameModeHttp: las siete rutas", () => {
-  // `reactive/:uuid` ANTES de `/:uuid`, y `sync` después del `POST` de la colección. Es el orden que
-  // el plan pide y el que hay que conservar: hoy Express no confunde `/game-modes/reactive/x` con
-  // `/game-modes/:uuid` —son dos segmentos contra uno—, pero una ruta futura con dos segmentos sí lo
-  // haría, y este arreglo es lo único que lo dice.
-  it("registra las siete rutas de v1 en orden", () => {
+describe("registerGameModeHttp: las seis rutas", () => {
+  // `reactive/:uuid` ANTES de `/:uuid`. Es el orden que hay que conservar: hoy Express no confunde
+  // `/game-modes/reactive/x` con `/game-modes/:uuid` —son dos segmentos contra uno—, pero una ruta
+  // futura con dos segmentos sí lo haría, y este arreglo es lo único que lo dice.
+  it("registra las seis rutas de v1 en orden", () => {
     expect(routesRegisteredWith(KEY)).toEqual([
       "GET /game-modes",
       "GET /game-modes/reactive/:uuid",
       "GET /game-modes/:uuid",
       "POST /game-modes",
       "PUT /game-modes/:uuid",
-      "POST /game-modes/sync",
       "DELETE /game-modes/:uuid",
     ]);
   });
@@ -235,16 +206,11 @@ describe("registerGameModeHttp: las siete rutas", () => {
     const clock = mutableClock();
 
     registerGameModeHttp(app, {
-      service: new GameModeService(
-        new MemoryGameModeRepository(clock),
-        new MemoryGameModeOutbox(clock),
-        {
-          async within(_name, _ttlMs, work) {
-            return work();
-          },
+      service: new GameModeService(new MemoryGameModeRepository(clock), {
+        async within(_name, _ttlMs, work) {
+          return work();
         },
-        vi.fn(),
-      ),
+      }),
       logger,
       internalApiKey: undefined,
     });
@@ -255,7 +221,6 @@ describe("registerGameModeHttp: las siete rutas", () => {
   it.each([
     ["POST", "/game-modes"],
     ["PUT", "/game-modes/mode-1"],
-    ["POST", "/game-modes/sync"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
   ])("sin llave interna %s %s no existe", async (method, path) => {
@@ -556,45 +521,10 @@ describe("GET /game-modes/reactive/:uuid", () => {
   });
 });
 
-describe("POST /game-modes/sync", () => {
-  // El número es el de ENCOLADOS y cuenta los inactivos, igual que el `/sync` de v1 que consulta
-  // `getAll()` (`game-mode.service.ts:177-178`).
-  it("devuelve cuántos modos encoló", async () => {
-    const app = harness();
-    const primero = await app.repository.create(clasica());
-    await app.repository.create(clasica({ name: "Cuarteto", playersQuantity: 4 }));
-    await app.repository.update(primero.uuid, { isActive: false });
-
-    expect(await app.post("/game-modes/sync", undefined, KEY)).toEqual({
-      status: 200,
-      body: { status: "success", data: { synced: 2 } },
-    });
-  });
-
-  // CADA REQUEST LLEVA SU PROPIO LOTE, y el número de la respuesta NO alcanza para medirlo: `sync`
-  // devuelve los modos RECORRIDOS y no los insertados, así que un `batchId` fijo contestaría
-  // `{ synced: 1 }` las dos veces sin haber encolado nada la segunda —el botón de recuperación
-  // apretado por segunda vez, contestando éxito y sin publicar—. Lo que lo mide es el outbox: la
-  // clave de deduplicación del lote es `["game_mode.sync", batchId, uuid]`, así que dos lotes
-  // distintos son dos entradas.
-  it("dos llamadas encolan dos lotes distintos", async () => {
-    const app = harness();
-    await app.repository.create(clasica());
-
-    await app.post("/game-modes/sync", undefined, KEY);
-    await app.post("/game-modes/sync", undefined, KEY);
-
-    const syncs = (await drain(app.outbox)).filter((key) => key.includes("game_mode.sync"));
-    expect(syncs).toHaveLength(2);
-    expect(new Set(syncs).size).toBe(2);
-  });
-});
-
 describe("la llave interna", () => {
   const mutations: Array<[string, string]> = [
     ["POST", "/game-modes"],
     ["PUT", "/game-modes/mode-1"],
-    ["POST", "/game-modes/sync"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
   ];
@@ -651,10 +581,6 @@ describe("la infraestructura administrativa", () => {
     ["PUT", "/game-modes/mode-1"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
-    // EL `/sync` TAMBIÉN, y es el que se olvidaba: va adentro del lease aunque no toque el catálogo
-    // —escribe el outbox—, así que el operador que aprieta "republicar todo" mientras otro proceso
-    // edita tiene que leer "reintentá" y no una caída.
-    ["POST", "/game-modes/sync"],
   ])("%s %s contesta 503 si el catálogo está ocupado", async (method, path) => {
     const app = harness({
       lease: {

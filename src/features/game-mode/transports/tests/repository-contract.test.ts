@@ -295,8 +295,8 @@ export function describeGameModeRepositoryContract(
         isFreeRoom: true,
         enableBots: true,
       });
-      // La identidad y el nacimiento NO son editables: `update` que los moviera dejaría al outbox
-      // publicando un modo distinto con la misma clave de deduplicación.
+      // La identidad y el nacimiento NO son editables: un `update` que los moviera convertiría
+      // una edición en un modo distinto, y el panel seguiría viendo el uuid de antes.
       expect(updated?.id).toBe(created.id);
       expect(updated?.uuid).toBe(created.uuid);
       expect(updated?.createdAt).toEqual(created.createdAt);
@@ -315,8 +315,7 @@ export function describeGameModeRepositoryContract(
 
     // EL RELOJ NO ES LA REVISIÓN, y éste es el test que lo cobra. La implementación obvia y
     // equivocada es derivar `version` de `updatedAt`: dos ediciones del mismo milisegundo
-    // colapsarían en la misma revisión, y el outbox deduplica por `uuid + version` — o sea que uno
-    // de los dos eventos se descarta EN SILENCIO y el consumidor se queda con el catálogo viejo.
+    // colapsarían en la misma revisión, y entonces la revisión deja de distinguir cambios.
     it("dos ediciones del mismo milisegundo avanzan la revisión igual", async () => {
       const { repository } = harnessOf();
       const created = await repository.create(clasica());

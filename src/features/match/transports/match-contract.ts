@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PlayerRef } from "../../../shared/player-ref.js";
 // EL ÚNICO CRUCE DE `match` HACIA `game-mode`, y entra por la superficie de la feature (Regla 4):
-// nada de este archivo sabe que el catálogo tiene un repositorio, un outbox ni una API. La arista
+// nada de este archivo sabe que el catálogo tiene un repositorio ni una API. La arista
 // va en un solo sentido —`game-mode` redeclaró su `Clock` estructural en la Tarea 4 justamente
 // para no tener que importar de acá— y eso es lo que mantiene el grafo acíclico.
 import type { GameMode } from "../../game-mode/index.js";

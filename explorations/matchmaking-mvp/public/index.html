@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buscar partida</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #eef1f0;
+    --surface: #f8faf9;
+    --ink: #10181a;
+    --muted: #57676a;
+    --line: #d3dbda;
+    --accent: #0c6b6e;
+    --accent-ink: #ffffff;
+    --signal: #8c5200;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0c1112; --surface: #141b1c; --ink: #e2e9e7; --muted: #8b9c9d;
+      --line: #273234; --accent: #46b5b1; --accent-ink: #06201f; --signal: #d9a03f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--ground); color: var(--ink);
+    font-family: var(--display); display: flex; justify-content: center; padding: 2.5rem 1.25rem;
+  }
+  .caja { width: 100%; max-width: 26rem; display: flex; flex-direction: column; gap: 1.5rem; }
+  h1 { font-size: 1.15rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sub { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .campo { display: flex; flex-direction: column; gap: 0.4rem; }
+  label { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  input {
+    font-family: var(--display); font-size: 1rem; padding: 0.7rem 0.85rem;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 3px;
+  }
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    font-family: var(--display); font-size: 0.95rem; font-weight: 600; letter-spacing: 0.01em;
+    padding: 0.85rem 1rem; border: 0; border-radius: 3px; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink);
+  }
+  button.fantasma { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.7rem; }
+  .fila { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+  .fila dt { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  .fila dd { margin: 0; font-family: var(--mono); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  dl { margin: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+  .en-sala { color: var(--accent); font-weight: 500; }
+  .lista { display: flex; flex-direction: column; gap: 0.45rem; }
+  .lista .item { display: flex; justify-content: space-between; gap: 0.6rem; font-family: var(--mono); font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lista .item .quien { display: flex; gap: 0.45rem; align-items: baseline; min-width: 0; }
+  .nivel { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.08rem 0.35rem; border-radius: 2px; border: 1px solid var(--line); color: var(--muted); }
+  .nivel.basico { border-color: var(--line); }
+  .nivel.medio { border-color: var(--signal); color: var(--signal); }
+  .nivel.avanzado { border-color: var(--accent); color: var(--accent); }
+  select {
+    font-family: var(--display); font-size: 1rem; padding: 0.7rem 0.85rem;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 3px;
+  }
+  select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .regla { font-family: var(--mono); font-size: 0.7rem; line-height: 1.7; color: var(--muted); }
+  .regla b { color: var(--ink); font-weight: 500; }
+  .vacio { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+  a { color: var(--muted); font-family: var(--mono); font-size: 0.72rem; }
+</style>
+</head>
+<body>
+<div class="caja">
+  <div>
+    <div class="sub">Matchmaking · demo</div>
+    <h1>Buscar partida</h1>
+  </div>
+
+  <div class="campo">
+    <label for="nombre">Tu nombre</label>
+    <input id="nombre" placeholder="Ana" autocomplete="off">
+  </div>
+
+  <div class="campo">
+    <label for="nivel">Tu categoría</label>
+    <select id="nivel">
+      <option value="basico">Básico</option>
+      <option value="medio">Medio</option>
+      <option value="avanzado">Avanzado</option>
+    </select>
+  </div>
+
+  <button id="accion">Buscar partida</button>
+
+  <div class="panel">
+    <dl>
+      <div class="fila"><dt>Estado</dt><dd id="estado">desconectado</dd></div>
+      <div class="fila"><dt>Orquestador</dt><dd id="orq">—</dd></div>
+      <div class="fila"><dt>Sala</dt><dd id="sala">—</dd></div>
+    </dl>
+  </div>
+
+  <div class="panel">
+    <div class="sub">Buscando ahora</div>
+    <div class="lista" id="pool"><div class="vacio">nadie</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="sub">Cuándo te cruzan de categoría</div>
+    <div class="regla">
+      misma categoría · <b>al instante</b><br>
+      Básico ↔ Medio · <b>tras 5 s</b><br>
+      Medio ↔ Avanzado · <b>tras 5 s</b><br>
+      Básico ↔ Avanzado · <b>tras 10 s</b>
+    </div>
+  </div>
+
+  <a href="/admin">ver panel de admin →</a>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id)
+  let ws = null
+  let jws = null
+  let yo = null
+  let buscando = false
+  let desde = null
+  let sala = null
+
+  const ETIQUETA = { basico: 'Básico', medio: 'Medio', avanzado: 'Avanzado' }
+
+  const reloj = (ms) => {
+    const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
+  }
+
+  const pintar = () => {
+    if (sala) {
+      $('estado').textContent = 'en sala'
+      $('estado').className = 'en-sala'
+    } else if (buscando) {
+      $('estado').textContent = 'buscando · ' + reloj(desde)
+      $('estado').className = ''
+    } else {
+      $('estado').textContent = ws ? 'conectado' : 'desconectado'
+      $('estado').className = ''
+    }
+    $('accion').textContent = buscando ? 'Cancelar' : 'Buscar partida'
+    $('accion').className = buscando ? 'fantasma' : ''
+    $('accion').disabled = Boolean(sala)
+  }
+
+  const conectar = () =>
+    new Promise((ok) => {
+      ws = new WebSocket('ws://' + location.host)
+      ws.onopen = () =>
+        ws.send(JSON.stringify({ t: 'hola', nombre: $('nombre').value || 'anónimo', nivel: $('nivel').value }))
+      ws.onclose = () => { ws = null; yo = null; buscando = false; pintar() }
+      ws.onmessage = (ev) => {
+        const m = JSON.parse(ev.data)
+        if (m.t === 'bienvenido') { yo = m.userId; $('orq').textContent = m.orquestador; ok() }
+        if (m.t === 'buscando') { buscando = true; desde = m.desde; pintar() }
+        if (m.t === 'libre') { buscando = false; pintar() }
+        if (m.t === 'pool') {
+          const otros = m.buscando.filter((u) => u.nombre !== $('nombre').value)
+          $('pool').innerHTML = otros.length
+            ? otros
+                .map(
+                  (u) =>
+                    '<div class="item"><span class="quien">' + u.nombre +
+                    '<span class="nivel ' + u.nivel + '">' + ETIQUETA[u.nivel] + '</span></span><span>' +
+                    reloj(u.desde) + '</span></div>'
+                )
+                .join('')
+            : '<div class="vacio">nadie</div>'
+        }
+        if (m.t === 'emparejado') entrarAlJuego(m)
+      }
+    })
+
+  const entrarAlJuego = (m) => {
+    buscando = false
+    sala = m.salaId
+    $('sala').textContent =
+      m.salaId + (m.rival ? ' · con ' + m.rival + ' (' + ETIQUETA[m.rivalNivel] + ')' : '')
+    pintar()
+    const u = new URL(m.url)
+    u.hostname = location.hostname
+    u.searchParams.set('ticket', m.ticket)
+    jws = new WebSocket(u.toString())
+    jws.onmessage = (ev) => {
+      const j = JSON.parse(ev.data)
+      if (j.t !== 'en-sala') return
+      $('sala').textContent = j.salaId + ' · ' + j.conectados.length + '/' + j.jugadores.length + ' dentro'
+    }
+    jws.onclose = () => { sala = null; $('sala').textContent = '—'; pintar() }
+  }
+
+  $('accion').onclick = async () => {
+    if (!ws) await conectar()
+    ws.send(JSON.stringify({ t: buscando ? 'cancelar' : 'buscar' }))
+  }
+
+  $('nombre').onkeydown = (e) => { if (e.key === 'Enter') $('accion').click() }
+
+  $('nivel').onchange = () => {
+    if (ws) ws.send(JSON.stringify({ t: 'nivel', nivel: $('nivel').value }))
+  }
+
+  setInterval(pintar, 500)
+  pintar()
+</script>
+</body>
+</html>

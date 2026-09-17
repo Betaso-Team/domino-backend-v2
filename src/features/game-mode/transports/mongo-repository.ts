@@ -148,12 +148,9 @@ export class MongoGameModeRepository implements GameModeRepository {
         // escribe como `null`: sería un `PUT` parcial borrando en silencio todo lo que el panel no
         // completó.
         $set: { ...definedOf(input), updatedAt: new Date(this.clock.now()) },
-        // LA REVISIÓN ES UN `$inc` DE LA BASE, y es la línea que no se puede escribir de otra
-        // forma. Derivarla del reloj colapsaría dos ediciones del mismo milisegundo en la misma
-        // revisión; calcularla en el proceso (`leído + 1`) colapsaría dos ediciones concurrentes.
-        // El outbox deduplica por `uuid + version`, así que dos cambios reales con la misma
-        // revisión son UN evento publicado y otro DESCARTADO EN SILENCIO — el consumidor se queda
-        // con el catálogo viejo y nadie ve un error.
+        // LA REVISIÓN ES UN `$inc` DE LA BASE. Derivarla del reloj colapsaría dos ediciones del
+        // mismo milisegundo en la misma revisión; calcularla en el proceso (`leído + 1`)
+        // colapsaría dos ediciones concurrentes.
         $inc: { __v: 1 },
       },
       // `after` porque lo que se devuelve es el modo YA EDITADO: quien llama publica el evento con
@@ -218,9 +215,6 @@ export class MongoGameModeRepository implements GameModeRepository {
 // EL MAPPER, y la única frontera entre los dos vocabularios. `_id` → `id` (hex, porque el DTO HTTP
 // tiene que devolverlo y el panel de v1 lo recibía así) y `__v` → `version`.
 //
-// OJO con `id`: NO es el `id` del cuerpo Rabbit, que es el `uuid` (ver `events.ts`). Publicar el
-// hex le crea al consumidor un registro nuevo por cada modo en vez de actualizar el que ya tiene,
-// y nada falla de este lado.
 function modeOf(document: WithId<GameModeDocument>): GameMode {
   return {
     id: document._id.toHexString(),

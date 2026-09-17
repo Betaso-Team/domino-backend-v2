@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delegar el matchmaking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root {
+    --ground: #eef1f0;
+    --surface: #f8faf9;
+    --ink: #10181a;
+    --muted: #57676a;
+    --line: #d3dbda;
+    --line-soft: #e2e8e7;
+    --accent: #0c6b6e;
+    --accent-soft: #e0eeed;
+    --signal: #8c5200;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: light dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0c1112;
+      --surface: #141b1c;
+      --ink: #e2e9e7;
+      --muted: #8b9c9d;
+      --line: #273234;
+      --line-soft: #1d2627;
+      --accent: #46b5b1;
+      --accent-soft: #13302f;
+      --signal: #d9a03f;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0c1112;
+    --surface: #141b1c;
+    --ink: #e2e9e7;
+    --muted: #8b9c9d;
+    --line: #273234;
+    --line-soft: #1d2627;
+    --accent: #46b5b1;
+    --accent-soft: #13302f;
+    --signal: #d9a03f;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  img { max-width: 100%; }
+
+  .page {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2.75rem;
+  }
+
+  header { display: flex; flex-direction: column; gap: 0.85rem; }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(1.9rem, 5vw, 2.6rem);
+    line-height: 1.06;
+    letter-spacing: -0.022em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst { margin: 0; font-size: 1.1rem; color: var(--muted); max-width: 36rem; }
+
+  .meta {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--muted);
+    border-top: 1px solid var(--line);
+    padding-top: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.4rem;
+  }
+
+  section { display: flex; flex-direction: column; gap: 0.9rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.4rem;
+    line-height: 1.2;
+    letter-spacing: -0.012em;
+    margin: -0.45rem 0 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; }
+
+  ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.4rem; }
+
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--line-soft);
+    padding: 0.08em 0.34em;
+    border-radius: 2px;
+  }
+
+  .scroll { overflow-x: auto; border-block: 1px solid var(--line); }
+
+  table { border-collapse: collapse; width: 100%; min-width: 28rem; font-size: 0.93rem; }
+
+  th {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 0.67rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 0.65rem 0.9rem 0.65rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  td {
+    padding: 0.6rem 0.9rem 0.6rem 0;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: 0; }
+
+  th:last-child, td:last-child { padding-right: 0; }
+
+  .mono-col td:first-child { font-family: var(--mono); font-size: 0.8rem; white-space: nowrap; }
+
+  .yes { color: var(--accent); font-weight: 600; }
+
+  .no { color: var(--signal); font-weight: 600; }
+
+  pre {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 0.95rem 1.1rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    line-height: 1.65;
+    white-space: pre;
+  }
+
+  pre.hl { background: var(--accent-soft); border-color: transparent; }
+
+  pre b { font-weight: 500; color: var(--accent); }
+
+  .note {
+    border-left: 3px solid var(--accent);
+    padding-left: 1rem;
+    color: var(--muted);
+  }
+
+  .note strong { color: var(--ink); }
+
+  ol.flow, ol.steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  ol.flow { counter-reset: f; }
+
+  ol.flow li {
+    counter-increment: f;
+    display: grid;
+    grid-template-columns: 1.9rem 1fr;
+    gap: 0.9rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  ol.flow li:last-child { border-bottom: 0; }
+
+  ol.flow li::before {
+    content: counter(f);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--accent);
+  }
+
+  ol.flow b { font-family: var(--display); font-weight: 600; }
+
+  ol.flow .arrow {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 0.2rem;
+  }
+
+  ol.flow .arrow em { font-style: normal; color: var(--accent); }
+
+  ol.steps { counter-reset: s; }
+
+  ol.steps li {
+    counter-increment: s;
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: 0.9rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  ol.steps li:last-child { border-bottom: 0; }
+
+  ol.steps li::before {
+    content: "0" counter(s);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+  }
+
+  ol.steps b { font-family: var(--display); font-weight: 600; }
+
+  ol.steps span { color: var(--muted); }
+
+  .later { color: var(--muted); }
+
+  .later li::marker { color: var(--signal); }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 1rem;
+    font-family: var(--mono);
+    font-size: 0.73rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="kicker">Exploración · prototipo</div>
+    <h1>Delegar el matchmaking</h1>
+    <p class="standfirst">
+      El usuario le da clic a «Buscar partida» y el orquestador <strong>no busca nada</strong>:
+      solo marca un booleano. Quien busca es otro servicio.
+    </p>
+    <div class="meta">
+      <span>explorations/matchmaking-mvp</span>
+      <span>5 piezas</span>
+      <span>4 archivos de código</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="eyebrow">Lo primero</div>
+    <h2>Quién escala y quién no</h2>
+    <p>No es un detalle de despliegue: decide cómo se escribe el código.</p>
+    <div class="scroll">
+      <table class="mono-col">
+        <thead><tr><th>Pieza</th><th>¿Escala?</th><th>Por qué</th></tr></thead>
+        <tbody>
+          <tr><td>back-orquestador</td><td class="yes">sí</td><td>por eso ningún dato del jugador puede vivir en su memoria</td></tr>
+          <tr><td>redis-orquestador</td><td class="yes">compartido</td><td>es donde viven los jugadores; es lo que hace que varios orquestadores sean <strong>uno solo</strong></td></tr>
+          <tr><td>matchmaker</td><td class="no">no, es uno</td><td>ve la pool entera, y eso es lo que le permite usar el algoritmo que sea</td></tr>
+          <tr><td>jueguito-backend</td><td>sí, pero no acá</td><td>cada sala es independiente; no es parte de la pregunta</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      <strong>Que el matchmaker sea uno solo es una decisión, no una limitación.</strong> Si
+      hubiera dos, cada uno vería un pedazo de la pool y tendría que conformarse con emparejar lo
+      que le tocó. Uno solo ve a todos los que están buscando al mismo tiempo, y con eso puede
+      hacer lo que quiera: por tiempo de espera, por nivel, por apuesta, por región, o todo junto.
+    </p>
+    <p class="note">
+      <strong>Que el orquestador escale es lo que obliga a que el estado viva en Redis.</strong>
+      Si el jugador existiera solo en la memoria del proceso al que se conectó, el segundo
+      orquestador no sabría que existe. Por eso la lista de quién está conectado y quién está
+      buscando está en Redis desde el primer día, aunque hoy haya un solo proceso leyéndola.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Las piezas</div>
+    <h2>Cinco cajas</h2>
+    <pre class="hl">  cliente-front ──ws──► <b>back-orquestador</b> ──────► redis-orquestador
+        │                      ▲                       ▲    │
+        │                      │  "ya los emparejé"    │    │  lee quién tiene
+        │                      └───────── <b>matchmaker</b> ──┘    │  buscando = true
+        │                                    │              │
+        │                                    └──────────────┘
+        │                                    │
+        └──────────ws──────► <b>jueguito-backend</b> ◄── "creame una sala"</pre>
+    <div class="scroll">
+      <table class="mono-col">
+        <thead><tr><th>Pieza</th><th>Puerto</th><th>Qué hace</th></tr></thead>
+        <tbody>
+          <tr><td>cliente-front</td><td>—</td><td>página estática que sirve el orquestador</td></tr>
+          <tr><td>back-orquestador</td><td>8080</td><td>tiene el socket del usuario. <strong>No empareja.</strong></td></tr>
+          <tr><td>redis-orquestador</td><td>6380</td><td>la lista de usuarios y su booleano</td></tr>
+          <tr><td>matchmaker</td><td>—</td><td>lee el booleano, arma parejas, avisa</td></tr>
+          <tr><td>jueguito-backend</td><td>8090</td><td>crea la sala y recibe a los dos jugadores</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Redis</div>
+    <h2>Sí, el booleano se puede</h2>
+    <p>Es lo más simple que hay: <strong>un solo hash</strong>.</p>
+    <pre>HSET orq:usuarios &lt;userId&gt; '{"nombre":"ana","nivel":"basico","buscando":false}'</pre>
+    <p>
+      El matchmaker lee todo de un saque con <code>HGETALL orq:usuarios</code> y se queda con los
+      que tienen <code>buscando: true</code>. Sin scans, sin colas, sin nada raro.
+    </p>
+    <div class="scroll">
+      <table class="mono-col">
+        <thead><tr><th>Llave</th><th>Qué es</th></tr></thead>
+        <tbody>
+          <tr><td>orq:usuarios</td><td>hash: <code>userId → {nombre, nivel, buscando, desde}</code></td></tr>
+          <tr><td>orq:matches</td><td>canal pub/sub: por ahí el matchmaker avisa</td></tr>
+          <tr><td>orq:tickets</td><td>hash: <code>ticket → {userId, salaId}</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">El flujo</div>
+    <h2>Seis pasos</h2>
+    <ol class="flow">
+      <li><div>
+        <b>El cliente abre WebSocket contra el orquestador.</b>
+        <span class="arrow">→ HSET orq:usuarios &lt;id&gt; {nombre, buscando: false}</span>
+      </div></li>
+      <li><div>
+        <b>El usuario da clic en Buscar partida.</b>
+        <span class="arrow">→ HSET orq:usuarios &lt;id&gt; {..., buscando: true, desde: ahora}</span>
+        <span class="arrow"><em>→ y listo, ahí termina su trabajo. Esto es la delegación.</em></span>
+      </div></li>
+      <li><div>
+        <b>El matchmaker, cada 1 segundo.</b>
+        <span class="arrow">→ HGETALL orq:usuarios</span>
+        <span class="arrow">→ se queda con los que tienen buscando: true</span>
+        <span class="arrow">→ llama a emparejar(candidatos, ahora), que aplica la regla de categorías</span>
+      </div></li>
+      <li><div>
+        <b>Por cada pareja que salió.</b>
+        <span class="arrow">→ les pone buscando: false antes que nada, para que la vuelta siguiente no los reagarre</span>
+        <span class="arrow">→ POST jueguito:8090/salas → le devuelve un salaId</span>
+        <span class="arrow">→ guarda un ticket por jugador en orq:tickets</span>
+        <span class="arrow">→ PUBLISH orq:matches {salaId, jugadores, tickets}</span>
+      </div></li>
+      <li><div>
+        <b>Todos los orquestadores están suscritos a orq:matches.</b>
+        <span class="arrow">→ cada uno mira si tiene alguno de esos dos sockets</span>
+        <span class="arrow">→ el que lo tiene manda {t: "emparejado", salaId, url, ticket}</span>
+        <span class="arrow">→ el que no, ignora el mensaje</span>
+      </div></li>
+      <li><div>
+        <b>El cliente abre un segundo WebSocket contra el jueguito, con su ticket.</b>
+        <span class="arrow">→ el juego valida el ticket y lo mete en la sala</span>
+        <span class="arrow"><em>→ cuando están los dos: «sala r-7f3a lista: ana, beto»</em></span>
+      </div></li>
+    </ol>
+    <p>
+      Ese log es el resultado del prototipo. Y cuando alguien cierra la pestaña, el orquestador
+      hace <code>HDEL orq:usuarios &lt;id&gt;</code> y desaparece de la lista.
+    </p>
+    <p class="note">
+      <strong>El paso 5 es pub/sub y no una llamada HTTP al orquestador por una razón
+      concreta:</strong> el matchmaker no sabe —ni tiene por qué saber— a cuál de los
+      orquestadores se conectó cada jugador. Publica una vez y el que tenga el socket se da por
+      aludido. Hoy con un orquestador se ve igual que una llamada directa; con tres, sigue
+      funcionando sin tocar nada.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Categorías</div>
+    <h2>Cuándo se cruza de nivel</h2>
+    <p>Tres categorías. La regla no es una tabla de excepciones, es una distancia:</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Distancia</th><th>Quiénes</th><th>Espera mínima</th></tr></thead>
+        <tbody>
+          <tr><td>0</td><td>básico+básico, medio+medio, avanzado+avanzado</td><td><strong>al instante</strong></td></tr>
+          <tr><td>1</td><td>básico+medio, medio+avanzado</td><td><strong>5 s</strong></td></tr>
+          <tr><td>2</td><td>básico+avanzado</td><td><strong>10 s</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      <strong>Cuenta el que más esperó de los dos, no los dos.</strong> Si un básico lleva 6 s
+      colgado y entra un medio recién llegado, se emparejan: el que estaba esperando es quien
+      ensancha su búsqueda. Con la regla al revés, el recién llegado obligaría al otro a seguir
+      esperando.
+    </p>
+    <p class="note">
+      <strong>Prefiere siempre la distancia menor.</strong> Aunque ya tengas derecho a cruzar de
+      categoría, si aparece alguien de la tuya va con ese. Verificado: un básico con 6 s de
+      espera y un avanzado esperando desde el mismo momento; entra un segundo básico y los dos
+      básicos se emparejan al instante, el avanzado sigue en cola.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">El corazón</div>
+    <h2>La función que importa</h2>
+    <p>Todo el prototipo existe para que esta función viva en el matchmaker y en ningún otro lado:</p>
+    <pre>function emparejar(candidatos, ahora) {
+  // candidatos = [{userId, nombre, nivel, desde}, ...]   ← la pool entera
+  // devuelve   = [{jugadores: [a, b], distancia, espera}, ...]
+}</pre>
+    <p>Cambiar la regla es cambiar dos constantes de ese archivo:</p>
+    <pre>const NIVELES = ['basico', 'medio', 'avanzado']
+const ESPERA_POR_DISTANCIA = [0, 5000, 10000]</pre>
+    <p>
+      Agregar una cuarta categoría es agregar un elemento a cada arreglo. Ni el orquestador ni el
+      front se enteran. Le entra la pool completa porque el matchmaker es uno: ahí está el valor
+      de que no escale.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Los archivos</div>
+    <h2>Qué hay en la carpeta</h2>
+    <pre class="hl">explorations/matchmaking-mvp/
+├── compose.yaml
+├── Dockerfile
+├── package.json
+├── <b>orquestador.js</b>     el orquestador y nada más
+├── <b>panel.js</b>           el admin y la demo: no es el orquestador
+├── <b>matchmaker.js</b>
+├── <b>juego.js</b>
+├── <b>public/index.html</b>  jugador
+└── <b>public/admin.html</b>  panel</pre>
+    <p>Dependencias: <code>ws</code> e <code>ioredis</code>.</p>
+    <p class="note">
+      <strong>panel.js está aparte a propósito.</strong> Ahí viven las rutas
+      <code>/admin/*</code>, los bots y el envío de la pool a cada jugador — cosas de la demo, no
+      del producto: un orquestador de verdad no le manda la lista entera de quién está buscando a
+      cada cliente. Así <code>orquestador.js</code> se lee como lo que el orquestador realmente
+      hace: sostener sockets, marcar el booleano y repartir el aviso del match.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">La página</div>
+    <h2>Para probar con amigos</h2>
+    <pre class="hl">┌────────────────────────────────────┐
+│  tu nombre  [ Ana          ]       │
+│                                    │
+│       [  BUSCAR PARTIDA  ]         │
+│                                    │
+│  estado     buscando · 00:07       │
+│  sala       —                      │
+│                                    │
+│  ── BUSCANDO AHORA ──────────      │
+│  beto    00:12                     │
+│  caro    00:03                     │
+└────────────────────────────────────┘</pre>
+    <p>
+      La lista de «buscando ahora» sale del mismo hash y la ven todos. Cada uno abre
+      <code>http://&lt;tu-ip&gt;:8080</code>, todos se ven esperando, y cuando salta la pareja
+      los dos ven el mismo <code>salaId</code>.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Docker</div>
+    <h2>Un compose y ya</h2>
+    <pre>services:
+  redis-orquestador:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:6380:6379"]
+
+  back-orquestador:
+    build: .
+    command: node orquestador.js
+    environment: [PORT=8080, REDIS_URL=redis://redis-orquestador:6379]
+    ports: ["8080:8080"]
+
+  matchmaker:
+    build: .
+    command: node matchmaker.js
+    environment: [REDIS_URL=redis://redis-orquestador:6379,
+                  JUEGO_URL=http://jueguito:8090]
+
+  jueguito:
+    build: .
+    command: node juego.js
+    environment: [PORT=8090, REDIS_URL=redis://redis-orquestador:6379,
+                  PUBLIC_URL=ws://localhost:8090]
+    ports: ["8090:8090"]</pre>
+    <p>
+      Un solo <code>Dockerfile</code> (<code>node:22-alpine</code>, <code>npm install</code>,
+      copiar); lo que cambia es el <code>command</code>. Redis en 6380 para no chocar con nada
+      del repo.
+    </p>
+    <p>
+      El día que quieras ver dos orquestadores, es copiar el bloque de
+      <code>back-orquestador</code> cambiando el puerto. No hay que tocar código. Pero no es
+      parte de este prototipo.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Construcción</div>
+    <h2>Tres pasos, cada uno con algo que mirar</h2>
+    <ol class="steps">
+      <li><b>Redis + orquestador + página</b><span> — entrás, das clic en Buscar partida, y lo comprobás con <code>redis-cli -p 6380 HGETALL orq:usuarios</code>: ahí está tu <code>buscando: true</code>. El orquestador no hizo nada más. <strong>Acá ya se ve la delegación.</strong></span></li>
+      <li><b>matchmaker</b><span> — dos pestañas, las dos dan clic, y en la consola del matchmaker aparece <code>emparejo a ana con beto</code>. Todavía sin juego.</span></li>
+      <li><b>jueguito</b><span> — las dos pestañas muestran el mismo <code>salaId</code> y el juego imprime la sala lista. Prototipo terminado.</span></li>
+    </ol>
+    <pre>cd explorations/matchmaking-mvp
+docker compose up --build
+# http://localhost:8080 en dos pestañas</pre>
+  </section>
+
+  <section>
+    <div class="eyebrow">Después</div>
+    <h2>Lo que queda escrito y no se hace</h2>
+    <ul class="later">
+      <li><strong>TTL en los usuarios.</strong> Si el orquestador se cae de golpe, deja entradas
+        viejas en el hash. Se arregla con un plazo y un latido, pero con la pestaña abierta no
+        molesta.</li>
+      <li><strong>Segundo orquestador.</strong> El código ya queda escrito para eso —estado en
+        Redis, aviso por pub/sub—; solo falta levantarlo y comprobarlo.</li>
+      <li><strong>Segundo matchmaker.</strong> No va a pasar: es uno por diseño.</li>
+    </ul>
+  </section>
+
+  <footer>
+    JavaScript plano, un archivo por servicio, sin capas, sin tests y sin comentarios. Código
+    para tirar.
+  </footer>
+</div>
+</body>
+</html>

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { Application, Response } from "express";
 import type { Logger } from "../../../../logger.js";
 import { requireInternalKey } from "../../../../shared/http/internal-key.js";
@@ -19,7 +18,7 @@ import {
   updateInputOf,
 } from "./schemas.js";
 
-// LAS SIETE RUTAS DEL CATÁLOGO DE v1, con sus métodos, sus paths y su envelope
+// LAS SEIS RUTAS DEL CATÁLOGO DE v1, con sus métodos, sus paths y su envelope
 // (`Betaso-Domino-Backend/src/game-modes/routes.ts`). Este archivo hace DOS cosas y ninguna más:
 // ruteo y traducción de errores a códigos HTTP. La forma de lo que entra y sale vive en
 // `schemas.ts`; qué es un duplicado y qué se puede reactivar lo decide el servicio.
@@ -41,7 +40,7 @@ const REACTIVATED_MESSAGE = "Modo de juego reactivado correctamente";
 export interface GameModeHttpDeps {
   readonly service: GameModeService;
   readonly logger: Logger;
-  /** `undefined` ⇒ las cinco mutaciones NO se registran. Ver el fail closed de abajo. */
+  /** `undefined` ⇒ las cuatro mutaciones NO se registran. Ver el fail closed de abajo. */
   readonly internalApiKey: string | undefined;
 }
 
@@ -106,7 +105,7 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
   if (internalApiKey) {
     app.get(
       `${BASE}/reactive/:uuid`,
-      // LA CREDENCIAL PRIMERO Y EL SCHEMA DESPUÉS, en las cinco mutaciones: al revés, un anónimo
+      // LA CREDENCIAL PRIMERO Y EL SCHEMA DESPUÉS, en las cuatro mutaciones: al revés, un anónimo
       // puede distinguir "forma inválida" de "forma válida" en una ruta que no tiene derecho a
       // tocar.
       requireInternalKey(internalApiKey),
@@ -145,7 +144,6 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
     const missing = [
       `POST ${BASE}`,
       `PUT ${BASE}/:uuid`,
-      `POST ${BASE}/sync`,
       `DELETE ${BASE}/:uuid`,
       `GET ${BASE}/reactive/:uuid`,
     ].join(", ");
@@ -175,28 +173,6 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
       try {
         sendData(response, 200, toDTO(await service.update(params.uuid, updateInputOf(body))));
       } catch (error) {
-        sendError(response, error);
-      }
-    }),
-  );
-
-  // DESPUÉS DEL `POST` DE LA COLECCIÓN y sin que nada lo tape: son dos paths distintos y no hay
-  // `POST /game-modes/:uuid` que pueda absorberlo. El orden es el del plan y el del archivo de v1.
-  app.post(
-    `${BASE}/sync`,
-    requireInternalKey(internalApiKey),
-    validated({}, async (_input, response) => {
-      try {
-        // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
-        // outbox lleva el `batchId` (`["game_mode.sync", batchId, uuid]`) justamente para que este
-        // botón fuerce el evento aunque esa revisión ya se haya publicado. Con un id fijo, el
-        // segundo apretón del botón de recuperación no encolaría NADA y contestaría éxito igual.
-        sendData(response, 200, await service.syncAll(randomUUID()));
-      } catch (error) {
-        // TAMBIÉN VA ADENTRO DEL LEASE aunque no toque el catálogo —escribe el outbox—, así que
-        // también puede salir ocupado. Sin este `catch`, el único desenlace que este botón tiene
-        // además del éxito se vería como un 500: el operador que aprieta "republicar todo" mientras
-        // otro proceso edita leería una caída donde hay un "reintentá".
         sendError(response, error);
       }
     }),

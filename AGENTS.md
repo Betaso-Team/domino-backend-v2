@@ -371,528 +371,128 @@ Los dos campos nuevos del snapshot (`betLevels`, `isFreeRoom`) llevan **default 
 replay**: sin eso, toda la historia grabada antes de la feature dejaba de rebobinarse. El golden
 2P se regrabó solo para sumar los dos campos neutros del árbol.
 
-## Incremento planificado — catálogo v1 y entrega RabbitMQ durable
+## Incremento completo — catálogo de modos v1 sobre Mongo
 
-Diseño aprobado:
-`docs/superpowers/specs/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md`.
-Autoridad operativa:
+Diseño y plan originales (históricos, describen el outbox que ya no existe):
+`docs/superpowers/specs/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design.md` y
 `docs/superpowers/plans/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`.
 
-Estado: **incremento COMPLETO, Tareas 1–13 cerradas** (`ca9e68a`, `5771b1e`, `ec63d71`, `ce54f9e`,
-`348f527`+`93809c1`, `3be878f`+`edf2e14`, `1f03cd7`+`cf8fe11`, `bed7e88`+`c269959`+los de la
-revisión, `dd16258`+`075900c`, `3c9930c`, `b9c35b2`, `782ed54`, `d684fd4`).
-Baseline **691 tests / 66 archivos**, con `typecheck`, suite, lint, `format`, `build` y `depcruise`
-(**205 módulos / 800 dependencias**) en verde.
+⚠ **RABBITMQ SE ELIMINÓ DEL REPO, y con él el outbox entero.** Era su ÚNICO consumidor —ninguna otra
+feature publicaba nada— y el modelo cambió: el catálogo es una colección de Mongo que el panel
+administrativo externo edita, y este microservicio la LEE. Un servicio que no es dueño de un dato no
+tiene por qué anunciarle al mundo que cambió. Lo que se fue: `shared/amqp.ts`, `features/game-mode/
+{events,outbox}.ts` y sus dos adaptadores, `POST /game-modes/sync`, el chequeo `rabbit` de `/ready`,
+`RABBITMQ_URL`, el servicio `rabbitmq` del compose, las fases `enqueue`/`recover` del smoke y la
+dependencia `amqplib`. Lo que quedó: el repositorio, el lease, el servicio y las seis rutas HTTP.
 
-**La certificación real quedó verde con código 0 de punta a punta** (Docker Engine 27.3.1, Compose
-2.29.7, RabbitMQ 4, Mongo 7, Nginx 1.30.4, PM2 con dos instancias): la colección con sus cuatro
-índices y su `__v`, el payload del exchange `betaso` comparado campo por campo contra un consumidor
-real, el ciclo **Rabbit apagado → encolado PENDING → Rabbit arriba → entregado SENT**, el
-reconciliador cerrando una ventana modo→outbox rota a mano, las dos instancias PM2 contestando la
-misma revisión, y la partida 2P terminada por `SCORE` con 119 entradas de historial.
-`docker compose ps -a` quedó vacío.
-
-⚠ **Lo que la primera corrida real encontró, y no lo veía ninguna suite:**
-
-- **`up --build` sólo construye los servicios QUE SE NOMBRAN.** El cliente del smoke lo invoca
-  `compose run`, que NO reconstruye, así que corría una imagen con un `engine-smoke.ts` anterior a
-  la Tarea 1 y mandaba `entryFeeUcMinor`. El modo de falla es cruel: el error apunta al CONTRATO y
-  no a la imagen, así que se investiga el código que ya está bien. Ahora el cliente se construye
-  explícito y primero.
-- **El smoke del engine terminaba su trabajo y no salía NUNCA.** El SDK de Colyseus deja handles
-  vivos después del `leave()`, así que el event loop no se vacía solo — estuvo colgado 56 minutos,
-  en verde, sin decir nada. El runner viejo lo tapaba con `--abort-on-container-exit`; el nuevo
-  espera a cada fase, así que quedó a la vista. Los dos smokes salen ahora explícitamente.
-- **La cola durable se declara ANTES de la primera mutación.** Un topic exchange DESCARTA lo que no
-  matchea ninguna binding, y el publicador recibe su confirm igual —el broker confirma que lo
-  ACEPTÓ, no que alguien lo guardó—, así que al revés la fase `recover` esperaría para siempre un
-  mensaje que nunca existió.
-- **`--no-deps` en todas las fases de cliente.** Sin eso `compose run` vuelve a PRENDER RabbitMQ al
-  intentar certificar que está caído, y `enqueue` mediría en verde lo contrario de lo que dice.
-
-### El incremento en diez líneas, para el que llega sin contexto
+### El catálogo en seis líneas
 
 - **La colección es la de v1 y no se migró nada**: `game_modes_domino`, los mismos campos y defaults,
   los mismos cuatro índices (`uuid_1` único, `isActive_1`, `isActive_1_name_1`, `isActive_1_uuid_1`),
   `_id`, `__v` y los timestamps de Mongoose. Sin mongoose y sin el paquete `uuid`: el documento vive
   sólo dentro del transporte. ⚠ **En v1 el `__v` nunca se movía** —el `versionKey` de Mongoose sólo
   avanza con modificaciones de arreglos y este documento no tiene ninguno—, así que todo lo
-  productivo está en `0`; que v2 lo use como revisión es un uso NUEVO de un campo existente, sin
-  lector v1 que lo consuma.
+  productivo está en `0`; que v2 lo use como revisión es un uso NUEVO de un campo existente.
 - **`entryFee: 10` son 10 UC.** No hay escala, no hay `*UcMinor`, y los montos aceptan decimales
   finitos no negativos con techo `Number.MAX_SAFE_INTEGER`. La spec del 2026-09-14 quedó supersedida
   en ese punto y lleva la nota.
-- **El dominó NO autentica administradores.** Los GET del catálogo son públicos; las cinco
+- **El dominó NO autentica administradores.** Los GET del catálogo son públicos; las cuatro
   mutaciones viven detrás de `X-Internal-Key` y **no se registran** sin llave (fail closed, 404 y no
-  401). Quien valida al admin es el futuro orquestador.
-- **La entrega es AL MENOS UNA VEZ y el consumidor debe deduplicar.** La mutación escribe Mongo y un
-  outbox durable; el despachador publica después con confirmación del broker, una entrada por lease,
-  backoff hasta 300 s y **sin límite de intentos** —una caída larga no puede convertir un pendiente
-  en pérdida silenciosa—. Una caída posterior al confirm reentrega, pero **nunca adelanta** la
-  siguiente entrada: reordenar el historial del catálogo deja al consumidor con un modo viejo.
-- **No hay replica set, así que no hay transacción** entre `game_modes_domino` y `game_mode_outbox`.
-  Lo que cubre esa ventana es el reconciliador, y su regla más delicada está abajo en la tabla de
-  defectos: el `created` sólo cuenta en la revisión cero.
+  401). Quien valida al admin es el orquestador.
+- **EL CATÁLOGO ES LA AUTORIDAD SOBRE LA ECONOMÍA DE UNA MESA.** El request nombra un `gameModeId`,
+  la sala lo resuelve con `activeByUuid` y `pointsToWin`/`entryFee`/`prize` salen del modo. El
+  request **ya no puede nombrarlos**: el `strictObject` los RECHAZA en vez de ignorarlos, porque
+  ignorarlos dejaría a un llamador creyendo que fijó el premio mientras el modo lo pisa.
+- **EL MODO SE COPIA AL SNAPSHOT EN `onCreate` Y NO SE VUELVE A CONSULTAR.** Editar un modo con
+  partidas en curso no puede reescribirle la economía a una mesa cuya inscripción ya se cobró. Por
+  eso `replayConfigOf` valida un snapshot YA GRABADO y **no consulta nada**: con una sola función que
+  resolviera el modo, el CLI de soporte rebobinaría una partida vieja con los valores de hoy.
+- **La presencia de `MONGO_URI` elige el repositorio Y el lease a la vez**, nunca uno por uno: son la
+  misma base. No hay `GAME_MODE_DRIVER`, y `src/di-container.test.ts` se pone rojo si aparece.
 
-**Deudas abiertas de ESTE incremento — NO CUMPLIDAS:**
+### Deudas abiertas — NO CUMPLIDAS
 
 1. **4P, bots y multiplicador siguen sin implementarse, y es deliberado.** El catálogo los PERSISTE
-   y los publica —`playersQuantity: 4`, `enableBots`, `multiplier` viajan a Mongo y a HTTP— pero
-   ninguno tiene efecto: una mesa de cuatro se rechaza con `UNSUPPORTED_GAME_MODE` en `configOf`
-   antes de génesis, nadie lee `enableBots`, y `multiplier` no multiplica nada. La causa del rechazo
-   4P es **dinero y no falta de motor**: `settlementOf` exige exactamente un ganador, así que el
-   final de una mesa de cuatro lanzaría DESPUÉS del veredicto —sin premio y sin reembolso—, plata
-   trabada. Empezá por la regla de reparto, no por borrar la guarda.
-2. **El hueco heredado del `PUT` que cambia sólo `playersQuantity`.** v1 no consulta duplicados
-   cuando el nombre no cambia, así que una edición puede fabricar el par `name + playersQuantity`
-   que `create` rechaza una línea antes. Está **pineado por un test** que lo afirma como hueco, no
-   como virtud: el que toque la regla de unicidad empieza ahí, y ponerlo rojo es el resultado
-   correcto. Cerrarlo exige decidir cuál de las dos reglas asimétricas de v1 gana.
+   —`playersQuantity: 4`, `enableBots`, `multiplier` viajan a Mongo y a HTTP— pero ninguno tiene
+   efecto: una mesa de cuatro se rechaza con `UNSUPPORTED_GAME_MODE` en `configOf` antes de génesis,
+   nadie lee `enableBots`, y `multiplier` no multiplica nada. La causa del rechazo 4P es **dinero y
+   no falta de motor**: `settlementOf` exige exactamente un ganador, así que el final de una mesa de
+   cuatro lanzaría DESPUÉS del veredicto —sin premio y sin reembolso—, plata trabada. Empezá por la
+   regla de reparto, no por borrar la guarda.
+2. **El hueco heredado del `PUT` que cambia sólo `playersQuantity`.** La regla de unicidad de v1 es
+   **asimétrica**: `create` compara el par `name + playersQuantity`
+   (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:58`), `update` compara **sólo el
+   nombre** (`:100-103`) y sólo cuando el nombre CAMBIA (`:99`). Así que una edición puede fabricar
+   el par que `create` rechaza una línea antes. Está **pineado por un test** que lo afirma como
+   hueco, no como virtud: el que toque la regla de unicidad empieza ahí, y ponerlo rojo es el
+   resultado correcto. Unificar cambia lo que el panel puede hacer hoy en alguna de las dos puntas.
 3. **El lease excluye PROCESOS, no llamadas.** El `owner` es por proceso, así que dos mutaciones
    concurrentes de la MISMA instancia entran las dos. Lo cubre una cola en memoria dentro de
    `GameModeService`; si aparece un segundo escritor del catálogo que no pase por ese servicio, esa
-   cola no lo protege.
-4. **`src/architecture.test.ts` es flaky bajo carga.** Corre `depcruise` como subproceso: aislado
+   cola no lo protege. **El test que lo mide lanza las dos creaciones EN EL MISMO TURNO** — esperar a
+   que la primera termine deja pasar verde a un servicio sin cola.
+4. **Quién escribe el catálogo está a medio decidir.** El panel externo edita la base, pero este
+   servicio conserva su API administrativa (`POST`/`PUT`/`DELETE /game-modes` y
+   `GET /game-modes/reactive/:uuid`) con el lease y la cola que la serializan. Dos escritores sobre
+   la misma colección es exactamente lo que el lease NO cubre si el otro no pasa por acá.
+5. **`src/architecture.test.ts` es flaky bajo carga.** Corre `depcruise` como subproceso: aislado
    tarda ~2,4 s, dentro de `npm test` llegó a 5,6 s y falló una vez, verde al repetir. `npm run
-   depcruise` da limpio. No se tocó —está fuera del alcance de este incremento— pero si lo ves rojo,
-   repetilo antes de investigar.
+   depcruise` da limpio. Si lo ves rojo, repetilo antes de investigar.
 
-**El incremento siguiente, y por dónde empieza.** Nadie llama a `settlementOf` todavía: el juego
-proyecta la instrucción de pago y no hay quien la cobre. El catálogo ya demostró la forma que le
-falta a esa pieza —outbox durable, lease, confirmación del broker, entrega al menos una vez— así
-que el primer paso es **portar esa misma forma a la liquidación**: un outbox de instrucciones de
-pago con su dispatcher, consumido por el orquestador. Lo que NO está resuelto en ningún lado y hay
-que decidir antes de escribir código es **el 4P**: sin regla de reparto del premio, abrir la
-liquidación de cuatro deja plata trabada (ver la deuda 1). La decisión va primero, el código después.
+### Lo que costó caro y conviene no volver a pagar
 
-Lo que dejó la Tarea 11:
-
-- **LA PRESENCIA DEL DATO ELIGE, y ahora son TRES variables con el mismo criterio.** `RABBITMQ_URL`
-  se suma a `MONGO_URI` y `REDIS_URL`: ausente no es una falla, es "esta instancia no publica" — no
-  se construye publicador, el despachador no arranca y **el outbox sigue acumulando**, que es el
-  punto entero de que la entrega esté desacoplada del request administrativo. No hay
-  `GAME_MODE_DRIVER` ni `OUTBOX_DRIVER` ni `AMQP_DRIVER`, y `src/di-container.test.ts` se pone rojo
-  si aparecen.
-- **LAS TRES PIEZAS DEL CATÁLOGO ELIGEN JUNTAS Y POR `mongo`**, nunca una por una: son la MISMA
-  base. Un catálogo en Mongo con un outbox en memoria pierde en cada reinicio justamente los eventos
-  que el outbox existe para no perder, y un lease de memoria no excluye a la otra instancia, que es
-  lo único que ese lease hace.
-- ⚠ **EN PRODUCCIÓN LAS TRES SON OBLIGATORIAS**, y la asimetría con el schema de zod es deliberada:
-  fuera de producción "ausente" es la elección legítima de una instancia que corre sola. Adentro,
-  las tres ausencias fallan **en silencio** —sin Mongo el catálogo muere con el proceso, sin Rabbit
-  el consumidor se queda con un catálogo viejo sin que falle nada de los dos lados, sin llave el
-  panel recibe 404 donde espera administrar—. Se emite **UN error que las enumera a las tres**:
-  corregir de a una es un despliegue productivo por variable.
-- **`vitest.setup.ts` BORRA `RABBITMQ_URL`** como ya borraba las otras dos, y acá el daño del olvido
-  SALE DEL REPO: los otros dos ensucian una base nuestra, éste le manda eventos a los CONSUMIDORES
-  de otro sistema desde cuarenta archivos en paralelo. Y el modo de falla no sería un rojo sino un
-  cuelgue.
-- **EL ORDEN DEL APAGADO ES EL CONTRATO**: despachador → drenado del historial → broker → Mongo, y
-  cada paso escribe en el siguiente. Cerrar el broker antes que el despachador tira la publicación
-  en vuelo sobre un canal cerrado; cerrar Mongo antes de drenar pierde el desenlace de cada partida.
-  El test lo mide como **secuencia** (`indexOf` creciente) y no con cuatro `toContain`, que darían
-  verde con el orden invertido. Redis sigue afuera: lo cierra Colyseus.
-- **`src/main.ts` NO se tocó**, contra lo que el plan listaba: ya delega en el `shutdown()` del
-  container, así que la extensión entera vive donde se abrieron las conexiones.
-- ⚠ **`ping()` NO RECHAZA SOLO CON EL BROKER CAÍDO: CUELGA** (`amqplib` con `recovery: true` usa
-  `maxRetries: Infinity`). Lo único que lo convierte en un 503 es el plazo POR CHEQUEO de
-  `registerHealth`. Por eso su test usa una promesa que **cuelga** y no una que rechaza: con
-  `Promise.reject` daría verde aunque ese plazo no existiera, y el síntoma en producción sería un
-  `/ready` que no contesta nada.
-
-Lo que dejó la Tarea 10:
-
-- **EL CATÁLOGO ES LA AUTORIDAD SOBRE LA ECONOMÍA DE UNA MESA.** El request nombra un
-  `gameModeId`, la sala lo resuelve con `activeByUuid` y `pointsToWin`/`entryFee`/`prize` salen del
-  modo. El request **ya no puede nombrarlos**: el `strictObject` los RECHAZA en vez de ignorarlos,
-  porque ignorarlos dejaría a un llamador creyendo que fijó el premio mientras el modo lo pisa.
-- **LA FRONTERA SON DOS FUNCIONES PORQUE LAS ENTRADAS SON DOS COSAS.** `requestOf` +
-  `configOf(request, mode)` es el camino de una mesa que NACE; `replayConfigOf` valida un snapshot
-  YA GRABADO y **no consulta nada**. Con una sola función que resolviera el modo, el CLI de soporte
-  tendría que ir a Mongo para rebobinar —y encontraría el modo YA EDITADO—, así que una partida
-  vieja se reconstruiría con los puntos y el premio de hoy.
-- **EL MODO SE COPIA AL SNAPSHOT EN `onCreate` Y NO SE VUELVE A CONSULTAR.** Editar un modo con
-  partidas en curso no puede reescribirle la economía a una mesa cuya inscripción ya se cobró. Lo
-  mide un test que crea la sala, edita el modo y **además** crea una mesa nueva que sí ve los
-  valores nuevos: sin esa segunda mitad, un `update` que no escribiera nada dejaba el test verde.
-- ⚠ **EL 4P SE RECHAZA EN `configOf`, NO EN LA SALA**, y la ubicación es la decisión: `configOf` es
-  lo único que ve el request Y el modo, y es por donde pasa toda mesa que nace —la sala es UN
-  llamador, y una segunda puerta de creación quedaría sin guarda—. «Antes de génesis» queda
-  garantizado por construcción: el árbol nace de un `DominoMatchConfig` y no hay otro modo de
-  obtener uno. **La guarda de `settlementOf` NO se tocó**; sigue siendo la última red.
-- **Y `replayConfigOf` SÍ acepta cuatro asientos.** Se prohíbe que una mesa de cuatro NAZCA, no que
-  una ya grabada se rebobine y se audite — que es justo lo que hace falta el día que una quede con
-  la plata trabada. Los tests de mesa de cuatro de `settlement.test.ts` se arman ahora con ella.
-- **«El replay nunca consulta el catálogo» se mide SOBRE LA LISTA EXACTA DE IMPORTS de
-  `src/replay.ts`**, con el idioma de la Tarea 8. Un reader envenenado sólo diría que hoy no se
-  llama con esta entrada; que el archivo no importe nada de `features/game-mode` es estructural. Lo
-  que la guarda no cubre: un `await import()` o un `resolve()` del container, que ya está importado.
-- **`src/di-container.ts` registra SOLO `GameModeReader`** aunque el adaptador sepa escribir: quien
-  crea y edita es la API administrativa, y un token de escritura ahí sería una puerta que la sala
-  podría abrir sin querer. Hoy es siempre el de memoria — la rama de Mongo es de la Tarea 11.
+- ⚠ **EL CUERPO DE EDICIÓN NO PUEDE SER `CREATE_BODY.partial()`.** Medido sobre la zod 4 instalada:
+  `.partial()` deja los defaults VIVOS, así que un `PUT` que sólo cambia el premio le reescribe al
+  modo el multiplicador, los puntos y la sala gratis con los valores de fábrica. Edición destructiva
+  silenciosa sobre un catálogo con dinero configurado. Los campos se declaran una vez sin envolver y
+  cada cuerpo los envuelve.
+- ⚠ **EL ORDEN DE LAS RUTAS NO ES LOAD-BEARING CON ESTOS PATHS, y el plan decía que sí.** Medido
+  contra la express 5.2 instalada: `/game-modes/:uuid` matchea UN segmento, así que no puede tapar a
+  `/game-modes/reactive/x`. Se conserva igual —es el de v1 y es lo único que protege a `reactive` el
+  día que aparezca un `GET /game-modes/:a/:b`— y **lo pinea una aserción sobre la lista de registros
+  en orden**, con un doble de `Application` que sólo anota método y path.
+- **Los defaults son los del SCHEMA de v1, no los de su DTO zod.** El DTO nunca se ejecutaba —las
+  rutas de v1 desestructuran `req.body` crudo y jamás llaman `.parse()`—, así que su
+  `pointsToWin: 10` era código muerto y los documentos productivos tienen el **25** del schema
+  (`Betaso-Domino-Backend/src/storage/mongo/schemas/game-mode.schema.ts:51-56`). `enableBots` es el
+  único default que depende de otro campo (`:66-71`) y va con `??`, no con `||`: un `false` explícito
+  sobre una mesa de cuatro es una elección del panel.
+- **`$set: { ...input }` crudo pasa VERDE contra un contrato que sólo omite claves.** Las rutas de v1
+  desestructuran el cuerpo entero (`routes.ts:117-118`), así que lo que llega es
+  `{ name: undefined, prize: 20, … }` — y en JavaScript esa clave existe, así que el spread la
+  escribe encima y Mongo guarda un `null`. Por eso `definedOf`, en los dos adaptadores.
+- **`__v` ES LA REVISIÓN Y NO SALE DEL RELOJ**: `$inc: { __v: 1 }` en Mongo, `version + 1` en
+  memoria. Derivarla de `updatedAt` colapsa dos ediciones del mismo milisegundo; calcularla en el
+  proceso colapsa dos concurrentes.
+- **`enableBots` VIAJA**, y es el bug de v1 que no se porta: se perdía en la desestructuración de las
+  rutas (`routes.ts:92-93`), así que el panel no podía encenderlo en una mesa de dos ni apagarlo en
+  una de cuatro.
+- **DOS RESPUESTAS MEJORAN A PROPÓSITO.** Un cuerpo inválido es **400** y no el 500 de v1 —sus rutas
+  nunca llaman al `.parse()` de su propio DTO—; repetir una baja es **409** y no 500
+  (`GameModeStateConflictError`, el «ya está inactivo»/«ya está activo» de `:148-150` y `:203-205`).
+  **El 400 sale con `{code:"MALFORMED",detail}`** y no con el envelope histórico, porque lo emite
+  `shared/http/validated.ts` y ése es el vocabulario del socket; los otros tres códigos sí llevan
+  `{status:"error",message}`. **Lo desconocido se RELANZA**: traducirlo a 404 le diría al panel que
+  el modo no existe cuando lo que pasa es que la base no contesta.
+- **`MemoryGameModeRepository` no es un doble**, es el adaptador de la instancia sin Mongo, igual que
+  `MemoryHistory`. Los dos comparten el contrato de `transports/tests/repository-contract.test.ts`:
+  dos suites paralelas derivan en cuanto una tarea toque un default y se acuerde de un solo archivo,
+  y entonces el catálogo sale al revés en el despliegue que no configuró `MONGO_URI`.
+- **El lease NO SE RENUEVA, y la liberación lleva el `owner` en el filtro.** Con
+  `deleteOne({ _id: name })` a secas, un proceso cuyo lease venció mientras trabajaba le borra al
+  salir el lease que ya tomó otro: un tercero entra creyendo que está libre y quedan dos escritores
+  del catálogo sin que nada falle. La adquisición es UN `findOneAndUpdate` —nunca "leo, decido,
+  escribo"— y el **E11000 del upsert competido es el camino ORDINARIO de "lo tiene otro"**, que se
+  reconoce por el CÓDIGO numérico y no por un `/E11000/` sobre el mensaje.
 - **`src/tests/game-mode-catalog.ts` siembra el modo de la suite UNA vez**, y vive fuera de
   `src/features/` porque `feature-boundary` prohíbe que `features/lobby/tests/lobby-e2e.test.ts`
   —que también crea mesas de dominó— importe el arnés de `features/match/tests/`.
-- **El golden se regeneró y lo único que cambió además de los instantes es `meta.gameModeId`**, que
-  ahora es el uuid del modo resuelto. Las 167 entradas y el `finalState` salieron idénticos. ⚠ Ese
-  uuid lo genera `MemoryGameModeRepository` en cada corrida, así que **cambia en cada regeneración
-  como los timestamps**; el motor no lo lee.
-- **Seis mutaciones verificadas a mano**, cada una roja en el test que dice medirla y en ningún
-  otro: `byUuid` en vez de `activeByUuid`, `pointsToWin` fijo en vez del modo, sin la guarda de
-  cantidad, sin la guarda del 4P, un import del catálogo en `replay.ts`, y una sala que relee el
-  catálogo después de `onCreate`.
-- ⚠ **EL SMOKE TIENE EL LLAMADOR PERO TODAVÍA NO PUEDE CORRER.** `src/smoke/engine-smoke.ts` crea
-  el modo con `POST /game-modes` + `X-Internal-Key` antes de crear la sala, pero esa ruta no está
-  registrada hasta que la **Tarea 11** llame a `registerGameModeHttp` desde `src/app.config.ts`, y
-  las fases del compose son de la **Tarea 12**. Está escrito y anotado, no verificado.
-
-Lo que dejó la Tarea 9:
-
-- **LAS SIETE RUTAS DE v1, Y LO QUE CAMBIA ES QUIÉN AUTORIZA.** Allá cada mutación llevaba
-  `isAuthenticated()` + `isAuthorized('admin')`; acá el panel no autentica administradores contra
-  domino, así que el orquestador valida al admin y llama con `X-Internal-Key`
-  (`shared/http/internal-key.ts`, la comparación constante que ya existía). **Sin llave configurada
-  las cinco mutaciones NO SE REGISTRAN** —`reactive/:uuid` cuenta como mutación aunque conserve el
-  verbo GET—, y el `warn` de arranque nombra los cinco paths apagados: el que llega a ese log llega
-  desde un 404 inexplicable y busca por path.
-- ⚠ **EL ORDEN DE LAS RUTAS NO ES LOAD-BEARING CON ESTOS PATHS, y el plan decía que sí.** Medido
-  contra la express 5.2 instalada: `/game-modes/:uuid` matchea UN segmento, así que no puede tapar a
-  `/game-modes/reactive/x`, y no existe ningún `POST /game-modes/:uuid` que pueda tapar a
-  `POST /game-modes/sync`. Invertirlos deja verde cualquier test de comportamiento. El orden se
-  conserva igual —es el de v1 y es lo único que protege a `reactive` el día que aparezca un
-  `GET /game-modes/:a/:b`— pero **lo pinea una aserción sobre la lista de registros en orden**, con
-  un doble de `Application` que sólo anota método y path.
-- ⚠ **EL CUERPO DE EDICIÓN NO PUEDE SER `CREATE_BODY.partial()`, y es el defecto más caro de la
-  tarea.** Medido sobre la zod 4 instalada: `.partial()` deja los defaults VIVOS, así que un `PUT`
-  que sólo cambia el premio le reescribe al modo el multiplicador, los puntos y la sala gratis con
-  los valores de fábrica. Edición destructiva silenciosa sobre un catálogo con dinero configurado.
-  Los campos se declaran una vez sin envolver y cada cuerpo los envuelve.
-- **EL TECHO DE MAGNITUD DE LOS MONTOS SE REPITE ACÁ** (`.max(Number.MAX_SAFE_INTEGER)`), porque
-  `configOf` no es la única frontera por la que entra plata: el catálogo la CONFIGURA. Sin el techo,
-  `2 ** 53` es una inscripción válida y dos precios distintos son el mismo número. Sigue sin
-  escribirse `.safe()`, que implica entero y rechazaría el `1.5`.
-- **`enableBots` VIAJA, Y `enableBots` NO LLEVA DEFAULT EN LA FRONTERA.** Lo primero es el bug de v1
-  que no se porta —se perdía en la desestructuración de las rutas (`routes.ts:92-93`), así que el
-  panel no podía encenderlo en una mesa de dos ni apagarlo en una de cuatro—; lo segundo es que su
-  default depende de `playersQuantity` y lo completa el repositorio, así que uno fijo acá dejaría
-  toda mesa de cuatro con los bots apagados sin que nadie escribiera ese valor.
-- **DOS RESPUESTAS MEJORAN A PROPÓSITO, y no se declara compatibilidad que no hay.** Un cuerpo
-  inválido es **400** y no el 500 de v1 —sus rutas nunca llaman al `.parse()` de su propio DTO, así
-  que lo único que validaba era Mongoose, después de la consulta de duplicados—; repetir una baja es
-  **409** y no 500, que es para lo que la Tarea 8 agregó el cuarto error. **El 400 sale con
-  `{code:"MALFORMED",detail}`** y no con el envelope histórico, porque lo emite `shared/http/
-  validated.ts` y ése es el mismo vocabulario que el del socket; copiar el validador para cambiarle
-  el cuerpo es justo la divergencia que su promoción vino a evitar, y v1 no contesta 400 en ninguna
-  ruta. Los otros tres códigos sí llevan `{status:"error",message}`.
-- **LO DESCONOCIDO SE RELANZA** al manejador compartido en vez de traducirse: convertirlo en 404 le
-  diría al panel que el modo no existe cuando lo que pasa es que la base no contesta, y manda al
-  operador a auditar el modo equivocado.
-- **EL `batchId` DEL `/sync` LO GENERA LA RUTA, uno por request.** Con uno fijo, el segundo apretón
-  del botón de recuperación no encola nada y contesta éxito igual — y el número de la respuesta no
-  lo delata, porque `sync` devuelve los modos recorridos y no los insertados. El test lo mide
-  drenando el outbox por `next()`/`sent()`, que es la única ventana que el puerto tiene.
-- **Trece mutaciones verificadas a mano**, cada una roja en el test que dice medirla. Las dos que
-  corrigieron un test decorativo: el `batchId` fijo pasaba verde contra una aserción sobre `synced`
-  (ver arriba), y el orden de rutas no lo puede medir ningún request.
-- **El defecto que encontró la autorrevisión y no la suite** (`075900c`): el `/sync` era la única de
-  las cinco mutaciones sin traducción de errores, así que el catálogo ocupado salía 500. El test del
-  503 sólo ejercitaba dos rutas; ahora ejercita las cinco.
-
-Lo que dejó la Tarea 8:
-
-- **EL SERVICIO NO NOMBRA A RABBIT, Y ESO ESTÁ MEDIDO CON LA LISTA EXACTA DE IMPORTS de
-  `service.ts`.** Los tipos NO impiden un quinto parámetro que publique "sólo para el create", y esa
-  es la tentación que el outbox existe para prohibir. ⚠ **Pero hay que saber hasta dónde llega la
-  guarda, porque el comentario original prometía de más**: la lista cerrada atrapa toda dependencia
-  **importada** —el puerto AMQP, el despachador, el container— y **no** un quinto parámetro tipado
-  con un tipo ESTRUCTURAL escrito en la línea (`publish: (key, body) => Promise<void>`), que no
-  importa nada y pasa verde. Está medido. No se intenta cerrar ese caso: el guardarraíl que lo
-  atrapara tendría que entender la firma del constructor. Es el piso, no el techo.
-- **LA REGLA DE UNICIDAD ES ASIMÉTRICA Y SE REPRODUJO ASÍ, porque es la de v1**: `create` compara el
-  par `name + playersQuantity` (`game-mode.service.ts:58`), `update` compara **sólo el nombre**,
-  cruzando mesas de dos y de cuatro (`:100-103`), y sólo cuando el nombre CAMBIA (`:99`). Unificar
-  cambia lo que el panel puede hacer hoy en alguna de las dos puntas: hacia el par, un renombre puede
-  dejar el duplicado que v1 rechaza; hacia el nombre solo, deja de poder crearse la pareja homónima
-  2P/4P que el catálogo productivo ya tiene. ⚠ **El hueco heredado**: un `PUT` que cambia sólo
-  `playersQuantity` no dispara ninguna consulta, así que puede fabricar el par que `create` prohíbe.
-  Cerrarlo pide decidir primero cuál de las dos reglas vale — no es una decisión de esta tarea.
-- **LA COLA EN MEMORIA NO ES REDUNDANTE CON EL LEASE, y sin ella la unicidad es decorativa.**
-  `MongoLease` excluye PROCESOS y no llamadas del mismo proceso, y la consulta de duplicados es un
-  `await`: dos `POST /game-modes` contra la misma instancia la pasan los dos antes de que ninguno
-  haya insertado. Es la cola ENCIMA del lease que el comentario del `owner` ya proponía. **El test
-  que lo mide lanza las dos creaciones EN EL MISMO TURNO** — esperar a que la primera termine deja
-  pasar verde a un servicio sin cola.
-- **NO HAY DIFF DE "CAMBIO EFECTIVO", y la ausencia es la decisión.** El repositorio hace `$inc` del
-  `__v` en toda llamada que encuentre el documento, así que dos `PUT` idénticos dan las revisiones 1
-  y 2 y salen dos `game_mode.updated` con el mismo cuerpo — que es lo que hacía v1 (`:110-123`). El
-  consumidor ya deduplica por `id`. Cualquier otra regla tendría que coincidir EXACTAMENTE con el
-  criterio del `$inc`, y el día que no coincida hay un cambio real cuya revisión ya se publicó: un
-  evento descartado en silencio por la clave de deduplicación.
-- **`GameModeStateConflictError` ES EL CUARTO ERROR**, y es el «ya está inactivo»/«ya está activo» de
-  v1 (`:148-150`, `:203-205`). 409 y no 404: el modo existe y el panel lo está listando. Comparte el
-  código con `DuplicateGameModeError` y no el nombre, que es lo que se lee en el log.
-- **SE DESPIERTA AL DESPACHADOR SÓLO TRAS EL ÉXITO** —incluyendo que el outbox haya aceptado—: si el
-  lease no se consiguió no hay nada escrito, y si falló el outbox lo que corresponde es la
-  reconciliación, que el tick de un segundo ya hace. `wakeDispatcher` es un callback y no el
-  `OutboxDispatcher` para no cerrar el ciclo servicio → despachador → outbox → servicio.
-- **LAS LECTURAS NO TOMAN EL LEASE**: un GET público que compitiera por el lease del escritor daría
-  503 cada vez que el panel edita.
-- **`syncAll` DIVERGE DE v1 EN DOS COSAS, NO EN UNA** (el cuerpo del `feat:` dice "una sola
-  diferencia de fondo" y se queda corto). La primera es la del incremento entero: no publica, encola.
-  La segunda es el número que devuelve — v1 cuenta los modos **efectivamente publicados** (`synced++`
-  adentro del `try`, `game-mode.service.ts:181-189`, así que un fallo del broker baja el número) y v2
-  devuelve los **encolados**. Es lo correcto acá y está argumentado en `memory-outbox.ts:50-53`: con
-  outbox, "publicado" todavía no pasó cuando el HTTP contesta, y repetir el mismo lote no duplica —
-  devolver menos haría creer al operador que se perdieron modos.
-- ⚠ **EL HUECO HEREDADO ESTÁ PINEADO CON UN TEST** (`⚠ HUECO HEREDADO DE v1: un PUT que cambia sólo
-  la cantidad…`): un `PUT` que cambia SÓLO `playersQuantity` no dispara la consulta de duplicados —la
-  de `update` corre sólo cuando el nombre cambia—, así que fabrica el par que `create` rechaza. El
-  test **no celebra el hueco, lo fija**: el que venga a cambiar la regla de unicidad empieza por ahí,
-  y ponerlo rojo es lo correcto. Un hueco documentado sin test se ensancha en silencio.
-- **Dieciséis mutaciones verificadas a mano**, cada una roja en el test que dice medirla y en ningún
-  otro. La que decidió el diseño del test: sin la cola, la carrera en proceso sólo se ve lanzando las
-  dos creaciones en el mismo turno. Las tres que agregó la revisión, y las tres pasaban verdes contra
-  los 21 tests originales: `this.tail = result` sin neutralizar —el envenenamiento de la cola, que
-  deja el catálogo de sólo lectura hasta reiniciar—, un `batchId` fijo en `syncAll` —el segundo
-  apretón del botón de recuperación no encola NADA y contesta éxito igual— y cerrar el hueco de
-  arriba.
-
-Lo que dejó la Tarea 7:
-
-- ⚠ **EL `created` SÓLO CUENTA EN LA REVISIÓN CERO** (`cf8fe11`, y la primera corrección del defecto
-  estuvo mal). `createdKeyOf` no lleva revisión —hay una sola creación por modo— y los registros del
-  outbox **no tienen TTL**, así que esa clave existe para siempre desde que el modo pasó por
-  `enqueueCreated`. `revisionKeysOf` la aceptaba sin condición, con lo cual el modo daba "cubierto" en
-  la v1, en la v5 y en la v50: **el reconciliador apagado exactamente para los modos que crea el
-  panel**, que son todos. Y es la única pieza que cubre la falta de transacción entre
-  `game_modes_domino` y `game_mode_outbox` —no hay replica set—, así que una edición cuyo insert de
-  outbox se pierda no se recupera nunca más sola. Las tres decisiones se sostienen entre sí y no se
-  pueden tocar de a una: **clave de creación sin revisión + sin TTL ⇒ el `created` sólo cuenta en la
-  revisión cero**. El hueco del contrato tenía la forma exacta del bug —ningún test combinaba un
-  `created` con una revisión posterior—, que es el motivo por el que la suite entera daba verde.
-
-- **EL REQUEST ADMINISTRATIVO NO ESPERA A RABBIT, y ése es el archivo entero.** La mutación escribe
-  Mongo y escribe el outbox; el dispatcher publica después con confirmación del broker. La entrega es
-  **al menos una vez** y está aceptado: un proceso que muere DESPUÉS del confirm y ANTES de marcar
-  `SENT` republica, y el consumidor upsertea por `id`.
-- **LO QUE NO SE ACEPTA ES ADELANTARSE.** `next()` mira el PENDIENTE MÁS VIEJO y devuelve vacío si
-  todavía no venció su reintento, en vez de ofrecer el siguiente. La consulta NO filtra por
-  `nextAttemptAt` (`{status:"PENDING"}` ordenado por `_id`, y el plazo se compara después): con el
-  filtro adentro, el segundo `updated` sale antes que el primero y el consumidor se queda con el modo
-  viejo **sin que nada falle**.
-- **LAS TRES CLAVES DE DEDUPLICACIÓN VIVEN EN `outbox.ts`, no en cada adaptador**, porque el formato
-  ES el contrato: `["game_mode.created", uuid]`, `["game_mode.updated", uuid, version]` y
-  `["game_mode.sync", batchId, uuid]`. `sync` lleva `batchId` y un discriminador propio porque es el
-  botón de "republicar todo" del operador y **debe forzar el evento aunque esa revisión ya se haya
-  publicado** — justo el caso en que se aprieta.
-- **`reconcile` NO es un `ensureUpdated` a secas**, y ése fue el hueco del plan. Da por cubierto al
-  modo cuyo `created` existe (`revisionKeysOf` devuelve las DOS claves): sin eso, cada alta del panel
-  recibe además un `updated` espurio en el primer tick, para siempre. Un `created` PERDIDO sí vuelve
-  como `updated`, que es la estrategia de recuperación del `/sync` de v1.
-- **NO HAY LÍMITE DE INTENTOS, y la ausencia es la decisión.** Descartar al intento N es una pérdida
-  silenciosa; una caída larga del broker cuesta retraso, no datos. El backoff sí tiene techo:
-  `min(300_000, 1_000 * 2 ** attempts)`.
-- ⚠ **EL PLAZO DE 5 s NO ES DECORACIÓN.** `publishTopic` no rechaza solo con el broker caído: SE
-  CUELGA (ver el bloque de la Tarea 6). Sin el plazo, el primer tick contra un Rabbit apagado espera
-  para siempre con el lease tomado y el outbox deja de drenar sin un solo error en el log.
-- **EL DISPATCHER TIENE SU PROPIA GUARDA `inFlight`, y no alcanza con el lease**: `MongoLease` excluye
-  PROCESOS y no llamadas del mismo proceso, así que un `wake()` encima del tick programado publicaría
-  la misma entrada dos veces.
-- **NO HAY TTL NI BORRADO.** Los `SENT` son lo que impide que la reconciliación vuelva a emitir toda
-  revisión ya publicada en cada tick.
-- **`MemoryGameModeOutbox` no es un doble** y comparte `transports/tests/outbox-contract.ts` con el
-  adaptador Mongo. El contrato mide SÓLO por el puerto —no hay inspector de "todas las entradas",
-  porque la única ventana que la producción usa es `next()`—; lo que sólo Mongo puede tener (documento,
-  índices, colección, hex del `ObjectId`) se mide en su propio archivo.
-- **`reconcile` consulta por claves candidatas, no lee la colección.** El techo está escrito como
-  comentario `ponytail:` en `mongo-outbox.ts`: un `$in` de `2 × modos` por segundo deja de ser adecuado
-  del orden del millar de modos, y ahí lo que cambia es la cadencia o una marca de agua, no la consulta.
-- **Quince mutaciones verificadas a mano**, cada una roja en el test que dice medirla. La que corrigió
-  un test decorativo: `close()` sin esperar `inFlight` pasaba VERDE contra un `Promise.race` con una
-  promesa ya resuelta —el race de microtareas lo gana igual—. Se espera un turno completo del event
-  loop.
-
-Lo que dejó la Tarea 6:
-
-- **`publishTopic` RESUELVE SÓLO DESPUÉS DEL CONFIRM del broker, y es la razón entera de usar un
-  confirm channel.** El dispatcher de la Tarea 7 marca `SENT` cuando esa promesa resuelve, y
-  `channel.publish()` sólo dice "lo puse en el buffer de salida": resolver ahí marcaría como
-  entregado un mensaje que el broker nunca tomó, y el evento se pierde **sin rastro y sin reintento**.
-  v1 abre un confirm channel y **nunca espera los confirms**.
-- **`publish() === false` se RECHAZA aunque sea contrapresión** (buffer de salida lleno) y no un
-  fallo. El mensaje puede terminar saliendo, pero quien espera no tiene cómo enterarse: darlo por
-  bueno es el mismo evento perdido. El outbox reintenta y la entrega es al menos una vez por diseño,
-  así que un duplicado es el costo correcto.
-- **La conexión se REUSA al soltar el canal, y es lo que este archivo decide distinto que truco.**
-  `connect(url, {recovery:true})` devuelve un `RecoveringChannelModel` que se reconecta solo y sin
-  plazo de renuncia (`maxRetries: Infinity`, `node_modules/amqplib/lib/recovery.js:8`), y sus canales
-  se piden sobre el MODELO. Truco vuelve a llamar `connect()` al soltar el canal: eso abandona un
-  modelo que igual sigue reintentando para siempre, **un zombi por cada caída del broker**. Acá se
-  memoizan por separado conexión y canal.
-- ⚠ **CON EL BROKER CAÍDO, `connect()` NO RECHAZA: CUELGA, y eso lo heredan las Tareas 7 y 11.** Ese
-  mismo `maxRetries: Infinity` deja muerta la única rama que rechaza la conexión inicial
-  (`_scheduleReconnect` sólo llama `_rejectInitialConnection` con los reintentos agotados,
-  `lib/recovery.js:290-294`). **`AmqpPublisher` no lo acota a propósito**: el plazo es del que llama,
-  que es quien sabe cuánto puede esperar — 2 s POR CHEQUEO en la sonda de LISTO
-  (`shared/http/health.ts`, la misma propiedad que ya está escrita para Mongo: «una base caída no
-  falla: CUELGA») y 5 s en el dispatcher del outbox. O sea: **`ping()` no se rechaza solo**, y sin el
-  plazo del endpoint un Rabbit caído deja `/ready` sin contestar en vez de contestar 503.
-- **SE ESCUCHA `error` EN LA CONEXIÓN, no sólo en el canal, y sin eso el proceso se cae.**
-  `RecoveringChannelModel` es un `EventEmitter` y reemite el `error` del modelo de abajo
-  (`lib/recovery.js:221`); Node LANZA cuando un `error` no tiene a quién ir. **El caso es el socket
-  que se muere DESPUÉS de establecido** —broker reiniciado, red cortada, heartbeat vencido—, y no el
-  que parece obvio: un rechazo de credenciales pasa en el handshake y sale como `connect-failed` más
-  un reintento agendado (`lib/recovery.js:275-279`) sin tocar nunca ese `error`. **Por eso los dos
-  dobles del test son `EventEmitter` de verdad** y no objetos con un `on: vi.fn()`: es lo único que
-  puede poner roja esa falta.
-- **`close()` espera el intento de conexión EN VUELO** antes de soltar las referencias, y tolera la
-  conexión ya cerrada. Lo primero evita que un apagado disparado durante una entrega deje el socket
-  abriéndose después del cierre —con `recovery: true` ese modelo reintenta para siempre y el proceso
-  no termina de salir—; lo segundo es la lección de cerrar Redis dos veces.
-- **`ping()` abre el canal y NO publica.** Su llamador es la sonda de LISTO, que corre en cada chequeo
-  del balanceador: una sonda que publicara emitiría un evento de catálogo por chequeo.
-- **No se portó `publishPattern`.** El envoltorio `{pattern,data,id}` es del camino de COLA de v1, que
-  lo consume un `@EventPattern` de NestJS; el exchange `betaso` lleva el cuerpo CRUDO
-  (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts:49-68`), y mezclarlos produce un mensaje
-  que nadie consume, en silencio.
-- **`amqplib@2` trae sus propios tipos**: no hay `@types/amqplib` que instalar. Y el `close` del canal
-  no cuelga a nadie —resuelve sus callbacks pendientes con un `Error('channel closed')`,
-  `lib/channel.js:36-43`—, así que no hay confirm esperando para siempre tras una caída.
-- **Catorce mutaciones verificadas a mano**, cada una roja en su test y en ningún otro. La que decidió
-  el diseño del test: lanzar las dos publicaciones EN EL MISMO TURNO. Esperar a que la primera
-  termine deja pasar verde a un publicador sin memoización, que es justo lo que el archivo prohíbe.
-
-Lo que dejó la Tarea 5:
-
-- **`Lease.within` devuelve `T | undefined`, y ese `undefined` es un desenlace NORMAL**: la Tarea 8 lo
-  convierte en 503 (`GameModeWriteBusyError`) y la 7 se saltea el tick. Un `within` que lanzara haría
-  que un catálogo ocupado se viera como una caída.
-- **v1 NO SERIALIZA NADA de esto, así que el lease es pieza nueva y no un port.** `create` hace
-  `findOne({name, playersQuantity})` y después `create(...)` sin lock, sin transacción y sin índice
-  que lo respalde (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:57-69`); los únicos
-  `Mutex` de v1 (`async-mutex`) son de PROCESO y son de las salas y del matchmaking del lobby, no del
-  catálogo. v2 es estrictamente más fuerte acá.
-- **La adquisición es UN `findOneAndUpdate`**, nunca "leo, decido, escribo": entre la lectura y la
-  escritura hay un turno del event loop. El **E11000 del upsert competido no es una rareza de carrera
-  sino el camino ORDINARIO de "lo tiene otro"** —Mongo deriva el `_id` del insert de la igualdad del
-  filtro y choca con el documento que está—, y se reconoce por el CÓDIGO numérico: un `/E11000/`
-  sobre el mensaje pasa la suite y se rompe el día que el servidor reescriba la frase.
-- **La liberación lleva el `owner` en el filtro y es la línea más peligrosa del archivo.** Con
-  `deleteOne({ _id: name })` a secas, un proceso cuyo lease venció mientras trabajaba le borra al
-  salir el lease que ya tomó otro: un tercero entra creyendo que está libre y quedan dos escritores
-  del catálogo sin que nada falle.
-- **NO HAY RENOVACIÓN, a propósito.** Si `work()` tarda más que `ttlMs`, otro proceso puede entrar en
-  paralelo. La contramedida es que adentro del lease no vayan trabajos largos —el dispatcher toma UNA
-  entrada por tick y no un bucle—, no un renovador con su propio temporizador y su propia carrera.
-- **El dueño es por PROCESO y no por llamada**, y hay que saber el precio: **este lease excluye
-  PROCESOS, no llamadas concurrentes del mismo proceso.** Dos mutaciones que lleguen a la misma
-  instancia entran las dos, y un `within` anidado libera al salir del de adentro dejando al de afuera
-  sin lease. A favor: un `release` que no llegó a la base no deja al proceso esperando su propio
-  vencimiento.
-- **`MemoryLease` vive en el mismo archivo** (criterio de `shared/kv.ts`, que también lleva puerto e
-  implementación de memoria juntos) y **corre siempre**: un proceso sin almacén compartido no tiene a
-  quién excluir, que es exactamente lo que el adaptador Mongo hace contra un solo dueño. Un `Map` de
-  leases simularía una negación que ni el real produce.
-- **Ocho mutaciones verificadas a mano**, cada una roja en su test y en ningún otro. La que decidió el
-  diseño del test: lanzar los dos `within` EN EL MISMO TURNO. Esperar a que el primero entre deja
-  pasar verde a un adaptador de "leo, decido, escribo", que es justo lo que este archivo existe para
-  prohibir.
-
-Lo que dejó la Tarea 4:
-
-- **El documento BSON vive SÓLO en el transporte** (`transports/mongo-repository.ts`), con el driver
-  oficial y sin mongoose. Es el gemelo de `mongo-history.ts`: `CollectionSource` es un recorte
-  estructural que `Mongo` satisface sin saberlo, así que la suite lo maneja sin un `as unknown as
-  Mongo` y **sin ningún servicio externo** (`vitest.setup.ts` borra `MONGO_URI` a propósito).
-- **Los defaults son los del SCHEMA de v1, no los de su DTO zod.** El DTO nunca se ejecutaba —las
-  rutas de v1 desestructuran `req.body` crudo y jamás llaman `.parse()`—, así que su
-  `pointsToWin: 10` era código muerto y los documentos productivos tienen el **25** del schema.
-  Verificado en `Betaso-Domino-Backend/src/storage/mongo/schemas/game-mode.schema.ts:51-56`.
-  `enableBots` es el único default que depende de otro campo (`:66-71`,
-  `default() { return this.playersQuantity === 4 }`) y va con `??`, no con `||`: un `false`
-  explícito sobre una mesa de cuatro es una elección del panel.
-- **`__v` ES LA REVISIÓN Y NO SALE DEL RELOJ**: `$inc: { __v: 1 }` en Mongo, `version + 1` en
-  memoria. Derivarla de `updatedAt` colapsa dos ediciones del mismo milisegundo; calcularla en el
-  proceso colapsa dos concurrentes. El outbox de la Tarea 7 deduplica por `uuid + version`, así que
-  dos cambios reales con la misma revisión son un evento publicado y otro **descartado en silencio**.
-  ⚠ En v1 el `__v` **nunca se movía** (el `versionKey` de Mongoose sólo avanza con modificaciones de
-  arreglos, y este documento no tiene ninguno): todo lo productivo está en `0`. Que v2 lo incremente
-  es un uso NUEVO de un campo que ya estaba, no una ruptura — ningún lector de v1 lo consume.
-- **`MemoryGameModeRepository` no es un doble**, es el adaptador de la instancia sin Mongo, igual que
-  `MemoryHistory`. Los dos comparten el contrato de `transports/tests/repository-contract.ts`: dos
-  suites paralelas derivan en cuanto una tarea toque un default y se acuerde de un solo archivo, y
-  entonces el catálogo sale al revés en el despliegue que no configuró `MONGO_URI`.
-- **El `Clock` se redeclara en el transporte** en vez de importarse de `features/match`. Es legal hoy
-  (sale por su `index.ts`) y es un ciclo mañana: la Tarea 12 hace que el nacimiento de una mesa
-  resuelva el modo activo.
-- **La unicidad `name + playersQuantity` NO es un índice** y sigue sin implementarse acá: es lógica
-  de servicio y la escribe la Tarea 8, que tiene anotado en el plan el hallazgo incómodo —en v1 la
-  regla es **asimétrica**, `create` compara nombre+cantidad (`game-mode.service.ts:58`) y `update`
-  compara **sólo el nombre** (`:100-103`)—.
-- **Trece mutaciones verificadas a mano.** La que importa: `$set: { ...input }` crudo pasaba VERDE
-  contra un contrato que sólo omitía claves. Las rutas de v1 desestructuran el cuerpo entero
-  (`routes.ts:117-118`), así que lo que llega es `{ name: undefined, prize: 20, … }` — y en
-  JavaScript esa clave existe, así que el spread la escribe encima y Mongo guarda un `null`. El caso
-  del `undefined` explícito es el que lo mide.
-
-Lo que dejó la Tarea 3:
-
-- **`features/game-mode` nace con SOLO contratos**: la entidad portable (`core/game-mode.ts`), los dos
-  puertos y los tres errores (`core/catalog.ts`) y el cuerpo literal de Rabbit (`events.ts`). Mongo,
-  HTTP y AMQP son las Tareas 4, 9 y 6.
-- **El `id` del payload Rabbit es el `uuid` del modo y NO el hex del `_id`**, y no estaba escrito en
-  ningún lado: la entidad tiene los dos y la spec sólo declara `id: string`. Lo resuelve el v1
-  productivo (`Betaso-Domino-Backend/src/game-modes/game-mode.publisher.ts:43`, `id: mode.uuid`).
-  **Al revés no falla nada de este lado**: el consumidor upsertea por `id`, así que publicar el `_id`
-  le duplica el catálogo en silencio. La asimetría que queda es deliberada: el `toDTO` HTTP sí mapea
-  `id→_id`, porque el DTO de v1 devuelve los dos campos. El fixture del test los tiene **distintos**
-  a propósito — con el mismo valor ninguna aserción distingue cuál se mapeó.
-- **El cuerpo no lleva `isFreeRoom` ni `enableBots`**, que sí existen en la entidad y en Mongo. La
-  omisión la mide el `toEqual`; medido por mutación, junto con `id: mode.id`, las claves
-  intercambiadas y un `playerCount` fijo.
-- **`index.ts` exporta dos nombres**, `GameMode` y `GameModeReader`. El repositorio, los errores y el
-  contrato Rabbit los consumen adaptadores de esta misma feature; las tareas siguientes agrandan la
-  superficie cuando aparezca el consumidor externo.
-
-La Tarea 2 promovió `validated` a `src/shared/http/validated.ts` sin barrel. El guard de ubicación
-vive en `src/architecture.test.ts` y **no** en `.dependency-cruiser.cjs` a propósito: depcruise
-evalúa ARISTAS, y una copia del archivo que todavía nadie importa no produce ninguna.
-
-Lo que dejó la Tarea 1:
-
-- **`entryFee`/`prize`/`amount` son UC COMPLETAS** y no llevan más el sufijo `*UcMinor`:
-  `entryFee: 10` son diez UC. Es la convención del catálogo de v1, que es de donde las tareas
-  siguientes copian estos números — y copiarlos con el nombre viejo es lo que invitaba a un `* 100`
-  en una sola de las dos puntas.
-- **`configOf` ya no exige enteros, y las otras dos guardas siguen ahí.** `Number.isSafeInteger`
-  cerraba tres puertas de un golpe y una era la fracción, que v1 usa (`1.5` es un UC y medio). El
-  `ucAmount` que quedó es `z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER)`. **No se
-  escribe `.safe()`**: en zod 4 `.safe()` IMPLICA entero y volvería a rechazar el `1.5` (medido
-  sobre la 4.6.1). Sin el `.max()`, `2 ** 53` sería un monto válido.
-- **`rateId`, `currency` y las claves de idempotencia no se tocaron**, y se siguen asertando como
-  literal.
-- **El golden lo escribe `game-2p-e2e.test.ts` y el plan decía `replay.test.ts`**, que solo lo lee.
-  Corregido en el plan. El renombre deja el fixture sin compilar y **vitest sigue verde**: quien lo
-  atrape es `typecheck`.
-
-Este incremento reemplaza completamente el catálogo de v1: conserva la colección
-`game_modes_domino`, sus campos, defaults, índices, `_id`/`__v`/timestamps, las siete rutas HTTP y
-los eventos `game_mode.created`/`game_mode.updated` del exchange `betaso`. Domino v2 será el único
-writer. El panel no autentica administradores contra Domino: el futuro orquestador valida el admin y
-llama las mutaciones con `X-Internal-Key`; los GET continúan públicos.
-
-La compatibilidad productiva corrige la convención actual de dinero: en v1 `entryFee: 10` significa
-**10 UC**, no `0,10 UC`. La Tarea 1 renombra `entryFeeUcMinor`/`prizeUcMinor`/`amountUcMinor` a
-`entryFee`/`prize`/`amount` y acepta números finitos no negativos, incluidos decimales. Hasta que esa
-tarea se implemente, el párrafo histórico anterior describe correctamente el código actual.
-
-Rabbit no participa en el request administrativo: la mutación escribe Mongo y un outbox durable; un
-dispatcher con confirmaciones, retry ilimitado y lease Mongo publica después. No se exige replica
-set: un reconciliador compara `__v` para reparar la ventana modo→outbox y puede recuperar un `created` perdido como
-`updated`, igual que el `/sync` de v1. La entrega es al menos una vez, por lo que consumidores deben
-deduplicar. `multiplier`, `isFreeRoom` y `enableBots` se preservan en Mongo/HTTP; Rabbit conserva su
-payload v1 y no añade los dos últimos. Este incremento no implementa bots, torneos, multiplicador
-dinámico ni 4P; las mesas 4P se rechazan explícitamente antes de génesis.
+- **`up --build` sólo construye los servicios QUE SE NOMBRAN.** El cliente del smoke lo invoca
+  `compose run`, que NO reconstruye, así que llegó a correr una imagen vieja y el error apuntaba al
+  CONTRATO y no a la imagen. Ahora el cliente se construye explícito y primero.
+- **El smoke del engine terminaba su trabajo y no salía NUNCA.** El SDK de Colyseus deja handles
+  vivos después del `leave()`, así que el event loop no se vacía solo — estuvo colgado 56 minutos, en
+  verde. Los dos smokes salen ahora explícitamente.
 
 ## Cómo se ejecuta una tarea
 
@@ -960,6 +560,10 @@ Y del plan del incremento activo (`2026-09-14-identidad-multiplataforma-y-smoke-
 | 3/4 | La primera corrección sí volvió rojo el falso verde, pero no evitó el comando: `signatureOf` comparaba la **cantidad** de fichas del tablero y no sus valores, justo los extremos que `nextAction` necesita. Dos vistas con igual largo y distinto último patch seguían pareciendo sincronizadas. La firma ahora incluye `placed.tile.{left,right}` y `placed.side` de todo el tablero público; el primer parche intentó leer `left/right` directamente de `PlacedTile`, campos que no existen, y una corrida instrumentada lo mostró como objetos con sólo `side` | `82706dd`, `4119278` |
 | 4 | El smoke finalmente aisló un agujero anterior del engine: revelar `hand.tiles` no hace visibles para siempre las referencias que se agreguen después. Al robar, `tileCount` subía pero el dueño no recibía la ficha nueva; el servidor sí la veía y rechazaba el siguiente `DRAW_TILE` con `MUST_PLAY_INSTEAD_OF_DRAWING`. `RoundPlayer.drawTile` debe publicar cada ficha robada sólo a su dueño; un unit test mide la llamada y el smoke real mide el wire | `cc9125f` |
 | 4 | El contrato estático del wrapper copiaba literalmente `process.env.RUN_ENGINE_SMOKE` dentro de `src/deploy-smoke.test.ts`. El gate completo lo identificó como lector directo porque `env-single-reader.test.ts` busca esa substring en todo `src/`; el test sólo inspecciona texto de `scripts/`, así que ahora construye `process.env` por partes sin abrir una excepción al guardarraíl | `e900c0a` |
+
+Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`). ⚠ Las filas
+de las Tareas 6 y 7 son de piezas que **ya no existen** —el outbox y el publicador AMQP se
+eliminaron—: quedan como registro de lo que costó ejecutarlas, no como descripción del repo.
 
 Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq.md`):
 

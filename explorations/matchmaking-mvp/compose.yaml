@@ -1,0 +1,40 @@
+services:
+  redis-orquestador:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6380:6379"
+
+  back-orquestador:
+    build: .
+    command: node orquestador.js
+    environment:
+      ORQ_ID: orq-1
+      PORT: 8080
+      REDIS_URL: redis://redis-orquestador:6379
+      JUEGO_WS_PUBLICO: ws://localhost:8090
+      JUEGO_WS_INTERNO: ws://jueguito:8090
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis-orquestador
+
+  matchmaker:
+    build: .
+    command: node matchmaker.js
+    environment:
+      REDIS_URL: redis://redis-orquestador:6379
+      JUEGO_URL: http://jueguito:8090
+    depends_on:
+      - redis-orquestador
+      - jueguito
+
+  jueguito:
+    build: .
+    command: node juego.js
+    environment:
+      PORT: 8090
+      REDIS_URL: redis://redis-orquestador:6379
+    ports:
+      - "8090:8090"
+    depends_on:
+      - redis-orquestador

@@ -12,7 +12,7 @@ import {
   clasica,
   describeGameModeRepositoryContract,
   mutableClock,
-} from "./tests/repository-contract.js";
+} from "./tests/repository-contract.test.js";
 
 // CONTRA UN DOBLE DEL DRIVER, y no contra un Mongo de verdad, por la misma razón que
 // `mongo-history.test.ts`: `vitest.setup.ts` BORRA `MONGO_URI` a propósito, así que la suite no
@@ -164,8 +164,7 @@ describe("MongoGameModeRepository: el documento productivo", () => {
   });
 
   // `id` es el HEX DEL `_id`, y no el uuid. Es identidad de almacenamiento: el DTO HTTP tiene que
-  // devolver `_id` porque el panel de v1 lo recibía. El del cuerpo Rabbit es el otro (ver
-  // `events.ts`), y confundirlos es lo que duplica el catálogo del consumidor en silencio.
+  // devolver `_id` porque el panel de v1 lo recibía. El identificador LÓGICO es el otro.
   it("el id de la entidad es el hex del _id que asignó Mongo", async () => {
     const { repository, documents } = harness();
 
@@ -255,8 +254,7 @@ describe("MongoGameModeRepository: la edición en la base", () => {
       updatedAt: new Date(BASE_INSTANT),
     });
     // LA REVISIÓN ES UN `$inc` DE LA BASE, no un número calculado en el proceso: dos ediciones que
-    // leyeran el `__v` viejo y escribieran `viejo + 1` producirían la misma revisión, que es
-    // exactamente lo que el outbox usa para deduplicar.
+    // leyeran el `__v` viejo y escribieran `viejo + 1` producirían la misma revisión.
     expect(update?.$inc).toEqual({ __v: 1 });
     expect(options).toMatchObject({ returnDocument: "after" });
   });

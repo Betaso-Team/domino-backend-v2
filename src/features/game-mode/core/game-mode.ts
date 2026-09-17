@@ -6,10 +6,10 @@
 export interface GameMode {
   // El hex del `_id` de Mongo, ya convertido a string por el adaptador. Es identidad de
   // ALMACENAMIENTO: lo consume el DTO HTTP, que debe devolver `_id` porque el panel de v1 lo
-  // recibía. OJO: NO es el `id` del cuerpo Rabbit — ver el comentario de `events.ts`.
+  // recibía.
   readonly id: string;
   // El identificador LÓGICO, generado con UUID v4. Es el que viaja por la ruta HTTP
-  // (`/game-modes/:uuid`), el que deduplica el outbox y el que v1 publica como `id` a Rabbit.
+  // (`/game-modes/:uuid`) y el que nombra el request que sienta una mesa.
   readonly uuid: string;
   readonly name: string;
   readonly multiplier: number;
@@ -33,9 +33,9 @@ export interface GameMode {
   readonly enableBots: boolean;
   readonly createdAt: Date;
   readonly updatedAt: Date;
-  // El `__v` de Mongoose, que este incremento usa como REVISIÓN y no como adorno: el
-  // reconciliador del outbox compara `version` para saber si un modo ya publicó su cambio.
-  // Se usa la revisión y no `updatedAt` porque dos mutaciones del mismo milisegundo colapsan.
+  // El `__v` de Mongoose. Se conserva porque el panel de v1 lo recibe, y sirve como REVISIÓN:
+  // avanza en toda edición, y dos mutaciones del mismo milisegundo se distinguen —cosa que
+  // `updatedAt` no puede.
   readonly version: number;
 }
 

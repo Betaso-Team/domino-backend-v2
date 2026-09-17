@@ -1,5 +1,12 @@
 # Catálogo de modos compatible con v1 y outbox RabbitMQ
 
+> ⚠ **SUPERSEDIDO EN PARTE (2026-09-17): RabbitMQ y el outbox se eliminaron del repo.** El catálogo
+> vive en Mongo y este servicio lo LEE; quien lo edita es el panel administrativo externo. Todo lo
+> que este documento dice sobre el exchange `betaso`, el outbox durable, el dispatcher, el
+> reconciliador y `POST /game-modes/sync` describe código que ya no existe. Lo demás —la colección de
+> v1, sus defaults e índices, los montos en UC, el lease y las rutas HTTP— sigue vigente. Ver
+> `AGENTS.md`, sección «Incremento completo — catálogo de modos v1 sobre Mongo».
+
 > **Spec de diseño** · 2026-09-15 · Aprobado por el usuario durante la conversación.
 >
 > Este documento corrige una decisión del incremento de identidad del 2026-09-14: los importes

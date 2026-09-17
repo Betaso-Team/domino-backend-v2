@@ -260,9 +260,8 @@ describe("MongoLease: la exclusión entre procesos", () => {
   });
 
   // LA LIBERACIÓN QUE FALLA DESPUÉS DE UN TRABAJO EXITOSO SÍ SUBE: el trabajo salió bien y lo único
-  // roto es la base, así que decirlo es la respuesta honesta. Es la misma ambigüedad que la spec ya
-  // declara para la ventana modo→outbox (§9.2), y tragársela acá inventaría una segunda regla para
-  // el mismo caso.
+  // roto es la base, así que decirlo es la respuesta honesta. El llamador ve un 503 sobre un cambio
+  // que puede haber quedado aplicado, y releer el catálogo antes de reintentar es su parte.
   it("un fallo al liberar después de un trabajo exitoso sube", async () => {
     const { a, collection } = harness();
     collection.deleteOne.mockRejectedValueOnce(new Error("sin conexión"));

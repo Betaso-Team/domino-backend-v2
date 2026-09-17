@@ -32,43 +32,28 @@ describe("el composition root", () => {
     expect(source.match(/\b(Fake\w+|Stub\w+|Mock\w+|Dummy\w+)\b/g) ?? []).toEqual([]);
   });
 
-  // LOS TRES INTERRUPTORES QUE EL CATÁLOGO INVITA A ESCRIBIR, nombrados uno por uno y no cubiertos
-  // por la expresión de más arriba: ésa mira `env.*Driver`, y la forma tentadora acá es un
-  // `env.gameModeDriver === "mongo"` o directamente un `GAME_MODE_DRIVER` en `src/env.ts`. Son tres
-  // piezas nuevas que eligen implementación —repositorio, outbox y publicador—, o sea tres
-  // oportunidades de convertir una decisión de arquitectura en un valor que alguien tipea en un
-  // deploy. La forma correcta ya está escrita abajo: la presencia del DATO elige.
-  it.each([["GAME_MODE_DRIVER"], ["OUTBOX_DRIVER"], ["AMQP_DRIVER"]] as const)(
-    "no tiene un %s",
-    (interruptor) => {
-      expect(source).not.toContain(interruptor);
-    },
-  );
+  // EL INTERRUPTOR QUE EL CATÁLOGO INVITA A ESCRIBIR, nombrado aparte porque la expresión de más
+  // arriba no lo cubre: ésa mira `env.*Driver`, y la forma tentadora acá es un
+  // `env.gameModeDriver === "mongo"` o directamente un `GAME_MODE_DRIVER` en `src/env.ts`. La forma
+  // correcta ya está escrita abajo: la presencia del DATO elige.
+  it("no tiene un GAME_MODE_DRIVER", () => {
+    expect(source).not.toContain("GAME_MODE_DRIVER");
+  });
 
-  // LAS TRES PIEZAS DEL CATÁLOGO ELIGEN JUNTAS Y POR `mongo`, nunca por separado. Un catálogo en
-  // Mongo con un outbox en memoria pierde en cada reinicio justamente los eventos que el outbox
-  // existe para no perder, y un lease de memoria no excluye a la otra instancia, que es lo único
-  // que ese lease hace. Se mide que las tres miren la MISMA condición.
-  it("repositorio, outbox y lease del catálogo eligen por la misma presencia de Mongo", () => {
-    for (const memoria of ["MemoryGameModeRepository", "MemoryGameModeOutbox", "MemoryLease"])
+  // LAS DOS PIEZAS DEL CATÁLOGO ELIGEN JUNTAS Y POR `mongo`, nunca por separado: un lease de
+  // memoria no excluye a la otra instancia, que es lo único que ese lease hace.
+  it("repositorio y lease del catálogo eligen por la misma presencia de Mongo", () => {
+    for (const memoria of ["MemoryGameModeRepository", "MemoryLease"])
       expect(source).toMatch(new RegExp(`mongo\\s*\\?[\\s\\S]{0,120}?:\\s*new ${memoria}`));
   });
 
-  // EL DESPACHADOR PIDE LAS DOS COSAS. Con una sola, esta instancia administra el catálogo y
-  // ACUMULA — que es un estado legítimo, no un error: sin Mongo el outbox es de memoria y despachar
-  // sería publicar lo que se va a perder igual; sin publicador no hay a dónde despachar.
-  it("el despachador del outbox exige Mongo Y publicador", () => {
-    expect(source).toMatch(/mongo\s*&&\s*amqp/);
-  });
-
-  // EL ORDEN DEL APAGADO ES EL CONTRATO, y cada paso escribe en el que viene después. Se mide como
-  // SECUENCIA —un `indexOf` creciente— y no con cuatro `toContain`, que darían verde con el orden
+  // EL ORDEN DEL APAGADO ES EL CONTRATO: el paso de arriba escribe en el de abajo. Se mide como
+  // SECUENCIA —un `indexOf` creciente— y no con dos `toContain`, que darían verde con el orden
   // invertido. Lo que se rompe al revés: cerrar Mongo antes de drenar pierde el último lote de cada
-  // partida, y cerrar el broker antes que el despachador tira la publicación en vuelo sobre un canal
-  // cerrado.
-  it("el apagado para el despachador, drena, cierra el broker y recién ahí Mongo", () => {
+  // partida.
+  it("el apagado drena el historial y recién ahí cierra Mongo", () => {
     const apagado = source.slice(source.indexOf("export async function shutdown"));
-    const pasos = ["outboxDispatcher?.close", "history.drain", "amqp?.close", "mongo?.close"];
+    const pasos = ["history.drain", "mongo?.close"];
     const posiciones = pasos.map((paso) => apagado.indexOf(paso));
     expect(posiciones.every((posición) => posición >= 0)).toBe(true);
     expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones);
@@ -92,9 +77,10 @@ describe("la superficie Express", () => {
     );
   });
 
-  // RABBIT ENTRA A READINESS Y NO A `/health`. `/health` no consulta NADA a propósito —"reiniciame"
-  // es la única respuesta que destruye partidas en curso— y el dominó sigue jugando sin publicar.
-  it("suma rabbit a las dependencias duras, con ping y no con una publicación", () => {
-    expect(source).toMatch(/rabbit:\s*\(\)\s*=>\s*broker\.ping\(\)/);
+  // LAS DEPENDENCIAS DURAS ENTRAN A READINESS Y NO A `/health`. `/health` no consulta NADA a
+  // propósito: "reiniciame" es la única respuesta que destruye partidas en curso.
+  it("suma Mongo y Redis a las dependencias duras, sin escribir nada", () => {
+    expect(source).toMatch(/mongo:\s*\(\)\s*=>\s*mongoConnection\.ping\(\)/);
+    expect(source).toMatch(/redis:\s*\(\)\s*=>\s*sharedStore\.get\(/);
   });
 });

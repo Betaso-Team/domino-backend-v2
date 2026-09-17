@@ -1,7 +1,7 @@
 import config from "@colyseus/tools";
 import { type ServerOptions, defineRoom, defineServer } from "colyseus";
 import express, { type Application } from "express";
-import { amqp, driver, mongo, presence, rootContainer } from "./di-container.js";
+import { driver, mongo, presence, rootContainer } from "./di-container.js";
 import { env } from "./env.js";
 import { GameModeService, registerGameModeHttp } from "./features/game-mode/index.js";
 import { LobbyRoom, LobbySettings, registerLobbyHttp } from "./features/lobby/index.js";
@@ -86,22 +86,14 @@ const rooms = { lobby: defineRoom(LobbyRoom), domino: defineRoom(DominoRoom) };
 // dentro de la flecha no compila aunque el ternario de afuera ya lo haya descartado. Con la
 // copia local sí, y el gate lo cazó con la suite en verde, que es el modo de falla de siempre.
 //
-// A RABBIT SE LE PIDE UN `ping()`, que abre el canal SIN publicar: una sonda que publicara mandaría
-// un evento de catálogo a los consumidores en cada chequeo del balanceador.
-//
-// ⚠ Y `ping()` NO RECHAZA SOLO CON EL BROKER CAÍDO: **cuelga**. `amqplib` con `recovery: true` usa
-// `maxRetries: Infinity` (`lib/recovery.js:8`), así que la rama que rechaza el connect inicial es
-// inalcanzable (§`src/shared/amqp.ts`). Lo que lo convierte en un 503 y no en un `/ready` que no
-// contesta es el plazo POR CHEQUEO de `registerHealth` — el mismo que ya cubre el Mongo inalcanzable
-// y por el mismo motivo: una base caída no falla, CUELGA. Sacar ese plazo saca a Rabbit del mapa sin
-// que ningún test de esta capa se ponga rojo.
+// ⚠ Una base inalcanzable no FALLA, cuelga. Lo que convierte eso en un 503 y no en un `/ready` que
+// no contesta es el plazo POR CHEQUEO de `registerHealth`; sacarlo saca a Mongo del mapa sin que
+// ningún test de esta capa se ponga rojo.
 const mongoConnection = mongo;
 const sharedStore = presence;
-const broker = amqp;
 const hardDependencies: DependencyChecks = {
   ...(mongoConnection ? { mongo: () => mongoConnection.ping() } : {}),
   ...(sharedStore ? { redis: () => sharedStore.get("readiness") } : {}),
-  ...(broker ? { rabbit: () => broker.ping() } : {}),
 };
 
 const registerHttp = (app: Application) => {
@@ -131,7 +123,7 @@ const registerHttp = (app: Application) => {
   // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta
   // puesta después queda con el HTML por defecto de Express, con el stack adentro.
   //
-  // Los GET son públicos y las cinco mutaciones viven detrás de `internalApiKey`; sin llave no se
+  // Los GET son públicos y las cuatro mutaciones viven detrás de `internalApiKey`; sin llave no se
   // registran (fail closed, §`features/game-mode/transports/http/register-http.ts`). Quien autentica
   // al administrador es el orquestador, no el dominó.
   registerGameModeHttp(app, {

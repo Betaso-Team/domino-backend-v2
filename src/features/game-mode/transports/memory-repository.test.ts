@@ -4,7 +4,7 @@ import {
   clasica,
   describeGameModeRepositoryContract,
   mutableClock,
-} from "./tests/repository-contract.js";
+} from "./tests/repository-contract.test.js";
 
 // EL MISMO CONTRATO QUE EL ADAPTADOR MONGO, corrido contra el adaptador que usa la instancia sin
 // Mongo. `MemoryGameModeRepository` NO es un doble de test —igual que `MemoryHistory`, es la
@@ -31,8 +31,7 @@ describe("MemoryGameModeRepository: lo propio de no tener base", () => {
   });
 
   // Nada de lo que devuelve puede ser el objeto que el repositorio guarda: quien reciba un modo y
-  // lo mute cambiaría el catálogo de todos sin pasar por `update`, y sin avanzar la revisión que
-  // el outbox mira.
+  // lo mute cambiaría el catálogo de todos sin pasar por `update` y sin avanzar la revisión.
   it("lo que devuelve no es el objeto guardado", async () => {
     const { repository } = harness();
     const created = await repository.create(clasica());
