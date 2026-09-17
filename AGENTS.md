@@ -471,6 +471,24 @@ La liga usa el **`fetch` de la plataforma** y no un cliente HTTP propio (truco t
 `shared/http`): un solo consumidor saliente, sin credencial y sin reintentos. `BACKEND_URL` se suma
 a las obligatorias de producción, y con eso son **cuatro**.
 
+⚠ **EL SMOKE DEL DEPLOY NO CERTIFICA NINGUNO DE LOS DOS.** Lo que sí hace desde este incremento
+es **arrancar**: `BACKEND_URL` pasó a ser obligatoria en producción y el servicio `domino` de
+`compose.smoke.yaml` no la tenía, así que el servidor moría ANTES de escuchar y el smoke entero
+se caía con un 502 de nginx —un rojo que apunta a la fase y no a la variable que falta—. Lo pinea
+`src/compose-env.test.ts`, que le pasa el `environment:` del compose al `parseEnv` de verdad en
+vez de comparar contra una lista escrita a mano: así la quinta variable obligatoria se detecta
+sola.
+
+La URL apunta al **nginx del stack**, y eso no es comodidad: el smoke TERMINA una partida, así que
+el `POST leagues/save` sale de verdad. Con la URL productiva ahí, cada corrida le mete un
+resultado inventado a la liga real — y esa ruta no pide credencial, así que nada del otro lado lo
+pararía. `smoke/nginx.conf` la atiende con un 204.
+
+Ese 204 **no registra nada**, y ahí está el límite: el smoke pasa igual si el reporte no sale.
+Certificarlos de verdad pide un stub que GUARDE lo recibido y un cliente que lo lea —para el
+ranking, además, un consumidor bindeado a `rankings_queue`, que hoy nadie declara y cuyos mensajes
+el broker descarta sin error—. Es un incremento propio.
+
 ⚠ **Falta el tercer flujo de v1**: `lastWinners.saveWin`, el carrusel de últimos ganadores. Su
 payload es `Math.round(entryFee * rate * 100)`, o sea que exige CONVERTIR la moneda, y este repo no
 convierte nada por decisión escrita (`network/settlement.ts`). Portarlo es traer el servicio de

@@ -35,6 +35,15 @@ services:
       REDIS_URL: redis://redis:6379/1
       MONGO_URI: mongodb://mongo:27017/domino-smoke
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      # LA LIGA APUNTA AL NGINX DEL STACK Y NO AL BACKEND REAL, y no es por comodidad: este smoke
+      # TERMINA UNA PARTIDA, así que el `POST leagues/save` se dispara de verdad. Con la URL
+      # productiva acá, cada corrida del smoke le metería un resultado inventado a la liga de
+      # producción — y esa ruta no pide credencial, así que nada del otro lado lo pararía.
+      #
+      # `smoke/nginx.conf` la atiende con un 204. Es obligatoria porque `NODE_ENV=production`
+      # exige las cuatro (ver `src/env.ts`): sin esta línea el servidor muere al arrancar con
+      # «en producción faltan: BACKEND_URL» y el smoke entero se cae antes de la primera fase.
+      BACKEND_URL: http://nginx:8080/
       TURN_TIMEOUT_MS: 5000
       EXTRA_TIME_RESERVE_MS: 1000
       DEALING_TIMEOUT_MS: 5000
