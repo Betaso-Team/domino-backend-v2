@@ -20,6 +20,7 @@ import { createMatchState } from "../genesis";
 import { MatchDriver } from "../match/driver";
 import { MatchPlayer } from "../match/player";
 import { MatchReferee } from "../match/referee";
+import { MoveLog } from "../move-log";
 import { Player } from "../player-facade";
 import { PlayerRepository } from "../player-repository";
 import { Referee } from "../referee-facade";
@@ -136,6 +137,7 @@ export function engineWithHands(
   const players = new Player(repository);
   const referee = new Referee(matchReferee, roundReferee);
   const bet = new BetNegotiation(match);
+  const moves = new MoveLog(match);
   const roundDriver = new RoundDriver(
     match,
     clock,
@@ -158,9 +160,9 @@ export function engineWithHands(
   );
   const commands = {
     ABANDON: new AbandonCommand(referee, players, matchDriver),
-    PLAY_TILE: new PlayTileCommand(referee, players, matchDriver),
-    DRAW_TILE: new DrawTileCommand(referee, players, matchDriver),
-    PASS: new PassCommand(referee, matchDriver),
+    PLAY_TILE: new PlayTileCommand(referee, players, matchDriver, moves),
+    DRAW_TILE: new DrawTileCommand(referee, players, matchDriver, moves),
+    PASS: new PassCommand(referee, matchDriver, moves),
     REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
     PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(
       new BetReferee(match, config),

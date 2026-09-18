@@ -64,6 +64,51 @@ export const BetOffer = schema(
 );
 export type BetOffer = SchemaType<typeof BetOffer>;
 
+// UNA JUGADA DE LA MANO, tal como se hizo. Es el REGISTRO: se escribe y **nadie lo lee para
+// decidir**. De ahí sale el panel que lista, en orden, quién puso ficha, quién cargó del pozo y
+// quién pasó — que del árbol NO se puede reconstruir:
+//
+//   · un PASE no deja ficha en el tablero ni saca del pozo; su única huella es
+//     `Turn.consecutivePasses`, que es un contador y se reinicia (§`Turn`);
+//   · una CARGA solo baja `BoneyardState.count`, que dice cuántas quedan y no quién las sacó;
+//   · y el ORDEN entre las tres no está en ningún lado — `board.tiles` ordena las colocaciones y
+//     nada más, así que "pasó, cargó, pasó otra vez" es exactamente lo que se pierde.
+//
+// SON LAS TRES JUGADAS DEL DOMINÓ Y NADA MÁS (§`MoveType`), y esa frontera es la mitad de la
+// decisión. Los otros cuatro verbos no entran acá: `REVEAL_TILES` es la ceremonia del reparto,
+// `ABANDON` ya vive en `PlayerState.hasAbandoned` y en su evento, y los dos del AUMENTO son
+// economía, con su propio estado de trabajo (`betOffer`) y su propio lector (el historial de
+// soporte, que guarda el payload entero de los dos comandos).
+//
+// Es la partición de v1 —`historyMoves` por un lado con sus `isPassed`/`isLoaded`,
+// `betMultiplierProposals` por otro— y NO la de truco, donde el canto SÍ es un acto de la mano y
+// el registro tiene que llevar el escalón y la respuesta. Copiar aquella forma le colgaría a cada
+// ficha puesta un `level` y un `accepted` que para ella son siempre cero.
+//
+// Y NO ES LA MÁQUINA DE v1 tampoco: allá el arreglo ERA el estado —`getBoardEnds()` lo recorría
+// para saber por dónde iba el tablero, y por eso tenía `placedTile`, `lockedNumber` y sus siete
+// campos—. Acá el tablero es `BoardState` y esto es un apunte que ninguna regla puede leer:
+// `pastMoves` NO está en `RoundView`, así que una regla que estire la mano hacia el registro **no
+// compila**.
+//
+// LA FICHA NO VIAJA ACÁ, y no es olvido: ya vive en `board.tiles` con su `playedBy` y su `side`, o
+// sea con su visibilidad ya resuelta. Duplicarla sería una segunda copia que puede discrepar, y el
+// día que el dominó tenga una jugada de dorso, sería publicarla. El número de jugada tampoco es un
+// campo: es el índice del arreglo. Y el nombre del jugador está en `PlayerState`.
+//
+// MUERE CON LA RONDA, como el pozo y por lo mismo: el panel que lo lee es el de la mano en curso.
+// Lo que sobrevive a una ronda ya tiene su sitio (`pastRounds`, el marcador), y el historial de
+// SOPORTE —que guarda el payload entero y no se sincroniza— sigue siendo el otro registro del
+// mismo acto: dos registros, dos audiencias, un solo vocabulario.
+export const PastMove = schema(
+  {
+    type: t.string(), // MoveType — misma nota que `side` en tile.ts
+    playerId: t.string(),
+  },
+  "PastMove",
+);
+export type PastMove = SchemaType<typeof PastMove>;
+
 export const RoundSummary = schema(
   {
     roundNumber: t.number(),
@@ -118,6 +163,11 @@ export const RoundState = schema(
     // `t.ref(BetOffer)` auto-instancia el nodo al construir `RoundState` y la rama nula
     // —ausente = nadie propuso— sería imposible de representar.
     betOffer: t.ref(BetOffer).optional(),
+    // VA AL FINAL A PROPÓSITO. `@colyseus/schema` codifica por índice, así que insertar un campo
+    // en el medio corre todos los posteriores y un cliente con el schema pre-generado decodifica
+    // basura (es la ruptura de wire que la identidad multiplataforma ya pagó una vez). Un campo
+    // agregado al final solo es ignorado por el cliente viejo.
+    pastMoves: t.array(PastMove),
   },
   "RoundState",
 );

@@ -16,6 +16,7 @@ import { createMatchState } from "../core/engine/genesis";
 import { MatchDriver } from "../core/engine/match/driver";
 import { MatchPlayer } from "../core/engine/match/player";
 import { MatchReferee } from "../core/engine/match/referee";
+import { MoveLog } from "../core/engine/move-log";
 import { Player } from "../core/engine/player-facade";
 import { PlayerRepository } from "../core/engine/player-repository";
 import { Referee } from "../core/engine/referee-facade";
@@ -79,6 +80,11 @@ export function buildEngineGraph(
   const referee = new Referee(matchReferee, roundReferee);
   const betReferee = new BetReferee(match, config);
   const bet = new BetNegotiation(match);
+  // EL REGISTRO NO SALE POR `EngineGraph`, y es deliberado: escribe y nadie lo lee del lado del
+  // servidor, así que darle una puerta pública sería ofrecer una segunda forma de apuntar una jugada
+  // —una que no pasa por el verbo— justo en el registro que el front lee como si fuera la verdad.
+  // Lo reciben los TRES comandos que son jugadas, y ningún conductor.
+  const moves = new MoveLog(match);
   const roundDriver = new RoundDriver(
     match,
     deps.clock,
@@ -109,9 +115,9 @@ export function buildEngineGraph(
       !match.players.find((player) => player.playerId === playerId)?.hasAbandoned,
     commands: {
       ABANDON: new AbandonCommand(referee, players, matchDriver),
-      PLAY_TILE: new PlayTileCommand(referee, players, matchDriver),
-      DRAW_TILE: new DrawTileCommand(referee, players, matchDriver),
-      PASS: new PassCommand(referee, matchDriver),
+      PLAY_TILE: new PlayTileCommand(referee, players, matchDriver, moves),
+      DRAW_TILE: new DrawTileCommand(referee, players, matchDriver, moves),
+      PASS: new PassCommand(referee, matchDriver, moves),
       REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
       // LOS DOS DEL AUMENTO reciben el conductor de RONDA y no el de partida, que es la
       // diferencia de fondo con los otros cinco: congelar y descongelar mueve la fase de la

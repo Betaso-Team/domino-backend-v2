@@ -1030,6 +1030,122 @@ deduplicar. `multiplier`, `isFreeRoom` y `enableBots` se preservan en Mongo/HTTP
 payload v1 y no añade los dos últimos. Este incremento no implementa bots, torneos, multiplicador
 dinámico ni 4P; las mesas 4P se rechazan explícitamente antes de génesis.
 
+## Incremento completo — el registro de la mano
+
+Sin plan escrito: salió de barrer los últimos commits de truco (`8293fe0`, `c31c167`, `a7a318f`,
+`43d19ca`, `fec2480`) contra este repo y quedarse SOLO con lo que el dominó necesita. Baseline
+**779 → 798 tests / 76 archivos**, con `typecheck`, lint, `build` y `depcruise` (**241 módulos /
+972 dependencias**) en verde.
+
+### `RoundState.pastMoves`: la mano apunta las jugadas
+
+Portado de truco `c31c167`, pero **leído de v1**: el equivalente son los `historyMoves` de
+`rooms/schema/domino/*/round.state.ts`, que el panel del front lista en orden.
+
+**SON LAS TRES JUGADAS DEL DOMINÓ Y NADA MÁS** —poner ficha, cargar del pozo, pasar— y esa
+frontera es la mitad de la decisión. Los otros cuatro verbos no entran: `REVEAL_TILES` es la
+ceremonia del reparto, `ABANDON` ya vive en `PlayerState.hasAbandoned` y en su evento, y los dos
+del AUMENTO son economía, con su propio estado de trabajo (`betOffer`) y su propio lector —el
+historial de soporte, que guarda el payload entero de los dos comandos—.
+
+**Es la partición de v1 y no la de truco.** Allá el canto SÍ es un acto de la mano, así que un solo
+registro con un solo vocabulario es lo correcto y el nodo tiene que llevar el escalón y la
+respuesta. Acá v1 los separa: `historyMoves` con sus `isPassed`/`isLoaded` por un lado,
+`betMultiplierProposals` por otro —que además no es un panel sino el estado de trabajo de la
+negociación y la fuente de las métricas de Mongo (`metrics/router.ts`)—. Copiar la forma de truco
+le colgaba a cada ficha puesta un `level` y un `accepted` que para ella son siempre cero, y hacía
+del nodo el cajón de sastre que no es. **`PastMove` tiene DOS campos: `type` y `playerId`.**
+
+Lo que se apunta es lo que el ÁRBOL NO GUARDA, y es la única justificación del campo:
+
+| jugada | lo que queda hoy sin el registro |
+|---|---|
+| pasar | `Turn.consecutivePasses`, un contador que se reinicia |
+| cargar | `BoneyardState.count`, que dice cuántas quedan y no quién sacó |
+| el orden entre las tres | **nada**: `board.tiles` ordena las colocaciones y nada más |
+
+- **Y NO es la máquina de v1.** Allá el arreglo ERA el estado —`getBoardEnds()` lo recorría para
+  saber por dónde iba el tablero, y de ahí sus siete campos con `placedTile` y `lockedNumber`—. Acá
+  el tablero es `BoardState` y el registro es un apunte que **ninguna regla puede leer**:
+  `pastMoves` no está en `RoundView`, así que una regla que estire la mano hacia él no compila.
+- **LA FICHA NO VIAJA ACÁ.** Ya vive en `board.tiles` con su `playedBy` y su `side`. Duplicarla
+  sería una segunda copia que puede discrepar, y el día que el dominó tenga una jugada de dorso
+  sería publicarla. El número de jugada tampoco es campo: es el índice del arreglo.
+- **NO HAY BOCA DEL RELOJ, y la ausencia es una afirmación.** El historial de soporte tiene dos
+  (`source: PLAYER|SYSTEM`) y truco también —allá el conductor canta por el que se calló—. Acá el
+  reloj nunca juega por nadie: al vencer el turno RETIRA (`MatchDriver.timeout`), y retirarse no es
+  una jugada. Por eso `MoveLog` no lleva `bySystem` y **ningún conductor lo recibe**. El día que
+  haya bots o jugada automática, ahí aparece el segundo llamador y el campo que los distinga; hay
+  un test que lo fija como frontera, no como detalle.
+- **SE APUNTA ANTES DE MUTAR**, y es la única regla que los tres comandos tienen que respetar. No
+  es estilo: `advance` puede cerrar la ronda —por dominó o por tranca— y abrir la siguiente, así
+  que apuntar después mandaría la última jugada de una mano al registro de la mano que sigue.
+- **MUERE CON LA RONDA**, como el pozo: el panel que lo lee es el de la mano en curso.
+- ⚠ **`pastMoves` VA AL FINAL DE `RoundState`.** `@colyseus/schema` codifica por índice:
+  insertarlo en el medio corre todos los campos posteriores y un cliente con el schema
+  pre-generado decodifica basura — es la ruptura de wire que la identidad multiplataforma ya pagó
+  una vez. Agregado al final, un cliente viejo lo ignora.
+- **El registro NO sale por `EngineGraph`.** Escribe y nadie lo lee del lado del servidor, así que
+  una puerta pública sería una segunda forma de apuntar una jugada —una que no pasa por el verbo—
+  justo en el registro que el front lee como si fuera la verdad.
+- **El golden se regrabó**, y de paso quedó al día: el commitado era anterior a `multiplier`,
+  `betLevels`, `isFreeRoom` y `betResponseTimeoutMs` en `meta`. **No se pierde cobertura**: que un
+  snapshot VIEJO rebobine igual lo mide `match-contract.test.ts` con un snapshot viejo escrito a
+  mano y a propósito, que es donde corresponde.
+
+⚠ **LO QUE ESTE INCREMENTO NO TRAE, y v1 sí tiene: el historial de propuestas de aumento**
+(`betMultiplierProposals`). Hoy una propuesta RECHAZADA no deja rastro en el árbol —`settle` borra
+`betOffer` y `acceptedBetLevel` guarda solo la aceptada—. No se portó porque en v1 ese arreglo es
+(a) el estado de trabajo de la negociación, que acá ya es `betOffer`, y (b) la fuente de unas
+métricas que en v2 se sacan del HISTORIAL DE SOPORTE, que guarda el payload entero de
+`PROPOSE_BET_MULTIPLIER` y `RESPOND_BET_MULTIPLIER`. Si alguna vez el front necesita PINTAR las
+propuestas de la partida, es un nodo propio al nivel de `MatchState` —donde ya viven
+`acceptedBetExtra`/`acceptedBetLevel`—, **no un campo más en `PastMove`**.
+
+### El vocabulario lleva adjetivo
+
+Portado de truco `8293fe0`. Una sola palabra para dos cosas opuestas se leyó mal apenas existió el
+registro: hay acciones que se PUEDEN hacer y acciones que se HICIERON. `legalActionsFor` pasó a
+`availableActionsFor`, `GameAction` a `AvailableActionType`, `LegalAction` a `AvailableAction`, y
+`MoveType` nombra la otra mitad.
+
+- **`MoveType` es un `Extract` de las TRES jugadas**, no la lista entera ni un `Exclude`. Truco
+  saca `PLAY_TAPADA` porque es un botón y no un verbo; acá los siete botones son verbos, pero solo
+  tres son JUGADAS. El `Extract` es lo que mantiene el vocabulario único: un verbo renombrado
+  arriba deja el tipo en `never` y el registro deja de compilar.
+- **La aserción de `core/command.ts` es `MoveType extends CommandName`** (`MovesAreVerbs`), y la
+  dirección importa: las jugadas son un SUBCONJUNTO de los verbos, no al revés.
+- **Vive en `rules/` y no junto a los comandos** porque el ÁRBOL tiene que poder nombrarlo:
+  `core/command.ts` importa `BoardSide` de `state/`, así que un `CommandName` adentro de un nodo
+  del schema sería un ciclo.
+- ⚠ **Rompe para el front** el día que tenga su copia de `rules/`. Hoy no la tiene.
+
+### Lo que se decidió NO portar, de esta tanda
+
+- **Los contadores del lobby por censo de asientos** (truco `a7a318f`). Allá el lobby había PERDIDO
+  los tres contadores al quedarse sin estado, así que volverlos a poner era recuperar una
+  regresión. **Acá nunca se perdieron**: `LobbyRoomState` ya lleva `totalPlayers`,
+  `playersInLobby` y `gameModesCount`, y el defecto REAL de v1 —el cartel congelado, que allá solo
+  se recalcula en el join/leave del propio lobby— ya está arreglado distinto: `refresh()` corre
+  cada segundo sobre `matchMaker.query`.
+  Lo único que el censo de truco agregaría es contar ASIENTOS en vez de SOCKETS —el que se queda
+  sin wifi deja de contar aunque su silla siga jugando y su reloj corriendo—, y **eso no es una
+  regresión contra v1: v1 también cuenta sockets** (`room.clients` en `countPlayers()`). O sea que
+  es un cambio de producto, no un port. Y el resto del censo no compraría nada: el `live_seats` de
+  truco tiene que cargarse el `poolId` y el modo para poder desglosar, que acá ya viene en la
+  metadata de la sala.
+  **Si alguna vez se quiere la semántica de asientos**, el camino barato NO es el hash: la sala ya
+  escribe metadata (`gameModeId`), así que publicar ahí los asientos vivos y que `applyCounts` lea
+  eso en vez de `room.clients` es el mismo arreglo en diez líneas, sin ops nuevas de `KeyValueStore`
+  ni dos umbrales de caducidad.
+- **El aislamiento de puertos de la suite** (truco `43d19ca`). Allá la suite habla con Mongo y Redis
+  de verdad y chocaba con los 27017/6379 **de este repo**, que es quien los tiene tomados. Acá
+  `vitest.setup.ts` borra `MONGO_URI`, `REDIS_URL` y `RABBITMQ_URL`: la suite no depende de ningún
+  servicio externo, así que no hay puerto que aislar.
+- **El sync de documentos** (`fec2480`, `c25cff8`) es de los docs de truco; este repo no los tiene.
+- **El `PUT` como parche** (`d1f23fc`) y **la llave del `.env.example`** (`3308781`) ya estaban
+  hechos, y el primero **mejor que en truco** — ya anotado más arriba.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
