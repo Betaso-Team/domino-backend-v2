@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type GameAction, legalActionsFor } from "../actions";
+import { type AvailableActionType, availableActionsFor } from "../actions";
 import { type ViewSetup, rulesConfig, viewOf } from "./fixture";
 
 const base: ViewSetup = {
@@ -15,13 +15,15 @@ const base: ViewSetup = {
   turn: "u1",
 };
 
-const verbs = (setup: ViewSetup, playerId = "u1"): GameAction[] =>
-  legalActionsFor(playerId, viewOf(setup), rulesConfig()).map(({ action }) => action);
+const verbs = (setup: ViewSetup, playerId = "u1"): AvailableActionType[] =>
+  availableActionsFor(playerId, viewOf(setup), rulesConfig()).map(({ action }) => action);
 
-const actionOf = (setup: ViewSetup, action: GameAction, playerId = "u1") =>
-  legalActionsFor(playerId, viewOf(setup), rulesConfig()).find((entry) => entry.action === action);
+const actionOf = (setup: ViewSetup, action: AvailableActionType, playerId = "u1") =>
+  availableActionsFor(playerId, viewOf(setup), rulesConfig()).find(
+    (entry) => entry.action === action,
+  );
 
-describe("legalActionsFor", () => {
+describe("availableActionsFor", () => {
   it("al que le toca le ofrece jugar, abandonar y proponer", () => {
     expect(verbs(base)).toEqual(["PLAY_TILE", "ABANDON", "PROPOSE_BET_MULTIPLIER"]);
   });
@@ -80,7 +82,7 @@ describe("legalActionsFor", () => {
   });
 
   it("una mesa que no aumenta no ofrece el verbo", () => {
-    const actions = legalActionsFor("u1", viewOf(base), rulesConfig({ isFreeRoom: true })).map(
+    const actions = availableActionsFor("u1", viewOf(base), rulesConfig({ isFreeRoom: true })).map(
       ({ action }) => action,
     );
     expect(actions).not.toContain("PROPOSE_BET_MULTIPLIER");

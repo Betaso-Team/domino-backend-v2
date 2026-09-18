@@ -24,8 +24,13 @@ import type { MatchView } from "./view";
 // Y LAS COLOCACIONES VIAJAN CON EL VERBO, porque en el dominó las fichas SON los botones: una
 // lista plana de verbos describiría de menos justo donde más importa —"podés jugar" no dice
 // cuál ni de qué lado—, y derivarlo afuera obligaría al cliente a reimplementar `playableSides`.
+//
+// ACÁ VIVEN LOS DOS LADOS DE LA MISMA PALABRA —lo que se PUEDE hacer y lo que se HIZO
+// (§`MoveType`)— y por eso los tipos llevan adjetivo. Una sola palabra para dos cosas opuestas se
+// leyó mal apenas existió el registro de la mano. El vocabulario sigue siendo UNO: el registro
+// EXTRAE de esta unión, así que un verbo nuevo entra por un solo sitio.
 
-export type GameAction =
+export type AvailableActionType =
   | "PLAY_TILE"
   | "DRAW_TILE"
   | "PASS"
@@ -34,6 +39,31 @@ export type GameAction =
   | "PROPOSE_BET_MULTIPLIER"
   | "RESPOND_BET_MULTIPLIER";
 
+// UNA JUGADA, que son TRES y no siete. En el dominó se pone ficha, se carga del pozo o se pasa:
+// eso es todo lo que un jugador puede HACER sobre la mesa, y es exactamente lo que el v1 apunta en
+// sus `historyMoves` (`rooms/schema/domino/*/round.state.ts`, con `isPassed`/`isLoaded`).
+//
+// LOS OTROS CUATRO VERBOS NO SON JUGADAS, y cada uno tiene su registro:
+//
+//   · `REVEAL_TILES` es la ceremonia de la ventana de reparto, no un movimiento en el tablero;
+//   · `ABANDON` es una salida, y ya vive en `PlayerState.hasAbandoned` y en el evento `ABANDON`;
+//   · los dos del AUMENTO son economía y no juego —el motor corre la negociación y nunca calcula
+//     con lo acordado—. En v1 tampoco están en `historyMoves`: tienen su propio
+//     `betMultiplierProposals`, que es el estado de trabajo de la negociación y la fuente de las
+//     métricas. Acá ese estado ya es `RoundState.betOffer`, y las métricas leen el HISTORIAL DE
+//     SOPORTE, que guarda el payload entero de los dos comandos. Meterlos en el registro de
+//     jugadas sería una tercera copia, y arrastraría a cada jugada un `level` y un `accepted` que
+//     para ella son siempre cero.
+//
+// Es un `Extract` y no una lista escrita de nuevo: el vocabulario tiene que seguir siendo UNO, así
+// que un verbo renombrado arriba deja esto en `never` y el registro deja de compilar.
+//
+// Se declara acá y no junto a los comandos porque el ÁRBOL tiene que poder nombrarlo:
+// `core/command.ts` importa `BoardSide` de `state/`, así que un `CommandName` adentro de un nodo
+// del schema sería un ciclo. Que las tres sigan siendo verbos de verdad lo comprueba una aserción
+// de tipo en aquel archivo.
+export type MoveType = Extract<AvailableActionType, "PLAY_TILE" | "DRAW_TILE" | "PASS">;
+
 // Una ficha jugable y por qué lados entra. `sides` nunca viene vacío: una ficha que no engancha
 // por ningún lado no es una colocación, así que no está en la lista.
 export interface TilePlacement {
@@ -41,8 +71,8 @@ export interface TilePlacement {
   readonly sides: readonly BoardSide[];
 }
 
-export interface LegalAction {
-  readonly action: GameAction;
+export interface AvailableAction {
+  readonly action: AvailableActionType;
   // Solo en `PLAY_TILE`. En el resto no va.
   readonly placements?: readonly TilePlacement[];
   // Los niveles ofrecibles del catálogo, solo en `PROPOSE_BET_MULTIPLIER` y por la misma razón:
@@ -50,13 +80,13 @@ export interface LegalAction {
   readonly levels?: readonly number[];
 }
 
-export function legalActionsFor(
+export function availableActionsFor(
   playerId: PlayerId,
   match: MatchView,
   config: DominoRulesConfig,
-): readonly LegalAction[] {
-  const actions: LegalAction[] = [];
-  const add = (action: GameAction, extra: Omit<LegalAction, "action"> = {}) =>
+): readonly AvailableAction[] {
+  const actions: AvailableAction[] = [];
+  const add = (action: AvailableActionType, extra: Omit<AvailableAction, "action"> = {}) =>
     actions.push({ action, ...extra });
 
   const placements = placementsFor(playerId, match);

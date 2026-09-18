@@ -19,8 +19,13 @@
 // angostamiento de los ejes, la puerta de `privateOf`—, no una API: quien consuma esto tiene la
 // vista y la puede leer. Exportarlas sería ofrecer dos formas de preguntar lo mismo, y una de
 // ellas sin la regla puesta.
-export type { GameAction, LegalAction, TilePlacement } from "./actions";
-export { legalActionsFor } from "./actions";
+export type {
+  AvailableAction,
+  AvailableActionType,
+  MoveType,
+  TilePlacement,
+} from "./actions";
+export { availableActionsFor } from "./actions";
 export type { BoardEnds, BoardSide } from "./board-ends";
 export { boardEndsOf } from "./board-ends";
 export type { RuleViolationCode } from "./codes";

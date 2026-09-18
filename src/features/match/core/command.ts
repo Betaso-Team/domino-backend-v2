@@ -1,5 +1,6 @@
 // src/features/match/core/command.ts
 import type { PlayerId } from "./ids";
+import type { MoveType } from "./rules/actions";
 import type { BoardSide } from "./state/tile";
 
 // El mapa de verbos. Crece de a uno: cada verbo nuevo rompe la compilación en TRES
@@ -26,6 +27,17 @@ export interface CommandPayloads {
 
 export type CommandName = keyof CommandPayloads;
 export type CommandPayload<N extends CommandName> = CommandPayloads[N];
+
+// LAS TRES JUGADAS SON VERBOS DE VERDAD, y esta línea lo comprueba. La tabla de arriba es la
+// fuente de verdad de los payloads; `MoveType` (§`rules/actions`) extrae de ella las tres que el
+// registro de la mano apunta, y se declara allá porque el ÁRBOL tiene que poder nombrarla —este
+// archivo no se puede importar desde `state/` sin hacer un ciclo—.
+//
+// La dirección de la aserción es la que importa: las jugadas son un SUBCONJUNTO de los verbos, no
+// al revés. Sin ella, renombrar `DRAW_TILE` acá dejaría a `MoveType` con un literal que ya no
+// existe y el registro seguiría compilando contra una palabra muerta.
+type Assert<T extends true> = T;
+export type MovesAreVerbs = Assert<MoveType extends CommandName ? true : false>;
 
 // SÍNCRONO POR CONTRATO. Nada que espere red cabe adentro: si no hay await,
 // Node no puede entrelazar dos mensajes del mismo cliente (spec §6).
