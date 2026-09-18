@@ -1,0 +1,2840 @@
+{
+  "meta": {
+    "matchId": "m-g1-g2",
+    "gameModeId": "27875ef2-d62a-4633-80ac-4b18bde3e825",
+    "seats": [
+      {
+        "platformId": "betaso",
+        "userUuid": "g1",
+        "displayName": "Jugador g1",
+        "currency": "VES",
+        "playerId": "seat-1"
+      },
+      {
+        "platformId": "betaso",
+        "userUuid": "g2",
+        "displayName": "Jugador g2",
+        "currency": "VES",
+        "playerId": "seat-2"
+      }
+    ],
+    "seed": "seed-partida-completa",
+    "pointsToWin": 100,
+    "teamAssignment": "SHUFFLED",
+    "isDealWindowEnabled": true,
+    "rateId": "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+    "entryFee": 125,
+    "prize": 250,
+    "multiplier": 1,
+    "isFreeRoom": false,
+    "betLevels": []
+  },
+  "globalConfig": {
+    "turnTimeoutMs": 600,
+    "extraTimeReserveMs": 300,
+    "dealingTimeoutMs": 800,
+    "presentingRoundMs": 120,
+    "presentingMatchMs": 120,
+    "seatingTimeoutMs": 3000,
+    "reconnectionWindowSeconds": 3,
+    "tilesPerPlayer": 7,
+    "betResponseTimeoutMs": 10000
+  },
+  "startedAt": 1789745772166,
+  "entries": [
+    {
+      "matchId": "m-g1-g2",
+      "seq": 1,
+      "at": 1789745772175,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "REVEAL_TILES",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 2,
+      "at": 1789745772175,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "REVEAL_TILES",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 3,
+      "at": 1789745772192,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 3,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 4,
+      "at": 1789745772207,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 1,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 5,
+      "at": 1789745772222,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 6,
+      "at": 1789745772238,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 0,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 7,
+      "at": 1789745772253,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 8,
+      "at": 1789745772271,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 9,
+      "at": 1789745772285,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 6,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 10,
+      "at": 1789745772301,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 11,
+      "at": 1789745772317,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 12,
+      "at": 1789745772334,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 13,
+      "at": 1789745772348,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 14,
+      "at": 1789745772363,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 15,
+      "at": 1789745772378,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 5,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 16,
+      "at": 1789745772395,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 17,
+      "at": 1789745772409,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 18,
+      "at": 1789745772425,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 19,
+      "at": 1789745772443,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 20,
+      "at": 1789745772457,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 21,
+      "at": 1789745772472,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 22,
+      "at": 1789745772488,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 23,
+      "at": 1789745772504,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 24,
+      "at": 1789745772519,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 25,
+      "at": 1789745772535,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 26,
+      "at": 1789745772551,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 27,
+      "at": 1789745772568,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 28,
+      "at": 1789745772582,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 29,
+      "at": 1789745772598,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 30,
+      "at": 1789745772613,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 31,
+      "at": 1789745772630,
+      "roundNumber": 1,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 32,
+      "at": 1789745772631,
+      "roundNumber": 1,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "ROUND_RESOLVED",
+      "payload": {
+        "roundNumber": 1,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 19,
+        "reason": "DOMINO"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 33,
+      "at": 1789745772756,
+      "roundNumber": 2,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "DEADLINE_EXPIRED",
+      "payload": {
+        "kind": "PRESENTING_ROUND"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 34,
+      "at": 1789745772781,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 35,
+      "at": 1789745772786,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 36,
+      "at": 1789745772803,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 37,
+      "at": 1789745772819,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 38,
+      "at": 1789745772834,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 39,
+      "at": 1789745772848,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 40,
+      "at": 1789745772864,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 41,
+      "at": 1789745772880,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 42,
+      "at": 1789745772895,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 43,
+      "at": 1789745772911,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 44,
+      "at": 1789745772926,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 45,
+      "at": 1789745772943,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 46,
+      "at": 1789745772957,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 47,
+      "at": 1789745772973,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 48,
+      "at": 1789745772989,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 49,
+      "at": 1789745773006,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 50,
+      "at": 1789745773021,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 51,
+      "at": 1789745773037,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 52,
+      "at": 1789745773053,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 53,
+      "at": 1789745773070,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 1,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 54,
+      "at": 1789745773085,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 55,
+      "at": 1789745773102,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 56,
+      "at": 1789745773118,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 57,
+      "at": 1789745773134,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 58,
+      "at": 1789745773150,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 59,
+      "at": 1789745773165,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 60,
+      "at": 1789745773181,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 61,
+      "at": 1789745773198,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 62,
+      "at": 1789745773213,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 63,
+      "at": 1789745773229,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PASS",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 64,
+      "at": 1789745773245,
+      "roundNumber": 2,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PASS",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 65,
+      "at": 1789745773245,
+      "roundNumber": 2,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "ROUND_RESOLVED",
+      "payload": {
+        "roundNumber": 2,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 54,
+        "reason": "BLOCKED"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 66,
+      "at": 1789745773323,
+      "roundNumber": 3,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "DEADLINE_EXPIRED",
+      "payload": {
+        "kind": "PRESENTING_ROUND"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 67,
+      "at": 1789745773326,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 68,
+      "at": 1789745773339,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 69,
+      "at": 1789745773355,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 70,
+      "at": 1789745773371,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 2,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 71,
+      "at": 1789745773387,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 72,
+      "at": 1789745773402,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 73,
+      "at": 1789745773418,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 5,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 74,
+      "at": 1789745773434,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 75,
+      "at": 1789745773449,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 76,
+      "at": 1789745773465,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 77,
+      "at": 1789745773481,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 2,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 78,
+      "at": 1789745773497,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 79,
+      "at": 1789745773513,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 80,
+      "at": 1789745773529,
+      "roundNumber": 3,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 81,
+      "at": 1789745773529,
+      "roundNumber": 3,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "ROUND_RESOLVED",
+      "payload": {
+        "roundNumber": 3,
+        "winnerId": "seat-2",
+        "winnerTeamId": "B",
+        "points": 10,
+        "reason": "DOMINO"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 82,
+      "at": 1789745773640,
+      "roundNumber": 4,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "DEADLINE_EXPIRED",
+      "payload": {
+        "kind": "PRESENTING_ROUND"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 83,
+      "at": 1789745773642,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 3,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 84,
+      "at": 1789745773656,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 3,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 85,
+      "at": 1789745773671,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 2,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 86,
+      "at": 1789745773687,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 87,
+      "at": 1789745773704,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 3,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 88,
+      "at": 1789745773719,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 3,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 89,
+      "at": 1789745773735,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 90,
+      "at": 1789745773750,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 5,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 91,
+      "at": 1789745773767,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 92,
+      "at": 1789745773782,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 93,
+      "at": 1789745773799,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 94,
+      "at": 1789745773813,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 95,
+      "at": 1789745773830,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 5,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 96,
+      "at": 1789745773845,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 6,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 97,
+      "at": 1789745773860,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 98,
+      "at": 1789745773875,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 99,
+      "at": 1789745773893,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 6,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 100,
+      "at": 1789745773907,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 101,
+      "at": 1789745773923,
+      "roundNumber": 4,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 102,
+      "at": 1789745773923,
+      "roundNumber": 4,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "ROUND_RESOLVED",
+      "payload": {
+        "roundNumber": 4,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 15,
+        "reason": "DOMINO"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 103,
+      "at": 1789745774018,
+      "roundNumber": 5,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "DEADLINE_EXPIRED",
+      "payload": {
+        "kind": "PRESENTING_ROUND"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 104,
+      "at": 1789745774020,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 5,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 105,
+      "at": 1789745774033,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 106,
+      "at": 1789745774048,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 107,
+      "at": 1789745774064,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 108,
+      "at": 1789745774080,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 1,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 109,
+      "at": 1789745774095,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 110,
+      "at": 1789745774111,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 0,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 111,
+      "at": 1789745774126,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 112,
+      "at": 1789745774143,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 113,
+      "at": 1789745774158,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 114,
+      "at": 1789745774173,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 115,
+      "at": 1789745774189,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 116,
+      "at": 1789745774204,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 117,
+      "at": 1789745774219,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 118,
+      "at": 1789745774235,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 119,
+      "at": 1789745774251,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 120,
+      "at": 1789745774266,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 121,
+      "at": 1789745774281,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 122,
+      "at": 1789745774297,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 123,
+      "at": 1789745774313,
+      "roundNumber": 5,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 2,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 124,
+      "at": 1789745774313,
+      "roundNumber": 5,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "ROUND_RESOLVED",
+      "payload": {
+        "roundNumber": 5,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 8,
+        "reason": "DOMINO"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 125,
+      "at": 1789745774393,
+      "roundNumber": 6,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "DEADLINE_EXPIRED",
+      "payload": {
+        "kind": "PRESENTING_ROUND"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 126,
+      "at": 1789745774395,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 1,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 127,
+      "at": 1789745774408,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 128,
+      "at": 1789745774424,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 129,
+      "at": 1789745774441,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 3,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 130,
+      "at": 1789745774457,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 131,
+      "at": 1789745774472,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 132,
+      "at": 1789745774488,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 4,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 133,
+      "at": 1789745774503,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 134,
+      "at": 1789745774520,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 135,
+      "at": 1789745774535,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 136,
+      "at": 1789745774551,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 137,
+      "at": 1789745774566,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 138,
+      "at": 1789745774582,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 0,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 139,
+      "at": 1789745774597,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 140,
+      "at": 1789745774613,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 141,
+      "at": 1789745774629,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 142,
+      "at": 1789745774645,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 143,
+      "at": 1789745774660,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 144,
+      "at": 1789745774676,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 145,
+      "at": 1789745774692,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 5,
+        "right": 6,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 146,
+      "at": 1789745774709,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 5,
+        "side": "RIGHT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 147,
+      "at": 1789745774724,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 3,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 148,
+      "at": 1789745774740,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 1,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 149,
+      "at": 1789745774756,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 5,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 150,
+      "at": 1789745774771,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 151,
+      "at": 1789745774786,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 4,
+        "side": "RIGHT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 152,
+      "at": 1789745774802,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 153,
+      "at": 1789745774819,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 0,
+        "right": 2,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 154,
+      "at": 1789745774835,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 155,
+      "at": 1789745774850,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 2,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 156,
+      "at": 1789745774865,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 157,
+      "at": 1789745774881,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 158,
+      "at": 1789745774898,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 159,
+      "at": 1789745774913,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PLAY_TILE",
+      "payload": {
+        "left": 4,
+        "right": 5,
+        "side": "LEFT",
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 160,
+      "at": 1789745774929,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 161,
+      "at": 1789745774945,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "DRAW_TILE",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 162,
+      "at": 1789745774961,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PASS",
+      "payload": {
+        "playerId": "seat-1"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 163,
+      "at": 1789745774976,
+      "roundNumber": 6,
+      "source": "PLAYER",
+      "kind": "COMMAND",
+      "type": "PASS",
+      "payload": {
+        "playerId": "seat-2"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 164,
+      "at": 1789745774977,
+      "roundNumber": 6,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "ROUND_RESOLVED",
+      "payload": {
+        "roundNumber": 6,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 22,
+        "reason": "BLOCKED"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 165,
+      "at": 1789745775086,
+      "roundNumber": 6,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "DEADLINE_EXPIRED",
+      "payload": {
+        "kind": "PRESENTING_ROUND"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 166,
+      "at": 1789745775086,
+      "roundNumber": 6,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "MATCH_RESOLVED",
+      "payload": {
+        "winnerTeamId": "A",
+        "reason": "SCORE"
+      }
+    },
+    {
+      "matchId": "m-g1-g2",
+      "seq": 167,
+      "at": 1789745775213,
+      "roundNumber": 6,
+      "source": "SYSTEM",
+      "kind": "EVENT",
+      "type": "DEADLINE_EXPIRED",
+      "payload": {
+        "kind": "PRESENTING_MATCH"
+      }
+    }
+  ],
+  "finalState": {
+    "phase": "FINISHED",
+    "scoreboard": {
+      "teamA": 118,
+      "teamB": 10
+    },
+    "players": [
+      {
+        "playerId": "seat-1",
+        "displayName": "Jugador g1",
+        "teamId": "A",
+        "seatIndex": 0,
+        "connected": true,
+        "hasAbandoned": false,
+        "hasSeenTiles": true,
+        "extraTimeRemainingMs": 300,
+        "hand": {
+          "tileCount": 3,
+          "isRevealed": true,
+          "tiles": [
+            {
+              "left": 6,
+              "right": 6
+            },
+            {
+              "left": 1,
+              "right": 1
+            },
+            {
+              "left": 3,
+              "right": 3
+            }
+          ]
+        }
+      },
+      {
+        "playerId": "seat-2",
+        "displayName": "Jugador g2",
+        "teamId": "B",
+        "seatIndex": 1,
+        "connected": true,
+        "hasAbandoned": false,
+        "hasSeenTiles": true,
+        "extraTimeRemainingMs": 300,
+        "hand": {
+          "tileCount": 3,
+          "isRevealed": true,
+          "tiles": [
+            {
+              "left": 3,
+              "right": 6
+            },
+            {
+              "left": 2,
+              "right": 3
+            },
+            {
+              "left": 2,
+              "right": 6
+            }
+          ]
+        }
+      }
+    ],
+    "currentRound": {
+      "roundNumber": 6,
+      "phase": "PRESENTING_ROUND",
+      "starterId": "seat-1",
+      "board": {
+        "tiles": [
+          {
+            "tile": {
+              "left": 0,
+              "right": 1
+            },
+            "playedBy": "seat-1",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 0,
+              "right": 3
+            },
+            "playedBy": "seat-2",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 1,
+              "right": 6
+            },
+            "playedBy": "seat-1",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 1,
+              "right": 3
+            },
+            "playedBy": "seat-2",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 4,
+              "right": 6
+            },
+            "playedBy": "seat-1",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 1,
+              "right": 4
+            },
+            "playedBy": "seat-2",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 2,
+              "right": 4
+            },
+            "playedBy": "seat-1",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 0,
+              "right": 4
+            },
+            "playedBy": "seat-2",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 2,
+              "right": 2
+            },
+            "playedBy": "seat-1",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 0,
+              "right": 0
+            },
+            "playedBy": "seat-2",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 1,
+              "right": 2
+            },
+            "playedBy": "seat-1",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 0,
+              "right": 6
+            },
+            "playedBy": "seat-2",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 5,
+              "right": 6
+            },
+            "playedBy": "seat-1",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 3,
+              "right": 5
+            },
+            "playedBy": "seat-2",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 3,
+              "right": 4
+            },
+            "playedBy": "seat-1",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 1,
+              "right": 5
+            },
+            "playedBy": "seat-2",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 5,
+              "right": 5
+            },
+            "playedBy": "seat-1",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 0,
+              "right": 5
+            },
+            "playedBy": "seat-2",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 4,
+              "right": 4
+            },
+            "playedBy": "seat-1",
+            "side": "RIGHT"
+          },
+          {
+            "tile": {
+              "left": 0,
+              "right": 2
+            },
+            "playedBy": "seat-2",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 2,
+              "right": 5
+            },
+            "playedBy": "seat-1",
+            "side": "LEFT"
+          },
+          {
+            "tile": {
+              "left": 4,
+              "right": 5
+            },
+            "playedBy": "seat-2",
+            "side": "LEFT"
+          }
+        ]
+      },
+      "boneyard": {
+        "count": 0,
+        "tiles": []
+      },
+      "currentTurn": {
+        "playerId": "seat-2",
+        "isConsumingExtendedTime": false,
+        "consecutivePasses": 2
+      },
+      "pastMoves": [
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "PLAY_TILE",
+          "playerId": "seat-2"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "DRAW_TILE",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PASS",
+          "playerId": "seat-1"
+        },
+        {
+          "type": "PASS",
+          "playerId": "seat-2"
+        }
+      ]
+    },
+    "pastRounds": [
+      {
+        "roundNumber": 1,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 19,
+        "reason": "DOMINO"
+      },
+      {
+        "roundNumber": 2,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 54,
+        "reason": "BLOCKED"
+      },
+      {
+        "roundNumber": 3,
+        "winnerId": "seat-2",
+        "winnerTeamId": "B",
+        "points": 10,
+        "reason": "DOMINO"
+      },
+      {
+        "roundNumber": 4,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 15,
+        "reason": "DOMINO"
+      },
+      {
+        "roundNumber": 5,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 8,
+        "reason": "DOMINO"
+      },
+      {
+        "roundNumber": 6,
+        "winnerId": "seat-1",
+        "winnerTeamId": "A",
+        "points": 22,
+        "reason": "BLOCKED"
+      }
+    ],
+    "pointsToWin": 100,
+    "activeDeadline": 0,
+    "startedAt": 1789745772166,
+    "acceptedBetExtra": 0,
+    "acceptedBetLevel": 0
+  }
+}

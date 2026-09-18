@@ -1,0 +1,156 @@
+# LA TAREA DE DESPLEGAR, una sola para los tres entornos.
+#
+# El eje es la tarea y EL ENTORNO ES UN DATO. Lo que hace que no haga falta un archivo por entorno
+# son los Environments de GitHub: los tres tienen los secretos con el MISMO nombre (`SSH_HOST`,
+# `SSH_USER`, `SSH_KEY`), así que desaparecen los sufijos `_DEV`/`_STAGE`/`_PROD` que hay en los
+# otros repos de la organización — y `prod` puede además exigir la aprobación de una persona, que
+# es una garantía que una rama no da.
+#
+#   develop → dev        push a la rama, o `workflow_dispatch` desde CUALQUIER rama (es lo que
+#   stage   → stage      permite probar una feature en el VPS de dev sin mergearla a develop)
+#   main    → prod
+#
+# `DEPLOY_ENVIRONMENTS` (variable del repositorio) lista los entornos que YA EXISTEN. El que no
+# esté ahí se saltea en vez de fallar en rojo: el dominó v2 todavía no tiene servidor de stage ni
+# de prod, y un rojo permanente es un rojo que se deja de mirar.
+#
+# NINGÚN SECRETO VIVE EN ESTE ARCHIVO ni en el artefacto. Las variables de la aplicación
+# (`JWT_SECRET`, `INTERNAL_API_KEY`, `MONGO_URI`, `REDIS_URL`, …) están en el `.env` compartido del
+# servidor, que se crea UNA vez a mano y que el despliegue nunca toca (§`scripts/deploy-remote.sh`).
+name: Deploy
+
+on:
+  push:
+    branches: [develop, stage, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: A qué entorno desplegar
+        type: choice
+        options: [dev, stage, prod]
+        default: dev
+
+permissions:
+  contents: read
+
+jobs:
+  # A DÓNDE VA ESTO. Es un job aparte porque `environment:` y `concurrency:` del job de abajo se
+  # evalúan antes de que corra un solo paso, así que necesitan el nombre ya resuelto.
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+      enabled: ${{ steps.pick.outputs.enabled }}
+    steps:
+      - id: pick
+        # LOS DATOS ENTRAN POR EL ENTORNO Y NO INTERPOLADOS EN EL SCRIPT: un nombre de rama es
+        # texto que eligió quien la creó, y un `${{ }}` adentro de un `run` se sustituye ANTES de
+        # que bash lo vea — o sea que una rama con el nombre adecuado ejecuta lo que quiera con los
+        # permisos del workflow.
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_ENV: ${{ inputs.environment }}
+          ENABLED: ${{ vars.DEPLOY_ENVIRONMENTS }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            target="$INPUT_ENV"
+          else
+            case "$REF_NAME" in
+              develop) target=dev   ;;
+              stage)   target=stage ;;
+              main)    target=prod  ;;
+              *) echo "::error::la rama $REF_NAME no mapea a ningún entorno"; exit 1 ;;
+            esac
+          fi
+          echo "environment=$target" >> "$GITHUB_OUTPUT"
+          if [[ ",${ENABLED// /}," == *",$target,"* ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "▸ destino: $target"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::el entorno $target no está en DEPLOY_ENVIRONMENTS todavía: no se despliega"
+          fi
+
+  # NADA SALE SIN EL GATE EN VERDE. Es el MISMO workflow que corre en los PRs, llamado y no
+  # copiado: una copia se desincroniza y el día que pasa, lo que verificó el PR no es lo que
+  # verificó el despliegue.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: [target, verify]
+    if: needs.target.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.target.outputs.environment }}
+    # Dos despliegues al MISMO entorno no pueden pisarse; a entornos distintos sí pueden ir juntos.
+    # Sin cancelar el que está en curso: cortar un despliegue a la mitad —entre el symlink movido y
+    # el pm2 recargado— es exactamente el estado del que este diseño viene a escapar.
+    concurrency:
+      group: deploy-${{ needs.target.outputs.environment }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      # La clave no pasa por ninguna action de terceros. Y el host se FIJA con `known_hosts`:
+      # aceptar la clave del primero que conteste es confiar en el DNS para entregar una llave de
+      # producción.
+      - name: Preparar el acceso
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+
+      # SUBIR Y CORRER EL PROCEDIMIENTO QUE VIAJA ADENTRO DEL ARTEFACTO. Ese es el punto: el script
+      # que se ejecuta es siempre el de la versión que se está desplegando, así que cambiar el
+      # procedimiento es un commit más y no un archivo que alguien editó a mano en el servidor.
+      #
+      # `NODE_INTERPRETER` es la lección que truco pagó con cuatro despliegues: el node de pm2 es
+      # el del DEMONIO, no el de quien despliega ni el que corrió la suite, y colyseus 0.18 pide
+      # >= 22. Si el demonio del servidor corre uno más viejo, esta variable es dónde se arregla.
+      - name: Subir y desplegar
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          PM2_APP_NAME: ${{ vars.PM2_APP_NAME }}
+          PM2_INSTANCES: ${{ vars.PM2_INSTANCES }}
+          NODE_BIN: ${{ vars.NODE_BIN }}
+          NODE_INTERPRETER: ${{ vars.NODE_INTERPRETER }}
+        run: |
+          set -euo pipefail
+          # El nombre lleva fecha y commit: ordena solo —el glob del script depende de eso— y dice
+          # de dónde salió sin abrir nada.
+          release="$(date -u +%Y%m%dT%H%M%S)-${GITHUB_SHA::7}"
+          opts=(-i "$HOME/.ssh/deploy" -o BatchMode=yes)
+
+          echo "▸ $release → $SSH_USER@$SSH_HOST:$DEPLOY_PATH"
+          ssh "${opts[@]}" "$SSH_USER@$SSH_HOST" "mkdir -p '$DEPLOY_PATH/releases/$release'"
+          scp "${opts[@]}" domino-v2.tgz "$SSH_USER@$SSH_HOST:/tmp/$release.tgz"
+          ssh "${opts[@]}" "$SSH_USER@$SSH_HOST" \
+            "set -e; tar -xzf '/tmp/$release.tgz' -C '$DEPLOY_PATH/releases/$release'; rm -f '/tmp/$release.tgz'; \
+             PM2_APP_NAME='$PM2_APP_NAME' PM2_INSTANCES='$PM2_INSTANCES' NODE_BIN='$NODE_BIN' \
+             NODE_INTERPRETER='$NODE_INTERPRETER' \
+             bash '$DEPLOY_PATH/releases/$release/scripts/deploy-remote.sh'"
+
+      # DESDE AFUERA, que es lo único que prueba que el proxy también está bien: el script de
+      # arriba comprueba las instancias contra 127.0.0.1, y eso no ve el vhost ni el DNS. Y acá el
+      # proxy importa más que de costumbre, porque con varias instancias tiene que rutear POR
+      # PREFIJO DE PATH (§README) y esa falla aparece en el CLIENTE, no en el servidor.
+      #
+      # Va contra `/health` y no contra `/ready`: lo que se está midiendo es que la puerta de
+      # entrada llega a un proceso vivo. Que las dependencias estén sanas ya lo dictaminó el script
+      # instancia por instancia, y por el proxy solo se ve una.
+      - name: Comprobar por la puerta de entrada
+        if: vars.PUBLIC_URL != ''
+        env:
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: curl -fsS --retry 5 --retry-delay 2 --retry-all-errors "$PUBLIC_URL/health"

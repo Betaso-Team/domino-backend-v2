@@ -1,6 +1,7 @@
 # Domino v2 — port de la arquitectura de `truco-backend-v2`
 
-> **Spec de diseño** · 2026-09-09 · Aprobado en seis secciones
+> **Spec de diseño** · 2026-09-09 · Aprobado en seis secciones · **revisado 2026-09-10** contra
+> `truco-backend-v2` v26/v10/v12
 > Este documento fija **qué** se construye y **por qué**. El *cuándo* y el *en qué orden* viven en el
 > plan de implementación.
 >
@@ -11,9 +12,23 @@
 > únicas que se planifican en detalle ahora. Cada rebanada posterior se replanifica con lo aprendido en
 > la anterior.
 >
-> **Referencias:** en `truco-backend-v2/docs/`: `arquitectura-negocio-v25.md`,
-> `arquitectura-app-e-infra-v9.md`, `estructura-de-carpetas-v11.md`. En este repo:
-> `docs/ruta-critica.md`, `docs/multi-operator-mvp-plan.md`, `docs/abrir-la-red.md`.
+> **Referencias:** en `truco-backend-v2/docs/`: `arquitectura-negocio-v27.md`,
+> `arquitectura-app-e-infra-v11.md`, `estructura-de-carpetas-v13.md`, y **`changelog.md`**. En este
+> repo: `docs/ruta-critica.md`, `docs/multi-operator-mvp-plan.md`, `docs/abrir-la-red.md`.
+>
+> **La primera redacción citaba v25/v9/v11, y esa diferencia costó cuatro decisiones.** El delta entre
+> esas versiones y las actuales son **dos** entradas del changelog de truco:
+>
+> - **La revancha** (v26/v10/v12) — de ahí salen: que la negociación de revancha la hospeda el MOTOR
+>   (§5.6), que `MATCH_RESOLVED` se emite al ENTRAR a la fase de presentación y no al vencerla (§5.7),
+>   y que `RESOLVED` (veredicto, siempre evento) es una palabra distinta de `FINISHED` (terminal de la
+>   máquina, siempre fase) (§5.8).
+> - **La ventana de reparto** (v27/v11/v13, `feat(match): ver mis cartas`) — de ahí sale §7.5, que en
+>   dominó no es una feature más: es el control antifraude del arranque.
+>
+> Regla de mantenimiento que sale de esto: **antes de revisar cualquier decisión de arquitectura, leer
+> `truco-backend-v2/docs/changelog.md` y comparar contra la versión que este documento cita.** Las dos
+> veces que se hizo, apareció algo que este spec necesitaba.
 
 ---
 
@@ -385,12 +400,32 @@ Un verbo dicho por el jugador ya queda registrado como comando. Dicho por el **s
 quien calló, se emite **con el nombre del verbo**: el acto es el mismo, lo único que cambia es quién lo
 dijo. Sin flags, sin vocabulario paralelo — de qué lado entró al grabador ya lo dice el `source`.
 
-> **Pendiente para el documento de reglas, no para este spec:** *qué* hace el sistema al vencer el
-> turno. Hoy `on-timeout.ts` **expulsa al jugador**; el modelo de truco en cambio ejecuta el verbo del
-> que calló y solo retira tras agotar el tiempo extra. Son dos reglas distintas con consecuencias
-> distintas para la mesa, y elegir es decisión de reglas. El mecanismo del historial **no depende de
-> esa elección**: cualquiera de las dos produce un `DEADLINE_EXPIRED` seguido del verbo que el sistema
-> ejecutó, con `source: SYSTEM`.
+> **Resuelto en el documento de reglas §5.2 (decisión 1):** al vencer el turno el sistema **retira** al
+> jugador y no juega por nadie. El mecanismo del historial no dependía de esa elección, y para que de
+> verdad no dependa, `MatchHistory.command()` recibe el `source` **por parámetro** en vez de fijarlo en
+> `"PLAYER"`. Si algún día el sistema dice un verbo, se graba con el nombre del verbo y
+> `source: SYSTEM` sin tocar el grabador.
+
+#### El criterio gobierna el HISTORIAL, no la sincronización
+
+Dos preguntas distintas, y confundirlas es cómo el v1 terminó con `historyMoves` dentro del `Schema`
+haciendo de auditoría y de feed de UI a la vez:
+
+| | Historial | Estado sincronizado |
+|---|---|---|
+| Qué es | un **delta**: el acto o el hecho, en su instante | el **acumulado**: lo que sigue siendo cierto |
+| Quién lo lee | soporte, conciliación, el replay | el cliente, incluido el que **reconecta** |
+| Criterio | *el evento existe ⟺ no hubo comando detrás* | *¿un cliente que llega tarde necesita saberlo?* |
+
+De ahí salen tres campos que el criterio del historial habría dejado fuera y que el estado **sí**
+lleva, cada uno porque un cliente que reconecta no puede reconstruirlo de ningún evento pasado:
+
+- **`Turn.consecutivePasses`** — pasar no pone ficha ni saca del pozo, así que es la única huella que
+  un pase deja en el árbol. Sin él, el rival no tiene de dónde enterarse.
+- **`Turn.isConsumingExtendedTime`** — los dos tramos del plazo ocurren en la misma fase; sin el
+  discriminador el front muestra una cuenta atrás sin saber de cuál.
+- **`PlayerState.connected`** — truco no lo tiene (lo cuenta con eventos de plataforma). Acá se
+  conserva el del v1, porque "mi rival está caído" tiene que sobrevivir a la reconexión.
 
 **Por eso un historial de solo eventos no alcanza.** Por ese criterio la mayoría de los verbos no
 emite nada, así que tendría los desenlaces y **ninguna jugada** — y un hueco justo donde más se
@@ -404,7 +439,8 @@ PASS             { playerId: u2 }                           PLAYER
 DEADLINE_EXPIRED { kind: TURN }                             SYSTEM
 ABANDON          { playerId: u1 }                           SYSTEM   ← lo retiró el reloj, no se fue
 ROUND_RESOLVED   { roundNumber: 1, winnerId: u2, … }        SYSTEM
-MATCH_RESOLVED   { winnerTeamId: B, reason: ABANDONMENT }   SYSTEM
+MATCH_RESOLVED   { winnerTeamId: B, reason: ABANDONMENT }   SYSTEM   ← al ENTRAR a la presentación
+DEADLINE_EXPIRED { kind: PRESENTING_MATCH }                 SYSTEM   ← recién acá se apaga la mesa
 ```
 
 El `source` es un campo y no un adorno: para un reclamo —"yo nunca pasé"— esa es toda la pregunta.
@@ -412,11 +448,18 @@ El `source` es un campo y no un adorno: para un reclamo —"yo nunca pasé"— e
 **Fuera quedan** los mensajes **rechazados** (una jugada ilegal es rastro antifraude, no historia de la
 partida: va al log) y el **`seed`**.
 
+**El vocabulario es cerrado.** `HistoryEntry.type` no es `string`: es
+`keyof CommandPayloads | NetworkMatchEvent["type"]`. Es la corrección del pecado del v1, donde una
+entrada era **un solo tipo discriminado por dos booleanos** (`isPassed`/`isLoaded`), de modo que
+`isPassed && isLoaded` typechequeaba y no significaba nada. Con el discriminante tipado, grabar el
+nombre viejo de un verbo (`LOAD_TILE`) es un error de compilación y no un hallazgo del replay en
+runtime.
+
 ### 5.2 Colecciones
 
 ```
 match_history  { matchId, seq, source: PLAYER|SYSTEM, kind: COMMAND|EVENT,
-                 type, payload, roundNumber, at, snapshot? }
+                 type, payload, roundNumber, at }
                  índices: unique { matchId: 1, seq: 1 } · { at: -1 }
 
 match_meta     { matchId, roomId, gameModeId, seats[], operatorIds[], seed,
@@ -424,6 +467,13 @@ match_meta     { matchId, roomId, gameModeId, seats[], operatorIds[], seed,
 ```
 
 El `seed` vive en `match_meta`, nunca en el estado sincronizado ni en el DTO del endpoint de config.
+
+**Una entrada del historial NO lleva `snapshot`.** La primera redacción lo tenía como campo opcional y
+nada lo escribía nunca, lo cual es peor que no tenerlo: hacía creer que el replay podía autoverificarse
+contra producción. Una entrada es un acto o un hecho —inmutable y de tamaño acotado—; un volcado del
+árbol es otra clase de cosa y solo interesa al cierre, así que si alguna vez hace falta va en
+`match_meta`. El replay que **afirma** es el de fixtures: el estado final esperado vive en el propio
+golden, versionado en el repo. El CLI de soporte reconstruye e imprime, y no compara contra nada.
 
 ### 5.3 Quién graba
 
@@ -457,9 +507,10 @@ reproducible de forma aislada.
 Dos consumidores:
 
 - `GET /internal/matches/:matchId/history` — para soporte, detrás de la API key interna.
-- `npm run replay -- <matchId>` — rebobina y **afirma que el estado final coincide** con el snapshot
-  registrado. Apuntado a fixtures golden versionados en el repo, el mismo runner es
-  `match/tests/replay.test.ts`: el test de regresión más fuerte del motor.
+- `npm run replay -- <matchId>` — rebobina e **imprime** el estado final reconstruido; es la
+  herramienta de soporte, y no compara contra nada (§5.2). El que **afirma** es
+  `match/tests/replay.test.ts`, apuntado a fixtures golden versionados en el repo con su propio
+  `finalState`: el test de regresión más fuerte del motor.
 
 ### 5.5 Logging
 
@@ -478,6 +529,66 @@ nueva. Cambian tres cosas:
    cuenta. Los mensajes rechazados van al log con `matchId` + `playerId` + código — están en el log
    *porque* no están en el historial.
 
+### 5.6 La negociación de revancha la hospeda el MOTOR
+
+La primera redacción de este spec la ponía **fuera**, en la capa de aplicación. Truco probó ese camino
+y lo descartó, y su changelog v26 dice por qué en una línea: *"cuatro mecanismos en paralelo a los que
+la sala ya tiene, para una sola feature"* — su propia puerta de verbos, su propio reloj, su propia
+forma de contarle al front en qué fase está.
+
+El argumento que la trae adentro no es de dominó ni de truco: **la negociación es un acto de mesa**,
+con oferta, respuesta y plazo, y ese vocabulario ya vive en el motor. El multiplicador de apuesta del
+v1 —que tampoco es una regla del dominó, tampoco puntúa, y cuyo significado es económico— es el mismo
+caso un piso más abajo:
+
+| | Multiplicador | Revancha |
+|---|---|---|
+| ¿Regla del dominó? | no | no |
+| Negociación | motor | motor |
+| Consecuencia económica | app | app (abre la sala siguiente) |
+| Lo que el motor sabe de plata | nada | nada |
+
+**No entra en la rebanada de 2P**, pero sí entra la forma: `MatchState.rematch?: RematchOffer`
+(`offererId` + `isAccepted`, rama nula) y dos fases de partida (`REMATCH_WINDOW`,
+`REMATCH_NEGOTIATION`) entre la presentación y el terminal. Y no lleva `responderId`: el respondedor se
+deriva del ofertante, así que sería estado duplicado — el v1 lo tenía y su propio comentario admitía
+*"derivable de requesterId"*.
+
+Si el multiplicador se porta, se porta con esta forma y no con la del v1: el valor **acordado** es un
+escalar de partida con elemento neutro (`multiplier = 1` es "sin acuerdo", sin rama nula que enumerar),
+la **oferta** es una rama nula de la ronda, y los seis valores de enum más el `isActive` del v1
+colapsan a *presencia del nodo* + `multiplier > 1`.
+
+### 5.7 `MATCH_RESOLVED` se emite al ENTRAR a la presentación, no al vencerla
+
+Regla de producto: **en lo que finaliza una partida se paga al ganador, haya revancha o no.** El
+listener que paga cuelga de `MATCH_RESOLVED`, así que **de dónde se emite ese evento ES la latencia del
+premio**. Emitido al vencer la pausa, el pago espera los 6 s de la presentación — y con las dos fases
+de revancha del otro lado, hasta 40 s. Truco lo vivió y lo movió (changelog v26 §2).
+
+Consecuencia que hay que ver **antes** de escribirla, y que truco documentó porque la pagó: con fases
+después del veredicto, **una guarda de reembolso que compare contra la fase terminal reembolsa una
+partida ya pagada**. Se pregunta por el veredicto (`referee.outcome()`), nunca por
+`phase === "FINISHED"`.
+
+### 5.8 `RESOLVED` es el veredicto; `FINISHED` es el final
+
+Dos palabras, dos hechos, y en este repo "resolver" significa **dictaminar** (`ROUND_RESOLVED`,
+`MATCH_RESOLVED`):
+
+- **`RESOLVED`** — el juego dictaminó. Aparece **solo en eventos**.
+- **`FINISHED`** — no queda nada por hacer en esta mesa. Aparece **solo en fases**, y es el único
+  terminal: una partida que muere sin veredicto no es una transición del juego (eso lo cuenta
+  `MATCH_ABORTED`, evento de plataforma).
+
+Coinciden mientras la partida se apaga al dictaminarse, que es justo por qué la primera redacción usó
+`RESOLVED` como nombre de fase sin que chillara nada. **La revancha los separa** y ahí el nombre
+repetido pasa a mentir. Las tres pausas se llaman `PRESENTING_ROUND` / `PRESENTING_MATCH` (y
+`PRESENTING_VUELTA` en truco), que es como los documentos ya las llamaban en prosa.
+
+Renombrar esto cuesta un find-and-replace mientras es un `.md`, y un commit mecánico sobre código
+después. Se hace ahora.
+
 ---
 
 ## 6. Concurrencia: un motor síncrono, no más mutex
@@ -489,7 +600,7 @@ sobre estado a medio mutar. Los mutex son el parche; el arreglo es estructural, 
 1. **`Command.execute(payload): readonly MatchEvent[]` es síncrono por contrato.** Cero `await` en el
    camino del comando. Si no hay await, Node no puede entrelazar nada: el handler corre de punta a
    punta sin ceder el event loop, y dos mensajes del mismo cliente **no pueden intercalarse**. Los
-   `sleep()` de hoy pasan a ser **fases con plazo** (`RESOLVING_ROUND`, `RESOLVING_MATCH`) estampadas
+   `sleep()` de hoy pasan a ser **fases con plazo** (`PRESENTING_ROUND`, `PRESENTING_MATCH`) estampadas
    en `MatchState.activeDeadline` y ejecutadas por el puerto `TimeoutScheduler`. El motor describe el
    instante; la infraestructura espera.
 2. **Toda la red vive en la puerta.** `onJoin` → `admission.admit()` es el único punto de la sala que
@@ -526,10 +637,20 @@ excluye nada, en silencio.
 | **`Hand` como nodo MIXTO**: `tileCount` público, `tiles` con `.view()` | Cierra el agujero de trampa sin dejar ciego al front: sabe cuántas fichas tiene el rival, no cuáles. Es el patrón exacto del `PlayedCard` de truco |
 | `Boneyard.tiles` con `.view()` y **sin audiencia** | El pozo lo necesita el dominio y no lo ve nadie. Queda en el estado (fuente única) fuera de todo `StateView` |
 | `Hand.isRevealed` + `makePublic({kind:"ALL"})` al cierre de ronda | El revelado es decisión **con memoria**, no derivación: vive en el estado, así queda autocontenido para el front y para el replay, y desaparece la consulta de reconexión |
+| **`PlayerState.hasSeenTiles`**, y NO es lo mismo que `Hand.isRevealed` | Dos ejes que el v1 habría metido en un booleano. `hasSeenTiles`: el **dueño** levantó sus fichas, una vez por partida, en la ventana de reparto (§7.5). `Hand.isRevealed`: la mano es pública para **todos**, al cerrar cada ronda para contar pips. Que el dueño las vea no las hace públicas; hacerlas públicas al final no dice nada sobre si las levantó al principio |
+| El `Dealer` **sin** el puerto de visibilidad | Desde la ventana de reparto no revela nada, así que "repartir no puede filtrar una ficha" es cierto por la forma de la clase y no por un test con un spy (§7.5). Divergencia menor con truco, que conservó el puerto |
 | `seed` fuera del estado, en el config inyectado | Sin superficie por donde filtrarse |
 | `RoundState.phase` en vez de los booleanos actuales | Un eje, un campo. Hoy `isRoundFinished` + bloqueo derivado + `roundEndReason` codifican el mismo eje tres veces |
-| Sin campos derivados | Si se calcula de otro dato es consulta pura del módulo dueño, no campo almacenado. Almacenarlo invita a la desincronización |
-| **Un solo `RoundState` para 2P y 4P**, con `teams` en el config | Hoy los dos son ~95 % idénticos, `PlayerHand` está duplicado, y el torneo importa el de 2P y reimplementa el reparto. Tres implementaciones de la misma regla obligadas a coincidir |
+| **Fuera `PlacedTile.lockedNumber`** | Derivable de `board.tiles` + `side` con el mismo recorrido que `boardEndsOf`, y `board.tiles` es público, así que el front lo deriva. De paso muere el centinela `-1` del v1 en un campo donde `0` es legítimo (la blanca) |
+| **Fuera `PlayerState.score`** | Doble contabilidad del mismo dinero: el marcador es del EQUIPO (`Scoreboard`) y el del jugador es `scoreboard[teamOf(player)]` — incluso en 4P, donde la regla del v1 le daba a los dos compañeros el total idéntico. Truco tampoco lo tiene |
+| **Fuera el eje `startedAt` del turno** | El instante de vencimiento vive unificado en `MatchState.activeDeadline`; un segundo timestamp del mismo turno no lo leía nadie. (`MatchState.startedAt` **sí** queda: un instante no se reconstruye de nada, y la app necesita la duración) |
+| **`RoundState.boneyard` como RAMA NULA** | Ausente = este modo no tiene pozo (4P: 4×7 = 28 = el set entero). Presente y vacío diría "pozo agotado", que es un hecho distinto justo donde la tranca se calcula distinto. Es la doctrina de ramas nulas de truco (negocio §4.1) aplicada a la divergencia más grande entre 2P y 4P — y es lo que permite **un solo `isBlocked`** en vez del par duplicado del v1 |
+| **`RoundState.starterId`** | La ronda siguiente la abre el rival de quien abrió la anterior (reglas §4.1); el doble-seis decide solo la ronda 1. Sin el campo no hay de dónde sacar la alternancia una vez que el turno se movió. El v1 lo tenía (`currentRoundStarterId`) |
+| **`PlayerState.extraTimeRemainingMs`** | El tiempo extra pasa de gracia por turno (v1) a **reserva por partida que solo decrece** (modelo de truco). Un saldo con memoria no es un parámetro de config: es estado |
+| **`Turn.isConsumingExtendedTime`** y **`Turn.consecutivePasses`** | Los dos existen para el cliente que **llega tarde**: los dos tramos del plazo ocurren en la misma fase, y un pase no deja huella en el tablero ni en el pozo. Ver §5.1 |
+| Sin campos derivados, **con un criterio** | Si se calcula de otro dato es consulta pura del módulo dueño. **Excepción única: se guarda cuando el cliente NO puede derivarlo** —porque su fuente está gateada (`Hand.tileCount`, `BoneyardState.count`) o porque derivarlo exigiría reimplementar una regla del juego (`Hand.isRevealed`)—. Sin este criterio escrito, la regla parece rota en tres lugares y el próximo campo derivado entra por discusión en vez de por pregunta |
+| **Los ejes son `t.string()` en el wire, pero NO en las reglas** | Colyseus no sincroniza uniones discriminadas, así que en el árbol `phase`/`side`/`reason` son string (es lo que truco documenta como "schema ancho", negocio §4.1). El cast vive en **un solo archivo**, `state-projections.ts` (`sideOf`, `roundPhaseOf`, `matchPhaseOf`), y de ese lado el motor compara contra uniones cerradas. Sin eso, un `side === "Left"` compila, deriva la cadena por el lado equivocado, y como los extremos son derivados el tablero entero queda mal sin que nada reviente |
+| **Un solo `RoundState` para 2P y 4P**, con `teams` en el config | Hoy los dos son ~95 % idénticos, `PlayerHand` está duplicado, y el torneo importa el de 2P y reimplementa el reparto. Tres implementaciones de la misma regla obligadas a coincidir. **Con una advertencia**: ver §7.6 |
 | Revisar el cap de **63 campos** por clase | En 0.18 **lanza en la definición**, e incluye los heredados |
 
 ### 7.2 Visibilidad: dos piezas, una por cada lado de la frontera
@@ -556,11 +677,122 @@ controlador resuelve la audiencia sobre ese mapa.
 
 Si se resolviera sobre `room.clients`, Colyseus ya borró al cliente caído de esa lista antes de llamar
 a cualquier hook, así que lo revelado mientras estabas fuera **no llegaría nunca a tu vista y volverías
-ciego** — incluso reusándola. Es el bug que truco documenta en `arquitectura-app-e-infra-v9.md` §5.4.1,
+ciego** — incluso reusándola. Es el bug que truco documenta en `arquitectura-app-e-infra-v11.md` §5.4.1,
 y es el que hace que "resuscribir la vista" no alcance.
 
 Efecto colateral útil: el controlador deja de conocer el `Client` de Colyseus, así que se prueba sin
 levantar una sala.
+
+### 7.4 El plazo es un instante absoluto en epoch, y el front recibe una muestra del reloj
+
+`MatchState.activeDeadline` es un **instante**, no un resto que baje. Eso es lo que borra el patch por
+segundo del v1: el servidor lo estampa una vez por transición y no lo vuelve a tocar.
+
+El costo se lo lleva el cliente: para dibujar la cuenta atrás tiene que restarle "ahora", y **su reloj
+puede estar corrido** —móvil sin NTP, zona mal configurada, emulador—. Con el reloj adelantado cinco
+minutos, el jugador ve el turno ya vencido. Es el único punto donde el modelo nuevo le complica la vida
+al front, y el v1 no lo tenía porque mandaba un entero pre-decrementado.
+
+**Decisión: `GET /config/:roomId` devuelve `serverNow` (una muestra de `Date.now()` del servidor).** El
+cliente calcula `offset = serverNow - Date.now()` una vez y dibuja
+`activeDeadline - (Date.now() + offset)`. Se re-muestrea al reconectar, que es cuando el drift importa.
+
+**Por qué no la maquinaria de Colyseus.** El accesor previsto para esto es `room.clock.serverNow()`,
+pero su estimador **solo existe en salas que llaman `defineInput()`** —el camino de predicción, con
+schema de input, timestep fijo y `step()`—; una sala por turnos se queda con *"un stub que lee tu reloj
+local"*, que es exactamente el bug. Y `serverNow()` está en **ms desde el arranque de la sala**, otra
+timeline que la de `activeDeadline`. La propia doc bendice la salida: *"¿traés tu propio algoritmo de
+sync? `room.clock = new MyClock()`"*. `serverNow` **es** ese algoritmo, en su versión mínima.
+
+**Por qué epoch y no la timeline de la sala.** Alinearse con `serverNow()` exigiría estampar sobre
+`room.clock.currentTime` (ms desde el arranque), y ahí `HistoryEntry.at` y `MatchState.startedAt`
+dejarían de servir: soporte necesita *"esto pasó a las 14:32"* y la app necesita el instante absoluto
+de arranque para la duración. Serían **dos relojes** en el motor —uno de pared para el registro, uno de
+sala para los plazos— y un eje nuevo que confundir, por un problema de presentación. Un solo reloj de
+pared, y el front corrige con una resta.
+
+**Error residual:** medio round-trip, decenas de ms contra una ventana de 60.000. Si alguna vez hace
+falta afinarlo, `client.getLatency({ pingCount: 5 })` mide el RTT antes de unirse.
+
+### 7.5 La ventana de reparto: repartir no revela
+
+**La regla está en `reglas-de-juego-v1.md` §3.1.** Acá va lo que le toca a la arquitectura, que es
+poco — y que sea poco es el punto.
+
+Portado de truco (negocio v27 §12.7). Al empezar la partida las fichas se reparten pero **no se hacen
+públicas**, y cada jugador levanta las suyas con `REVEAL_TILES` dentro de 15 s. En dominó pesa más que
+en truco: 7 fichas dicen bastante sobre si conviene jugar esa mano, así que **ver el reparto y salirse
+gratis sería elegir con qué reparto jugar**. Levantar las fichas ES la prueba de presencia.
+
+**Ocultar no es un mecanismo.** No hay nada que esconder: la ficha se adjunta al árbol y simplemente
+**todavía no se hizo pública para nadie**, que es el estado natural de cualquier nodo con `.view()`
+(§7.2). Repartir dejó de llamar a `makePublic`; lo llama el verbo. De ahí que la feature entera no
+traiga maquinaria de visibilidad nueva — es **una línea menos** en el `Dealer`, no una más.
+
+Y una consecuencia que conviene cobrar: **el `Dealer` deja de recibir el puerto de visibilidad**. La
+invariante "repartir no puede filtrar una ficha" pasa de ser un test con un spy a ser cierta por la
+forma de la clase. Truco conservó el puerto; acá se saca.
+
+**Las piezas, y ninguna es nueva:**
+
+| Pieza | Qué suma |
+|---|---|
+| `RoundPhase.DEALING` | la fase que ya estaba declarada. Ahora tiene plazo, así que **es** una fase (un estado que espera algo) |
+| `PlayerState.hasSeenTiles` | público: el front tiene que poder decir a quién se espera. No se resetea entre rondas — la ventana es solo la de la 1 |
+| `RoundPlayer.revealTiles()` | marca y hace pública su propia mano. Va en el jugador de la RONDA porque es quien sostiene el puerto de visibilidad |
+| `RoundReferee` | `assertCanRevealTiles` (fase + una sola vez, **sin turno**: los dos miran a la vez) y `playersWithoutTilesSeen()` |
+| `RoundDriver` | `begin()` estampa el plazo solo en la ronda 1; `advance()` sale cuando no falta nadie; `resumeAfterDealWindow()` cierra |
+| `MatchDriver` | el vencimiento, porque su consecuencia es **retirar** gente y `hasAbandoned` lo escribe solo `MatchPlayer`. Acá el reparto de niveles difiere de truco a propósito: el plazo es de ronda, la consecuencia es de partida |
+
+**Dos valores de audiencia, no tres.** `Audience = PLAYER | ALL`. No hay EQUIPO, porque en dominó no
+existe ninguna mecánica que le muestre algo a tu compañero y no a la mesa: no hay señas legales, no hay
+intercambio de fichas entre compañeros (el `SHARING_CARD` del truco de 4), y no hay jugadas tapadas —
+una ficha en la mesa es pública siempre. La primera redacción traía la tercera rama de truco, con un
+`case` inalcanzable y un test afirmando que lanzaba. Ver `reglas-de-juego-v1.md` §3.1.1 para la lista
+completa de lo que dominó **no** tiene.
+
+**Y la trampa que esa lista destapa, que sí es de arquitectura.** El revelado del cierre de ronda
+muestra las manos a **todos**, y `hand.tiles` es el **mismo nodo** ronda a ronda: `clear()` no lo saca
+de ninguna `StateView`. Así que el conductor **des-revela** antes de repartir
+(`RoundPlayer.hideTiles`), o desde la segunda ronda cada mano nace pública para la mesa entera. Es el
+agujero del v1 reabierto por la puerta de atrás, y no lo atraparía ningún test de la ronda 1. Es la
+única razón por la que el puerto tiene `hide`, y está escrito para que nadie lo borre por "no lo usa
+nadie".
+
+**Y el matiz que no es de arquitectura sino de plata: `MatchReferee.outcome()` devuelve `undefined`
+con los DOS equipos retirados.** Preguntando por un equipo primero, el orden de evaluación corona al
+otro y una partida que nadie jugó **paga premio**. Era inalcanzable antes —el primer forfeit resolvía
+la partida y ya no quedaba a quién retirar—; el vencimiento de esta ventana puede retirar a varios de
+una. Truco lo descubrió implementándola; acá nace cubierto, con su test en `deal-window-e2e`.
+
+De ahí sale también el tercer `AbortReason`: **`NEVER_PLAYED`**. Los tres reembolsan, pero soporte
+tiene que poder distinguir "nunca se llenó" (`NEVER_STARTED`) de "se llenó, se repartió, y nadie
+apareció".
+
+### 7.6 Dónde el motor unificado NO puede unificar: 2P puntúa por jugador, 4P por equipo
+
+Truco es **siempre** por equipos: el 1v1 son equipos de uno, y toda la cobranza es de equipo. Ese es
+el modelo que este spec porta, y por eso `PlayerState.teamId` y `Scoreboard` existen también en las
+mesas de dos.
+
+**En dominó eso es cierto para el marcador pero NO para el conteo**, y ahí está el riesgo del motor
+único:
+
+| Regla | 2P | 4P |
+|---|---|---|
+| Quién gana la tranca | el jugador con menos pips en mano | el **equipo** con menos pips sumando a los dos compañeros; empata si los totales coinciden |
+| Cuánto cobra el que cierra por dominó | los pips del rival | los pips de los **dos** del equipo perdedor — no de los otros tres asientos |
+
+Las dos funciones que implementan esto (`blockVerdictOf`, `opposingHandsValue`) están escritas para
+2P, que es la rebanada, y **quedan marcadas en el código con esa advertencia**. Es deliberado no
+generalizarlas todavía: una implementación de 4P sin sus tests sería adivinar. Lo que no puede pasar es
+que 4P las herede en silencio — el motor es uno, así que nada chillaría. Cuando entre 4P, se parten en
+dos o toman la agrupación (jugador / equipo) como parámetro.
+
+**La lección general, para el próximo port desde truco:** las reglas de truco que se adoptan sin
+pensar son las que *no se notan*, porque son las que coinciden en las mesas de dos. Adoptar "todo es
+equipo" es correcto para el marcador y equivocado para el conteo, y la mesa de dos no distingue las dos
+cosas.
 
 ---
 
