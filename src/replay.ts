@@ -8,7 +8,7 @@ import { replayConfigOf } from "@/features/match/transports/match-contract";
 // herramienta de SOPORTE: no afirma nada, porque el historial no lleva un snapshot contra
 // el que comparar —y no lo lleva a propósito, ver abajo—.
 //
-// El que AFIRMA es `replay.test.ts`, contra los fixtures golden: ahí el estado final
+// El que AFIRMA es `replay.int.test.ts`, contra los fixtures golden: ahí el estado final
 // esperado vive en el propio fixture (`finalState`), versionado en el repo y aprobado a
 // ojo una vez. Ése es el test de regresión del motor.
 //

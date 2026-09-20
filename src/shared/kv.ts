@@ -9,12 +9,10 @@
 // que ya le pasa al servidor, y no hay una clase en el medio traduciendo. Es lo que permite que
 // el adaptador de Redis del dominó sea CERO líneas propias.
 //
-// LOS CUATRO MÉTODOS SON LOS CUATRO QUE SE USAN, y la lista corta es una decisión. Truco pide
-// además `sadd`/`srem`/`smembers`/`expire` porque su registro tiene que contestar a qué torneos
-// les quedan partidas; el dominó no tiene torneos ni matchmaking, así que un conjunto acá sería
-// una capacidad sin un solo llamador — y un puerto con métodos que nadie implementa contra algo
-// real es un puerto que nadie puede verificar. Si el día de mañana entra esa pregunta, se
-// agregan: `Presence` ya las tiene, así que ampliar el puerto no rompe al adaptador.
+// LOS SIETE MÉTODOS SON LOS SIETE QUE SE USAN, y la lista corta es una decisión. Los tres del
+// hash sostienen el censo de salas: cada sala renueva su propio campo, algo que el plazo de una
+// clave entera no puede expresar sin llevarse también las salas vivas de otros procesos. No se
+// agregan conjuntos ni sorted sets: dominó no tiene la pregunta que los necesitaría.
 //
 // El tipo de retorno de `setex` es laxo (`unknown`) porque nadie lee el resultado: es lo que
 // permite que una implementación que devuelve `any` —como la de Colyseus— encaje sin castear.
@@ -29,10 +27,13 @@ export interface KeyValueStore {
   // `record` y `of`: borrar pasa por el camino de una sala que se está muriendo, y ahí no hay a
   // quién devolverle el error.
   del(key: string): void;
+  hset(key: string, field: string, value: string): Promise<unknown>;
+  hgetall(key: string): Promise<Record<string, string>>;
+  hdel(key: string, field: string): Promise<unknown>;
 }
 
 interface Entry {
-  readonly value: string;
+  readonly value: string | Map<string, string>;
   expiresAt: number;
 }
 
@@ -50,7 +51,8 @@ export class MemoryKeyValueStore implements KeyValueStore {
   constructor(private readonly now: () => number = Date.now) {}
 
   async get(key: string): Promise<string | undefined> {
-    return this.live(key)?.value;
+    const value = this.live(key)?.value;
+    return typeof value === "string" ? value : undefined;
   }
 
   async set(key: string, value: string): Promise<unknown> {
@@ -67,6 +69,27 @@ export class MemoryKeyValueStore implements KeyValueStore {
 
   del(key: string): void {
     this.entries.delete(key);
+  }
+
+  async hset(key: string, field: string, value: string): Promise<unknown> {
+    const current = this.live(key)?.value;
+    const hash = current instanceof Map ? current : new Map<string, string>();
+    hash.set(field, value);
+    this.entries.set(key, { value: hash, expiresAt: Number.POSITIVE_INFINITY });
+    return undefined;
+  }
+
+  async hgetall(key: string): Promise<Record<string, string>> {
+    const value = this.live(key)?.value;
+    return value instanceof Map ? Object.fromEntries(value) : {};
+  }
+
+  async hdel(key: string, field: string): Promise<unknown> {
+    const value = this.live(key)?.value;
+    if (!(value instanceof Map)) return undefined;
+    value.delete(field);
+    if (value.size === 0) this.entries.delete(key);
+    return undefined;
   }
 
   // Vencida es INEXISTENTE, y se borra al leerla: sin esto el Map crecería con las claves de

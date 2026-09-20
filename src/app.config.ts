@@ -54,7 +54,7 @@ const rooms = { lobby: defineRoom(LobbyRoom), domino: defineRoom(DominoRoom) };
 //
 // Ese chequeo vive en una dependencia y un bump de versión puede invertir el orden sin
 // avisar, dejando una raíz nuestra ignorada sin un solo error. Lo pinea
-// `src/http-root-route.test.ts`, que levanta el servidor con un `GET /` puesto y lo pide.
+// `src/tests/http-root-route.e2e.test.ts`, que levanta el servidor con un `GET /` puesto y lo pide.
 // LAS DEPENDENCIAS DURAS DE ESTA INSTANCIA, que las sabe el composition root y nadie más. Se
 // arman acá y no en `shared/http/health.ts` porque ese archivo no conoce —ni tiene que conocer—
 // ni a Mongo ni a Redis.

@@ -13,7 +13,7 @@ import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contrac
 import { registerGameModeHttp } from "./register-http";
 
 // LA FRONTERA MEDIDA CONTRA EL SERVICIO DE VERDAD y los adaptadores de memoria, no contra un doble
-// del servicio. Es el mismo argumento de `service.test.ts`: `MemoryGameModeRepository` y
+// del servicio. Es el mismo argumento de `service.int.test.ts`: `MemoryGameModeRepository` y
 // `MemoryGameModeOutbox` son los que despliega la instancia sin `MONGO_URI`, así que medir contra
 // ellos mide el sistema. Un doble con `create: vi.fn()` mediría que el handler llama al método que
 // el propio test le enseñó a devolver, y lo que importa acá —el 409 del duplicado, el 409 de la baja

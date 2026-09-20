@@ -90,7 +90,9 @@ rootContainer.register(LobbySettings, { useValue: new LobbySettings(store) });
 // —el config público del endpoint HTTP y en qué sala está sentado un jugador— salen del almacén
 // compartido y no de un `Map` local. Sobrevive a las salas sin convertir a la sala en dueña de
 // esa infraestructura, igual que el historial.
-rootContainer.register(MatchRegistry, { useValue: new MatchRegistry(store) });
+const matchRegistry = new MatchRegistry(store);
+rootContainer.register(MatchRegistry, { useValue: matchRegistry });
+rootContainer.register("MatchCensus", { useValue: matchRegistry });
 
 // LA PRESENCIA DE LA URI ES LA QUE ELIGE, y no hay un `HISTORY_DRIVER` ni lo va a haber:
 // un interruptor que NOMBRA la implementación es deuda, no configuración —deja escribir

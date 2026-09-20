@@ -13,10 +13,27 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   test: {
-    include: ["src/**/*.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
     // `forks` (el default) rompe: @colyseus/tools usa process.send y choca con su IPC.
     pool: "threads",
     testTimeout: 15_000,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: ["src/**/*.test.ts"],
+          exclude: ["**/*.int.test.ts", "**/*.e2e.test.ts", "**/node_modules/**"],
+        },
+      },
+      {
+        extends: true,
+        test: { name: "int", include: ["src/**/*.int.test.ts"] },
+      },
+      {
+        extends: true,
+        test: { name: "e2e", include: ["src/**/*.e2e.test.ts"] },
+      },
+    ],
   },
 });

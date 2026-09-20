@@ -4,7 +4,7 @@ import { type DependencyChecks, registerHealth } from "./health";
 
 // CONTRA UN EXPRESS DE VERDAD Y CON `fetch`, no llamando al handler a mano: lo que este
 // archivo tiene que medir es el STATUS que ve el balanceador, y un handler invocado
-// directamente no produce ninguno. Es la misma decisión que `http-root-route.test.ts`.
+// directamente no produce ninguno. Es la misma decisión que `http-root-route.e2e.test.ts`.
 async function serve(checks: DependencyChecks, timeoutMs?: number) {
   const app = express();
   registerHealth(app, checks, timeoutMs);

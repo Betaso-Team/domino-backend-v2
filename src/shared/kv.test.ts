@@ -63,3 +63,26 @@ describe("el almacén de clave-valor en memoria", () => {
     expect(await store.get("k")).toBeUndefined();
   });
 });
+
+describe("el hash del almacén en memoria", () => {
+  it("guarda, reemplaza y borra campos sin tocar los demás", async () => {
+    const store = new MemoryKeyValueStore();
+    await store.hset("censo", "room-1", "dos");
+    await store.hset("censo", "room-2", "cuatro");
+    await store.hset("censo", "room-1", "tres");
+
+    await store.hdel("censo", "room-2");
+
+    expect(await store.hgetall("censo")).toEqual({ "room-1": "tres" });
+    expect(await store.get("censo")).toBeUndefined();
+  });
+
+  it("un hash vacío deja de existir", async () => {
+    const store = new MemoryKeyValueStore();
+    await store.hset("censo", "room-1", "dos");
+
+    await store.hdel("censo", "room-1");
+
+    expect(await store.hgetall("censo")).toEqual({});
+  });
+});

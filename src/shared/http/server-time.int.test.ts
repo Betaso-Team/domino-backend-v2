@@ -2,7 +2,7 @@ import express from "express";
 import { describe, expect, it } from "vitest";
 import { exposeServerTime } from "./server-time";
 
-// CONTRA UN EXPRESS DE VERDAD Y CON `fetch`, igual que `health.test.ts`: lo que hay que
+// CONTRA UN EXPRESS DE VERDAD Y CON `fetch`, igual que `health.int.test.ts`: lo que hay que
 // medir es la cabecera que sale POR EL CABLE. Un handler invocado a mano no produce
 // respuesta HTTP, y esta pieza no hace otra cosa que ponerle una cabecera a esa respuesta.
 async function serve() {

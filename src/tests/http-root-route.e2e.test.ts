@@ -1,7 +1,7 @@
+import { testConfig } from "@/app.config";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import type { Application } from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { testConfig } from "./app.config";
 
 // GUARDIA DE UNA PROPIEDAD QUE NO ES NUESTRA: que una ruta raíz registrada en Express le
 // gane al banner `Colyseus x.y.z`. Hoy domino no registra ningún `GET /`, así que este

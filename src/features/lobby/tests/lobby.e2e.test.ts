@@ -1,24 +1,8 @@
-import { testConfig } from "@/app.config";
 import { env } from "@/env";
-import type { PlayerRef } from "@/shared/player-ref";
+import { bootTestServer, casualTable, mintToken, participantOf, waitUntil } from "@/tests/e2e";
 import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
-import { boot } from "@colyseus/testing";
-import jwt from "jsonwebtoken";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-const participantOf = (userUuid: string) => ({
-  platformId: "betaso",
-  userUuid,
-  displayName: `Jugador ${userUuid}`,
-  currency: "VES",
-});
-
-const mintToken = (player: PlayerRef): string =>
-  jwt.sign({ sub: player.userUuid, platformId: player.platformId }, env.jwtSecret, {
-    algorithm: "HS256",
-    expiresIn: "1h",
-  });
 
 // EL MODO SALE DEL CATÁLOGO SEMBRADO en `src/tests/game-mode-catalog.ts` y no de un literal: desde
 // la Tarea 10 la sala lo resuelve contra el container, así que un `gameModeId` inventado acá haría
@@ -26,23 +10,6 @@ const mintToken = (player: PlayerRef): string =>
 //
 // Se importa de `src/tests/` y no del arnés E2E del match porque la Regla 4 (`feature-boundary`)
 // prohíbe que esta feature importe archivos internos de otra.
-const casualTable = (userUuids: readonly [string, string]) => ({
-  mode: "CASUAL",
-  matchId: `m-${userUuids.join("-")}`,
-  gameModeId: CASUAL_2P.uuid,
-  participants: userUuids.map(participantOf),
-  seed: "lobby-e2e",
-  teamAssignment: "SHUFFLED",
-  rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-});
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error("waitUntil: se agotó el plazo");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 interface LobbyStateDTO {
   readonly totalPlayers: number;
@@ -58,7 +25,7 @@ interface LobbyStateDTO {
 let server: ColyseusTestServer;
 
 beforeAll(async () => {
-  server = await boot(testConfig, 2592);
+  server = await bootTestServer(2592);
 });
 
 afterAll(async () => {

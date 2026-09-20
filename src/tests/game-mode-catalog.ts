@@ -9,7 +9,7 @@ import type { GameMode } from "@/features/game-mode";
 // ninguna aserción lo diría—.
 //
 // VIVE EN `src/tests/` Y NO EN EL ARNÉS E2E DEL MATCH, y no es preferencia: `feature-boundary`
-// (Regla 4) prohíbe que `features/lobby/tests/lobby-e2e.test.ts` importe de
+// (Regla 4) prohíbe que `features/lobby/tests/lobby.e2e.test.ts` importe de
 // `features/match/tests/`, y ese archivo también crea mesas de dominó. Un archivo fuera de
 // `src/features/` es el único lugar desde el que las tres suites pueden tirar del mismo modo.
 //

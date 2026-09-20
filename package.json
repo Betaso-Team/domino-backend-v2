@@ -19,6 +19,9 @@
     "lint": "biome check src",
     "format": "biome format --write src",
     "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:int": "vitest run --project int",
+    "test:e2e": "vitest run --project e2e",
     "test:watch": "vitest",
     "depcruise": "depcruise src --config .dependency-cruiser.cjs"
   },

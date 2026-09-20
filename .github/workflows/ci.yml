@@ -76,8 +76,11 @@ jobs:
 
       # Sin servicios y sin `.env`: si esto se pone rojo acá y verde en una máquina de desarrollo,
       # lo que cambió es el entorno de esa máquina, y eso es justamente lo que el CI viene a decir.
-      - name: Tests
-        run: npm test
+      - name: Tests unitarios
+        run: npm run test:unit
+
+      - name: Tests de integración y E2E
+        run: npm run test:int && npm run test:e2e
 
       - name: Build
         run: npm run build

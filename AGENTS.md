@@ -667,7 +667,7 @@ Lo que dejó la Tarea 10:
   crea y edita es la API administrativa, y un token de escritura ahí sería una puerta que la sala
   podría abrir sin querer. Hoy es siempre el de memoria — la rama de Mongo es de la Tarea 11.
 - **`src/tests/game-mode-catalog.ts` siembra el modo de la suite UNA vez**, y vive fuera de
-  `src/features/` porque `feature-boundary` prohíbe que `features/lobby/tests/lobby-e2e.test.ts`
+  `src/features/` porque `feature-boundary` prohíbe que `features/lobby/tests/lobby.e2e.test.ts`
   —que también crea mesas de dominó— importe el arnés de `features/match/tests/`.
 - **El golden se regeneró y lo único que cambió además de los instantes es `meta.gameModeId`**, que
   ahora es el uuid del modo resuelto. Las 167 entradas y el `finalState` salieron idénticos. ⚠ Ese
@@ -1007,7 +1007,7 @@ Lo que dejó la Tarea 1:
   sobre la 4.6.1). Sin el `.max()`, `2 ** 53` sería un monto válido.
 - **`rateId`, `currency` y las claves de idempotencia no se tocaron**, y se siguen asertando como
   literal.
-- **El golden lo escribe `game-2p-e2e.test.ts` y el plan decía `replay.test.ts`**, que solo lo lee.
+- **El golden lo escribe `game-2p.e2e.test.ts` y el plan decía `replay.int.test.ts`**, que solo lo lee.
   Corregido en el plan. El renombre deja el fixture sin compilar y **vitest sigue verde**: quien lo
   atrape es `typecheck`.
 
@@ -1146,6 +1146,26 @@ registro: hay acciones que se PUEDEN hacer y acciones que se HICIERON. `legalAct
 - **El `PUT` como parche** (`d1f23fc`) y **la llave del `.env.example`** (`3308781`) ya estaban
   hechos, y el primero **mejor que en truco** — ya anotado más arriba.
 
+## Incremento completo — censo del lobby y alcance explícito de tests
+
+Portado selectivamente de truco `a7a318f`, `d4fc247` y `16a4bab`, después de que el producto pidió
+la semántica de ASIENTOS que la revisión anterior había dejado afuera. Baseline **798 → 802 tests /
+76 archivos**, con `typecheck`, suite, lint, `build` y `depcruise` (**241 módulos / 965
+dependencias**) en verde. **Matchmaking sigue expresamente fuera.**
+
+- `MatchRegistry` estampa un campo por sala en el hash compartido `live_seats`. Cuenta los asientos
+  reservados aunque el socket se corte, deja de contar una sala tras dos latidos y barre su campo
+  tras cuatro. `remove()` lo borra inmediatamente. El lobby conserva su estado v1 y su pulso de un
+  segundo; solo cambió la fuente de los contadores.
+- El censo entra al lobby por el token estrecho `MatchCensus`. Importar `MatchRegistry` desde el
+  barrel de match creaba el ciclo lobby → match → lobby, porque `DominoRoom` consulta
+  `LobbySettings`; el composition root registra la misma instancia bajo ambos contratos.
+- La suite tiene dos ejes: ubicación por dueño y sufijo por alcance. `*.test.ts` es unitario,
+  `*.int.test.ts` integra piezas sin levantar la app y `*.e2e.test.ts` levanta el servidor. Vitest
+  expone los proyectos `unit`, `int` y `e2e`; CI ejecuta primero unit y luego int/e2e.
+- El scaffold que comparten features vive en `src/tests/`. Las implementaciones `Memory*` no se
+  movieron a tests: en dominó son adaptadores reales del despliegue sin Mongo/Redis, no fakes.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
@@ -1157,6 +1177,9 @@ lo que prueba que el test mide algo.
 ```bash
 npm run typecheck   # tsc --noEmit  <- ESTE es el gate
 npm test            # vitest run
+npm run test:unit  # solo *.test.ts
+npm run test:int   # solo *.int.test.ts
+npm run test:e2e   # solo *.e2e.test.ts
 npm run lint        # biome check src
 npm run format      # biome format --write src
 ```
@@ -1225,7 +1248,7 @@ Y del plan del catálogo de modos (`2026-09-15-catalogo-modos-v1-y-outbox-rabbit
 | 5 | Uno, y de los que se cobran dos tareas después: falta el lease DE MEMORIA y no tiene archivo. La Tarea 8 pide "repositorio/outbox/lease en memoria" y la 11 "registrar repository/outbox/lease de memoria sin URI", pero ninguna de las dos crea un archivo donde pueda vivir y la lista `Files:` de la 5 tiene dos. Va junto al puerto en `src/shared/mongo-lease.ts`, por el criterio de `src/shared/kv.ts` | `348f527` + este `docs:` |
 | 4 | Tres: la lista `Files:` no tenía dónde poner el contrato COMPARTIDO de los dos adaptadores, y cuatro archivos sueltos producen justo la deriva que el propio Step 3 dice evitar (`MemoryGameModeRepository` no es un doble); el snippet de los índices los asertaba como pares `[clave, opciones]`, que es la forma de `createIndex` y no la de `createIndexes`, que el mismo Step pide; y «update que no borra campos omitidos» no alcanza —medido por mutación: un `$set: { ...input }` crudo pasa verde, y la forma que de verdad llega desde las rutas de v1 es el `undefined` EXPLÍCITO— | `ce54f9e` + este `docs:` |
 | 3 | Uno, y de los que rompen en silencio del OTRO lado: ni el plan ni la spec decían si el `id` del payload Rabbit es el `uuid` o el hex del `_id` —la entidad tiene los dos y §9.1 sólo declara `id: string`—. Lo resolvió el v1 productivo (`game-mode.publisher.ts:43`, `id: mode.uuid`), no el nombre del campo. El fixture del test lleva los dos identificadores distintos para que la aserción mida el mapeo | `ec63d71` + este `docs:` |
-| 1 | Tres: el Step 4 regeneraba el golden con `replay.test.ts`, que solo LO LEE —el único llamador de `writeGolden` es `game-2p-e2e.test.ts`—, así que `WRITE_GOLDEN=1` no escribía nada y el fixture quedaba sin compilar con vitest en verde; la lista `Files:` se olvidaba de cinco archivos que también arman un `DominoRoomOptions` a mano (`match-registry.test.ts`, `replay.test.ts` del match, `history.test.ts`, `domino-room.test.ts`, `lobby-e2e.test.ts`) y del `README.md`; y el `ucAmount` del snippet dejaba `2 ** 53` como monto válido, porque `.safe()` —como estaba expresada la guarda vieja— implica entero en zod 4 y no se puede reusar | `ca9e68a` + este `docs:` |
+| 1 | Tres: el Step 4 regeneraba el golden con `replay.int.test.ts`, que solo LO LEE —el único llamador de `writeGolden` es `game-2p.e2e.test.ts`—, así que `WRITE_GOLDEN=1` no escribía nada y el fixture quedaba sin compilar con vitest en verde; la lista `Files:` se olvidaba de cinco archivos que también arman un `DominoRoomOptions` a mano (`match-registry.test.ts`, `replay.int.test.ts` del match, `history.test.ts`, `domino-room.e2e.test.ts`, `lobby.e2e.test.ts`) y del `README.md`; y el `ucAmount` del snippet dejaba `2 ** 53` como monto válido, porque `.safe()` —como estaba expresada la guarda vieja— implica entero en zod 4 y no se puede reusar | `ca9e68a` + este `docs:` |
 
 Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
 
@@ -1244,7 +1267,7 @@ Esperá encontrarlo otra vez. Cuatro formas concretas que ya se repitieron:
   Leelo ANTES de escribir el test, no cuando falle.
 - **Si tocás `GlobalDominoConfig`, regenerá el fixture golden.** `replay()` lo recibe entero, así
   que un campo nuevo deja `golden-2p.json` sin compilar — y vitest sigue verde.
-  `WRITE_GOLDEN=1 npx vitest run src/features/match/tests/game-2p-e2e.test.ts`.
+  `WRITE_GOLDEN=1 npx vitest run src/features/match/tests/game-2p.e2e.test.ts`.
 
 El catálogo de verbos **crece de a uno** (`CommandPayloads`
 en `src/features/match/core/command.ts`). Si un test del plan

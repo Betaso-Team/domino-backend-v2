@@ -1,92 +1,44 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { testConfig } from "@/app.config";
 import { rootContainer } from "@/di-container";
 import { env } from "@/env";
 import type { PlayerRef } from "@/shared/player-ref";
+import {
+  type ParticipantInput,
+  bootTestServer,
+  casualTable,
+  mintToken,
+  participantOf,
+  waitUntil,
+} from "@/tests/e2e";
 import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { Room } from "@colyseus/sdk";
-import { type ColyseusTestServer, boot } from "@colyseus/testing";
-import jwt from "jsonwebtoken";
+import type { ColyseusTestServer } from "@colyseus/testing";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
 import { boardEndsOf } from "../core/rules/board-ends";
 import { playableSides } from "../core/rules/playable";
 import type { MatchState } from "../core/state";
 import type { BoardSide } from "../core/state/tile";
 import type { HistoryEntry, HistoryReader } from "../network/history";
-import {
-  type CreateMatchRequest,
-  type MatchParticipant,
-  configOf,
-  requestOf,
-} from "../transports/match-contract";
+import { type CreateMatchRequest, configOf, requestOf } from "../transports/match-contract";
 
-// UN STRING SIGUE ALCANZANDO para la mayoría de los tests: casi ninguno mide
-// multiplataforma, y obligarlos a escribir la pareja y el perfil enteros solo agregaría
-// ceremonia a suites que hablan de tranca, de plazos y de visibilidad. El que sí lo mide
-// pasa el participante completo.
-export type ParticipantInput = string | MatchParticipant;
-
-export const participantOf = (input: ParticipantInput): MatchParticipant =>
-  typeof input === "string"
-    ? {
-        platformId: "betaso",
-        userUuid: input,
-        displayName: `Jugador ${input}`,
-        currency: "VES",
-      }
-    : input;
-
-export function mintToken(player: PlayerRef): string {
-  return jwt.sign({ sub: player.userUuid, platformId: player.platformId }, env.jwtSecret, {
-    algorithm: "HS256",
-    expiresIn: "1h",
-  });
-}
-
-// EL REQUEST VIVO, y ya no trae dinero ni puntos: desde la Tarea 10 los pone el catálogo. El
-// `gameModeId` es el uuid del modo que `src/tests/game-mode-catalog.ts` sembró en el container —el
-// mismo que la sala va a resolver—, así que ningún test de acá escribe un modo a mano ni tiene que
-// saber cuánto cobra la mesa.
-export function casualTable(
-  seats: readonly ParticipantInput[],
-  seed = "seed-e2e",
-): CreateMatchRequest {
-  const participants = seats.map(participantOf);
-  return {
-    mode: "CASUAL",
-    matchId: `m-${participants.map(({ userUuid }) => userUuid).join("-")}`,
-    gameModeId: CASUAL_2P.uuid,
-    participants,
-    seed,
-    teamAssignment: "SHUFFLED",
-    rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-  };
-}
+export {
+  bootTestServer as bootServer,
+  casualTable,
+  mintToken,
+  participantOf,
+  type ParticipantInput,
+  waitUntil,
+};
 
 // Puertos E2E reservados: lifecycle 2585, game-2p 2586, visibility 2587,
 // concurrency 2588, reconnection 2589, deal-window 2590. Fuera de esta carpeta,
-// `src/http-root-route.test.ts` levanta su propio servidor en el 2591.
-export async function bootServer(port: number): Promise<ColyseusTestServer> {
-  return boot(testConfig, port);
-}
-
+// `src/tests/http-root-route.e2e.test.ts` levanta su propio servidor en el 2591.
 // El predicado puede ser ASÍNCRONO, y no es generalidad gratis: desde que el lector del
 // historial promete (`HistoryReader.of`), esperar a que aparezca una línea grabada —lo que
-// hace deal-window-e2e con `linesOf`— es inexpresable con un predicado sincrónico. Los
+// hace deal-window.e2e con `linesOf`— es inexpresable con un predicado sincrónico. Los
 // predicados que devuelven un booleano pelado siguen andando sin tocarlos: `await` sobre un
 // no-thenable resuelve con el mismo valor.
-export async function waitUntil(
-  predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 5_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) throw new Error("waitUntil: se agotó el plazo");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 export function signatureOf(state: MatchState): string {
   return JSON.stringify([
     state.phase,

@@ -40,6 +40,7 @@ const configKey = (roomId: string) => `match_config:${roomId}`;
 // jugador en la mesa de otro.
 const playerKey = ({ platformId, userUuid }: PlayerRef) =>
   `player_match:${JSON.stringify([platformId, userUuid])}`;
+const CENSUS_KEY = "live_seats";
 
 // EL PLAZO DE TODAS ELLAS, y el latido que lo renueva. Son una sola decisión y no dos:
 //
@@ -56,6 +57,19 @@ const playerKey = ({ platformId, userUuid }: PlayerRef) =>
 // cayó, la red parpadeó— sin que una mesa viva desaparezca del clúster.
 export const TTL_SECONDS = 120;
 export const HEARTBEAT_MS = 30_000;
+const STALE_MS = 2 * HEARTBEAT_MS;
+const DEAD_MS = 4 * HEARTBEAT_MS;
+
+interface CensusEntry {
+  readonly seats: number;
+  readonly gameModeId: string;
+  readonly at: number;
+}
+
+export interface MatchCensusCount {
+  readonly playersInMatch: number;
+  readonly byGameMode: ReadonlyMap<string, number>;
+}
 
 // EL REGISTRO DE PARTIDAS VIVAS DEL CLÚSTER. La `DominoRoom` se anota al nacer, late mientras
 // vive y se borra al morir. Vive en `transports/` —y no en `colyseus/`— porque el que pregunta es
@@ -85,10 +99,12 @@ export class MatchRegistry {
   // montos en la memoria del registro, que es justo lo que la allowlist de arriba evita.
   private readonly seatsByRoomId = new Map<string, readonly PlayerRef[]>();
 
-  // EL PLAZO NO SE INYECTA, y es a propósito: truco lo deja como segundo parámetro con default y
-  // nadie se lo pasa nunca. Acá los tests mueven el RELOJ del almacén, que es la otra mitad del
-  // mismo vencimiento y la que además prueba la implementación de memoria de verdad.
-  constructor(private readonly store: KeyValueStore) {}
+  // El reloj solo decide cuándo un campo del censo dejó de latir. Las demás claves conservan el
+  // plazo del almacén, que es lo que Redis aplica en producción.
+  constructor(
+    private readonly store: KeyValueStore,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   // Nace la sala. Es el PRIMER LATIDO y nada más: todo lo que escribe lo vuelve a escribir cada
   // `HEARTBEAT_MS`, así que no hay un camino de alta distinto del de mantenimiento — y un camino
@@ -126,6 +142,11 @@ export class MatchRegistry {
     for (const seat of seats) {
       await this.store.setex(playerKey(seat), roomId, TTL_SECONDS);
     }
+    await this.store.hset(
+      CENSUS_KEY,
+      roomId,
+      JSON.stringify({ seats: config.seats.length, gameModeId: config.gameModeId, at: this.now() }),
+    );
   }
 
   async publicConfigOf(roomId: string): Promise<PublicMatchConfig | undefined> {
@@ -139,6 +160,25 @@ export class MatchRegistry {
     return await this.store.get(playerKey(player));
   }
 
+  async census(): Promise<MatchCensusCount> {
+    const now = this.now();
+    let playersInMatch = 0;
+    const byGameMode = new Map<string, number>();
+
+    for (const [roomId, raw] of Object.entries(await this.store.hgetall(CENSUS_KEY))) {
+      const entry = parseCensus(raw);
+      if (!entry || now - entry.at >= DEAD_MS) {
+        await this.store.hdel(CENSUS_KEY, roomId);
+        continue;
+      }
+      if (now - entry.at >= STALE_MS) continue;
+      playersInMatch += entry.seats;
+      byGameMode.set(entry.gameModeId, (byGameMode.get(entry.gameModeId) ?? 0) + entry.seats);
+    }
+
+    return { playersInMatch, byGameMode };
+  }
+
   async remove(roomId: string): Promise<void> {
     const seats = this.seatsByRoomId.get(roomId);
     if (!this.byRoomId.has(roomId) || !seats) return;
@@ -146,6 +186,7 @@ export class MatchRegistry {
     this.seatsByRoomId.delete(roomId);
 
     this.store.del(configKey(roomId));
+    await this.store.hdel(CENSUS_KEY, roomId);
     for (const seat of seats) await this.release(seat, roomId);
   }
 
@@ -158,5 +199,18 @@ export class MatchRegistry {
     if ((await this.store.get(playerKey(player))) === roomId) {
       this.store.del(playerKey(player));
     }
+  }
+}
+
+function parseCensus(raw: string): CensusEntry | undefined {
+  try {
+    const entry = JSON.parse(raw) as Partial<CensusEntry>;
+    return typeof entry.seats === "number" &&
+      typeof entry.gameModeId === "string" &&
+      typeof entry.at === "number"
+      ? (entry as CensusEntry)
+      : undefined;
+  } catch {
+    return undefined;
   }
 }

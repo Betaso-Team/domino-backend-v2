@@ -186,7 +186,7 @@ describe("reglas de arquitectura", () => {
   // de interleaving que el test del semáforo cierra: dos mensajes del mismo cliente
   // pasarían la validación antes de que el primero mute el turno o la mano, y la misma
   // ficha se jugaría dos veces. Es el complemento estructural de
-  // features/match/tests/concurrency-e2e.test.ts — ese prueba el comportamiento de hoy,
+  // features/match/tests/concurrency.e2e.test.ts — ese prueba el comportamiento de hoy,
   // este impide que mañana alguien lo rompa en silencio.
   //
   // Esta regla NO la puede aplicar dependency-cruiser: mira el grafo de imports, y la

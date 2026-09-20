@@ -1,11 +1,8 @@
-import { testConfig } from "@/app.config";
 import { gameModes, rootContainer } from "@/di-container";
-import { env } from "@/env";
 import type { PlayerRef } from "@/shared/player-ref";
-import { CASUAL_2P } from "@/tests/game-mode-catalog";
+import { bootTestServer, casualTable, mintToken, participantOf, waitUntil } from "@/tests/e2e";
 import { ColyseusSDK } from "@colyseus/sdk";
-import { type ColyseusTestServer, boot } from "@colyseus/testing";
-import jwt from "jsonwebtoken";
+import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HistoryReader } from "../../network/history";
 import type { CreateMatchRequest, MatchParticipant } from "../match-contract";
@@ -14,7 +11,7 @@ import type { DominoRoom } from "./domino-room";
 let server: ColyseusTestServer | undefined;
 
 beforeAll(async () => {
-  server = await boot(testConfig, 2584);
+  server = await bootTestServer(2584);
 });
 
 afterAll(async () => {
@@ -319,13 +316,9 @@ function options(
   participants: readonly MatchParticipant[] = defaultParticipants,
 ): CreateMatchRequest {
   return {
-    mode: "CASUAL",
+    ...casualTable(participants, "seed"),
     matchId,
-    gameModeId: CASUAL_2P.uuid,
-    participants: [...participants],
-    seed: "seed",
     teamAssignment: "SEAT_ORDER",
-    rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
   };
 }
 
@@ -337,10 +330,7 @@ async function configOfRoom(testServer: ColyseusTestServer, roomId: string) {
 // Un string es azúcar para "de la plataforma de siempre": los tests que no miden
 // multiplataforma no tienen por qué escribir la pareja entera.
 const tokenOf = (player: string | PlayerRef) => {
-  const identity = typeof player === "string" ? { platformId: "betaso", userUuid: player } : player;
-  return jwt.sign({ sub: identity.userUuid, platformId: identity.platformId }, env.jwtSecret, {
-    algorithm: "HS256",
-  });
+  return mintToken(typeof player === "string" ? participantOf(player) : player);
 };
 
 function requiredServer(): ColyseusTestServer {
@@ -359,14 +349,6 @@ async function connect(
 ) {
   testServer.sdk.auth.token = tokenOf(player);
   return testServer.connectTo(room);
-}
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error("waitUntil: se agotó el plazo");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 async function historyTypes(matchId: string): Promise<string[]> {

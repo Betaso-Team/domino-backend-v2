@@ -19,7 +19,7 @@ import type { GameModeOutbox } from "./outbox";
 // despachador publica después, con confirmación y reintento. Por eso el constructor recibe un
 // `GameModeOutbox` y NO el publicador: la tentación no es importar el publicador de una, es
 // agregarle "sólo para el create" un `await` a la publicación, y un tipo que no se puede nombrar es
-// más barato de auditar que la convención de no hacerlo. `service.test.ts` pinea la lista de imports
+// más barato de auditar que la convención de no hacerlo. `service.int.test.ts` pinea la lista de imports
 // justamente porque los tipos no lo prohíben.
 //
 // Lo segundo que cambia: v1 no serializaba NADA (ni lease, ni transacción, ni índice único detrás de

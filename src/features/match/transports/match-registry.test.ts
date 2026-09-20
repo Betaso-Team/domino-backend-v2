@@ -1,7 +1,7 @@
 import { MemoryKeyValueStore } from "@/shared/kv";
 import { describe, expect, it } from "vitest";
 import { replayConfigOf } from "./match-contract";
-import { MatchRegistry, TTL_SECONDS } from "./match-registry";
+import { HEARTBEAT_MS, MatchRegistry, TTL_SECONDS } from "./match-registry";
 
 // El config se arma con el CONTRATO y no a mano: lo que el registro indexa son las parejas
 // del snapshot REAL, y un objeto escrito a mano podría describir una mesa que el contrato
@@ -222,5 +222,59 @@ describe("MatchRegistry", () => {
 
     expect(await nueva.matchOf(seatRef("u1"))).toBe("room-2");
     expect(await vieja.matchOf(seatRef("u2"))).toBeUndefined();
+  });
+});
+
+describe("MatchRegistry: censo del lobby", () => {
+  it("suma asientos de todos los procesos y desglosa por modo", async () => {
+    const store = new MemoryKeyValueStore();
+    const processA = new MatchRegistry(store);
+    const processB = new MatchRegistry(store);
+    const otherMode = replayConfigOf({
+      ...roomOptions,
+      matchId: "m2",
+      gameModeId: "rapida-2p",
+      seats: [seat("u3", 0), seat("u4", 1)],
+    });
+
+    await processA.register("room-1", config);
+    await processB.register("room-2", otherMode);
+
+    const census = await processA.census();
+    expect(census.playersInMatch).toBe(4);
+    expect([...census.byGameMode]).toEqual([
+      ["clasica-2p", 2],
+      ["rapida-2p", 2],
+    ]);
+  });
+
+  it("deja de contar antes de barrer una sala que dejó de latir", async () => {
+    const clock = fakeClock();
+    const store = new MemoryKeyValueStore(clock.now);
+    const registry = new MatchRegistry(store, clock.now);
+    await registry.register("room-1", config);
+    await store.hset("live_seats", "corrupt", "{");
+
+    clock.advance(2 * HEARTBEAT_MS + 1);
+    expect(await registry.census()).toMatchObject({ playersInMatch: 0 });
+    expect(await store.hgetall("live_seats")).toHaveProperty("room-1");
+    expect(await store.hgetall("live_seats")).not.toHaveProperty("corrupt");
+
+    clock.advance(2 * HEARTBEAT_MS);
+    expect(await registry.census()).toMatchObject({ playersInMatch: 0 });
+    expect(await store.hgetall("live_seats")).toEqual({});
+  });
+
+  it("al cerrar una sala la saca del censo en el acto", async () => {
+    const store = new MemoryKeyValueStore();
+    const registry = new MatchRegistry(store);
+    await registry.register("room-1", config);
+
+    await registry.remove("room-1");
+
+    expect(await registry.census()).toMatchObject({
+      playersInMatch: 0,
+      byGameMode: new Map(),
+    });
   });
 });
