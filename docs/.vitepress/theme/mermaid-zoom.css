@@ -1,0 +1,28 @@
+.mermaid.mermaid-zoom {
+  position: relative;
+  height: 70vh;
+  max-height: 80vh;
+  overflow: hidden;
+  resize: vertical;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
+
+.mermaid.mermaid-zoom svg {
+  cursor: grab;
+}
+
+.mermaid.mermaid-zoom svg:active {
+  cursor: grabbing;
+}
+
+.mermaid.mermaid-zoom [id^="svg-pan-zoom-controls"] rect {
+  fill: var(--vp-c-bg);
+  stroke: var(--vp-c-divider);
+  opacity: 0.9;
+}
+
+.mermaid.mermaid-zoom [id^="svg-pan-zoom-controls"] path {
+  fill: var(--vp-c-text-1);
+}

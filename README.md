@@ -6,6 +6,20 @@ partida, en Mongo, para la consola de soporte.
 
 Si venís a trabajar sobre el código, lo que tenés que leer es `AGENTS.md`.
 
+## Documentación local
+
+La arquitectura, los flujos y las reglas se sirven como un sitio VitePress con búsqueda local y
+diagramas Mermaid ampliables:
+
+```bash
+npm install
+npm run docs:dev
+```
+
+Abrí la URL que imprime VitePress (normalmente `http://localhost:5173`). `npm run docs:build`
+comprueba enlaces y genera el sitio estático; el CI ejecuta ese build para que la documentación no
+se pudra aparte del código.
+
 ## Levantarlo con Docker
 
 ```bash

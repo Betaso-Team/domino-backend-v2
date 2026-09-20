@@ -1166,6 +1166,22 @@ dependencias**) en verde. **Matchmaking sigue expresamente fuera.**
 - El scaffold que comparten features vive en `src/tests/`. Las implementaciones `Memory*` no se
   movieron a tests: en dominó son adaptadores reales del despliegue sin Mongo/Redis, no fakes.
 
+## Incremento completo — documentación local navegable
+
+Portado del sitio de truco, adaptado a la arquitectura real del dominó. Baseline de código sin
+cambios: **802 tests / 76 archivos**. El gate nuevo es `npm run docs:build`, además de los gates del
+backend.
+
+- `npm run docs:dev` sirve VitePress en la URL que imprime (normalmente
+  `http://localhost:5173`); `docs:preview` sirve el build estático.
+- `docs/index.md`, `arquitectura.md`, `api-y-mensajes.md` y `operacion.md` son las puertas del sitio.
+  Reutilizan `reglas-de-juego-v1.md`, el diseño del orquestador y las specs existentes; los planes
+  fechados son historial de ejecución y `srcExclude` no los publica.
+- Mermaid renderiza los diagramas y el theme agrega zoom, paneo y controles con `svg-pan-zoom`, igual
+  que truco. La búsqueda es local: no hay servicio externo ni endpoint de documentación en la app.
+- CI construye el sitio después del bundle. Un enlace roto o un diagrama que no compile pone el job
+  rojo antes del smoke de deploy.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.

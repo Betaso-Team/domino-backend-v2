@@ -85,16 +85,15 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Docs
+        run: npm run docs:build
+
       # Suite de integración separada: sí levanta Mongo/Redis porque además certifica el bundle,
       # PM2 y los paths de Nginx. No contradice que Vitest sea hermético.
       - name: Smoke Docker, PM2 y Nginx
         env:
           RUN_ENGINE_SMOKE: '1'
         run: npm run test:deploy
-
-      # SIN PASO DE DOCS, que truco sí tiene: este repo no publica un sitio de documentación y no
-      # existe un script `docs:build`. Los documentos que hay (`AGENTS.md`, `README.md`, `docs/`)
-      # se leen en el repositorio.
 
       # LO QUE VIAJA AL SERVIDOR: el bundle, con qué instalar las dependencias de producción, cómo
       # arrancarlo, y EL PROPIO PROCEDIMIENTO DE DESPLIEGUE — que así es siempre el de la versión
