@@ -1777,6 +1777,29 @@ golden rebobina, los E2E de dos siguen verdes y el único cambio del árbol es e
 4. **La tranca de 4P no tiene E2E.** Está medida como regla y en el motor; llevar una mesa de
    cuatro a una tranca real pide conducir las cuatro manos a mano.
 
+## Actualización — Colyseus core 0.18.15 / colyseus 0.18.7 / sdk 0.18.3 / schema 5.0.33
+
+Baseline **1273 tests / 122 archivos**, con `typecheck`, suite, lint y `depcruise` (**378 módulos /
+1523 dependencias**) en verde. De las notas de release, dos tocan este repo y el resto no
+(`IdleKickPlugin`, WebTransport, Vite+Nitro, el monitor y uWebSockets no se usan):
+
+- **core 0.18.14: un `onCreate` que lanza ahora DISPONE la sala y corre `onDispose`.** Antes la
+  sala quedaba viva y muda, así que `onDispose` nunca veía una mesa a medio armar. Ahora sí, y la
+  guarda `this.notifier && !this.hasOutcome()` dejaba pasar una sala cuyo `register` falló (Redis
+  caído al nacer): emitía `MATCH_ABORTED` —reembolso, resumen y cooldown— de una mesa donde nadie
+  se sentó, y entre el `notifier` y el `hasOutcome` un throw daba `TypeError`. **La guarda es
+  `opened`**, que se prende en la última línea de `onCreate`. El reembolso no sacaba plata
+  (`refundMatch` revierte sólo lo cobrado, y la inscripción se cobra al ENTRAR), pero es un cierre
+  que miente. Medido: el test nuevo de `domino-room.e2e.test.ts` salió rojo antes del arreglo.
+- **core 0.18.13: el `onAuth` de instancia corre aunque el static de `@colyseus/auth` haya
+  decodificado el token.** La override `static onAuth → true` de las salas SIGUE haciendo falta:
+  sin ella, un token que ese decodificador no acepta sale `AUTH_FAILED` genérico en el
+  matchmaking, antes de que el `TokenVerifier` diga por qué. Cambió el motivo, no la decisión.
+
+⚠ `@colyseus/core` imprime al registrar `DominoRoom` y los lobbies «onAuth() defined at the
+instance level will be ignored» porque tienen los dos `onAuth`. **Es falso** con la override que
+devuelve `true`: `callOnAuth` no produce `authData` y el de instancia corre (`Room.mjs:1101-1102`).
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.

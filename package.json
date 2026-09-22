@@ -29,10 +29,10 @@
     "depcruise": "depcruise src --config .dependency-cruiser.cjs"
   },
   "dependencies": {
-    "@colyseus/schema": "^5.0.27",
+    "@colyseus/schema": "^5.0.33",
     "@colyseus/tools": "^0.18.3",
     "amqplib": "^2.0.1",
-    "colyseus": "^0.18.5",
+    "colyseus": "^0.18.7",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.6.0",
@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@colyseus/sdk": "^0.18.2",
+    "@colyseus/sdk": "^0.18.3",
     "@colyseus/testing": "^0.18.5",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",

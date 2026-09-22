@@ -93,12 +93,14 @@ export class LobbyRoom extends Room {
   private ticker?: Delayed;
   private stats: LobbyStats = EMPTY_STATS;
 
-  // @colyseus/auth instala un static onAuth que decodifica el JWT ANTES de instanciar la sala, y
-  // su resultado gana: `Room._onJoin` usa el `authData` del matchmaking y ni llama al `onAuth` de
-  // instancia (`@colyseus/core/build/Room.mjs:1098`). Sin esta neutralización `client.auth` es el
-  // payload crudo —`{ sub, iat, exp }`—, así que `credentials.userId` es `undefined` y
-  // toda búsqueda muere con `INTERNAL`. Es la misma override que ya llevan `DominoRoom` y el lobby
-  // viejo; truco no la necesita porque no tiene el módulo instalado.
+  // @colyseus/auth instala un static onAuth que decodifica el JWT ANTES de instanciar la sala.
+  // Hasta `@colyseus/core` 0.18.12 su resultado GANABA: `Room._onJoin` no llamaba al `onAuth` de
+  // instancia, `client.auth` quedaba en el payload crudo —`{ sub, iat, exp }`— y toda búsqueda
+  // moría con `INTERNAL`. Desde 0.18.13 el de instancia corre igual (`Room.mjs:1101`), pero la
+  // override SIGUE haciendo falta: sin ella un token que ese decodificador no acepta sale
+  // `AUTH_FAILED` genérico en el matchmaking, antes de que nuestro verificador diga POR QUÉ. Es la
+  // misma override que ya llevan `DominoRoom` y el lobby viejo; truco no la necesita porque no
+  // tiene el módulo instalado.
   static override async onAuth(
     _token: string,
     _options: unknown,

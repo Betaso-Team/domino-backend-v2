@@ -106,6 +106,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // cadena los ordena, y de paso le da al apagado algo que esperar: lo que se esté escribiendo
   // tiene que terminar ANTES de la limpieza, o la limpieza no limpia nada.
   private beats: Promise<void> = Promise.resolve();
+  // LA SALA NACIÓ: `onCreate` llegó al final. Desde `@colyseus/core` 0.18.14 un `onCreate` que
+  // lanza igual corre `onDispose`, y el `notifier` puede existir sin que la mesa haya abierto
+  // nunca. Sin esta bandera ese cierre emite `MATCH_ABORTED` de una mesa donde nadie se sentó.
+  private opened = false;
   private readonly views = new Map<PlayerId, StateView>();
   private readonly seated = new Set<PlayerId>();
   private readonly pendingReconnections = new Map<PlayerId, Deferred<Client>>();
@@ -356,6 +360,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.onMessage("*", (client, type, payload) =>
       this.handleMessage(client, String(type), payload),
     );
+    this.opened = true;
     this.log.info("sala creada");
   }
 
@@ -493,7 +498,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // PRIMERO SE CORTA EL LATIDO: lo que sigue es limpieza, y un latido posterior volvería a
     // escribir justo lo que estamos por borrar — dejando la sala anunciada dos minutos más.
     this.heartbeat?.clear();
-    if (this.notifier && !this.hasOutcome()) {
+    if (this.opened && !this.hasOutcome()) {
       // Con revancha habrá fases posteriores al veredicto: la guarda futura debe mirar el
       // veredicto del juez, no la fase terminal, para no reembolsar una partida ya pagada.
       this.notifier.notify([{ type: "MATCH_ABORTED", reason: this.abortReason() }]);
