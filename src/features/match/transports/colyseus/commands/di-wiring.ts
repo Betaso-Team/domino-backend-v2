@@ -15,6 +15,7 @@ import {
   MatchHistory,
   type MatchPieces,
   type StandingsFeeds,
+  logSink,
   registerCasualVeto,
   registerTournamentVeto,
   reportStandings,
@@ -204,5 +205,14 @@ export function buildPieces(child: DependencyContainer, emit: MatchEventSink): M
   // `emit` sigue sin usarse: es el canal para el listener que PRODUZCA eventos, y el del cierre no
   // produce ninguno a propósito (las dos tablas son de plataforma y nadie de esta partida las mira).
   void emit;
-  return { history, listeners, sinks: [(events) => history.events(events)] };
+  // LA TRAZA VA PRIMERO, y el orden importa cuando algo se rompe: si el historial revienta al
+  // escribir, lo que quedó en el log es lo que permite reconstruir qué pasaba. Al revés, el
+  // hecho que tumbó al historial sería justo el que falta.
+  //
+  // El token existe SÓLO con el debug encendido: quien lo decide es el composition root, que es
+  // el único que lee la configuración del proceso.
+  const trace = child.isRegistered("MatchTraceLog")
+    ? [logSink(child.resolve<Logger>("MatchTraceLog"))]
+    : [];
+  return { history, listeners, sinks: [...trace, (events) => history.events(events)] };
 }

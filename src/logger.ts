@@ -13,7 +13,10 @@ export interface Logger {
 
 // Una sola fachada: la sala crea un child con matchId/roomId/gameModeId. El dominio no
 // registra; solo transports y network conocen logging.
-function wrap(instance: pino.Logger): Logger {
+// Se EXPORTA para poder medir lo único que esta fachada puede romper: el ORDEN de los argumentos.
+// `pino` recibe los campos PRIMERO y el mensaje después; invertirlo no falla, deja logs donde el
+// mensaje es el objeto — y eso no se ve hasta que alguien va a buscar un incidente.
+export function wrap(instance: pino.Logger): Logger {
   return {
     debug: (message, fields) => instance.debug(fields ?? {}, message),
     info: (message, fields) => instance.info(fields ?? {}, message),

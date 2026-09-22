@@ -1,4 +1,5 @@
 export { BetCharger } from "./bet-charge";
+export { logSink } from "./log-sink";
 export type { BetChargerDeps } from "./bet-charge";
 export { CachedBetLevelBook, NO_BET_LEVELS } from "./bet-levels";
 export type { BetLevelBook } from "./bet-levels";

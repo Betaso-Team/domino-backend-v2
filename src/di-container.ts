@@ -426,6 +426,17 @@ export const matchmaker = new Matchmaker({
 //
 // El plazo es el de v1 (15 s) y es generoso a propósito: el que espera es un jugador que ya
 // apretó «acepto», y cortar antes de tiempo le anula un trato que iba a salir bien.
+// LA TRAZA DEL JUEGO, y el token existe SÓLO cuando el nivel la pide. El sink no sabe de
+// niveles ni pregunta por ninguno: con el debug apagado no se construye, y así el costo de
+// filtrar los campos de cada evento de cada mesa tampoco se paga.
+//
+// Se decide acá porque es el único lugar que lee la configuración del proceso — `buildPieces`
+// no puede, y darle `env` sería una segunda puerta a la configuración.
+// `logLevel` es `"debug" | "info"` y nada más (ver `src/env.ts`), así que la condición es una
+// sola: en producción el default es `info` y la traza no existe.
+if (env.logLevel === "debug") {
+  rootContainer.register("MatchTraceLog", { useValue: logger });
+}
 rootContainer.register(BetCharger, {
   useValue: new BetCharger({ wallet, ledger, timeoutMs: 15_000, log: logger }),
 });
