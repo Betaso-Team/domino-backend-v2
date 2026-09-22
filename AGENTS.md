@@ -1734,6 +1734,31 @@ está en el jugador, y repetirlo en cada jugada sería el campo derivado que la 
    mesa se comporta como si los bots no existieran y no falla nada. Se acota a medio turno. Lo
    destapó la suite, que corre con `TURN_TIMEOUT_MS=600` contra los 1500 de v1.
 
+### Los tres invariantes, y cómo están fijados
+
+El producto pide tres cosas, y las tres SALEN de la única guarda de `canSeatBot` —«queda alguien
+más en tu equipo, de carne y hueso»— en vez de estar escritas una por una:
+
+1. **UNA SOLA MÁQUINA POR EQUIPO.** El segundo que se va de un bando ya no encuentra compañero a
+   quien proteger.
+2. **UN EQUIPO DE PURAS MÁQUINAS NO JUEGA.** La partida se cierra en vez de enfrentar a alguien
+   contra un bando que no tiene a nadie — que además podría GANARLA, con el premio yendo a un
+   equipo donde nadie cobra.
+3. **NUNCA MÁQUINAS CONTRA MÁQUINAS.** Se sigue de la 2: para llegar ahí harían falta dos por
+   bando, y el segundo de cada bando ya cerró la mesa.
+
+⚠ **ESTÁN MEDIDOS SOBRE LAS 64 SECUENCIAS DE RETIRO POSIBLES**
+(`engine/tests/bot-invariants.int.test.ts`), con el invariante comprobado después de CADA paso.
+No es cobertura de más: un `it` por caso fija UNA decisión y deja pasar el camino que nadie
+pensó, y acá lo que se afirma es un «nunca». Verificado por mutación — permitir un segundo bot en
+el mismo equipo pone rojos **54 de los 68**.
+
+**El 2P no cambió en nada**, y eso también está medido: las dos reglas nuevas están escritas por
+EQUIPO y un equipo de un miembro da el mismo resultado; `hasTeamAbandoned` filtra bots que en 2P
+nunca existen; y `canSeatBot` devuelve `false` por construcción con un jugador por bando. El
+golden rebobina, los E2E de dos siguen verdes y el único cambio del árbol es el `isBot` en
+`false` de cada asiento.
+
 ### Deudas abiertas de ESTE incremento — NO CUMPLIDAS
 
 1. **El 4P no tiene E2E de partida COMPLETA.** El que hay mide que la mesa nace, que la máquina
