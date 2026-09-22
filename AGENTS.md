@@ -289,12 +289,9 @@ quedó.
    `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva está en el recuadro
    ⛔ de la Tarea 22 y junto al propio `unlock()`: **si tocás `maxClients`, leelo y agregá el test
    antes de cambiarlo.**
-2. **El 4P no tiene regla de reparto del premio.** `configOf` acepta cuatro participantes y
-   `settlementOf` lanza contra cualquier final de mesa de cuatro. Hoy es inofensivo porque nadie
-   liquida; con el orquestador puesto, ese throw cae DESPUÉS del veredicto y la mesa se queda sin
-   premio (tiró) y sin reembolso (hubo desenlace): **plata trabada**. Escrito en tres lugares a
-   propósito —`configOf`, `network/settlement.ts` y el Criterio de cierre del plan—, porque el que
-   abra el 4P va a llegar por cualquiera de los tres. Empieza por la regla, no por borrar la guarda.
+2. ~~**El 4P no tiene regla de reparto del premio.**~~ **CERRADO, y la deuda era FALSA**: la regla
+   estaba escrita en v1 (`domino-room-state.ts:672-678`) y `settlementOf` ya la implementaba por
+   construcción. Ver el bloque «la mesa de cuatro y la máquina que la sostiene» al final.
 3. **No existe el orquestador que cobre.** `settlementOf` es una proyección pura y exportada, y
    nadie la llama todavía fuera de su test: no hay puerto de wallet, ni adaptador remoto, ni
    outbox, **y es deliberado** (el plan lo dice en su Mapa de archivos). Diseñar el puerto sin un
@@ -585,13 +582,9 @@ misma revisión, y la partida 2P terminada por `SCORE` con 119 entradas de histo
 
 **Deudas abiertas de ESTE incremento — NO CUMPLIDAS:**
 
-1. **4P, bots y multiplicador siguen sin implementarse, y es deliberado.** El catálogo los PERSISTE
-   y los publica —`playersQuantity: 4`, `enableBots`, `multiplier` viajan a Mongo y a HTTP— pero
-   ninguno tiene efecto: una mesa de cuatro se rechaza con `UNSUPPORTED_GAME_MODE` en `configOf`
-   antes de génesis, nadie lee `enableBots`, y `multiplier` no multiplica nada. La causa del rechazo
-   4P es **dinero y no falta de motor**: `settlementOf` exige exactamente un ganador, así que el
-   final de una mesa de cuatro lanzaría DESPUÉS del veredicto —sin premio y sin reembolso—, plata
-   trabada. Empezá por la regla de reparto, no por borrar la guarda.
+1. ~~**4P y bots siguen sin implementarse.**~~ **CERRADO**: la mesa de cuatro nace, paga y los
+   bots la sostienen — ver el bloque del final. Lo que sigue sin efecto es **`multiplier`**, que
+   viaja a Mongo y a HTTP y sólo pesa en el ranking.
 2. **El hueco heredado del `PUT` que cambia sólo `playersQuantity`.** v1 no consulta duplicados
    cuando el nombre no cambia, así que una edición puede fabricar el par `name + playersQuantity`
    que `create` rechaza una línea antes. Está **pineado por un test** que lo afirma como hueco, no
@@ -664,7 +657,9 @@ Lo que dejó la Tarea 10:
   partidas en curso no puede reescribirle la economía a una mesa cuya inscripción ya se cobró. Lo
   mide un test que crea la sala, edita el modo y **además** crea una mesa nueva que sí ve los
   valores nuevos: sin esa segunda mitad, un `update` que no escribiera nada dejaba el test verde.
-- ⚠ **EL 4P SE RECHAZA EN `configOf`, NO EN LA SALA**, y la ubicación es la decisión: `configOf` es
+- ⚠ **EL 4P SE RECHAZA EN `configOf`, NO EN LA SALA** — ⚠ y **ya no se rechaza**: el incremento
+  del final abre la mesa de cuatro. Lo que sigue valiendo es la UBICACIÓN, que es la decisión:
+  `configOf` es
   lo único que ve el request Y el modo, y es por donde pasa toda mesa que nace —la sala es UN
   llamador, y una segunda puerta de creación quedaría sin guarda—. «Antes de génesis» queda
   garantizado por construcción: el árbol nace de un `DominoMatchConfig` y no hay otro modo de
@@ -1041,7 +1036,8 @@ set: un reconciliador compara `__v` para reparar la ventana modo→outbox y pued
 `updated`, igual que el `/sync` de v1. La entrega es al menos una vez, por lo que consumidores deben
 deduplicar. `multiplier`, `isFreeRoom` y `enableBots` se preservan en Mongo/HTTP; Rabbit conserva su
 payload v1 y no añade los dos últimos. Este incremento no implementa bots, torneos, multiplicador
-dinámico ni 4P; las mesas 4P se rechazan explícitamente antes de génesis.
+dinámico ni 4P; las mesas 4P se rechazan explícitamente antes de génesis. ⚠ Eso último dejó de
+ser cierto: el incremento del final las abre, con la regla de reparto leída de v1.
 
 ## Incremento completo — el registro de la mano
 
@@ -1606,7 +1602,151 @@ decisión de qué es un token vacío — ahí habría que mantenerla dos veces.
 ### Lo que sigue faltando de truco, después de esto
 
 - **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
-- **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P. **Es lo único que queda.**
+- ~~`bot.ts` / `BotPort`~~ — **HECHO**, y no como truco: ver el bloque de abajo.
+
+## Incremento completo — la mesa de cuatro y la máquina que la sostiene
+
+Salió de «porta el bot», y leer los dos repos cambió el alcance antes de escribir una línea.
+Baseline **1168 → 1200 tests / 122 archivos**, con `typecheck`, suite, `biome check` y
+`depcruise` (**376 módulos / 1515 dependencias**) en verde.
+
+Tres commits, uno por capa: `91796a3` las reglas, `9cf4bfd` el motor, `6bf12e8` la red y las
+guardas.
+
+### ⚠ EL BOT DE TRUCO NO EXISTE, Y EL DE v1 ES OTRA COSA
+
+`truco/src/features/match/betaso/bot.ts` son **quince líneas**: un `BotPort.attach(seat)` sin
+implementación y sin llamador. Portarlo era escribir una interfaz que nadie llama — justo lo
+que este repo prohíbe.
+
+**El bot de verdad está en v1, y no es un jugador que se sienta: es el REEMPLAZO del que se
+retira de una mesa de CUATRO.** Hereda su mano, su equipo y su lugar en la rueda. Existe por
+una sola razón: en 4P se juega por parejas, así que el que pierde al compañero queda jugando
+uno contra dos sin haber hecho nada. En 2P v1 lo **prohíbe explícitamente**
+(`game-mode.dto.ts:28-36`): ahí el que queda simplemente gana.
+
+O sea que el bot **no se podía disparar nunca** con el 4P rechazado en `configOf`. Por eso el
+alcance real del pedido era abrir la mesa de cuatro, y eso se consultó antes de escribir código.
+
+### ⚠⚠ LA DEUDA DEL 4P ERA FALSA: LA REGLA DE REPARTO EXISTÍA Y ESTABA EN v1
+
+Tres bloques de este documento decían que abrir el 4P exigía **inventar** la regla de cómo se
+parte el premio entre compañeros, y que hasta entonces la guarda de `settlementOf` mantenía la
+deuda inerte. **La regla estaba escrita y argumentada en v1**
+(`domino-room-state.ts:672-678`):
+
+> Cada ganador cobra `prize` **entero** —el premio POR CABEZA del catálogo, no un pozo a
+> repartir—. Si un socio abandonó, el que queda cobra **sólo lo suyo** y la otra mitad se queda
+> en la casa. v1 lo escribe en el divisor, que es **nominal** (`playersQuantity / 2`) y no por
+> cobradores reales: con el divisor real, un abandono le pagaría el pozo entero a uno solo.
+
+Y `settlementOf` ya la implementaba **por construcción**: `winners.map((seat) => entryOf(...,
+config.prize, seat))` paga `prize` por asiento ganador. Lo único que lo frenaba era
+`winners.length !== 1`.
+
+**La lección es del método, no del 4P**: la deuda se escribió tres veces sin volver a leer v1, y
+lo que faltaba no era una decisión de producto sino una lectura. Cuando una deuda diga «hay que
+decidir X», el primer paso es buscar si v1 ya lo decidió.
+
+### Las dos reglas que la mesa de cuatro separa
+
+Estaban escritas **por jugador**, y con parejas eso premia al equipo equivocado. En 2P las dos
+formas dan lo mismo, así que nada podía ponerse rojo hasta que hubiera cuatro asientos.
+
+| | estaba | es (v1) |
+|---|---|---|
+| puntos del dominó | todos menos el ganador | **los pips del equipo RIVAL** (`:412-415`) |
+| tranca | el jugador con menos pips | **el equipo con menos pips TOTALES** (`:514-534`) |
+
+La primera le sumaba al que dominó los pips de su **propio compañero**; la segunda dejaba que el
+mejor de la pareja perdedora ganara la tranca contra una pareja que en total tenía menos.
+
+**NINGUNA LLEVA UNA RAMA POR CANTIDAD DE ASIENTOS**, y es la decisión de esa capa: escritas por
+equipo, el 2P es el caso de un equipo de un miembro y sale idéntico. Un `if (players.length ===
+4)` habría dejado dos juegos de reglas para el mismo cierre.
+
+⚠ **LA CARA DEL VEREDICTO DE LA TRANCA ES DERIVADA.** Lo que gana es un EQUIPO, pero
+`RoundVerdict` viaja con un `winnerId` —lo leen el marcador, el evento y el historial— así que
+hay que nombrar a alguien: el del equipo ganador con menos pips, desempatado por asiento. En 2P
+es el de siempre, y en 4P es determinista, que es lo que el replay necesita.
+
+### El bot, en tres piezas
+
+- **`PlayerState.isBot`** (AL FINAL del schema, como `pastMoves`). **No se marca
+  `hasAbandoned`**, y ésa es la mitad que decide el final: las dos banderas dicen «acá ya no hay
+  nadie» y llevan a lados opuestos — con el retiro puesto, `MatchReferee` ve un equipo fuera y
+  corona al otro, o sea que la mesa que el bot vino a salvar termina igual por forfeit con una
+  máquina jugándola.
+- **`rules/bot.ts`** — la política, y **elige entre lo legal en vez de decidir legalidad**: todo
+  sale de `availableActionsFor`, la misma consulta que arma la barra de botones del front. Un bot
+  con su propia idea de «esto engancha» manda una jugada que el comando rechaza, y ahí el asiento
+  queda mudo hasta que vence el reloj — el compañero pierde igual, por un camino que ningún test
+  de reglas ve. La elección es la de v1 (la jugable de más pips) y es **deliberadamente boba**:
+  el bot está para que la mesa no muera, no para jugar bien. Una política fuerte le daría al que
+  perdió a su socio uno mejor que el que se fue, que es el camino a retirarse a propósito.
+- **`network/bot-turn.ts`** — el reloj. Es de la RED por lo mismo que el cobro del aumento: los
+  comandos son síncronos por contrato y esto tiene que ESPERAR (1500 ms, de v1).
+
+**LAS TRES GUARDAS SON LAS DE v1** (`canSeatBot`): la mesa lo ofrece, la partida está EN JUEGO, y
+queda alguien más en su equipo de carne y hueso. La segunda traduce el `isGameValid` de v1 —
+durante la ventana de reparto nadie participó todavía, y sentar un bot ahí sostendría una partida
+que nunca arrancó, convirtiendo en cobro lo que tiene que ser un reembolso.
+
+⚠ **LA TERCERA ES LA QUE APAGA EL 2P**, y por eso no hay chequeo del tamaño de la mesa: con un
+jugador por bando el equipo del que se va queda vacío por construcción. Es la prohibición que v1
+declara aparte, saliendo de la regla del equipo en vez de ser un segundo chequeo que la puede
+contradecir.
+
+**`retire` VIVE EN UN SOLO LUGAR** (`MatchDriver`), porque los dos caminos que retiran un asiento
+—el verbo y el reloj del turno— tienen que dar lo mismo. Es interfaz propia (`Retirement`) y no
+un cuarto verbo de `Driver`: el conductor de RONDA también implementa `Driver` y una mano no
+decide si la mesa sigue existiendo. Sentar el bot **no llama a `advance`** —el asiento sigue en
+la rueda con sus fichas, no hay mano que pueda haberse cerrado— y sí le devuelve el reloj al
+turno, porque por el camino del timeout el que hereda viene vencido.
+
+**SE LO EMPUJA, NO SE SUSCRIBE.** El turno cambia sin emitir evento —jugar no es un evento, el
+comando ya es el registro— así que la sala pregunta después de cada mutación. **Los dos empujes
+hacen falta**: el del mensaje y el del timeout, que es por donde se SIENTA el bot — sin ése, el
+bot recién nacido espera un mensaje que en una mesa que lo está esperando a él no llega nunca.
+
+**EL BOT NO ENTRA POR EL ROUTER**: el router es la frontera del CABLE y su handler graba la
+fuente `"PLAYER"` por construcción. Una jugada de la máquina es un acto del SISTEMA, y el
+historial que alguien va a auditar es justamente el de la partida que alguien abandonó. Es el
+segundo llamador que `MoveLog` anticipaba — y `PastMove` **sigue sin `bySystem`**: `isBot` ya
+está en el jugador, y repetirlo en cada jugada sería el campo derivado que la doctrina prohíbe.
+
+### ⚠ Tres defectos, y quién pudo encontrar cada uno
+
+1. **Un equipo de puras MÁQUINAS seguía contando como presente.** Se va uno, se le sienta un bot,
+   se va su compañero — y como el bot no está marcado como retirado, `hasTeamAbandoned` decía que
+   el equipo seguía ahí. La partida continuaba con un bot solo contra dos personas y **podía
+   ganarla**: premio para un equipo donde nadie cobra, o sea plata trabada. Es el
+   `checkOnlyOneTeam` de v1 filtrando bots. **Lo encontró el test de la capa del motor**, que
+   decía medir otra cosa.
+2. **Esparcir un nodo del schema devuelve un objeto VACÍO.** La ficha que la política elige sale
+   del árbol VIVO —`SchemaMatchView` no copia nada— así que `{ ...move.tile }` mandaba
+   `left`/`right` en `undefined` y el comando contestaba `TILE_NOT_IN_HAND` sobre una ficha que
+   el bot tenía en la mano. **El modo de falla es cruel**: `JSON.stringify` del MISMO nodo sí
+   imprime los números, así que el log muestra la ficha correcta mientras el payload va vacío. Es
+   la trampa que `log-sink.ts` ya documentaba en su filtro. **Lo encontró el E2E**, instrumentado.
+3. **Un plazo de reflexión más largo que el turno es un bot que nunca juega**: piensa hasta que
+   se le vence y lo retiran, y como a un bot ya no se lo reemplaza por otro, ahí sí abandona — la
+   mesa se comporta como si los bots no existieran y no falla nada. Se acota a medio turno. Lo
+   destapó la suite, que corre con `TURN_TIMEOUT_MS=600` contra los 1500 de v1.
+
+### Deudas abiertas de ESTE incremento — NO CUMPLIDAS
+
+1. **El 4P no tiene E2E de partida COMPLETA.** El que hay mide que la mesa nace, que la máquina
+   juega y que la jugada se graba como del sistema; nadie llevó una mesa de cuatro hasta
+   `SCORE` ni midió el `REWARD` de la pareja de punta a punta. La proyección del premio sí está
+   medida en `settlement.test.ts`, incluida la mitad que queda en la casa.
+2. **El emparejador no arma mesas de cuatro.** `configFromRoomOptions` deja `enableBots: false`
+   porque no recibe el modo entero: el camino del REQUEST sienta las de cuatro y el del
+   matchmaking no. Es la deuda de los dos caminos de creación, que sigue abierta.
+3. **El smoke real no corrió.** Pide Docker. Este incremento toca el ciclo de vida de la sala y
+   el schema, que es lo que el smoke certifica.
+4. **La tranca de 4P no tiene E2E.** Está medida como regla y en el motor; llevar una mesa de
+   cuatro a una tranca real pide conducir las cuatro manos a mano.
 
 ## Cómo se ejecuta una tarea
 
