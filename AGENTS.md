@@ -1877,7 +1877,7 @@ Baseline **1320 tests / 129 archivos**, con `typecheck`, suite, lint, `depcruise
   ANTES que las lecturas, porque `GET /game-modes/reactive/:uuid` (mutación) tiene que ir antes que
   `GET /game-modes/:uuid`. Lo pinea el test del orden, que ahora lee el `stack` del router
   (`src/tests/routes.ts`).
-- **Las salas por feature** (`de 597e5af`): `transports/colyseus/register.ts` devuelve el pedazo
+- **Las salas por feature** (`97224b4`, de `597e5af`): `transports/colyseus/register.ts` devuelve el pedazo
   del mapa de `defineRoom`. `matchRooms` NO sale por el índice de `match` —sería un ciclo con el
   container— y `registerMatchmaking`, que era código muerto, se borró.
 - **`env-single-reader.test.ts` era flaky** (`4f15b71`): recorría `src/` mientras
