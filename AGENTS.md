@@ -187,6 +187,16 @@ queda congelada, y toda recompensa/reembolso usa el `rateId` único de la mesa. 
 (`ca9e68a`) los renombró a `entryFee`/`prize`/`amount` y los pasó a UC completas — ver el bloque de
 más abajo.
 
+⚠⚠ **Y LA PAREJA `{ platformId, userUuid }` TAMPOCO EXISTE YA.** El incremento de integración con
+el front (`18c99b0`) la aplanó a un solo `userId`, que es el `sub` del token. **Todo lo que este
+bloque y los siguientes dicen sobre "la pareja" hay que leerlo como "el `userId`"**: la clave del
+registro (`player_match:<userId>`, ya sin `JSON.stringify`), la `idempotencyKey` de
+`settlementOf` (`["matchId","KIND",userId]`), la comparación de `assertSameTable`, el
+`noSync()` de `PlayerState` y el cruce de `onJoin`. El motivo está en el bloque del final; en una
+línea: ni truco ni el v1 del dominó tienen `platformId` en una sola línea de su código, así que la
+multiplataforma no la alimentaba ningún sistema. **`golden-2p.json` ya no contiene `betaso`**, y
+`shared/player-ref.ts` no existe.
+
 Lo que dejó la Tarea 1, y que conviene saber antes de tocar nada de acá:
 
 - **`configOf` es la ÚNICA frontera**, y ahora valida con zod: `onCreate(options: unknown)`, así
@@ -1181,6 +1191,118 @@ backend.
   que truco. La búsqueda es local: no hay servicio externo ni endpoint de documentación en la app.
 - CI construye el sitio después del bundle. Un enlace roto o un diagrama que no compile pone el job
   rojo antes del smoke de deploy.
+
+## Incremento completo — integración con el front: identidad plana y las tres features de truco
+
+Sin plan escrito: salió del pedido de dejar el dominó listo para que el front lo integre, con la
+tercerización (el orquestador que cobra) diferida a un incremento propio. Baseline **820 → 1014
+tests / 78 → 105 archivos**, con `typecheck`, suite, `biome check`, `depcruise` (**345 módulos /
+1348 dependencias**) y `build` en verde.
+
+Tres commits: `cea5bcc` la base del port, `18c99b0` el aplanado de la identidad, `d83732d` las 27
+suites.
+
+### La identidad es UN `userId`, y por qué
+
+`features/matchmaking`, `features/tournament` y `features/economy` llegaron portadas de truco en una
+sesión anterior, sin commitear y a medio cerrar. Lo que había quedado abierto era la identidad:
+`Identity` ya era `{ userId }` pero `MatchRegistry`, `match-contract`, `settlement` y `configOf`
+seguían con la pareja `{ platformId, userUuid }`, y `typecheck` no lo veía porque `matchOf` aceptaba
+las dos formas. **`DominoRoom.onJoin` ya había dejado de comparar la plataforma**: el asiento se
+otorgaba por `sub` solo, así que dos productos que firmaran el mismo `sub` reclamaban el mismo
+asiento con la inscripción ya cobrada.
+
+Se aplanó entero en vez de revertir, y el argumento es medible: **ni truco ni el v1 del dominó
+tienen `platformId` en una sola línea**. Los únicos valores que existían —`betaso`, `partner`,
+`third`, `fourth`, `replay`— eran fixtures de esta suite midiendo una multiplataforma que ningún
+sistema alimenta. El vocabulario que queda es `userId`, que es el de truco y el del v1 (181 usos
+contra 5 de `userUuid`).
+
+- **`shared/player-ref.ts` SE BORRÓ.** Un campo `string` no justifica una interfaz compartida, y
+  `MatchSeat` tampoco podría importar `Identity` de `features/auth`: el core solo importa de su
+  feature y de `shared/` (Regla 1).
+- **`playerKey` del registro dejó de serializar.** La pareja necesitaba `JSON.stringify` porque un
+  `a:b:c` concatenado no dice dónde termina una mitad y empieza la otra. Con un componente no hay
+  dos mitades que confundir. **Y con eso se fue la DOBLE ESCRITURA** que el port a medias había
+  dejado: el registro anotaba la clave-pareja *y* la clave-string para que el `Matchmaker` de truco
+  encontrara algo.
+- **`idempotencyKey` CONSERVA el `JSON.stringify`**, y no es inercia: sigue concatenando `matchId` y
+  `kind` con la identidad, que son los que reintroducen la colisión.
+- **`PlayerState` perdió un campo `noSync()` y ninguno sincronizado**, así que esto NO es una
+  ruptura de wire — a diferencia de la que los agregó.
+- **`configOf` rechaza el `userId` repetido** donde antes rechazaba la pareja repetida: es
+  estrictamente más estricto.
+- Verificado por MUTACIÓN: `assertSameTable` sin comparar el `userId` (1 rojo de 12) y la unicidad
+  indexando por posición en vez de por `userId` (2 rojos de 32).
+
+### Las 27 suites que el port no había traído
+
+Truco mide esas tres features con 29 archivos de test; habían llegado 2. Lo que cambia respecto de
+truco, y por qué:
+
+- **No hay `fake-backend`.** Allá el composition root cablea siempre lo real y la suite lo sustituye
+  entero. Acá la presencia de `MONGO_URI`/`REDIS_URL`/`RABBITMQ_URL` ELIGE y `vitest.setup.ts` las
+  borra: el container ya arma los adaptadores de memoria. Sustituirlos sería tapar la configuración
+  que se quiere ejercitar.
+- **El mantenimiento se mueve por `POST /internal/lobby/maintenance`** y no sustituyendo el libro:
+  `PolledMaintenanceSignal` se construye UNA vez en `di-container.ts`, así que registrar un token
+  después del arranque no llega a ningún lado. Sin base su libro lee `LobbySettings`, que es lo que
+  ese endpoint escribe — el e2e recorre entonces la cadena entera.
+- **`FREE_2P` se suma a `src/tests/game-mode-catalog.ts`.** Sin `BACKEND_URL` el `canAfford` del
+  container contesta `false` siempre, así que toda mesa PAGA se rechaza con `INSUFFICIENT_FUNDS`
+  antes de entrar a la cola: un e2e de matchmaking que quiera medir otra cosa necesita un `admit`
+  que salga antes de tocar la billetera. Su `isFreeRoom` va EXPLÍCITO — el repositorio no lo deriva
+  de `entryFee`.
+- **Los dos `.int.test.ts` leen `MONGO_INT_URI`**, no `MONGO_URI`: esa la borra `vitest.setup.ts` a
+  propósito, así que leerla los saltearía SIEMPRE, y un test que nunca puede correr se lee como
+  cobertura. La lectura vive en `src/tests/int-services.ts`, tercera exclusión de
+  `env-single-reader.test.ts`. Se corren con
+  `MONGO_INT_URI=mongodb://127.0.0.1:27017/domino_int npm run test:int`.
+- **`FakeWallet` y `FakeTournamentClient` viven en `src/tests/`** y no en su feature: `pools.test`
+  es de matchmaking y los consume, y `feature-boundary` lo prohíbe. Exportarlos por el `index.ts`
+  —que la Regla 4 sí permite— metería dos dobles en la superficie pública.
+- **`MemoryLedger` no se duplicó.** Truco lo tiene en `tests/`; acá es un adaptador real del
+  despliegue sin Mongo y ya vivía en `transports/`.
+- **`PoolSpec.targetScore` se renombró a `pointsToWin`.** Los dos adaptadores escribían
+  literalmente `targetScore: table.pointsToWin`: una traducción sin motivo entre dos tipos vecinos.
+
+### ⚠ EL DEFECTO QUE EL PORT DESTAPÓ, y que ninguna suite podía ver
+
+**`startServices()` lo llama SOLO `src/main.ts`**, que es el que CORRE. Los tests levantan la app
+por `app.config.ts`, que es el que se IMPORTA — y esa separación existe a propósito para que
+ningún test arrastre lo que main registra. O sea que **en la suite entera la cola de matchmaking
+nunca tickeaba**.
+
+El modo de falla no es un rojo, es un CUELGUE: el servidor levanta, acepta sockets, crea salas y
+contesta `/health` con 200, y nadie se empareja jamás. Lo agrava que el emparejador se suscribe al
+interruptor de mantenimiento ADENTRO de `start()`, así que el vaciado de colas tampoco existía.
+
+Se arregla en `bootTestServer` —no en cada archivo, por lo mismo que el modo del catálogo se
+siembra en un solo lugar: el que escriba el E2E número veinte no tiene por qué saberlo— y se PINEA
+en `src/entrypoint.test.ts`.
+
+**`bootTestServer(port)` sigue pidiendo el puerto** y no lo saca del índice del worker:
+`env-single-reader.test.ts` prohíbe que nada bajo `src/` fuera de `env.ts` lea el entorno, y ese
+guardarraíl busca la SUBSTRING — así que el comentario que lo explica tampoco puede escribirla. Es
+la misma trampa que ya pagó `src/deploy-smoke.test.ts`.
+
+### Deudas abiertas de ESTE incremento — NO CUMPLIDAS
+
+1. **Los archivos portados están comentados en INGLÉS** y el resto del repo en español. Son ~70
+   archivos de `matchmaking/`, `tournament/`, `economy/` y media docena de `shared/`. Es cosmético
+   y es real: la doctrina de este repo vive en los comentarios, y media base en otro idioma la parte
+   en dos. No se tocó por volumen.
+2. **`features/lobby/` y `features/matchmaking/` conviven.** El `LobbyRoom` que `app.config.ts`
+   registra es el de matchmaking; del viejo sobrevive `LobbySettings` —que es el almacén del
+   mantenimiento y lo usa el libro del container— y su `LobbyRoomState`. **El `LobbyRoom` viejo sigue saliendo por el
+   `index.ts` de su feature y NO lo importa nadie: es una exportación muerta.** Antes de borrarlo hay que decidir dónde vive la palanca de
+   mantenimiento, porque hoy vive ahí al lado.
+3. **El smoke real no se volvió a correr.** Pide Docker y no se ejecutó en esta tanda. La identidad plana
+   tocó `src/smoke/engine-smoke.ts` —los dos asientos pasaron de compartir `shared-smoke-uuid` en
+   dos plataformas a `smoke-ada`/`smoke-lin`, porque el `userId` repetido ya no valida— y eso solo
+   lo certifica `npm run smoke:client` contra el compose.
+4. **Sigue sin haber orquestador que cobre.** `settlementOf` proyecta y nadie la llama — es lo que
+   este incremento difirió a propósito.
 
 ## Cómo se ejecuta una tarea
 
