@@ -93,7 +93,7 @@ export class Matchmaker {
     if (this.ticking) clearInterval(this.ticking);
     this.ticking = undefined;
     for (const playerId of [...this.waiters.keys()]) {
-      this.settle(playerId, (w) => w.reject(new MatchmakingError("INTERNAL", "servidor cerrando")));
+      this.settle(playerId, (w) => w.reject(new MatchmakingError("RESTARTING")));
     }
   }
 

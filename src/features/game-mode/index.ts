@@ -32,12 +32,15 @@
 // misma función, acá adentro.
 export type { GameModeReader } from "./core/catalog";
 export type { GameMode } from "./core/game-mode";
+// `CachedGameModeReader` sale como VALOR para el composition root, que es quien decide que el
+// emparejador sondee a través de él y la sala no.
 export { OutboxDispatcher } from "./outbox";
 export { GameModeService } from "./service";
 export {
   type GameModeHttpDeps,
   registerGameModeHttp,
 } from "./transports/http/register-http";
+export { CachedGameModeReader } from "./transports/cached-reader";
 export { MemoryGameModeOutbox } from "./transports/memory-outbox";
 export { MemoryGameModeRepository } from "./transports/memory-repository";
 export { MongoGameModeOutbox } from "./transports/mongo-outbox";

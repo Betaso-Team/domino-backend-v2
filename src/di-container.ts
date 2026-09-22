@@ -20,6 +20,7 @@ import {
   WalletUnavailableError,
 } from "@/features/economy";
 import {
+  CachedGameModeReader,
   type GameModeReader,
   GameModeService,
   MemoryGameModeOutbox,
@@ -377,9 +378,17 @@ const antifraud: AntifraudFlag =
       )
     : { isRematchRulesEnabled: async () => true };
 
+// EL MODO, EN CACHÉ, sólo para el emparejador. El tick rearma la especificación del pozo cada 250 ms,
+// así que sin esto un modo con alguien esperando cuesta 4 lecturas de Mongo por segundo. CINCO
+// segundos y no los treinta del torneo: la ventana es lo que tarda un cambio del panel en llegar a
+// una mesa NUEVA, y la especificación del modo lleva la entrada y el premio que la sala cobra. Más
+// allá de cinco el ahorro ya es nulo —0,2 lecturas por segundo contra 0,03—. La sala NO pasa por acá:
+// nace con `activeByUuid` contra el repositorio.
+const pollCatalog = new CachedGameModeReader(gameModeRepository, 5_000, clock.now);
+
 const poolDirectory = new ScopedPoolDirectory(
   {
-    catalog: gameModeRepository,
+    catalog: pollCatalog,
     wallet,
     avoid: async (playerId) =>
       (await antifraud.isRematchRulesEnabled()) ? casualVeto.vetoedFor(CASUAL_SCOPE, playerId) : [],

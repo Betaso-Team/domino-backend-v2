@@ -31,6 +31,13 @@ export type MatchmakingErrorReason =
   | "PENALIZED"
   /** The search timed out with no rivals found. */
   | "TIMEOUT"
+  /**
+   * El servidor se está apagando y la búsqueda no se puede trasladar: la cola vive en el proceso que
+   * cierra. Motivo propio y no `INTERNAL` porque es el ÚNICO caso en que no falló nada y volver a
+   * pedir funciona: el cliente reintenta cuando vuelva en vez de mostrar un error que no puede
+   * resolver. Portado de truco (`10cdd0e`).
+   */
+  | "RESTARTING"
   /** They left: cancelled or dropped out of the lobby. Not a failure, but it closes the request. */
   | "CANCELLED"
   /**

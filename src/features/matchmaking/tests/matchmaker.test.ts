@@ -315,7 +315,9 @@ describe("Matchmaker: las salidas que no son una partida", () => {
     expect((await pool.waiting("mesa")).map((t) => t.playerId).sort()).toEqual(["u1", "u2"]);
   });
 
-  it("apagar el servidor cierra a los que estaban esperando", async () => {
+  // Con un motivo PROPIO y no el comodín: no falló nada y volver a pedir funciona, así que el cliente
+  // reintenta cuando el servidor vuelva en vez de mostrar un error que no puede resolver.
+  it("apagar el servidor cierra a los que estaban esperando, diciendo que es un reinicio", async () => {
     const { matchmaker } = build();
 
     const search = matchmaker.request(CASUAL, requester("u1"), new AbortController().signal);
@@ -323,7 +325,7 @@ describe("Matchmaker: las salidas que no son una partida", () => {
     await enqueued();
     matchmaker.stop();
 
-    expect(await settled).toMatchObject({ reason: "INTERNAL" });
+    expect(await settled).toMatchObject({ reason: "RESTARTING" });
   });
 });
 
