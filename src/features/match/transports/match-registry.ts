@@ -1,6 +1,7 @@
 import type { KeyValueStore } from "@/shared/kv";
 import type { PlayerRef } from "@/shared/player-ref";
 import type { DominoMatchConfig } from "../core/config";
+import type { DominoRoomOptions } from "./match-contract";
 
 export interface PublicMatchConfig {
   readonly matchId: string;
@@ -10,6 +11,14 @@ export interface PublicMatchConfig {
   /** UC completas, tal como las guarda el catálogo: `125` son 125 UC, y `1.5` es válido. */
   readonly entryFee: number;
   readonly prize: number;
+  readonly players?: readonly PublicPlayer[];
+  readonly stakes?: { readonly entryFee: number; readonly prize: number };
+}
+
+export interface PublicPlayer {
+  readonly playerId: string;
+  readonly username: string;
+  readonly profilePicture: string;
 }
 
 export interface MatchConfigResponse extends PublicMatchConfig {
@@ -38,9 +47,13 @@ const configKey = (roomId: string) => `match_config:${roomId}`;
 // misma clave. Con el escape de JSON, dos parejas distintas nunca colisionan aunque el
 // `platformId` o el `userUuid` traigan el separador adentro — y la que colisione sienta a un
 // jugador en la mesa de otro.
-const playerKey = ({ platformId, userUuid }: PlayerRef) =>
-  `player_match:${JSON.stringify([platformId, userUuid])}`;
+const playerKey = (player: PlayerRef | string) =>
+  typeof player === "string"
+    ? `player_match:${player}`
+    : `player_match:${JSON.stringify([player.platformId, player.userUuid])}`;
 const CENSUS_KEY = "live_seats";
+const LIVE_TOURNAMENTS = "live_tournaments";
+const tournamentKey = (tournamentId: string) => `tournament_matches:${tournamentId}`;
 
 // EL PLAZO DE TODAS ELLAS, y el latido que lo renueva. Son una sola decisión y no dos:
 //
@@ -98,6 +111,7 @@ export class MatchRegistry {
   // es imposible; y guardar el `DominoMatchConfig` entero para tenerla metería moneda, tasa y
   // montos en la memoria del registro, que es justo lo que la allowlist de arriba evita.
   private readonly seatsByRoomId = new Map<string, readonly PlayerRef[]>();
+  private readonly optionsByRoomId = new Map<string, DominoRoomOptions>();
 
   // El reloj solo decide cuándo un campo del censo dejó de latir. Las demás claves conservan el
   // plazo del almacén, que es lo que Redis aplica en producción.
@@ -109,7 +123,11 @@ export class MatchRegistry {
   // Nace la sala. Es el PRIMER LATIDO y nada más: todo lo que escribe lo vuelve a escribir cada
   // `HEARTBEAT_MS`, así que no hay un camino de alta distinto del de mantenimiento — y un camino
   // que corre una sola vez es el que nadie prueba.
-  async register(roomId: string, config: DominoMatchConfig): Promise<void> {
+  async register(
+    roomId: string,
+    config: DominoMatchConfig,
+    options?: DominoRoomOptions,
+  ): Promise<void> {
     // Allowlist explícita: restar `seed` filtraría solo lo conocido hoy y una propiedad
     // secreta agregada mañana se filtraría al wire. Tampoco se exponen campos derivados
     // de la ventana de reparto.
@@ -122,11 +140,20 @@ export class MatchRegistry {
       // el DTO público publica el mismo número que la mesa cobró, en UC completas.
       entryFee: config.entryFee,
       prize: config.prize,
+      ...(options
+        ? {
+            players: [],
+            ...(options.mode === "CASUAL"
+              ? { stakes: { entryFee: options.entryFee, prize: options.prize } }
+              : {}),
+          }
+        : {}),
     });
     this.seatsByRoomId.set(
       roomId,
       config.seats.map(({ platformId, userUuid }) => ({ platformId, userUuid })),
     );
+    if (options) this.optionsByRoomId.set(roomId, options);
     await this.keepAlive(roomId);
   }
 
@@ -141,12 +168,20 @@ export class MatchRegistry {
     await this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS);
     for (const seat of seats) {
       await this.store.setex(playerKey(seat), roomId, TTL_SECONDS);
+      await this.store.setex(playerKey(seat.userUuid), roomId, TTL_SECONDS);
     }
     await this.store.hset(
       CENSUS_KEY,
       roomId,
       JSON.stringify({ seats: config.seats.length, gameModeId: config.gameModeId, at: this.now() }),
     );
+    const options = this.optionsByRoomId.get(roomId);
+    if (options?.mode === "TOURNAMENT") {
+      await this.store.sadd(tournamentKey(options.tournamentId), roomId);
+      await this.store.expire(tournamentKey(options.tournamentId), TTL_SECONDS);
+      await this.store.sadd(LIVE_TOURNAMENTS, options.tournamentId);
+      await this.store.expire(LIVE_TOURNAMENTS, TTL_SECONDS);
+    }
   }
 
   async publicConfigOf(roomId: string): Promise<PublicMatchConfig | undefined> {
@@ -154,9 +189,20 @@ export class MatchRegistry {
     return raw ? (JSON.parse(raw) as PublicMatchConfig) : undefined;
   }
 
+  async rememberPlayer(roomId: string, player: PublicPlayer): Promise<void> {
+    const config = this.byRoomId.get(roomId);
+    if (!config) return;
+    const players = [
+      ...(config.players ?? []).filter(({ playerId }) => playerId !== player.playerId),
+      player,
+    ];
+    this.byRoomId.set(roomId, { ...config, players });
+    await this.keepAlive(roomId);
+  }
+
   // En qué sala está sentado, si está en alguna. Es un GET contra el índice que las salas
   // escriben: la respuesta es del CLÚSTER, no de este proceso.
-  async matchOf(player: PlayerRef): Promise<string | undefined> {
+  async matchOf(player: PlayerRef | string): Promise<string | undefined> {
     return await this.store.get(playerKey(player));
   }
 
@@ -179,15 +225,35 @@ export class MatchRegistry {
     return { playersInMatch, byGameMode };
   }
 
+  async count(): Promise<MatchCensusCount> {
+    return this.census();
+  }
+
+  async tournamentsWithMatches(): Promise<readonly string[]> {
+    const live: string[] = [];
+    for (const tournamentId of await this.store.smembers(LIVE_TOURNAMENTS)) {
+      if ((await this.store.smembers(tournamentKey(tournamentId))).length > 0)
+        live.push(tournamentId);
+    }
+    return live;
+  }
+
   async remove(roomId: string): Promise<void> {
     const seats = this.seatsByRoomId.get(roomId);
     if (!this.byRoomId.has(roomId) || !seats) return;
     this.byRoomId.delete(roomId);
     this.seatsByRoomId.delete(roomId);
+    const options = this.optionsByRoomId.get(roomId);
+    this.optionsByRoomId.delete(roomId);
 
     this.store.del(configKey(roomId));
     await this.store.hdel(CENSUS_KEY, roomId);
-    for (const seat of seats) await this.release(seat, roomId);
+    for (const seat of seats) {
+      await this.release(seat, roomId);
+      await this.release(seat.userUuid, roomId);
+    }
+    if (options?.mode === "TOURNAMENT")
+      await this.store.srem(tournamentKey(options.tournamentId), roomId);
   }
 
   // Soltar a un jugador es borrar SU clave, y SOLO SI sigue apuntando acá: entre que dejó esta
@@ -195,7 +261,7 @@ export class MatchRegistry {
   // proceso o en otro—, y borrar a ciegas lo dejaría sin partida justo cuando acaba de empezar
   // una. El chequeo no es atómico y no hace falta que lo sea: la ventana que queda es la de una
   // clave que caduca sola en dos minutos.
-  private async release(player: PlayerRef, roomId: string): Promise<void> {
+  private async release(player: PlayerRef | string, roomId: string): Promise<void> {
     if ((await this.store.get(playerKey(player))) === roomId) {
       this.store.del(playerKey(player));
     }

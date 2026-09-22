@@ -29,7 +29,7 @@ describe("DominoRoom", () => {
     await testServer.connectTo(room);
 
     expect(room.clients).toHaveLength(1);
-    expect(room.clients[0]?.auth).toEqual({ platformId: "betaso", userUuid: "a", token });
+    expect(room.clients[0]?.auth).toEqual({ userId: "a", token });
   });
 
   it("no acumula reservas al reemplazar varias veces el mismo asiento", async () => {
@@ -136,27 +136,27 @@ describe("DominoRoom", () => {
     ).rejects.toThrow(/rateId/);
   });
 
-  // LA PAREJA ES LA LLAVE DEL ASIENTO. El mismo `sub` firmado por dos plataformas son dos
-  // personas, y la tercera —que no está en la mesa— no entra aunque comparta el UUID.
-  it("distingue el mismo UUID de dos plataformas y rechaza una tercera", async () => {
+  // `sub` ES LA IDENTIDAD, igual que en truco. La plataforma que emitió el token ya no forma parte
+  // de la llave del asiento: el backend principal entrega un id global y el juego no lo reinterpreta.
+  it("usa el sub como identidad y no la plataforma del token", async () => {
     const testServer = requiredServer();
     const participants = [
-      { platformId: "betaso", userUuid: "same", displayName: "Ada", currency: "VES" },
-      { platformId: "partner", userUuid: "same", displayName: "Lin", currency: "USD" },
+      { platformId: "betaso", userUuid: "a", displayName: "Ada", currency: "VES" },
+      { platformId: "partner", userUuid: "b", displayName: "Lin", currency: "USD" },
     ] as const;
     const room = await testServer.createRoom<DominoRoom>(
       "domino",
       options("match-platforms", participants),
     );
-    const a = await connect(testServer, room, { platformId: "betaso", userUuid: "same" });
-    const b = await connect(testServer, room, { platformId: "partner", userUuid: "same" });
+    const a = await connect(testServer, room, { platformId: "third", userUuid: "a" });
+    const b = await connect(testServer, room, { platformId: "fourth", userUuid: "b" });
 
     expect(room.clients.map((client) => client.userData)).toEqual(
       expect.arrayContaining([{ playerId: "seat-1" }, { playerId: "seat-2" }]),
     );
 
     const outsider = new ColyseusSDK(`ws://127.0.0.1:${portOf(testServer)}`);
-    outsider.auth.token = tokenOf({ platformId: "third", userUuid: "same" });
+    outsider.auth.token = tokenOf({ platformId: "betaso", userUuid: "c" });
     await expect(outsider.joinById(room.roomId)).rejects.toThrow();
     await Promise.all([a.leave(), b.leave()]);
   });

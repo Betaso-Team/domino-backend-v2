@@ -1,24 +1,45 @@
+import type { TokenVerifier } from "@/features/auth";
 import { GameModeService, registerGameModeHttp } from "@/features/game-mode";
-import { LobbyRoom, LobbySettings, registerLobbyHttp } from "@/features/lobby";
+import { LobbySettings, registerLobbyHttp } from "@/features/lobby";
 import {
   type Clock,
-  DominoRoom,
   type HistoryReader,
   MatchRegistry,
+  type PlayerLog,
   registerMatchHttp,
   selectProcessIdToCreateRoom,
 } from "@/features/match";
+import { DominoRoom } from "@/features/match/transports/colyseus/domino-room";
+import { LobbyRoom, registerMatchmakingHttp } from "@/features/matchmaking";
+import { type StrikeBook, registerTournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, registerHealth } from "@/shared/http/health";
 import { exposeServerTime } from "@/shared/http/server-time";
 import config from "@colyseus/tools";
 import { type ServerOptions, defineRoom, defineServer } from "colyseus";
 import express, { type Application } from "express";
-import { amqp, driver, mongo, presence, rootContainer } from "./di-container";
+import {
+  amqp,
+  census,
+  driver,
+  maintenanceSignal,
+  matchmaker,
+  mongo,
+  presence,
+  rootContainer,
+} from "./di-container";
 import { env } from "./env";
 import type { Logger } from "./logger";
 
-const rooms = { lobby: defineRoom(LobbyRoom), domino: defineRoom(DominoRoom) };
+const rooms = {
+  lobby: defineRoom(LobbyRoom, {
+    matchmaker,
+    verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+    maintenance: maintenanceSignal,
+    census,
+  }),
+  domino: defineRoom(DominoRoom),
+};
 
 // EL COMPOSITION ROOT de la superficie Express. Acá —y solo acá— se resuelve del container
 // y se lee `env`: el transporte recibe las cinco dependencias ya armadas y no sabe que
@@ -120,12 +141,20 @@ const registerHttp = (app: Application) => {
     settings: rootContainer.resolve(LobbySettings),
     internalApiKey: env.internalApiKey,
   });
+  registerMatchmakingHttp(app, maintenanceSignal, census);
+  registerTournamentHttp(
+    app,
+    rootContainer.resolve<StrikeBook>("StrikeBook"),
+    rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+  );
   registerMatchHttp(app, {
     registry: rootContainer.resolve(MatchRegistry),
     clock: rootContainer.resolve<Clock>("Clock"),
     logger,
     history: rootContainer.resolve<HistoryReader>("HistoryReader"),
     internalApiKey: env.internalApiKey,
+    verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+    playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
   });
   // EL CATÁLOGO, y va ANTES del manejador de errores como todas las demás: Express reconoce ese
   // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta

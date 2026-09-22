@@ -153,9 +153,9 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   turnTimeoutMs: 60_000,
   extraTimeReserveMs: 30_000,
   // El número del v1 (`initialTilesTimeRemaining`).
-  dealingTimeoutMs: 15_000,
-  presentingRoundMs: 6_000,
-  presentingMatchMs: 6_000,
+  dealingTimeoutMs: 20_000,
+  presentingRoundMs: 4_000,
+  presentingMatchMs: 4_000,
   seatingTimeoutMs: 30_000,
   reconnectionWindowSeconds: 120,
   tilesPerPlayer: 7,

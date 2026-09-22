@@ -1,3 +1,4 @@
+import type { Identity } from "@/features/auth";
 // EL ÚNICO CRUCE DE `match` HACIA `game-mode`, y entra por la superficie de la feature (Regla 4):
 // nada de este archivo sabe que el catálogo tiene un repositorio, un outbox ni una API. La arista
 // va en un solo sentido —`game-mode` redeclaró su `Clock` estructural en la Tarea 4 justamente
@@ -6,6 +7,7 @@ import type { GameMode } from "@/features/game-mode";
 import type { PlayerRef } from "@/shared/player-ref";
 import { z } from "zod";
 import type { DominoMatchConfig } from "../core/config";
+import type { MatchEventSink } from "../network/listeners";
 
 // Contrato en la raíz de transports porque matchmaking crea las salas. `mode` lo deja
 // discriminado para sumar otros orígenes sin adivinar por campos opcionales.
@@ -167,7 +169,7 @@ const matchSnapshot = z
 export type MatchParticipant = z.infer<typeof participant>;
 export type CreateMatchRequest = z.infer<typeof createRequest>;
 
-export interface SeatCredentials extends PlayerRef {
+export interface SeatCredentials extends Identity {
   readonly token: string;
 }
 
@@ -291,4 +293,71 @@ export function configOf(request: CreateMatchRequest, mode: GameMode): DominoMat
  */
 export function replayConfigOf(input: unknown): DominoMatchConfig {
   return matchSnapshot.parse(input);
+}
+
+interface CommonRoomOptions {
+  readonly seats: readonly string[];
+  readonly seed: string;
+  readonly pointsToWin: number;
+}
+
+export interface CasualRoomOptions extends CommonRoomOptions {
+  readonly mode: "CASUAL";
+  readonly gameModeId: string;
+  readonly entryFee: number;
+  readonly prize: number;
+  readonly rankingWeight: number;
+  readonly isFreeRoom: boolean;
+}
+
+export interface TournamentRoomOptions extends CommonRoomOptions {
+  readonly mode: "TOURNAMENT";
+  readonly tournamentId: string;
+  readonly pointsPerLoss: number;
+}
+
+export type DominoRoomOptions = CasualRoomOptions | TournamentRoomOptions;
+export type MatchSinks = (options: DominoRoomOptions) => readonly MatchEventSink[];
+
+/**
+ * Matchmaking owns creation now. The engine keeps its existing snapshot shape while account data is
+ * resolved at admission, exactly as in truco: the authenticated `sub` is the seat id and no client
+ * supplied identity is trusted.
+ */
+export function configFromRoomOptions(
+  options: DominoRoomOptions,
+  matchId: string,
+): DominoMatchConfig {
+  return {
+    matchId,
+    gameModeId: options.mode === "CASUAL" ? options.gameModeId : options.tournamentId,
+    seed: options.seed,
+    seats: options.seats.map((playerId) => ({
+      playerId,
+      platformId: "betaso",
+      userUuid: playerId,
+      displayName: playerId,
+      currency: "USD",
+    })),
+    pointsToWin: options.pointsToWin,
+    teamAssignment: "SHUFFLED",
+    isDealWindowEnabled: true,
+    // The platform integration freezes the real account and rate on admission. These legacy fields
+    // remain only so old replay snapshots keep their shape; no movement reads them on this path.
+    rateId: "00000000-0000-4000-8000-000000000000",
+    entryFee: options.mode === "CASUAL" ? options.entryFee : 0,
+    prize: options.mode === "CASUAL" ? options.prize : 0,
+    multiplier: options.mode === "CASUAL" ? options.rankingWeight : 1,
+    betLevels: [],
+    isFreeRoom: options.mode === "CASUAL" ? options.isFreeRoom : true,
+  };
+}
+
+export interface Seat {
+  readonly playerId: string;
+  readonly reservation: unknown;
+}
+
+export interface MatchOpener {
+  open(options: DominoRoomOptions): Promise<readonly Seat[]>;
 }

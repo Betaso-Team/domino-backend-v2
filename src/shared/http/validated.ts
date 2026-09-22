@@ -29,7 +29,7 @@ import { z } from "zod";
 
 // Las tres fuentes de entrada de un request. Un endpoint declara SOLO las que le llegan; lo
 // que no declara no viaja al handler.
-interface RouteSchemas {
+export interface RouteSchemas {
   params?: z.ZodType;
   query?: z.ZodType;
   body?: z.ZodType;
@@ -45,7 +45,7 @@ interface RouteSchemas {
 // la fuente que el endpoint SÍ declaró llega como "puede faltar", que es exactamente lo
 // contrario de lo que esta pieza promete. Con `-?`, las tres están siempre presentes: la
 // declarada con su tipo, la que no con `undefined`.
-type Validated<S extends RouteSchemas> = {
+export type Validated<S extends RouteSchemas> = {
   [K in keyof RouteSchemas]-?: S[K] extends z.ZodType ? z.infer<S[K]> : undefined;
 };
 

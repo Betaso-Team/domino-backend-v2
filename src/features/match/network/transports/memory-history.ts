@@ -1,4 +1,14 @@
 import type { HistoryEntry, HistoryPort, HistoryReader } from "../history";
+import {
+  type MatchRow,
+  type MatchSummary,
+  type MatchSummaryPort,
+  type Paginated,
+  type PlayerLog,
+  type PlayerStats,
+  rowFor,
+  statsFor,
+} from "../player-log";
 
 // Implementación de memoria. YA NO ES "la de antes de que haya base": el adaptador de Mongo
 // existe (`./mongo-history.ts`) y el composition root elige entre los dos según haya o no
@@ -11,8 +21,37 @@ import type { HistoryEntry, HistoryPort, HistoryReader } from "../history";
 // pasó desde el último deploy.
 const MAX_MATCHES = 200;
 
-export class MemoryHistory implements HistoryPort, HistoryReader {
+export class MemoryHistory implements HistoryPort, HistoryReader, MatchSummaryPort, PlayerLog {
   private readonly byMatch = new Map<string, HistoryEntry[]>();
+  private readonly summaries = new Map<string, MatchSummary>();
+
+  summarize(summary: MatchSummary): void {
+    this.summaries.set(summary.matchId, summary);
+  }
+
+  pageOf(playerId: string, page: number, perPage: number): Promise<Paginated<MatchRow>> {
+    const all = [...this.summaries.values()]
+      .filter((match) => [...match.players, ...match.quitPlayers].some(({ id }) => id === playerId))
+      .sort((a, b) => b.playedAt.getTime() - a.playedAt.getTime());
+    const totalItems = all.length;
+    const totalPages = Math.ceil(totalItems / perPage);
+    const items = all
+      .slice((page - 1) * perPage, page * perPage)
+      .map((match) => rowFor(playerId, match));
+    return Promise.resolve({
+      items,
+      page,
+      perPage,
+      totalItems,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
+    });
+  }
+
+  statsOf(playerId: string): Promise<PlayerStats> {
+    return Promise.resolve(statsFor(playerId, [...this.summaries.values()]));
+  }
 
   record(entries: readonly HistoryEntry[]): void {
     for (const entry of entries) {

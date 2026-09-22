@@ -26,9 +26,9 @@ describe("parseEnv", () => {
     expect(env.logLevel).toBe("debug");
     expect(env.turnTimeoutMs).toBe(60_000);
     expect(env.extraTimeReserveMs).toBe(30_000);
-    expect(env.dealingTimeoutMs).toBe(15_000);
-    expect(env.presentingRoundMs).toBe(6_000);
-    expect(env.presentingMatchMs).toBe(6_000);
+    expect(env.dealingTimeoutMs).toBe(20_000);
+    expect(env.presentingRoundMs).toBe(4_000);
+    expect(env.presentingMatchMs).toBe(4_000);
     expect(env.seatingTimeoutMs).toBe(30_000);
   });
 

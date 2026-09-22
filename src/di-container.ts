@@ -1,5 +1,24 @@
 import "reflect-metadata";
+import { randomUUID } from "node:crypto";
 import { JwtVerifier } from "@/features/auth";
+import {
+  type AccountDirectory,
+  AccountUnavailableError,
+  AmqpWallet,
+  BetasoWallet,
+  HttpAccountDirectory,
+  HttpRateBook,
+  HttpWallet,
+  type Ledger,
+  MatchAccounts,
+  MatchRates,
+  MemoryLedger,
+  MongoLedger,
+  Outbox,
+  type RateBook,
+  type WalletPort,
+  WalletUnavailableError,
+} from "@/features/economy";
 import {
   type GameModeReader,
   GameModeService,
@@ -10,6 +29,7 @@ import {
   OutboxDispatcher,
 } from "@/features/game-mode";
 import { LobbySettings } from "@/features/lobby/settings";
+import { ColyseusMatchGateway, MatchPlatform, MatchRegistry } from "@/features/match";
 import { type GlobalDominoConfig, globalConfigWith } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
 import type { HistoryPort, HistoryReader } from "@/features/match/network/history";
@@ -18,8 +38,40 @@ import { AmqpRankingFeed } from "@/features/match/network/transports/amqp-rankin
 import { HttpLeagueFeed } from "@/features/match/network/transports/http-leagues";
 import { MemoryHistory } from "@/features/match/network/transports/memory-history";
 import { MongoHistory } from "@/features/match/network/transports/mongo-history";
-import { MatchRegistry } from "@/features/match/transports/match-registry";
+import {
+  type AntifraudFlag,
+  CASUAL_SCOPE,
+  CachedAntifraudFlag,
+  CooldownBook,
+  DEFAULT_COOLDOWN,
+  DEFAULT_MATCHMAKING_CONFIG,
+  HttpAntifraudFlag,
+  type MaintenanceBook,
+  Matchmaker,
+  MemoryMatchPool,
+  MongoMaintenanceBook,
+  OPEN,
+  PolledCensus,
+  PolledMaintenanceSignal,
+  ScopedPoolDirectory,
+  VetoBook,
+  casualVetoKey,
+  matchmakingSink,
+  tournamentVetoKey,
+} from "@/features/matchmaking";
+import {
+  AmqpParticipationTransport,
+  CachedTournamentClient,
+  DEFAULT_TOURNAMENT_CONFIG,
+  HttpTournamentClient,
+  ParticipationReporter,
+  StrikeBook,
+  type TournamentClient,
+  TournamentUnavailableError,
+  TournamentWatcher,
+} from "@/features/tournament";
 import { AmqpPublisher } from "@/shared/amqp";
+import { HttpClient } from "@/shared/http";
 import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
 import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
@@ -122,6 +174,7 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
 rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
 rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
+rootContainer.register("PlayerLog", { useValue: history });
 
 // EL PUBLICADOR DEL BROKER, que es la ÚNICA instancia del proceso: `AmqpPublisher` memoiza una
 // conexión y un canal confirm adentro, así que dos instancias serían dos conexiones al mismo
@@ -199,6 +252,202 @@ rootContainer.register(GameModeService, {
   ),
 });
 
+// The integration ring follows truco: matchmaking owns room creation and the authenticated `sub`
+// is the player id. Tests and service-free development keep memory implementations, while the same
+// ports use Mongo/HTTP/Rabbit as soon as their coordinates are present.
+const http = env.backendUrl ? new HttpClient({ baseUrl: env.backendUrl }) : undefined;
+const unavailableAccounts: AccountDirectory = {
+  accountOf: async (playerId) => {
+    throw new AccountUnavailableError(`backend no configurado para ${playerId}`);
+  },
+};
+const accounts: AccountDirectory = http ? new HttpAccountDirectory(http) : unavailableAccounts;
+const unavailableRates: RateBook = {
+  rateFor: async (currency) => {
+    throw new Error(`backend no configurado para convertir ${currency}`);
+  },
+};
+const rates: RateBook = http ? new HttpRateBook(http) : unavailableRates;
+const matchAccounts = new MatchAccounts(accounts);
+const matchRates = new MatchRates(rates);
+export const ledger: Ledger = mongo
+  ? new MongoLedger(mongo, "dominotransactions")
+  : new MemoryLedger(clock.now);
+
+const httpWallet =
+  http && env.internalApiKey
+    ? new HttpWallet({
+        http,
+        apiKey: { value: env.internalApiKey },
+        accounts,
+        matchAccounts,
+        rates,
+        matchRates,
+      })
+    : undefined;
+const amqpWallet = amqp
+  ? new AmqpWallet({ publisher: amqp, matchAccounts, matchRates, ledger })
+  : undefined;
+const wallet: WalletPort =
+  httpWallet && amqpWallet
+    ? new BetasoWallet(httpWallet, amqpWallet)
+    : {
+        canAfford: (query) => httpWallet?.canAfford(query) ?? Promise.resolve(false),
+        charge: (movement) =>
+          httpWallet?.charge(movement) ??
+          Promise.reject(new WalletUnavailableError("backend no configurado")),
+        credit: (movement) =>
+          amqpWallet?.credit(movement) ??
+          Promise.reject(new WalletUnavailableError("broker no configurado")),
+        refund: (movement) =>
+          amqpWallet?.refund(movement) ??
+          Promise.reject(new WalletUnavailableError("broker no configurado")),
+        refundMatch: (matchId, playerIds) =>
+          amqpWallet?.refundMatch(matchId, playerIds) ??
+          Promise.reject(new WalletUnavailableError("broker no configurado")),
+      };
+export const economyOutbox = new Outbox(wallet, ledger, logger);
+
+const tournamentClient: TournamentClient | undefined =
+  http && env.internalApiKey
+    ? new HttpTournamentClient(http, { value: env.internalApiKey }, DEFAULT_TOURNAMENT_CONFIG)
+    : undefined;
+const unavailableTournament: TournamentClient = {
+  infoOf: async (id) => {
+    throw new TournamentUnavailableError(id);
+  },
+  isEnrolled: async (id) => {
+    throw new TournamentUnavailableError(id);
+  },
+};
+const askTournament = tournamentClient ?? unavailableTournament;
+const pollTournament = new CachedTournamentClient(askTournament, 30_000, clock.now);
+export const participationReporter = amqp
+  ? new ParticipationReporter(new AmqpParticipationTransport(amqp), logger)
+  : undefined;
+
+const strikes = new StrikeBook(store, DEFAULT_TOURNAMENT_CONFIG, clock.now);
+const maintenanceBook: MaintenanceBook = mongo
+  ? new MongoMaintenanceBook(mongo, "domino_settings", logger)
+  : {
+      current: async () => {
+        const value = await rootContainer.resolve(LobbySettings).get();
+        return value.isUnderMaintenance
+          ? { isUnderMaintenance: true, message: value.maintenanceMessage }
+          : OPEN;
+      },
+    };
+export const maintenanceSignal = new PolledMaintenanceSignal({
+  book: maintenanceBook,
+  intervalMs: DEFAULT_MATCHMAKING_CONFIG.maintenancePollMs,
+  log: logger,
+});
+export const census = new PolledCensus({
+  source: { count: () => matchRegistry.census() },
+  intervalMs: DEFAULT_MATCHMAKING_CONFIG.censusPollMs,
+  log: logger,
+});
+
+const casualVeto = new VetoBook(store, casualVetoKey, { ttlMs: 30 * 60_000 });
+const tournamentVeto = new VetoBook(store, tournamentVetoKey, { ttlMs: 6 * 60 * 60_000 });
+const cooldown = new CooldownBook(store, DEFAULT_COOLDOWN, clock.now);
+const antifraud: AntifraudFlag =
+  http && env.internalApiKey
+    ? new CachedAntifraudFlag(
+        new HttpAntifraudFlag(http, { value: env.internalApiKey }),
+        5_000,
+        clock.now,
+        logger,
+      )
+    : { isRematchRulesEnabled: async () => true };
+
+const poolDirectory = new ScopedPoolDirectory(
+  {
+    catalog: gameModeRepository,
+    wallet,
+    avoid: async (playerId) =>
+      (await antifraud.isRematchRulesEnabled()) ? casualVeto.vetoedFor(CASUAL_SCOPE, playerId) : [],
+  },
+  {
+    client: pollTournament,
+    strikes,
+    avoid: (tournamentId, playerId) => tournamentVeto.vetoedFor(tournamentId, playerId),
+  },
+);
+const gateway = new ColyseusMatchGateway();
+export const matchmaker = new Matchmaker({
+  directory: poolDirectory,
+  pool: new MemoryMatchPool(),
+  gateway,
+  config: DEFAULT_MATCHMAKING_CONFIG,
+  cooldown,
+  live: { matchOf: (playerId) => matchRegistry.matchOf(playerId) },
+  maintenance: maintenanceSignal,
+  now: clock.now,
+  seedOf: randomUUID,
+  log: logger,
+});
+rootContainer.register(MatchPlatform, {
+  useValue: new MatchPlatform({
+    wallet,
+    ledger,
+    accounts,
+    matchAccounts,
+    outbox: economyOutbox,
+    tournament: tournamentClient,
+    participation: participationReporter,
+    strikes,
+    tournamentConfig: DEFAULT_TOURNAMENT_CONFIG,
+    summaries: history,
+    now: clock.now,
+    log: logger,
+  }),
+});
+rootContainer.register("MatchSinks", {
+  useValue: (options: import("@/features/match").DominoRoomOptions) => {
+    const casual = options.mode === "CASUAL";
+    return [
+      matchmakingSink(
+        {
+          cooldown,
+          veto: casual ? casualVeto : tournamentVeto,
+          isCasualVetoEnabled: () => antifraud.isRematchRulesEnabled(),
+          log: logger,
+        },
+        {
+          poolId: casual ? options.gameModeId : options.tournamentId,
+          playerIds: options.seats,
+        },
+      ),
+    ];
+  },
+});
+
+export const tournamentWatcher =
+  amqp && tournamentClient
+    ? new TournamentWatcher({
+        client: pollTournament,
+        publisher: amqp,
+        liveTournaments: () => matchRegistry.tournamentsWithMatches(),
+        intervalMs: DEFAULT_TOURNAMENT_CONFIG.gamesCheckIntervalMs,
+        log: logger,
+      })
+    : undefined;
+rootContainer.register("StrikeBook", { useValue: strikes });
+
+export function startServices(): void {
+  matchmaker.start();
+  maintenanceSignal.start();
+  census.start();
+  tournamentWatcher?.start();
+}
+
+export function stopAcceptingMatches(): void {
+  matchmaker.stop();
+  maintenanceSignal.stop();
+  census.stop();
+}
+
 // CERRAR LO QUE ESTE ARCHIVO ABRIÓ, que es la deuda que el incremento del clúster dejó
 // anotada: nadie cerraba nada y `SIGTERM` cortaba en seco. Lo llama el apagado ordenado
 // (`src/main.ts`) DESPUÉS de que las salas se disponen, y ese orden es el contrato entero.
@@ -222,6 +471,12 @@ rootContainer.register(GameModeService, {
 // Nadie más que el entrypoint puede llamar a esto: una sala que cierre Mongo se lleva puesto
 // el historial de las otras cuarenta que siguen jugando.
 export async function shutdown(): Promise<void> {
+  stopAcceptingMatches();
+  await Promise.allSettled([
+    economyOutbox.close(),
+    participationReporter?.close(),
+    tournamentWatcher?.close(),
+  ]);
   // 0. PARAR EL DESPACHADOR, y va PRIMERO por lo mismo que el historial va antes que Mongo: tiene
   //    una entrega EN VUELO. `close()` cancela el temporizador y espera el `inFlight`, así que lo
   //    que estaba publicado y confirmado alcanza a marcarse `SENT`. Cortarle la base debajo dejaría

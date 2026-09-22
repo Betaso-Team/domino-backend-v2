@@ -3,6 +3,8 @@ export * from "./events";
 export * from "./history";
 export * from "./listeners";
 export * from "./pieces";
+export * from "./platform";
+export * from "./player-log";
 export * from "./report-standings";
 export * from "./settlement";
 export * from "./standings";

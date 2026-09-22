@@ -90,9 +90,9 @@ const schema = z.object({
   NODE_APP_INSTANCE: z.coerce.number().int().nonnegative().optional(),
   TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   EXTRA_TIME_RESERVE_MS: z.coerce.number().int().positive().default(30_000),
-  DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
-  PRESENTING_ROUND_MS: z.coerce.number().int().positive().default(6_000),
-  PRESENTING_MATCH_MS: z.coerce.number().int().positive().default(6_000),
+  DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  PRESENTING_ROUND_MS: z.coerce.number().int().positive().default(4_000),
+  PRESENTING_MATCH_MS: z.coerce.number().int().positive().default(4_000),
   SEATING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   /**
    * Cuánto se le guarda el asiento al que se cayó (`allowReconnection`). Va en SEGUNDOS

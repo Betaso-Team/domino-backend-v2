@@ -24,9 +24,22 @@ import { RuleViolationError } from "../../core/engine/errors";
 import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
 import type { MatchState } from "../../core/state";
-import { MatchEventNotifier, type MatchHistory } from "../../network";
+import {
+  AdmissionRefusedError,
+  MatchEventNotifier,
+  type MatchHistory,
+  MatchPlatform,
+} from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
-import { type SeatCredentials, UnknownGameModeError, configOf, requestOf } from "../match-contract";
+import {
+  type DominoRoomOptions,
+  type MatchSinks,
+  type SeatCredentials,
+  UnknownGameModeError,
+  configFromRoomOptions,
+  configOf,
+  requestOf,
+} from "../match-contract";
 import { HEARTBEAT_MS, MatchRegistry } from "../match-registry";
 import {
   type MatchHasOutcome,
@@ -53,6 +66,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // al asiento opaco necesita la identidad externa, que el estado no sincroniza y el
   // registro no guarda. Se asigna en `onCreate`, antes de que la sala pueda recibir a nadie.
   private config!: DominoMatchConfig;
+  private roomOptions?: DominoRoomOptions;
+  private platform?: MatchPlatform;
   // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
   // El default reutiliza el global: si algún día `onDrop` corriera antes de que
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
@@ -123,18 +138,25 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     //
     // `activeByUuid` y no `byUuid`: un modo dado de baja NO EXISTE desde afuera, y el panel lo da
     // de baja justamente para que deje de sentar mesas.
-    const request = requestOf(options);
-    const mode = await rootContainer
-      .resolve<GameModeReader>("GameModeReader")
-      .activeByUuid(request.gameModeId);
-    if (!mode) throw new UnknownGameModeError(request.gameModeId);
+    const roomOptions = isRoomOptions(options) ? options : undefined;
+    this.roomOptions = roomOptions;
+    const request = roomOptions ? undefined : requestOf(options);
+    const mode = request
+      ? await rootContainer
+          .resolve<GameModeReader>("GameModeReader")
+          .activeByUuid(request.gameModeId)
+      : undefined;
+    if (request && !mode) throw new UnknownGameModeError(request.gameModeId);
     // Acá adentro se rechaza el 4P (`UNSUPPORTED_GAME_MODE`) y la cantidad que no coincide, y las
     // dos cosas pasan ANTES de la génesis: el árbol de la partida nace unas líneas más abajo, en
     // el `child.resolve("MatchState")`.
-    const config = configOf(request, mode);
-    const maintenance = await rootContainer.resolve(LobbySettings).get();
-    if (maintenance.isUnderMaintenance) {
-      throw new MaintenanceModeError(maintenance.maintenanceMessage);
+    const config = roomOptions
+      ? configFromRoomOptions(roomOptions, this.roomId)
+      : configOf(request as NonNullable<typeof request>, mode as NonNullable<typeof mode>);
+    if (!roomOptions) {
+      const maintenance = await rootContainer.resolve(LobbySettings).get();
+      if (maintenance.isUnderMaintenance)
+        throw new MaintenanceModeError(maintenance.maintenanceMessage);
     }
     this.config = config;
     this.seats = playerIdsOf(config);
@@ -145,6 +167,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
     const child = rootContainer.createChildContainer();
     child.register("Config", { useValue: config });
+    if (roomOptions) child.register("RoomOptions", { useValue: roomOptions });
 
     // La vista es del asiento, no del socket: existe antes de que el dueño se conecte y
     // conserva las revelaciones privadas si el socket se reemplaza o se reconecta.
@@ -169,10 +192,24 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       this.notifier.notify(events),
     );
     this.history = pieces.history;
+    this.platform = rootContainer.isRegistered(MatchPlatform)
+      ? rootContainer.resolve(MatchPlatform)
+      : undefined;
+    const platformSink =
+      roomOptions && this.platform
+        ? this.platform.sinkFor(roomOptions, this.roomId, match, (playerId, type, payload) =>
+            this.clientOf(playerId)?.send(type, payload),
+          )
+        : undefined;
+    const platformSinks = platformSink ? [platformSink] : [];
+    const externalSinks =
+      roomOptions && rootContainer.isRegistered("MatchSinks")
+        ? rootContainer.resolve<MatchSinks>("MatchSinks")(roomOptions)
+        : [];
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
       (events) => this.broadcast("events", events),
-      pieces.sinks,
+      [...pieces.sinks, ...platformSinks, ...externalSinks],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
@@ -199,7 +236,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // un `GET /config/:roomId` que llegue antes de que la clave esté escrita —y que caiga en otro
     // proceso, que es todo el punto de esto— responde 404 por una sala que existe.
     this.matches = rootContainer.resolve(MatchRegistry);
-    await this.matches.register(this.roomId, config);
+    await this.matches.register(this.roomId, config, roomOptions);
 
     // EL LATIDO que renueva ese plazo. Va POR EL RELOJ DE LA SALA —el mismo que vence los
     // turnos— y no colgado de los hechos del juego, porque tiene que darse aunque no pase nada:
@@ -232,14 +269,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     return { ...identity, token: token ?? "" };
   }
 
-  override onJoin(client: Client): void {
+  override async onJoin(client: Client): Promise<void> {
     // ACÁ SE CRUZA LA IDENTIDAD EXTERNA CON EL ASIENTO OPACO, y es el único lugar donde
     // pasa. De estas cuatro líneas para abajo nadie vuelve a ver una plataforma ni un
     // UUID: el motor, el historial y el wire hablan de `seat-N`.
     const identity = client.auth as SeatCredentials;
-    const playerId = this.config.seats.find(
-      (seat) => seat.platformId === identity.platformId && seat.userUuid === identity.userUuid,
-    )?.playerId;
+    const playerId = this.config.seats.find((seat) => seat.userUuid === identity.userId)?.playerId;
     // Primero pertenece a la mesa; recién después se pregunta si sigue jugando. Invertir
     // el orden filtra el estado de una partida a un principal sin asiento reservado.
     // LA ÚNICA EXCEPCIÓN DELIBERADA a "la identidad externa no sale del cruce": este error
@@ -248,9 +283,29 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // registra es SIEMPRE el rechazado, nunca un jugador sentado. `seat-N` no serviría acá:
     // justamente no tiene asiento, así que no hay id opaco que nombrarlo.
     if (!playerId) {
-      throw new SeatNotReservedError(JSON.stringify([identity.platformId, identity.userUuid]));
+      throw new SeatNotReservedError(identity.userId);
     }
     if (!this.isStillPlaying(playerId)) throw new PlayerAlreadyOutError(playerId);
+    if (this.roomOptions && this.platform) {
+      const profile = await this.platform.admit(
+        this.roomOptions,
+        this.roomId,
+        playerId,
+        identity.token,
+      );
+      if (profile) {
+        const player = this.player(playerId);
+        player.displayName = profile.username || playerId;
+        player.username = profile.username || undefined;
+        player.profilePicture = profile.profilePicture || undefined;
+        player.currency = profile.currency;
+        await this.matches.rememberPlayer(this.roomId, {
+          playerId,
+          username: profile.username,
+          profilePicture: profile.profilePicture,
+        });
+      }
+    }
     this.cancelPendingReconnection(playerId);
 
     client.userData = { playerId };
@@ -369,7 +424,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       cause instanceof ValidationError ||
       cause instanceof UnknownCommandError ||
       cause instanceof InvalidTokenError ||
-      cause instanceof MaintenanceModeError
+      cause instanceof MaintenanceModeError ||
+      cause instanceof AdmissionRefusedError
     ) {
       this.log.warn("rechazo esperado", { method: methodName, reason: cause.message });
       return;
@@ -483,3 +539,14 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     void this.disconnect(CloseCode.WITH_ERROR);
   }
 }
+
+const isRoomOptions = (value: unknown): value is DominoRoomOptions => {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<DominoRoomOptions>;
+  return (
+    (candidate.mode === "CASUAL" || candidate.mode === "TOURNAMENT") &&
+    Array.isArray(candidate.seats) &&
+    typeof candidate.seed === "string" &&
+    typeof candidate.pointsToWin === "number"
+  );
+};

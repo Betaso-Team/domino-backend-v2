@@ -17,6 +17,16 @@ export type { DominoMatchConfig } from "./core/config";
 export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
 export type { HistoryReader } from "./network/history";
+export { AdmissionRefusedError, MatchPlatform } from "./network/platform";
+export type {
+  MatchRow,
+  MatchSummary,
+  MatchSummaryPlayer,
+  MatchSummaryPort,
+  Paginated,
+  PlayerLog,
+  PlayerStats,
+} from "./network/player-log";
 // La proyección monetaria sale por acá porque su consumidor está AFUERA de la feature: hoy
 // el smoke, mañana el adaptador que efectivamente pague. Sale la función y salen sus tipos:
 // una instrucción que nadie puede nombrar no se puede recibir, ni loguear, ni auditar.
@@ -26,7 +36,7 @@ export {
   type SettlementInstruction,
   type SettlementKind,
 } from "./network/settlement";
-export { DominoRoom } from "./transports/colyseus/domino-room";
+export { ColyseusMatchGateway } from "./transports/colyseus/gateway";
 // El reparto de partidas entre procesos. Sale por acá porque lo entrega el composition root al
 // servidor, que es el único que puede: `matchMaker` no se importa desde ningún otro lado.
 // `NoProcessAvailableError` NO sale: nadie lo atrapa —quien recibe el rechazo es Colyseus, que lo
@@ -41,8 +51,15 @@ export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/registe
 // nombrar no se puede atrapar.
 export {
   configOf,
+  configFromRoomOptions,
   type CreateMatchRequest,
   type MatchParticipant,
+  type MatchOpener,
+  type MatchSinks,
+  type Seat,
+  type DominoRoomOptions,
+  type CasualRoomOptions,
+  type TournamentRoomOptions,
   replayConfigOf,
   requestOf,
   SeatCountMismatchError,
@@ -54,4 +71,5 @@ export {
   MatchRegistry,
   type MatchConfigResponse,
   type PublicMatchConfig,
+  type PublicPlayer,
 } from "./transports/match-registry";

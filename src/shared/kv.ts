@@ -27,13 +27,17 @@ export interface KeyValueStore {
   // `record` y `of`: borrar pasa por el camino de una sala que se está muriendo, y ahí no hay a
   // quién devolverle el error.
   del(key: string): void;
+  sadd(key: string, value: string): Promise<unknown>;
+  srem(key: string, value: string): Promise<unknown>;
+  smembers(key: string): Promise<string[]>;
+  expire(key: string, seconds: number): Promise<unknown>;
   hset(key: string, field: string, value: string): Promise<unknown>;
   hgetall(key: string): Promise<Record<string, string>>;
   hdel(key: string, field: string): Promise<unknown>;
 }
 
 interface Entry {
-  readonly value: string | Map<string, string>;
+  readonly value: string | Map<string, string> | Set<string>;
   expiresAt: number;
 }
 
@@ -69,6 +73,36 @@ export class MemoryKeyValueStore implements KeyValueStore {
 
   del(key: string): void {
     this.entries.delete(key);
+  }
+
+  async sadd(key: string, value: string): Promise<unknown> {
+    const current = this.live(key)?.value;
+    const set = current instanceof Set ? current : new Set<string>();
+    set.add(value);
+    this.entries.set(key, {
+      value: set,
+      expiresAt: this.live(key)?.expiresAt ?? Number.POSITIVE_INFINITY,
+    });
+    return undefined;
+  }
+
+  async srem(key: string, value: string): Promise<unknown> {
+    const current = this.live(key)?.value;
+    if (!(current instanceof Set)) return undefined;
+    current.delete(value);
+    if (current.size === 0) this.entries.delete(key);
+    return undefined;
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    const current = this.live(key)?.value;
+    return current instanceof Set ? [...current] : [];
+  }
+
+  async expire(key: string, seconds: number): Promise<unknown> {
+    const entry = this.live(key);
+    if (entry) entry.expiresAt = this.now() + seconds * 1000;
+    return undefined;
   }
 
   async hset(key: string, field: string, value: string): Promise<unknown> {

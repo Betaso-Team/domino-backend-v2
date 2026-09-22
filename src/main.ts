@@ -1,6 +1,6 @@
 import { listen } from "@colyseus/tools";
 import app from "./app.config";
-import { shutdown } from "./di-container";
+import { shutdown, startServices, stopAcceptingMatches } from "./di-container";
 import { env } from "./env";
 import { logger } from "./logger";
 
@@ -75,6 +75,7 @@ const morirSinServidor = (error: unknown): never => {
   process.exit(1);
 };
 
+startServices();
 const server = await Promise.race([
   listen(app, env.port),
   new Promise<never>((_, rechazar) => {
@@ -105,6 +106,7 @@ logger.info("servidor escuchando", {
 // Redis lo cierra el paso 1: Colyseus apaga `presence` y `driver` adentro de su
 // `gracefullyShutdown`, y hacerlo también acá lo cerraría dos veces.
 const drain = async (): Promise<void> => {
+  stopAcceptingMatches();
   const empezó = Date.now();
   await server.gracefullyShutdown(false);
   await shutdown();

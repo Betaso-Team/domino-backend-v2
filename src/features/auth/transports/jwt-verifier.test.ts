@@ -7,43 +7,24 @@ const SECRET = "s".repeat(32);
 const verifier = new JwtVerifier(SECRET);
 
 describe("JwtVerifier", () => {
-  it("verifica un token HS256 y devuelve su identidad compuesta", async () => {
-    const token = jwt.sign({ sub: "u1", platformId: "betaso" }, SECRET, {
+  it("verifica un token HS256 y devuelve el usuario del sub", async () => {
+    const token = jwt.sign({ sub: "u1" }, SECRET, {
       algorithm: "HS256",
       expiresIn: "1h",
     });
 
-    await expect(verifier.verify(token)).resolves.toEqual({
-      platformId: "betaso",
-      userUuid: "u1",
-    });
-  });
-
-  // LA PLATAFORMA ES PARTE DE LA IDENTIDAD, no un adorno del token: sin ella el mismo
-  // `sub` de dos productos distintos autoriza la misma mesa, y la mesa mueve plata.
-  // `"   "` es el caso que un `typeof === "string"` pelado deja pasar y que después
-  // formaría una clave de índice vacía en el registro.
-  it.each<[string, Record<string, unknown>]>([
-    ["sin platformId", { sub: "u1" }],
-    ["con platformId vacío", { sub: "u1", platformId: "   " }],
-  ])("rechaza un token %s", async (_name, payload) => {
-    const token = jwt.sign(payload, SECRET, { algorithm: "HS256" });
-
-    await expect(verifier.verify(token)).rejects.toBeInstanceOf(InvalidTokenError);
+    await expect(verifier.verify(token)).resolves.toEqual({ userId: "u1" });
   });
 
   // LA OTRA MITAD DEL CRUCE. `configOf` guarda la identidad recortada; si el verificador
   // devolviera el padding, `onJoin` compararía `"betaso "` contra `"betaso"` y rechazaría el
   // asiento de alguien que ya pagó. Las dos fronteras normalizan o ninguna sirve.
   it("normaliza los espacios de la identidad que devuelve", async () => {
-    const token = jwt.sign({ sub: "  u1  ", platformId: " betaso " }, SECRET, {
+    const token = jwt.sign({ sub: "  u1  " }, SECRET, {
       algorithm: "HS256",
     });
 
-    await expect(verifier.verify(token)).resolves.toEqual({
-      platformId: "betaso",
-      userUuid: "u1",
-    });
+    await expect(verifier.verify(token)).resolves.toEqual({ userId: "u1" });
   });
 
   it("rechaza un token ausente", async () => {

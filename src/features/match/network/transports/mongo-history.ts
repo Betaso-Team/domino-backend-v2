@@ -1,6 +1,16 @@
 import type { Logger } from "@/logger";
-import type { Collection, Document } from "mongodb";
+import type { Collection, Document, Filter } from "mongodb";
 import type { HistoryEntry, HistoryPort, HistoryReader } from "../history";
+import {
+  type MatchRow,
+  type MatchSummary,
+  type MatchSummaryPort,
+  type Paginated,
+  type PlayerLog,
+  type PlayerStats,
+  rowFor,
+  statsFor,
+} from "../player-log";
 
 // EL HISTORIAL QUE SOBREVIVE AL REINICIO. `MemoryHistory` tiene tope de 200 partidas y muere
 // con el proceso, así que el endpoint interno de soporte y el CLI de replay —los dos ya
@@ -56,9 +66,20 @@ export interface MatchHistoryDocument {
   readonly entries: HistoryEntry[];
   readonly createdAt: Date;
   updatedAt: Date;
+  status?: "finished" | "canceled";
+  winnerIds?: readonly string[];
+  entryFee?: number;
+  prize?: number;
+  isFreeRoom?: boolean;
+  gameModeId?: string;
+  players?: MatchSummary["players"];
+  quitPlayers?: MatchSummary["quitPlayers"];
 }
 
-export class MongoHistory implements HistoryPort, HistoryReader {
+export class MongoHistory implements HistoryPort, HistoryReader, MatchSummaryPort, PlayerLog {
+  // One write at a time per match. Two fire-and-forget batches may otherwise both upsert a document
+  // that does not exist yet, splitting one match or tripping a unique index.
+  private readonly writing = new Map<string, Promise<void>>();
   // LOS LOTES QUE TODAVÍA ESTÁN VIAJANDO. Es lo único que hace falta para que el apagado
   // pueda esperarlos, y es un `Set` y no un contador porque lo que se espera son las
   // promesas mismas.
@@ -90,7 +111,7 @@ export class MongoHistory implements HistoryPort, HistoryReader {
     // La promesa que se ANOTA es la que ya tiene el `catch` puesto, y ese orden importa:
     // anotar la cruda dejaría en el `Set` una promesa rechazada, y el `Promise.all` de
     // `drain()` se rompería con el primer lote fallido en vez de esperar a todos.
-    const writing = this.append(matchId, entries).catch((error) =>
+    const writing = this.queued(matchId, () => this.append(matchId, entries)).catch((error) =>
       this.logger.error("historial: no se pudo grabar el lote", {
         matchId,
         entries: entries.length,
@@ -99,6 +120,52 @@ export class MongoHistory implements HistoryPort, HistoryReader {
     );
     this.inFlight.add(writing);
     void writing.finally(() => this.inFlight.delete(writing));
+  }
+
+  summarize(summary: MatchSummary): void {
+    const writing = this.queued(summary.matchId, () => this.writeSummary(summary)).catch((error) =>
+      this.logger.error("historial: no se pudo grabar el resumen", {
+        matchId: summary.matchId,
+        error: String(error),
+      }),
+    );
+    this.inFlight.add(writing);
+    void writing.finally(() => this.inFlight.delete(writing));
+  }
+
+  async pageOf(playerId: string, page: number, perPage: number): Promise<Paginated<MatchRow>> {
+    const collection = await this.collection();
+    const filter: Filter<MatchHistoryDocument> = {
+      status: { $in: ["finished", "canceled"] },
+      $or: [{ "players.id": playerId }, { "quitPlayers.id": playerId }],
+    };
+    const [documents, totalItems] = await Promise.all([
+      collection
+        .find(filter)
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * perPage)
+        .limit(perPage)
+        .toArray(),
+      collection.countDocuments(filter),
+    ]);
+    const totalPages = Math.ceil(totalItems / perPage);
+    return {
+      items: documents.map((document) => rowFor(playerId, summaryOf(document))),
+      page,
+      perPage,
+      totalItems,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
+    };
+  }
+
+  async statsOf(playerId: string): Promise<PlayerStats> {
+    const documents = await (await this.collection())
+      .find({ status: "finished", "players.id": playerId })
+      .sort({ updatedAt: 1 })
+      .toArray();
+    return statsFor(playerId, documents.map(summaryOf));
   }
 
   // Ver el comentario de `HistoryPort.drain`. EN BUCLE y no una sola pasada: nada impide que
@@ -147,4 +214,40 @@ export class MongoHistory implements HistoryPort, HistoryReader {
       { upsert: true },
     );
   }
+
+  private async writeSummary(summary: MatchSummary): Promise<void> {
+    const { matchId, playedAt, ...fields } = summary;
+    await (await this.collection()).updateOne(
+      { matchId },
+      {
+        $set: { ...fields, updatedAt: playedAt },
+        $setOnInsert: { matchId, entries: [], createdAt: playedAt },
+      },
+      { upsert: true },
+    );
+  }
+
+  private queued(matchId: string, write: () => Promise<void>): Promise<void> {
+    const next = (this.writing.get(matchId) ?? Promise.resolve()).then(write, write);
+    this.writing.set(matchId, next);
+    void next
+      .catch(() => undefined)
+      .then(() => {
+        if (this.writing.get(matchId) === next) this.writing.delete(matchId);
+      });
+    return next;
+  }
 }
+
+const summaryOf = (document: MatchHistoryDocument): MatchSummary => ({
+  matchId: document.matchId,
+  status: document.status ?? "canceled",
+  winnerIds: document.winnerIds ?? [],
+  entryFee: document.entryFee ?? 0,
+  prize: document.prize ?? 0,
+  isFreeRoom: document.isFreeRoom ?? false,
+  gameModeId: document.gameModeId ?? "",
+  players: document.players ?? [],
+  quitPlayers: document.quitPlayers ?? [],
+  playedAt: document.updatedAt ?? document.createdAt,
+});

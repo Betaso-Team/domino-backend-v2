@@ -1,3 +1,4 @@
+import { type TokenVerifier, authenticated, requireBearer } from "@/features/auth";
 import type { Logger } from "@/logger";
 import { requireInternalKey } from "@/shared/http/internal-key";
 import { validated } from "@/shared/http/validated";
@@ -5,6 +6,7 @@ import type { Application as Express } from "express";
 import { z } from "zod";
 import type { Clock } from "../../core/engine/clock";
 import type { HistoryReader } from "../../network/history";
+import type { PlayerLog } from "../../network/player-log";
 import type { MatchConfigResponse, MatchRegistry } from "../match-registry";
 
 // En una const para que el aviso de arranque y el `app.get` no puedan divergir: el warn
@@ -53,6 +55,10 @@ const HISTORY_PARAMS = z.object({
     .max(128)
     .regex(/^\P{Cc}+$/u, "matchId inválido"),
 });
+const PAGE_QUERY = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
 
 // TODAS las dependencias entran por PARÁMETRO OBLIGATORIO, ninguna con default y ninguna
 // leída de `env` acá adentro. El razonamiento ya estaba escrito para la llave interna
@@ -73,6 +79,8 @@ export interface MatchHttpDeps {
   readonly history: HistoryReader;
   /** `undefined` ⇒ la ruta interna NO se registra. Ver registerInternalHistoryHttp. */
   readonly internalApiKey: string | undefined;
+  readonly verifier?: TokenVerifier;
+  readonly playerLog?: PlayerLog;
 }
 
 // RECIBE sus dependencias en vez de resolverlas del container: resolver es una operación de
@@ -81,6 +89,38 @@ export interface MatchHttpDeps {
 // seguiría dependiendo de tsyringe, escondiendo qué necesita, y sin poder testearse sin
 // armar un container—. Lo que un transporte no puede saber es que el container existe.
 export function registerMatchHttp(app: Express, deps: MatchHttpDeps): void {
+  if (deps.verifier) {
+    app.get(
+      "/matches/:roomId",
+      requireBearer(deps.verifier),
+      validated({ params: CONFIG_PARAMS }, async ({ params }, response) => {
+        const match = await deps.registry.publicConfigOf(params.roomId);
+        if (!match) {
+          response.status(404).json({ error: "ROOM_NOT_FOUND" });
+          return;
+        }
+        response.set("Cache-Control", "no-store").json(match);
+      }),
+    );
+    if (deps.playerLog) {
+      app.get(
+        "/me/matches",
+        authenticated(
+          deps.verifier,
+          { query: PAGE_QUERY },
+          async (identity, { query }, response) => {
+            response.json(await deps.playerLog?.pageOf(identity.userId, query.page, query.limit));
+          },
+        ),
+      );
+      app.get(
+        "/me/metrics",
+        authenticated(deps.verifier, {}, async (identity, _input, response) => {
+          response.json(await deps.playerLog?.statsOf(identity.userId));
+        }),
+      );
+    }
+  }
   app.get(
     "/config/:roomId",
     // Un `roomId` de forma imposible es 400 ANTES de consultar, y no un 404 después. La

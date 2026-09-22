@@ -1,3 +1,4 @@
+import { census, maintenanceSignal } from "@/di-container";
 import { env } from "@/env";
 import { bootTestServer, casualTable, mintToken, participantOf, waitUntil } from "@/tests/e2e";
 import { CASUAL_2P } from "@/tests/game-mode-catalog";
@@ -11,15 +12,20 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // Se importa de `src/tests/` y no del arnés E2E del match porque la Regla 4 (`feature-boundary`)
 // prohíbe que esta feature importe archivos internos de otra.
 
-interface LobbyStateDTO {
-  readonly totalPlayers: number;
+interface LobbyStats {
+  readonly playersInMatch: number;
   readonly playersInLobby: number;
-  readonly isUnderMaintenance: boolean;
-  readonly maintenanceMessage: string;
-  readonly gameModesCount: readonly {
-    readonly gameModeName: string;
-    readonly playerCount: number;
+  readonly playersSearching: number;
+  readonly byGameMode: readonly {
+    readonly gameModeId: string;
+    readonly playersInMatch: number;
+    readonly playersSearching: number;
   }[];
+}
+
+interface Maintenance {
+  readonly isUnderMaintenance: boolean;
+  readonly message: string;
 }
 
 let server: ColyseusTestServer;
@@ -40,43 +46,43 @@ describe("lobby", () => {
     await expect(server.connectTo(room)).rejects.toThrow();
   });
 
-  it("sincroniza mantenimiento y contadores por modo", async () => {
+  it("publica el censo del cluster y los jugadores del lobby", async () => {
     const table = await server.createRoom("domino", casualTable(["lobby-a", "lobby-b"]));
     server.sdk.auth.token = mintToken(participantOf("lobby-a"));
     await server.connectTo(table);
     server.sdk.auth.token = mintToken(participantOf("lobby-b"));
     await server.connectTo(table);
+    await census.check();
 
     const room = await server.createRoom("lobby", {});
     server.sdk.auth.token = mintToken(participantOf("observer-a"));
     const first = await server.connectTo(room);
+    const heard: LobbyStats[] = [];
+    first.onMessage("LOBBY_STATS", (stats: LobbyStats) => heard.push(stats));
     server.sdk.auth.token = mintToken(participantOf("observer-b"));
     await server.connectTo(room);
-    const state = first.state as LobbyStateDTO;
 
-    await waitUntil(
-      () =>
-        state.totalPlayers === 2 &&
-        state.playersInLobby === 2 &&
-        state.gameModesCount.some(
-          // El lobby cuenta por el `gameModeId` de la metadata, que desde la Tarea 10 es el uuid
-          // del modo resuelto y ya no el nombre que el request traía.
-          ({ gameModeName, playerCount }) => gameModeName === CASUAL_2P.uuid && playerCount === 2,
-        ),
-    );
-
-    expect(state.isUnderMaintenance).toBe(false);
-    expect(state.maintenanceMessage).toBe(
-      "El juego de dominó está en mantenimiento. Vuelve pronto.",
+    await waitUntil(() =>
+      heard.some(
+        (stats) =>
+          stats.playersInMatch === 2 &&
+          stats.playersInLobby === 2 &&
+          stats.playersSearching === 0 &&
+          stats.byGameMode.some(
+            ({ gameModeId, playersInMatch }) =>
+              gameModeId === CASUAL_2P.uuid && playersInMatch === 2,
+          ),
+      ),
     );
   });
 
-  it("cambia mantenimiento sin deploy y bloquea solo mesas nuevas", async () => {
+  it("empuja el mantenimiento y cierra el matchmaking, no la partida viva", async () => {
     const existing = await server.createRoom("domino", casualTable(["existing-a", "existing-b"]));
     const room = await server.createRoom("lobby", {});
     server.sdk.auth.token = mintToken(participantOf("operator-observer"));
     const client = await server.connectTo(room);
-    const state = client.state as LobbyStateDTO;
+    const heard: Maintenance[] = [];
+    client.onMessage("MAINTENANCE", (maintenance: Maintenance) => heard.push(maintenance));
 
     const denied = await fetch("http://localhost:2592/internal/lobby/maintenance", {
       method: "POST",
@@ -108,14 +114,15 @@ describe("lobby", () => {
       isUnderMaintenance: true,
       maintenanceMessage: "Actualizando mesas",
     });
-    await waitUntil(
-      () => state.isUnderMaintenance && state.maintenanceMessage === "Actualizando mesas",
-    );
+    await maintenanceSignal.check();
+    await waitUntil(() => heard.some((value) => value.message === "Actualizando mesas"));
 
     expect(server.getRoomById(existing.roomId)).toBeDefined();
-    await expect(
-      server.createRoom("domino", casualTable(["blocked-a", "blocked-b"])),
-    ).rejects.toThrow("Actualizando mesas");
+    const rejected = new Promise<{ reason: string }>((resolve) =>
+      client.onMessage("MATCHMAKING_ERROR", resolve),
+    );
+    client.send("REQUEST_MATCH", { kind: "CASUAL", gameModeId: CASUAL_2P.uuid });
+    await expect(rejected).resolves.toEqual({ reason: "MAINTENANCE" });
 
     const disabled = await fetch("http://localhost:2592/internal/lobby/maintenance", {
       method: "POST",
@@ -126,8 +133,7 @@ describe("lobby", () => {
       body: JSON.stringify({ isUnderMaintenance: false }),
     });
     expect(disabled.status).toBe(200);
-    await expect(
-      server.createRoom("domino", casualTable(["available-a", "available-b"])),
-    ).resolves.toBeDefined();
+    await maintenanceSignal.check();
+    await waitUntil(() => heard.some((value) => !value.isUnderMaintenance));
   });
 });

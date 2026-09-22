@@ -1,5 +1,7 @@
 import { type Collection, type Db, type Document, MongoClient } from "mongodb";
 
+export const ENGINE_VERSION = 2;
+
 // LA CONEXIÓN a Mongo, y nada más. Vive en `shared/` y no dentro de `features/match/` por la
 // regla de imports 2 (`core-no-runtime`): `mongodb` es un paquete de runtime, el core no puede
 // nombrarlo, y `shared/` es lo único importable desde todos lados. Lo que NO sube acá es el

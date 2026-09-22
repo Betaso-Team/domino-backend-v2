@@ -137,15 +137,17 @@ export function buildPieces(child: DependencyContainer, emit: MatchEventSink): M
   // Se arma SIEMPRE, aunque los dos destinos falten: el listener anota lo que no puede reportar, y
   // saltearlo acá convertiría una instancia sin configurar en una que reporta en silencio nada.
   const feeds = child.resolve<StandingsFeeds>("StandingsFeeds");
-  const listeners = [
-    reportStandings({
-      config,
-      match,
-      ranking: feeds.ranking,
-      leagues: feeds.leagues,
-      log: child.resolve<Logger>("Logger"),
-    }),
-  ];
+  const listeners = child.isRegistered("RoomOptions")
+    ? []
+    : [
+        reportStandings({
+          config,
+          match,
+          ranking: feeds.ranking,
+          leagues: feeds.leagues,
+          log: child.resolve<Logger>("Logger"),
+        }),
+      ];
 
   // `emit` sigue sin usarse: es el canal para el listener que PRODUZCA eventos, y el del cierre no
   // produce ninguno a propósito (las dos tablas son de plataforma y nadie de esta partida las mira).
