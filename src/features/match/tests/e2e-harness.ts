@@ -10,7 +10,7 @@ import {
   participantOf,
   waitUntil,
 } from "@/tests/e2e";
-import { CASUAL_2P } from "@/tests/game-mode-catalog";
+import { CASUAL_2P, CASUAL_4P } from "@/tests/game-mode-catalog";
 import type { Room } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
@@ -119,6 +119,31 @@ export async function seatPairAsMatchmaking(
     serverState: room.state as MatchState,
     clients,
   };
+}
+
+/**
+ * LA MESA DE CUATRO, gemela de `seatPair` y por el mismo camino: el `CreateMatchRequest` del
+ * orquestador contra el modo de cuatro del catálogo.
+ *
+ * No es `seatPair` con más asientos porque el MODO es otro: la cantidad la decide el catálogo y
+ * `configOf` rechaza el pedido que no coincide, así que cruzar cuatro participantes con
+ * `CASUAL_2P` no sienta a nadie. Todo lo demás del arnés —`revealHands`, `playOneTurn`,
+ * `playUntilDecided`— es agnóstico a cuántos hay sentados y no se tocó.
+ */
+export async function seatFour(
+  server: ColyseusTestServer,
+  seats: readonly [ParticipantInput, ParticipantInput, ParticipantInput, ParticipantInput],
+  seed?: string,
+): Promise<SeatedMatch> {
+  const options = casualTable(seats, seed, CASUAL_4P.uuid);
+  const config = configOf(requestOf(options), CASUAL_4P);
+  const room = await server.createRoom("domino", options);
+  const clients: SeatedMatch["clients"] = {};
+  for (const seat of config.seats) {
+    server.sdk.auth.token = mintToken(seat);
+    clients[seat.playerId] = await server.connectTo(room);
+  }
+  return { roomId: room.roomId, options, config, serverState: room.state as MatchState, clients };
 }
 
 export async function seatPair(

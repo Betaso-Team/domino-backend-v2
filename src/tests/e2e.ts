@@ -59,12 +59,16 @@ export function mintToken(player: string | { readonly userId: string }): string 
 export function casualTable(
   seats: readonly ParticipantInput[],
   seed = "seed-e2e",
+  // EL MODO POR PARÁMETRO, y el default es el de dos porque es el de casi toda la suite. Sin
+  // esto, una mesa de cuatro se pediría contra `CASUAL_2P` y `configOf` la rechazaría por
+  // cantidad — con un error que apunta al pedido cuando lo que está mal es el modo.
+  gameModeId: string = CASUAL_2P.uuid,
 ): CreateMatchRequest {
   const participants = seats.map(participantOf);
   return {
     mode: "CASUAL",
     matchId: `m-${participants.map(({ userId }) => userId).join("-")}`,
-    gameModeId: CASUAL_2P.uuid,
+    gameModeId,
     participants,
     seed,
     teamAssignment: "SHUFFLED",

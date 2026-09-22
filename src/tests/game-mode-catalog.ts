@@ -48,3 +48,20 @@ export const CASUAL_2P: GameMode = await gameModes.create({
   entryFee: 125,
   prize: 250,
 });
+
+// LA MESA DE CUATRO. Los mismos números que la de dos a propósito: lo que la distingue es
+// `playersQuantity`, y dejar el resto igual hace que cualquier diferencia que una suite mida entre
+// las dos mesas sea de la CANTIDAD y no de la economía.
+//
+// `enableBots` VA EXPLÍCITO y en `true`, que es el default que el repositorio deriva de
+// `playersQuantity === 4` (`memory-repository.ts`). Escribirlo es lo que hace que el E2E de la
+// partida de cuatro esté midiendo una mesa que reemplaza al que se va, y no una que lo hace por
+// accidente el día que ese default cambie.
+export const CASUAL_4P: GameMode = await gameModes.create({
+  name: "clasica-4p",
+  playersQuantity: 4,
+  pointsToWin: 100,
+  entryFee: 125,
+  prize: 250,
+  enableBots: true,
+});
