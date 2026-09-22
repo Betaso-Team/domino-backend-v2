@@ -14,6 +14,7 @@ import {
   currentRoundOf,
   currentTurnOf,
   handOf,
+  opponentTeam,
   playerOf,
   roundActivePlayers,
   roundPhaseOf,
@@ -224,9 +225,19 @@ export class RoundDriver implements Driver {
     return { events: [event], finished: false };
   }
 
+  /**
+   * Lo que cobra el que se dominó: los pips del EQUIPO RIVAL.
+   *
+   * ⚠ **RIVAL, no «todos los demás»**, y en 2P las dos frases son la misma — por eso esto estuvo
+   * bien hasta que la mesa tuvo cuatro asientos. Con parejas, «todos menos el ganador» le suma al
+   * que dominó los pips de su PROPIO compañero: puntos que el equipo se cobra a sí mismo, y que
+   * inflan el marcador del ganador con la mano de alguien que jugó en el mismo bando. Es la regla
+   * de v1 (`finishCurrentRound`, `domino-room-state.ts:412-415`): `losingTeam.reduce(...)`.
+   */
   private opposingHandsValue(winnerId: PlayerId): number {
+    const rival = opponentTeam(teamOf(winnerId, this.match));
     return roundActivePlayers(this.match)
-      .filter((player) => player.playerId !== winnerId)
+      .filter((player) => player.teamId === rival)
       .reduce(
         (sum, player) =>
           sum + [...player.hand.tiles].reduce((inner, tile) => inner + tileValue(tile), 0),

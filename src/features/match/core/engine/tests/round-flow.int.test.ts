@@ -361,3 +361,26 @@ describe("flujo de la ronda", () => {
     expect(closingEvents).toEqual([{ type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" }]);
   });
 });
+
+// LA MESA DE CUATRO. El arnés arma los equipos por asiento (`SEAT_ORDER`), así que las parejas
+// son u1+u3 contra u2+u4.
+describe("la ronda de cuatro", () => {
+  // ⚠ EL QUE SE DOMINA COBRA LOS PIPS DEL EQUIPO RIVAL, y no los de «todos los demás»: la mano
+  // del COMPAÑERO no entra. Acá u1 se domina y su pareja cobra 11 —el 1|0 de u2 más el 5|5 de
+  // u4— y no 15, que es lo que daría sumando además el 2|2 de u3. La diferencia son puntos que
+  // el equipo se cobraría a sí mismo, y en 2P no se ve porque ahí «el rival» y «todos los
+  // demás» son la misma persona.
+  it("el dominó cobra los pips del equipo rival, sin la mano del compañero", () => {
+    const e = engineWithHands({
+      u1: [[6, 6]],
+      u2: [[1, 0]],
+      u3: [[2, 2]],
+      u4: [[5, 5]],
+    });
+    e.start();
+
+    e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
+
+    expect(scoreboardOf(e.match)).toMatchObject({ teamA: 11, teamB: 0 });
+  });
+});
