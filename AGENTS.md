@@ -1396,9 +1396,9 @@ el otro.
 
 ### Deudas abiertas de ESTE incremento — NO CUMPLIDAS
 
-1. **El veto se consulta pero no se escribe.** Anotar el veto cuando una revancha TERMINA es del
-   cierre de esa mesa y no se hace. Sin esa mitad, el tope de la cadena es lo único que impide la
-   repetición — y alcanza, porque el par vuelve al emparejador, que es quien los separa.
+1. ~~El veto se consulta pero no se escribe.~~ **CERRADO** por el bloque de más abajo: resultó ser
+   más grande de lo que esta línea decía — no faltaba sólo el veto casual, faltaban los DOS
+   productores, y la capa anti-colusión entera era inerte.
 2. **Los dos caminos de creación con dos identidades** (arriba). Decidir cuál gana antes de que el
    front dependa de los dos.
 3. **El smoke real no corrió.** Pide Docker. La revancha toca el ciclo de vida de la sala, que es
@@ -1406,6 +1406,61 @@ el otro.
 4. **La revancha no re-chequea el saldo al abrir**, a diferencia de truco y de v1. Es deliberado y
    está argumentado en `network/rematch.ts` — la admisión de la mesa nueva rechaza sólo al que no
    puede — pero conviene medirlo el día que haya un backend de verdad contra el que probarlo.
+
+## Corrección — el veto anti-colusión tenía consumidor y no tenía productor
+
+Salió de comparar truco LISTENER POR LISTENER, no de una falla. Baseline **1070 → 1077 tests /
+110 archivos**; `typecheck`, suite, lint y `depcruise` (**360 módulos / 1434 dependencias**) en
+verde. Commit `0cebfb8`.
+
+**`matchmakingSink` escuchaba `CASUAL_PAIR_VETOED` y `PAIR_VETOED` y llamaba `VetoBook.register`.
+Nadie emitía ninguno de los dos.** Los dos listeners que los producen quedaron del otro lado del
+port de matchmaking. Los libros se leían y nunca se escribían: `vetoedFor()` devolvía `[]` en cada
+consulta, el emparejador no evitaba a nadie jamás, y la capa anti-colusión entera era inerte.
+
+⚠ **NO LO VEÍA NADA, y eso es lo que hay que recordar de este defecto.** Leer un libro vacío es
+indistinguible de leer uno que funciona, así que ningún test del consumidor podía fallar; el
+productor no existía, así que no había qué testear; y `depcruise` estaba limpio porque el
+consumidor compila solo. **Es la forma de defecto que deja un port: el que trae la mitad de una
+conversación.** La única manera de encontrarlo fue enumerar los listeners de truco y buscar el
+gemelo de cada uno.
+
+Las dos reglas son distintas, y por eso son DOS eventos y no uno con un campo:
+
+| | cuándo veta | alcance |
+|---|---|---|
+| casual | la partida que cierra **ya era la revancha** (`rematchCount > 0`) | todo el ámbito casual |
+| torneo | la partida fue de **baja calidad** (la firma del que se rinde rápido) | **ese** torneo, que viaja en el evento |
+
+Terminar una partida normal **no veta a nadie**: el objetivo no es prohibir que dos se crucen
+—el emparejador junta a quien haya— sino desalentar REPETIR. Vetar en la primera le vaciaría el
+pozo de rivales a cualquiera que juegue seguido.
+
+Los productores **SOLO EMITEN**: escribir es de matchmaking, que es quien lo lee. Si el productor
+pudiera escribir el libro, una partida estaría decidiendo a quién empareja el lobby.
+
+⚠ **Y EL MISMO CABLEADO TENÍA OTRO AGUJERO DE LA MISMA FAMILIA**: `reportStandings` estaba detrás
+de `isRegistered("RoomOptions") ? [] : [...]`, o sea que sólo corría en el camino del REQUEST y
+nunca en el del emparejador — que es por donde nace toda mesa casual. **Las partidas reales no
+llegaban ni al ranking ni a la liga**, sin fallar: un reporte que no sale deja una fila que nadie
+escribe. Se arregló en el mismo commit porque es la misma expresión.
+
+**EL TEST QUE FALTABA ES EL DEL CABLEADO Y NO EL DEL PRODUCTOR**, y es la lección transferible: el
+defecto era que nadie lo CONSTRUÍA. El E2E juega una mesa nacida con `rematchCount: 1` y lee el
+libro del otro lado de la cadena entera —listener → evento → sink → `register`—. Verificado por
+mutación: sacando el productor del cableado, ese `it` es el único que se pone rojo.
+
+### Lo que sigue faltando de truco, después de esto
+
+Comparado archivo por archivo y símbolo por símbolo:
+
+- **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
+- **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
+- **`charge-multiplier`** — deliberado: el aumento no cobra (`network/bet-charge.ts`) y
+  `betLevels: []` hace que ninguna mesa lo ofrezca.
+- **`logSink`** — la traza de cada evento al log. Chico, útil para soporte, no bloquea a nadie.
+- **Cinco archivos de test**: `shared/tests/{logger,retry,trace}.test.ts` y
+  `auth/transports/tests/{bearer,internal-key-guard}.test.ts`. El código está, los tests no.
 
 ## Cómo se ejecuta una tarea
 
