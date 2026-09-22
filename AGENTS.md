@@ -1761,10 +1761,14 @@ golden rebobina, los E2E de dos siguen verdes y el único cambio del árbol es e
 
 ### Deudas abiertas de ESTE incremento — NO CUMPLIDAS
 
-1. **El 4P no tiene E2E de partida COMPLETA.** El que hay mide que la mesa nace, que la máquina
-   juega y que la jugada se graba como del sistema; nadie llevó una mesa de cuatro hasta
-   `SCORE` ni midió el `REWARD` de la pareja de punta a punta. La proyección del premio sí está
-   medida en `settlement.test.ts`, incluida la mitad que queda en la casa.
+1. ~~**El 4P no tiene E2E de partida COMPLETA.**~~ **CERRADO**: `tests/game-4p.e2e.test.ts` juega
+   una partida de cuatro entera —seis rondas, 180 entradas de historial— y proyecta el premio
+   sobre el estado REAL, no sobre uno armado a mano. ⚠ De paso destapó una **aserción
+   tautológica**: sumar `round.points` por `winnerTeamId` y compararlo con el marcador no puede
+   fallar, porque los dos lados salen del MISMO `RoundVerdict`. Medido — mutar el dominó para que
+   vuelva a cobrar la mano del compañero dejaba ese archivo entero en verde. La regla se mide en
+   `round-flow.int.test.ts`; lo que el E2E sí puede afirmar es la alineación entre las dos
+   mitades del veredicto.
 2. **El emparejador no arma mesas de cuatro.** `configFromRoomOptions` deja `enableBots: false`
    porque no recibe el modo entero: el camino del REQUEST sienta las de cuatro y el del
    matchmaking no. Es la deuda de los dos caminos de creación, que sigue abierta.
