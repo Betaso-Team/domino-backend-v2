@@ -1,4 +1,3 @@
-import type { PlayerRef } from "@/shared/player-ref";
 import type { PlayerId } from "./ids";
 import type { BetLevel } from "./rules/config";
 
@@ -12,8 +11,14 @@ export type TeamAssignmentMode = "SHUFFLED" | "SEAT_ORDER";
 /**
  * UN ASIENTO DE LA MESA, congelado al crearse la partida. Junta las tres cosas que hasta
  * acá vivían separadas o no existían: el id OPACO con el que el motor lo nombra
- * (`playerId`), la identidad EXTERNA que lo autoriza (`PlayerRef`) y el perfil que el
+ * (`playerId`), la identidad EXTERNA que lo autoriza (`userId`) y el perfil que el
  * front muestra.
+ *
+ * `userId` es el `sub` del token y la MISMA cadena que `Identity.userId` de `features/auth`:
+ * un solo vocabulario de identidad en todo el repo, que es el de truco y el del v1 del
+ * dominó. No se declara importando `Identity` porque el core solo puede importar de su
+ * propia feature y de `shared/` (Regla 1), y un campo `string` no justifica una interfaz
+ * compartida.
  *
  * `currency` es la moneda YA COBRADA, no una preferencia del jugador: se congela acá
  * porque la recompensa se paga en la misma moneda de la inscripción, y releerla al
@@ -22,8 +27,9 @@ export type TeamAssignmentMode = "SHUFFLED" | "SEAT_ORDER";
  * `username` y `profilePicture` son OPCIONALES y el resto no: un invitado puede no tener
  * usuario ni foto, pero nadie juega sin nombre visible ni sin moneda cobrada.
  */
-export interface MatchSeat extends PlayerRef {
+export interface MatchSeat {
   readonly playerId: PlayerId;
+  readonly userId: string;
   readonly displayName: string;
   readonly username?: string;
   readonly profilePicture?: string;

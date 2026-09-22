@@ -26,8 +26,7 @@ describe("createMatchState", () => {
     expect(match.players[0]).toMatchObject({
       playerId: "u1",
       displayName: "Jugador u1",
-      platformId: "betaso",
-      userUuid: "u1",
+      userId: "u1",
       currency: "VES",
     });
   });

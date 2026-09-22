@@ -8,10 +8,10 @@ import { reportStandings } from "../report-standings";
 import type { LeagueResult, RankingParticipation } from "../standings";
 
 // Las identidades de plataforma de los dos asientos. El `playerId` interno es `u1`/`u2` (el fixture
-// del motor), y la diferencia entre ESE id y el `userUuid` es justamente lo que estos tests miden.
+// del motor), y la diferencia entre ESE id y el `userId` es justamente lo que estos tests miden.
 const SEATS = [
-  { playerId: "u1", userUuid: "uuid-ganador", username: "gana", profilePicture: "foto.png" },
-  { playerId: "u2", userUuid: "uuid-perdedor", username: "pierde" },
+  { playerId: "u1", userId: "uuid-ganador", username: "gana", profilePicture: "foto.png" },
+  { playerId: "u2", userId: "uuid-perdedor", username: "pierde" },
 ];
 
 function fakeLogger(): Logger {
@@ -97,8 +97,8 @@ describe("reportStandings", () => {
     expect(h.won).toHaveLength(1);
     // `uuid-ganador` y NO `u1`: el `playerId` es opaco y posicional, idéntico en todas las mesas,
     // así que mandarlo como `userId` le sumaría los puntos de todo el mundo a una cuenta inventada.
-    expect(h.won[0]?.userUuid).toBe("uuid-ganador");
-    expect(h.won[0]?.opponentUuids).toEqual(["uuid-perdedor"]);
+    expect(h.won[0]?.userId).toBe("uuid-ganador");
+    expect(h.won[0]?.opponentIds).toEqual(["uuid-perdedor"]);
   });
 
   it("los puntos son el peso del modo cuando no hubo aumento, y sin traza", async () => {
@@ -130,10 +130,10 @@ describe("reportStandings", () => {
 
     expect(h.recorded).toEqual([
       {
-        winner: { userUuid: "uuid-ganador", username: "gana", profilePicture: "foto.png" },
+        winner: { userId: "uuid-ganador", username: "gana", profilePicture: "foto.png" },
         // `null` y no `""`: un invitado sin foto manda null, que es lo que v1 manda y lo que del
         // otro lado distingue "no tiene" de "tiene una vacía".
-        losers: [{ userUuid: "uuid-perdedor", username: "pierde", profilePicture: null }],
+        losers: [{ userId: "uuid-perdedor", username: "pierde", profilePicture: null }],
       },
     ]);
   });

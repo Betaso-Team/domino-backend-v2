@@ -25,7 +25,7 @@ afterAll(async () => {
 });
 
 // Lee el estado TAL COMO LO RECIBIÓ el cliente, ya filtrado por su StateView. El selector
-// es el `userUuid` con el que el test nombra a la gente; `clientOf` lo traduce al asiento.
+// es el `userId` con el que el test nombra a la gente; `clientOf` lo traduce al asiento.
 const clientState = (match: SeatedMatch, selector: string): MatchState =>
   clientOf(match, selector).state as MatchState;
 
@@ -112,14 +112,13 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
   });
 
   // EL WIRE NO LLEVA IDENTIDAD EXTERNA NI MONEDA. `displayName` y el resto del perfil son
-  // presentación y viajan; la pareja `{ platformId, userUuid }` y la moneda ya cobrada son
+  // presentación y viajan; el `userId` de plataforma y la moneda ya cobrada son
   // `noSync()` y no entran al árbol sincronizado. Si entraran, cualquier cliente conocería
   // la cuenta del rival en la plataforma — y con plata de por medio eso no se deshace.
   it("sincroniza presentación pero no identidad externa ni moneda", async () => {
     const match = await seatPair(server, [
       {
-        platformId: "betaso",
-        userUuid: "private-a",
+        userId: "private-a",
         displayName: "Ada",
         // Los dos OPCIONALES van poblados en un solo asiento y ausentes en el otro: es la
         // única forma de medir las dos ramas de `t.string().optional()` a la vez.
@@ -127,7 +126,7 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
         profilePicture: "https://img.test/ada.png",
         currency: "VES",
       },
-      { platformId: "partner", userUuid: "private-b", displayName: "Lin", currency: "USD" },
+      { userId: "private-b", displayName: "Lin", currency: "USD" },
     ]);
     await waitUntil(() => clientState(match, "private-a").players.length === 2);
 

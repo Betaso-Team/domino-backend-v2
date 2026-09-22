@@ -27,7 +27,7 @@ const LEAGUE_NAME = "Domino";
 const TIMEOUT_MS = 5_000;
 
 const userOf = (player: LeaguePlayer) => ({
-  id: player.userUuid,
+  id: player.userId,
   username: player.username,
   profilePicture: player.profilePicture,
 });

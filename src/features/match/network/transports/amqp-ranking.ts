@@ -20,10 +20,11 @@ export class AmqpRankingFeed implements RankingFeed {
     await this.publisher.publishPattern(RANKING_QUEUE, PATTERN, {
       rankingType: RANKING_TYPE,
       currency: entry.currency,
-      // EL NOMBRE DEL CAMPO ES `userId` DEL OTRO LADO y acá se llama `userUuid`: la traducción es
-      // la mitad de lo que hace este archivo, igual que el `uuid` → `gameModeId` del catálogo. Lo
-      // que viaja es la identidad de PLATAFORMA, nunca el `seat-N` interno de la mesa.
-      userId: entry.userUuid,
+      // LO QUE VIAJA ES LA IDENTIDAD DE PLATAFORMA, nunca el `seat-N` interno de la mesa. El
+      // nombre coincide de los dos lados desde que la identidad se aplanó a `userId`; mandar el
+      // `playerId` acá le sumaría los puntos de todos los ganadores del sistema a una cuenta
+      // que no existe, porque `seat-1` es el mismo en todas las mesas.
+      userId: entry.userId,
       username: entry.username,
       profilePicture: entry.profilePicture,
       multiplier: entry.multiplier,
@@ -31,7 +32,7 @@ export class AmqpRankingFeed implements RankingFeed {
       // enseguida, así que no cambia nada funcional; lo que evita es que un `JSON.stringify` de un
       // `ArraySchema` termine acá el día que el llamador pase el nodo del árbol en vez de una
       // proyección.
-      opponentIds: [...entry.opponentUuids],
+      opponentIds: [...entry.opponentIds],
       // SOLO SI HUBO AUMENTO, con el `...` condicional: v1 manda la clave únicamente cuando
       // `acceptedBetLevel > 0`, y un `betIncrease: undefined` se serializa como clave AUSENTE en
       // JSON —así que daría lo mismo—, pero decirlo explícito es lo que deja leer la condición

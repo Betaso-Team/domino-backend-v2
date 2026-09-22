@@ -28,15 +28,13 @@ function build() {
       gameModeId: "g",
       seats: [
         {
-          platformId: "betaso",
-          userUuid: "u1",
+          userId: "u1",
           displayName: "Jugador u1",
           currency: "VES",
           playerId: "seat-1",
         },
         {
-          platformId: "betaso",
-          userUuid: "u2",
+          userId: "u2",
           displayName: "Jugador u2",
           currency: "VES",
           playerId: "seat-2",

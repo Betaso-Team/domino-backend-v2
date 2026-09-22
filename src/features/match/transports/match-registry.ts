@@ -1,5 +1,4 @@
 import type { KeyValueStore } from "@/shared/kv";
-import type { PlayerRef } from "@/shared/player-ref";
 import type { DominoMatchConfig } from "../core/config";
 import type { DominoRoomOptions } from "./match-contract";
 
@@ -42,15 +41,12 @@ export interface MatchConfigResponse extends PublicMatchConfig {
 // Tampoco se comparten con nadie: son el estado de EJECUCIÓN de un clúster, no un dato que dos
 // sistemas tengan que ver igual.
 const configKey = (roomId: string) => `match_config:${roomId}`;
-// LA CLAVE ES LA PAREJA ENTERA, serializada con `JSON.stringify` y no concatenada con un
-// separador: `["a","b:c"]` y `["a:b","c"]` son dos parejas distintas que un `a:b:c` vuelve la
-// misma clave. Con el escape de JSON, dos parejas distintas nunca colisionan aunque el
-// `platformId` o el `userUuid` traigan el separador adentro — y la que colisione sienta a un
-// jugador en la mesa de otro.
-const playerKey = (player: PlayerRef | string) =>
-  typeof player === "string"
-    ? `player_match:${player}`
-    : `player_match:${JSON.stringify([player.platformId, player.userUuid])}`;
+// LA CLAVE ES EL `userId` Y NADA MÁS. Fue la pareja `{ platformId, userId }` serializada con
+// `JSON.stringify` mientras la identidad tenía dos mitades: un `a:b:c` concatenado no dice
+// dónde termina una y empieza la otra, y la clave que colisiona sienta a un jugador en la
+// mesa de otro. Con UN solo componente no hay dos mitades que confundir, y el prefijo
+// `player_match:` ya la separa de las demás claves del almacén.
+const playerKey = (userId: string) => `player_match:${userId}`;
 const CENSUS_KEY = "live_seats";
 const LIVE_TOURNAMENTS = "live_tournaments";
 const tournamentKey = (tournamentId: string) => `tournament_matches:${tournamentId}`;
@@ -110,7 +106,7 @@ export class MatchRegistry {
   // ids OPACOS —`seat-1`, `seat-2`—, así que reconstruir de ahí la clave del índice invertido
   // es imposible; y guardar el `DominoMatchConfig` entero para tenerla metería moneda, tasa y
   // montos en la memoria del registro, que es justo lo que la allowlist de arriba evita.
-  private readonly seatsByRoomId = new Map<string, readonly PlayerRef[]>();
+  private readonly seatsByRoomId = new Map<string, readonly string[]>();
   private readonly optionsByRoomId = new Map<string, DominoRoomOptions>();
 
   // El reloj solo decide cuándo un campo del censo dejó de latir. Las demás claves conservan el
@@ -151,7 +147,7 @@ export class MatchRegistry {
     });
     this.seatsByRoomId.set(
       roomId,
-      config.seats.map(({ platformId, userUuid }) => ({ platformId, userUuid })),
+      config.seats.map(({ userId }) => userId),
     );
     if (options) this.optionsByRoomId.set(roomId, options);
     await this.keepAlive(roomId);
@@ -166,9 +162,8 @@ export class MatchRegistry {
     if (!config || !seats) return;
 
     await this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS);
-    for (const seat of seats) {
-      await this.store.setex(playerKey(seat), roomId, TTL_SECONDS);
-      await this.store.setex(playerKey(seat.userUuid), roomId, TTL_SECONDS);
+    for (const userId of seats) {
+      await this.store.setex(playerKey(userId), roomId, TTL_SECONDS);
     }
     await this.store.hset(
       CENSUS_KEY,
@@ -202,8 +197,8 @@ export class MatchRegistry {
 
   // En qué sala está sentado, si está en alguna. Es un GET contra el índice que las salas
   // escriben: la respuesta es del CLÚSTER, no de este proceso.
-  async matchOf(player: PlayerRef | string): Promise<string | undefined> {
-    return await this.store.get(playerKey(player));
+  async matchOf(userId: string): Promise<string | undefined> {
+    return await this.store.get(playerKey(userId));
   }
 
   async census(): Promise<MatchCensusCount> {
@@ -248,9 +243,8 @@ export class MatchRegistry {
 
     this.store.del(configKey(roomId));
     await this.store.hdel(CENSUS_KEY, roomId);
-    for (const seat of seats) {
-      await this.release(seat, roomId);
-      await this.release(seat.userUuid, roomId);
+    for (const userId of seats) {
+      await this.release(userId, roomId);
     }
     if (options?.mode === "TOURNAMENT")
       await this.store.srem(tournamentKey(options.tournamentId), roomId);
@@ -261,9 +255,9 @@ export class MatchRegistry {
   // proceso o en otro—, y borrar a ciegas lo dejaría sin partida justo cuando acaba de empezar
   // una. El chequeo no es atómico y no hace falta que lo sea: la ventana que queda es la de una
   // clave que caduca sola en dos minutos.
-  private async release(player: PlayerRef | string, roomId: string): Promise<void> {
-    if ((await this.store.get(playerKey(player))) === roomId) {
-      this.store.del(playerKey(player));
+  private async release(userId: string, roomId: string): Promise<void> {
+    if ((await this.store.get(playerKey(userId))) === roomId) {
+      this.store.del(playerKey(userId));
     }
   }
 }

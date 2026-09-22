@@ -113,7 +113,7 @@ if (entries.length === 0) {
 // LOS ASIENTOS SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
 // siendo IDS DE ASIENTO —el vocabulario con el que el historial grabó la partida—, y el
 // resto del snapshot no está grabado en ninguna parte: `match_history` guarda actos y
-// hechos, no la cabecera de la mesa. `platformId: "replay"` y `currency: "REPLAY"` son
+// hechos, no la cabecera de la mesa. `currency: "REPLAY"` es
 // etiquetas que gritan de dónde salieron, y los montos van en cero con la tasa nula.
 //
 // ⛔ NADA DE ESTO SIRVE PARA LIQUIDAR. Estos campos completan un `DominoMatchConfig` que el
@@ -128,10 +128,9 @@ if (entries.length === 0) {
 const snapshot = {
   matchId,
   gameModeId: "replay",
-  seats: seats.map((userUuid, index) => ({
-    platformId: "replay",
-    userUuid,
-    displayName: userUuid,
+  seats: seats.map((userId, index) => ({
+    userId,
+    displayName: userId,
     currency: "REPLAY",
     playerId: `seat-${index + 1}`,
   })),

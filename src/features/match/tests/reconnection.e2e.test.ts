@@ -33,7 +33,7 @@ afterAll(async () => {
   rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
-// Reciben la MESA y no solo el árbol: el selector que los tests usan es el `userUuid`, y
+// Reciben la MESA y no solo el árbol: el selector que los tests usan es el `userId`, y
 // adentro del árbol los jugadores se llaman `seat-N`. Comparar el uuid contra el asiento
 // daría `undefined` siempre — un `waitUntil` que se cuelga sin decir por qué.
 const connectedOf = (match: SeatedMatch, selector: string) =>

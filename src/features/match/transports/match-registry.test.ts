@@ -8,10 +8,9 @@ import { HEARTBEAT_MS, MatchRegistry, TTL_SECONDS } from "./match-registry";
 // ni siquiera aceptaría. Va por `replayConfigOf` —la entrada del snapshot ya congelado— y no por
 // `configOf`, que desde la Tarea 10 pide además el `GameMode` resuelto: el registro indexa mesas
 // que ya nacieron, no las hace nacer.
-const seat = (userUuid: string, index: number, platformId = "betaso", currency = "VES") => ({
-  platformId,
-  userUuid,
-  displayName: `Jugador ${userUuid}`,
+const seat = (userId: string, index: number, currency = "VES") => ({
+  userId,
+  displayName: `Jugador ${userId}`,
   currency,
   playerId: `seat-${index + 1}`,
 });
@@ -30,14 +29,12 @@ const roomOptions = {
 } as const;
 
 const config = replayConfigOf(roomOptions);
-// LA MESA QUE COLISIONARÍA con un índice por UUID pelado: el mismo `userUuid` en dos
-// plataformas distintas, que son dos personas con dos billeteras.
-const collidingConfig = replayConfigOf({
+// LA MESA CON DOS MONEDAS, para medir qué NO sale por el DTO público: identidad, moneda y
+// tasa son privadas, y con las dos monedas distintas una fuga se ve por cualquiera de las dos.
+const privateConfig = replayConfigOf({
   ...roomOptions,
-  seats: [seat("same", 0), seat("same", 1, "partner", "USD")],
+  seats: [seat("u1", 0), seat("u2", 1, "USD")],
 });
-
-const seatRef = (userUuid: string, platformId = "betaso") => ({ platformId, userUuid });
 
 // Contra la implementación de MEMORIA del puerto, que no es un doble sino la del proceso
 // único (ver `src/shared/kv.ts`). El reloj se inyecta para poder mover el plazo sin esperarlo.
@@ -90,8 +87,8 @@ describe("MatchRegistry", () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
     await registry.register("room-1", config);
 
-    expect(await registry.matchOf(seatRef("u2"))).toBe("room-1");
-    expect(await registry.matchOf(seatRef("u9"))).toBeUndefined();
+    expect(await registry.matchOf("u2")).toBe("room-1");
+    expect(await registry.matchOf("u9")).toBeUndefined();
   });
 
   it("deja de exponer una partida eliminada", async () => {
@@ -101,7 +98,7 @@ describe("MatchRegistry", () => {
     await registry.remove("room-1");
 
     expect(await registry.publicConfigOf("room-1")).toBeUndefined();
-    expect(await registry.matchOf(seatRef("u1"))).toBeUndefined();
+    expect(await registry.matchOf("u1")).toBeUndefined();
   });
 
   // EL PUNTO ENTERO DEL INCREMENTO, y el único test que lo mide: dos registros distintos son dos
@@ -123,7 +120,7 @@ describe("MatchRegistry", () => {
       entryFee: 125,
       prize: 250,
     });
-    expect(await procesoB.matchOf(seatRef("u1"))).toBe("room-1");
+    expect(await procesoB.matchOf("u1")).toBe("room-1");
   });
 
   // LO QUE DEJA ATRÁS UN PROCESO QUE MUERE DE GOLPE. `onDispose` no corre en un `kill -9`, así
@@ -137,7 +134,7 @@ describe("MatchRegistry", () => {
     clock.advance(TTL_SECONDS * 1000 + 1);
 
     expect(await registry.publicConfigOf("room-1")).toBeUndefined();
-    expect(await registry.matchOf(seatRef("u1"))).toBeUndefined();
+    expect(await registry.matchOf("u1")).toBeUndefined();
   });
 
   // Y EL LATIDO ES LO QUE IMPIDE QUE ESO LE PASE A UNA SALA VIVA. Sin `keepAlive`, el plazo de
@@ -152,7 +149,7 @@ describe("MatchRegistry", () => {
     clock.advance(TTL_SECONDS * 1000 - 1);
 
     expect(await registry.publicConfigOf("room-1")).toBeDefined();
-    expect(await registry.matchOf(seatRef("u1"))).toBe("room-1");
+    expect(await registry.matchOf("u1")).toBe("room-1");
   });
 
   // LA MEMORIA QUE QUEDA ES DE ESCRITURA, y esto es lo que la define: un proceso solo renueva y
@@ -170,16 +167,20 @@ describe("MatchRegistry", () => {
     expect(await procesoA.publicConfigOf("room-1")).toBeDefined();
   });
 
-  // LA PAREJA ES LA CLAVE, y el UUID solo no lo es: dos productos del Betaso comparten el
-  // espacio de UUIDs, así que indexar por `userUuid` pelado sentaría al jugador de una
-  // plataforma en la mesa de otro — y le daría su token de reconexión.
-  it("indexa por la pareja y no mezcla UUID iguales de plataformas distintas", async () => {
+  // LA CLAVE ES EL `userId`, y lo que se mide es que apunte a la sala en la que ese jugador se
+  // sentó y que un tercero no aparezca en ninguna: devolver una sala de más le da al que
+  // pregunta el token de reconexión de una partida ajena.
+  //
+  // Fue el test de la PAREJA `{ platformId, userId }` —`same` en dos plataformas eran dos
+  // personas— y esa mesa hoy no se puede ni construir: `checkTableShape` rechaza el `userId`
+  // repetido desde que la identidad se aplanó.
+  it("indexa cada asiento por su userId y no inventa los que no se sentaron", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", collidingConfig);
+    await registry.register("room-1", privateConfig);
 
-    expect(await registry.matchOf({ platformId: "betaso", userUuid: "same" })).toBe("room-1");
-    expect(await registry.matchOf({ platformId: "partner", userUuid: "same" })).toBe("room-1");
-    expect(await registry.matchOf({ platformId: "third", userUuid: "same" })).toBeUndefined();
+    expect(await registry.matchOf("u1")).toBe("room-1");
+    expect(await registry.matchOf("u2")).toBe("room-1");
+    expect(await registry.matchOf("u3")).toBeUndefined();
   });
 
   // `entryFee` y `prize` son los dos montos PÚBLICOS, en las mismas UC completas que el
@@ -191,11 +192,11 @@ describe("MatchRegistry", () => {
   it("publica los montos UC sin identidad, moneda ni tasa", async () => {
     const store = new MemoryKeyValueStore();
     const registry = new MatchRegistry(store);
-    await registry.register("room-1", collidingConfig);
+    await registry.register("room-1", privateConfig);
     const raw = await store.get("match_config:room-1");
 
     expect(raw).toBeDefined();
-    for (const secret of ["betaso", "partner", "VES", "USD", collidingConfig.rateId]) {
+    for (const secret of ["u1", "u2", "VES", "USD", privateConfig.rateId]) {
       expect(raw).not.toContain(secret);
     }
     expect(JSON.parse(raw ?? "{}")).toMatchObject({ entryFee: 125, prize: 250 });
@@ -220,8 +221,8 @@ describe("MatchRegistry", () => {
 
     await vieja.remove("room-1");
 
-    expect(await nueva.matchOf(seatRef("u1"))).toBe("room-2");
-    expect(await vieja.matchOf(seatRef("u2"))).toBeUndefined();
+    expect(await nueva.matchOf("u1")).toBe("room-2");
+    expect(await vieja.matchOf("u2")).toBeUndefined();
   });
 });
 

@@ -1,4 +1,3 @@
-import type { PlayerRef } from "@/shared/player-ref";
 import type { DominoMatchConfig, MatchSeat } from "../core/config";
 import { InvariantViolationError } from "../core/engine/errors";
 import type { MatchState } from "../core/state";
@@ -15,9 +14,9 @@ import type { NetworkMatchEvent } from "./events";
 export type SettlementKind = "REWARD" | "REFUND";
 
 /**
- * A quién se le acredita y cuánto. Lleva la pareja `{ platformId, userUuid }` —y no el
- * `playerId` opaco— porque el asiento es interno de la partida: quien cobre tiene que
- * resolver una billetera, y `seat-1` no nombra a nadie afuera de esta mesa.
+ * A quién se le acredita y cuánto. Lleva el `userId` de plataforma —y no el `playerId`
+ * opaco— porque el asiento es interno de la partida: quien cobre tiene que resolver una
+ * billetera, y `seat-1` no nombra a nadie afuera de esta mesa.
  *
  * ⚠ `currency` ES LA MONEDA EN QUE SE COBRÓ, NO LA UNIDAD DEL MONTO, y confundirlas es la
  * ambigüedad más cara que puede tener este tipo. `amount` está SIEMPRE en UC COMPLETAS —la
@@ -32,7 +31,8 @@ export type SettlementKind = "REWARD" | "REFUND";
  * motivo que el índice del registro: `["m","a:b"]` y `["m:a","b"]` no pueden colisionar, y
  * una colisión acá es un pago que no se hace porque otro ya usó la clave.
  */
-export interface SettlementEntry extends PlayerRef {
+export interface SettlementEntry {
+  readonly userId: string;
   readonly currency: string;
   readonly amount: number;
   readonly idempotencyKey: string;
@@ -55,11 +55,10 @@ const entryOf = (
   amount: number,
   seat: MatchSeat,
 ): SettlementEntry => ({
-  platformId: seat.platformId,
-  userUuid: seat.userUuid,
+  userId: seat.userId,
   currency: seat.currency,
   amount,
-  idempotencyKey: JSON.stringify([matchId, kind, seat.platformId, seat.userUuid]),
+  idempotencyKey: JSON.stringify([matchId, kind, seat.userId]),
 });
 
 /**
@@ -97,10 +96,8 @@ const assertSameTable = (match: MatchState, config: DominoMatchConfig): void => 
   for (const player of match.players) {
     const seat = seatsById.get(player.playerId);
     if (!seat) reject(`${player.playerId} no tiene asiento`);
-    else if (seat.platformId !== player.platformId || seat.userUuid !== player.userUuid) {
-      reject(
-        `${player.playerId} es ${JSON.stringify([player.platformId, player.userUuid])} en el estado y ${JSON.stringify([seat.platformId, seat.userUuid])} en el snapshot`,
-      );
+    else if (seat.userId !== player.userId) {
+      reject(`${player.playerId} es ${player.userId} en el estado y ${seat.userId} en el snapshot`);
     }
   }
 };

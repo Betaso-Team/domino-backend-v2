@@ -30,8 +30,7 @@ export function createMatchState(config: DominoMatchConfig): MatchState {
     player.displayName = seat.displayName;
     player.username = seat.username;
     player.profilePicture = seat.profilePicture;
-    player.platformId = seat.platformId;
-    player.userUuid = seat.userUuid;
+    player.userId = seat.userId;
     player.currency = seat.currency;
     player.seatIndex = seatIndex;
     player.teamId = teamId;

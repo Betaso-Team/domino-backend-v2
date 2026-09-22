@@ -11,8 +11,7 @@ import type { DominoMatchConfig, MatchSeat } from "../../config";
 // nada nuevo. Quien quiera la normalización de verdad tiene `match-contract.test.ts`.
 export const matchSeat = (playerId: string): MatchSeat => ({
   playerId,
-  platformId: "betaso",
-  userUuid: playerId,
+  userId: playerId,
   displayName: `Jugador ${playerId}`,
   currency: "VES",
 });

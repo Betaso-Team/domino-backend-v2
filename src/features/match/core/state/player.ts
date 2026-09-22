@@ -44,7 +44,7 @@ export type Hand = SchemaType<typeof Hand>;
 // esperando*, que es la mitad del valor de la ventana.
 // EL CORTE ENTRE PRESENTACIÓN E IDENTIDAD, y es el motivo por el que los seis campos de
 // abajo no son un solo bloque. `displayName`/`username`/`profilePicture` son lo que el
-// front dibuja y viajan al wire; la pareja `{ platformId, userUuid }` y la moneda ya
+// front dibuja y viajan al wire; el `userId` de plataforma y la moneda ya
 // cobrada son `noSync()` —viven en la instancia del servidor y NO entran a la metadata,
 // así que no se codifican, no se sincronizan y ni siquiera aparecen en `toJSON()`—.
 //
@@ -57,8 +57,7 @@ export const PlayerState = schema(
     displayName: t.string(),
     username: t.string().optional(),
     profilePicture: t.string().optional(),
-    platformId: t.string().noSync(),
-    userUuid: t.string().noSync(),
+    userId: t.string().noSync(),
     currency: t.string().noSync(),
     teamId: t.string(),
     seatIndex: t.number(),

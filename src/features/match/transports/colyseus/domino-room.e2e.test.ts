@@ -1,6 +1,12 @@
 import { gameModes, rootContainer } from "@/di-container";
-import type { PlayerRef } from "@/shared/player-ref";
-import { bootTestServer, casualTable, mintToken, participantOf, waitUntil } from "@/tests/e2e";
+import {
+  type ParticipantInput,
+  bootTestServer,
+  casualTable,
+  mintToken,
+  participantOf,
+  waitUntil,
+} from "@/tests/e2e";
 import { ColyseusSDK } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -141,22 +147,22 @@ describe("DominoRoom", () => {
   it("usa el sub como identidad y no la plataforma del token", async () => {
     const testServer = requiredServer();
     const participants = [
-      { platformId: "betaso", userUuid: "a", displayName: "Ada", currency: "VES" },
-      { platformId: "partner", userUuid: "b", displayName: "Lin", currency: "USD" },
+      { userId: "a", displayName: "Ada", currency: "VES" },
+      { userId: "b", displayName: "Lin", currency: "USD" },
     ] as const;
     const room = await testServer.createRoom<DominoRoom>(
       "domino",
       options("match-platforms", participants),
     );
-    const a = await connect(testServer, room, { platformId: "third", userUuid: "a" });
-    const b = await connect(testServer, room, { platformId: "fourth", userUuid: "b" });
+    const a = await connect(testServer, room, "a");
+    const b = await connect(testServer, room, "b");
 
     expect(room.clients.map((client) => client.userData)).toEqual(
       expect.arrayContaining([{ playerId: "seat-1" }, { playerId: "seat-2" }]),
     );
 
     const outsider = new ColyseusSDK(`ws://127.0.0.1:${portOf(testServer)}`);
-    outsider.auth.token = tokenOf({ platformId: "betaso", userUuid: "c" });
+    outsider.auth.token = tokenOf("c");
     await expect(outsider.joinById(room.roomId)).rejects.toThrow();
     await Promise.all([a.leave(), b.leave()]);
   });
@@ -215,8 +221,8 @@ describe("DominoRoom", () => {
       testServer.createRoom<DominoRoom>("domino", {
         ...options("match-4p", [
           ...defaultParticipants,
-          { platformId: "betaso", userUuid: "c", displayName: "C", currency: "VES" },
-          { platformId: "betaso", userUuid: "d", displayName: "D", currency: "VES" },
+          { userId: "c", displayName: "C", currency: "VES" },
+          { userId: "d", displayName: "D", currency: "VES" },
         ]),
         gameModeId: cuatro.uuid,
       }),
@@ -233,8 +239,8 @@ describe("DominoRoom", () => {
         "domino",
         options("match-seat-mismatch", [
           ...defaultParticipants,
-          { platformId: "betaso", userUuid: "c", displayName: "C", currency: "VES" },
-          { platformId: "betaso", userUuid: "d", displayName: "D", currency: "VES" },
+          { userId: "c", displayName: "C", currency: "VES" },
+          { userId: "d", displayName: "D", currency: "VES" },
         ]),
       ),
     ).rejects.toThrow(/SEAT_COUNT_MISMATCH/);
@@ -305,8 +311,8 @@ describe("DominoRoom", () => {
 });
 
 const defaultParticipants = [
-  { platformId: "betaso", userUuid: "a", displayName: "A", currency: "VES" },
-  { platformId: "betaso", userUuid: "b", displayName: "B", currency: "VES" },
+  { userId: "a", displayName: "A", currency: "VES" },
+  { userId: "b", displayName: "B", currency: "VES" },
 ] as const;
 
 // El request YA NO TRAE DINERO NI PUNTOS: los pone el modo que `src/tests/game-mode-catalog.ts`
@@ -329,9 +335,7 @@ async function configOfRoom(testServer: ColyseusTestServer, roomId: string) {
 
 // Un string es azúcar para "de la plataforma de siempre": los tests que no miden
 // multiplataforma no tienen por qué escribir la pareja entera.
-const tokenOf = (player: string | PlayerRef) => {
-  return mintToken(typeof player === "string" ? participantOf(player) : player);
-};
+const tokenOf = (player: ParticipantInput) => mintToken(participantOf(player));
 
 function requiredServer(): ColyseusTestServer {
   if (!server) throw new Error("servidor de prueba no iniciado");
@@ -342,11 +346,7 @@ function portOf(testServer: ColyseusTestServer): number {
   return (testServer.server as unknown as { readonly port: number }).port;
 }
 
-async function connect(
-  testServer: ColyseusTestServer,
-  room: DominoRoom,
-  player: string | PlayerRef,
-) {
+async function connect(testServer: ColyseusTestServer, room: DominoRoom, player: ParticipantInput) {
   testServer.sdk.auth.token = tokenOf(player);
   return testServer.connectTo(room);
 }

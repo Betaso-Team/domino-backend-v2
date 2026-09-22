@@ -1,7 +1,6 @@
 import { testConfig } from "@/app.config";
 import { env } from "@/env";
 import type { CreateMatchRequest, MatchParticipant } from "@/features/match";
-import type { PlayerRef } from "@/shared/player-ref";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
 import { CASUAL_2P } from "./game-mode-catalog";
@@ -17,15 +16,14 @@ export function bootTestServer(port: number): Promise<ColyseusTestServer> {
 export const participantOf = (input: ParticipantInput): MatchParticipant =>
   typeof input === "string"
     ? {
-        platformId: "betaso",
-        userUuid: input,
+        userId: input,
         displayName: `Jugador ${input}`,
         currency: "VES",
       }
     : input;
 
-export function mintToken(player: PlayerRef): string {
-  return jwt.sign({ sub: player.userUuid, platformId: player.platformId }, env.jwtSecret, {
+export function mintToken(player: { readonly userId: string }): string {
+  return jwt.sign({ sub: player.userId }, env.jwtSecret, {
     algorithm: "HS256",
     expiresIn: "1h",
   });
@@ -38,7 +36,7 @@ export function casualTable(
   const participants = seats.map(participantOf);
   return {
     mode: "CASUAL",
-    matchId: `m-${participants.map(({ userUuid }) => userUuid).join("-")}`,
+    matchId: `m-${participants.map(({ userId }) => userId).join("-")}`,
     gameModeId: CASUAL_2P.uuid,
     participants,
     seed,

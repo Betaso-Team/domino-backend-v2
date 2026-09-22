@@ -274,7 +274,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // pasa. De estas cuatro líneas para abajo nadie vuelve a ver una plataforma ni un
     // UUID: el motor, el historial y el wire hablan de `seat-N`.
     const identity = client.auth as SeatCredentials;
-    const playerId = this.config.seats.find((seat) => seat.userUuid === identity.userId)?.playerId;
+    const playerId = this.config.seats.find((seat) => seat.userId === identity.userId)?.playerId;
     // Primero pertenece a la mesa; recién después se pregunta si sigue jugando. Invertir
     // el orden filtra el estado de una partida a un principal sin asiento reservado.
     // LA ÚNICA EXCEPCIÓN DELIBERADA a "la identidad externa no sale del cruce": este error

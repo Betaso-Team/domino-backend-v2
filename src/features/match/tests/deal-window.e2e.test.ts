@@ -23,7 +23,7 @@ afterAll(async () => {
   await server.shutdown();
 });
 
-// El SELECTOR es el `userUuid` con el que el test nombra a la gente; adentro del árbol los
+// El SELECTOR es el `userId` con el que el test nombra a la gente; adentro del árbol los
 // jugadores se llaman `seat-N`, así que traducirlo no es opcional: sin `playerIdOf` la
 // búsqueda no encuentra a nadie y el `waitUntil` se cuelga en vez de fallar.
 const seenOf = (match: SeatedMatch, state: MatchState, selector: string): boolean =>

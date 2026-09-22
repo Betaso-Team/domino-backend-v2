@@ -42,7 +42,7 @@ export interface BetIncreaseTrace {
 /**
  * Una participación que suma al ranking del dominó.
  *
- * LLEVA `userUuid` Y NO `playerId`, y es la diferencia que más fácil se pasa por alto al portar de
+ * LLEVA `userId` Y NO `playerId`, y es la diferencia que más fácil se pasa por alto al portar de
  * truco: allá el `playerId` ES la identidad de plataforma, así que el transporte lo manda tal
  * cual. Acá el `playerId` es OPACO y POSICIONAL (`seat-1`), idéntico en todas las mesas, y mandarlo
  * como `userId` le sumaría los puntos de todo el mundo a una cuenta que no existe.
@@ -51,12 +51,12 @@ export interface BetIncreaseTrace {
  * Quien lo calcula es quien tiene el estado a la vista, no este puerto.
  */
 export interface RankingParticipation {
-  readonly userUuid: string;
+  readonly userId: string;
   readonly username: string;
   readonly profilePicture: string;
   readonly currency: string;
   readonly multiplier: number;
-  readonly opponentUuids: readonly string[];
+  readonly opponentIds: readonly string[];
   /** Ausente = no hubo aumento en esta partida. Es el reposo, no un dato que falte. */
   readonly betIncrease?: BetIncreaseTrace;
 }
@@ -76,7 +76,7 @@ export interface RankingFeed {
  * cadena vacía, porque del otro lado eso es lo que distingue "no tiene" de "tiene una vacía".
  */
 export interface LeaguePlayer {
-  readonly userUuid: string;
+  readonly userId: string;
   readonly username: string;
   readonly profilePicture: string | null;
 }

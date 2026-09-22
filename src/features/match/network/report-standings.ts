@@ -108,7 +108,7 @@ async function report(deps: ReportStandingsDeps, winnerTeamId: string): Promise<
             baseMultiplier: config.multiplier,
           }
         : undefined;
-    const opponentUuids = losers.map((seat) => seat.userUuid);
+    const opponentIds = losers.map((seat) => seat.userId);
 
     const ranking = deps.ranking;
     // EN SERIE Y NO EN PARALELO: en 2P es UNA sola participación, y el día que el 4P se abra son
@@ -116,12 +116,12 @@ async function report(deps: ReportStandingsDeps, winnerTeamId: string): Promise<
     // lado, que es lo que se mira cuando alguien reclama sus puntos.
     for (const seat of winners) {
       await ranking.won({
-        userUuid: seat.userUuid,
+        userId: seat.userId,
         username: seat.username ?? "",
         profilePicture: seat.profilePicture ?? "",
         currency: seat.currency,
         multiplier,
-        opponentUuids,
+        opponentIds,
         ...(betIncrease && { betIncrease }),
       });
     }
@@ -141,7 +141,7 @@ async function report(deps: ReportStandingsDeps, winnerTeamId: string): Promise<
 // `?? ""` en el nombre y `?? null` en la foto, y la asimetría es de v1: manda
 // `String(username ?? "")` y `profilePicture ?? null`. Un invitado no tiene ninguno de los dos.
 const leaguePlayerOf = (seat: MatchSeat): LeaguePlayer => ({
-  userUuid: seat.userUuid,
+  userId: seat.userId,
   username: seat.username ?? "",
   profilePicture: seat.profilePicture ?? null,
 });

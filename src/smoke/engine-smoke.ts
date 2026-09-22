@@ -60,18 +60,8 @@ const requestFor = (gameModeId: string) =>
     matchId: "smoke-full-game",
     gameModeId,
     participants: [
-      {
-        platformId: "betaso",
-        userUuid: "shared-smoke-uuid",
-        displayName: "Ada",
-        currency: "VES",
-      },
-      {
-        platformId: "partner",
-        userUuid: "shared-smoke-uuid",
-        displayName: "Lin",
-        currency: "USD",
-      },
+      { userId: "smoke-ada", displayName: "Ada", currency: "VES" },
+      { userId: "smoke-lin", displayName: "Lin", currency: "USD" },
     ],
     seed: "smoke-deterministic-seed",
     teamAssignment: "SEAT_ORDER",
@@ -126,8 +116,8 @@ async function waitUntil(
   throw new Error(`${label}: se agotó el plazo${detail}`);
 }
 
-const tokenOf = (platformId: string, userUuid: string) =>
-  jwt.sign({ sub: userUuid, platformId }, env.jwtSecret, {
+const tokenOf = (userId: string) =>
+  jwt.sign({ sub: userId }, env.jwtSecret, {
     algorithm: "HS256",
     expiresIn: "10m",
   });
@@ -197,11 +187,10 @@ function assertSettlements(
     kind: "REWARD",
     entries: [
       {
-        platformId: winner.platformId,
-        userUuid: winner.userUuid,
+        userId: winner.userId,
         currency: winner.currency,
         amount: config.prize,
-        idempotencyKey: `["${config.matchId}","REWARD","${winner.platformId}","${winner.userUuid}"]`,
+        idempotencyKey: `["${config.matchId}","REWARD","${winner.userId}"]`,
       },
     ],
   });
@@ -213,14 +202,10 @@ function assertSettlements(
   );
   assert.equal(refund?.kind, "REFUND");
   assert.deepEqual(
-    refund?.entries.map(({ platformId, currency, amount }) => ({
-      platformId,
-      currency,
-      amount,
-    })),
+    refund?.entries.map(({ userId, currency, amount }) => ({ userId, currency, amount })),
     [
-      { platformId: "betaso", currency: "VES", amount: 125 },
-      { platformId: "partner", currency: "USD", amount: 125 },
+      { userId: "smoke-ada", currency: "VES", amount: 125 },
+      { userId: "smoke-lin", currency: "USD", amount: 125 },
     ],
   );
 }
@@ -316,8 +301,8 @@ async function run(): Promise<void> {
   const config = configOf(requestOf(OPTIONS), mode);
   const sdkA = new ColyseusSDK(WS_URL);
   const sdkB = new ColyseusSDK(WS_URL);
-  sdkA.auth.token = tokenOf("betaso", "shared-smoke-uuid");
-  sdkB.auth.token = tokenOf("partner", "shared-smoke-uuid");
+  sdkA.auth.token = tokenOf("smoke-ada");
+  sdkB.auth.token = tokenOf("smoke-lin");
   let roomA: SmokeRoom | undefined;
   let roomB: SmokeRoom | undefined;
   try {
@@ -331,13 +316,13 @@ async function run(): Promise<void> {
     );
 
     const outsider = new ColyseusSDK(WS_URL);
-    outsider.auth.token = tokenOf("third", "shared-smoke-uuid");
+    outsider.auth.token = tokenOf("smoke-outsider");
     await assert.rejects(outsider.joinById(first.roomId, {}, MatchState));
 
     const wire = JSON.stringify(first.state.toJSON());
     assert.match(wire, /Ada/);
     assert.match(wire, /Lin/);
-    for (const privateValue of ["shared-smoke-uuid", "betaso", "partner", "VES", "USD"]) {
+    for (const privateValue of ["smoke-ada", "smoke-lin", "VES", "USD"]) {
       assert.equal(wire.includes(privateValue), false, `dato privado filtrado: ${privateValue}`);
     }
 

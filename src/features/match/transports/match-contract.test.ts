@@ -14,16 +14,14 @@ import { configOf, replayConfigOf, requestOf } from "./match-contract";
 // puede REBOBINAR, y el día que el catálogo cambie de reglas la segunda no puede cambiar con él.
 const participants = [
   {
-    platformId: "betaso",
-    userUuid: "same",
+    userId: "ada",
     displayName: "Ada",
     username: "ada",
     profilePicture: "https://img.test/ada.png",
     currency: "VES",
   },
   {
-    platformId: "partner",
-    userUuid: "same",
+    userId: "lin",
     displayName: "Lin",
     currency: "USD",
   },
@@ -64,12 +62,11 @@ const modeOf = (overrides: Partial<GameMode> = {}): GameMode => ({
 const configFrom = (input: unknown = request, mode: GameMode = modeOf()) =>
   configOf(requestOf(input), mode);
 
-// OTRO PRINCIPAL CUALQUIERA, para armar mesas de largo distinto del válido. Cada uno es una
-// pareja nueva, así que lo único que estas filas ejercen es el LARGO — si reusaran una pareja
+// OTRO PRINCIPAL CUALQUIERA, para armar mesas de largo distinto del válido. Cada uno es un
+// `userId` nuevo, así que lo único que estas filas ejercen es el LARGO — si reusaran uno
 // existente, el rechazo podría venir del control de duplicados y la fila mediría otra regla.
 const extra = (n: number) => ({
-  platformId: "betaso",
-  userUuid: `extra-${n}`,
+  userId: `extra-${n}`,
   displayName: `Extra ${n}`,
   currency: "VES",
 });
@@ -98,8 +95,8 @@ describe("requestOf", () => {
     ["cinco participantes", { participants: [...participants, extra(1), extra(2), extra(3)] }],
     ["currency vacía", { participants: [{ ...participants[0], currency: " " }, participants[1]] }],
     [
-      "platformId ausente",
-      { participants: [{ ...participants[0], platformId: undefined }, participants[1]] },
+      "userId ausente",
+      { participants: [{ ...participants[0], userId: undefined }, participants[1]] },
     ],
     [
       "displayName ausente",
@@ -109,25 +106,26 @@ describe("requestOf", () => {
     expect(() => requestOf({ ...request, ...override })).toThrow();
   });
 
-  // EL CASO QUE JUSTIFICA LA PAREJA: el mismo UUID puede existir en dos plataformas y ser
-  // dos personas distintas con dos billeteras distintas. Lo que no puede repetirse es la
-  // pareja entera — eso sería el mismo principal sentado dos veces en la misma mesa.
-  it("acepta el mismo userUuid en plataformas distintas y rechaza la pareja duplicada", () => {
+  // EL `userId` ES LO ÚNICO ÚNICO de la mesa: repetirlo es el mismo principal sentado dos
+  // veces, cobrando dos inscripciones y pudiendo jugar contra sí mismo. Fue la PAREJA
+  // `{ platformId, userId }` mientras el Betaso podía tener dos productos sobre el mismo
+  // espacio de UUIDs; con la identidad aplanada esa distinción dejó de existir.
+  it("acepta dos userId distintos y rechaza el mismo dos veces", () => {
     expect(() => requestOf(request)).not.toThrow();
     expect(() =>
       requestOf({ ...request, participants: [participants[0], participants[0]] }),
     ).toThrow(/duplicada/);
   });
 
-  // Y NORMALIZAR ANTES DE COMPARAR es lo que impide colar la misma pareja dos veces con un
+  // Y NORMALIZAR ANTES DE COMPARAR es lo que impide colar al mismo jugador dos veces con un
   // espacio de más. `superRefine` recibe la salida del objeto, así que ve los valores ya
   // recortados; si corriera sobre la entrada, esta mesa pasaría y cobraría dos asientos al
   // mismo principal.
-  it("el padding no alcanza para duplicar una pareja", () => {
+  it("el padding no alcanza para duplicar un jugador", () => {
     expect(() =>
       requestOf({
         ...request,
-        participants: [participants[0], { ...participants[0], userUuid: " same " }],
+        participants: [participants[0], { ...participants[0], userId: " ada " }],
       }),
     ).toThrow(/duplicada/);
   });
@@ -173,19 +171,16 @@ describe("configOf", () => {
     expect(config.isDealWindowEnabled).toBe(true);
   });
 
-  // LA IDENTIDAD SE GUARDA NORMALIZADA. El asiento se compara contra lo que viene en el token,
-  // así que un `platformId` con padding acá y sin padding allá sería el mismo jugador para el
+  // LA IDENTIDAD SE GUARDA NORMALIZADA. El asiento se compara contra el `sub` del token, así
+  // que un `userId` con padding acá y sin padding allá sería el mismo jugador para el
   // validador y dos distintos para `onJoin` — asiento rechazado con la inscripción cobrada.
   it("normaliza los espacios de la identidad y deja la moneda intacta", () => {
     const padded = configFrom({
       ...request,
-      participants: [
-        { ...participants[0], platformId: " betaso ", userUuid: "  same  ", currency: " VES " },
-        participants[1],
-      ],
+      participants: [{ ...participants[0], userId: "  ada  ", currency: " VES " }, participants[1]],
     });
 
-    expect(padded.seats[0]).toMatchObject({ platformId: "betaso", userUuid: "same" });
+    expect(padded.seats[0]).toMatchObject({ userId: "ada" });
     // La moneda es un valor CONTABLE, no una llave: se conserva exactamente como se cobró.
     expect(padded.seats[0]?.currency).toBe(" VES ");
   });

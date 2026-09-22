@@ -32,7 +32,7 @@ describe("JwtVerifier", () => {
   });
 
   it("rechaza un token firmado con otro secreto", async () => {
-    const token = jwt.sign({ sub: "u1", platformId: "betaso" }, "x".repeat(32), {
+    const token = jwt.sign({ sub: "u1" }, "x".repeat(32), {
       algorithm: "HS256",
     });
 
@@ -40,7 +40,7 @@ describe("JwtVerifier", () => {
   });
 
   it("rechaza un token expirado", async () => {
-    const token = jwt.sign({ sub: "u1", platformId: "betaso" }, SECRET, {
+    const token = jwt.sign({ sub: "u1" }, SECRET, {
       algorithm: "HS256",
       expiresIn: "-1h",
     });
@@ -49,19 +49,19 @@ describe("JwtVerifier", () => {
   });
 
   it("rechaza el algoritmo none", async () => {
-    const token = jwt.sign({ sub: "u1", platformId: "betaso" }, "", { algorithm: "none" });
+    const token = jwt.sign({ sub: "u1" }, "", { algorithm: "none" });
 
     await expect(verifier.verify(token)).rejects.toBeInstanceOf(InvalidTokenError);
   });
 
   it("rechaza HS384 aunque use el secreto correcto", async () => {
-    const token = jwt.sign({ sub: "u1", platformId: "betaso" }, SECRET, { algorithm: "HS384" });
+    const token = jwt.sign({ sub: "u1" }, SECRET, { algorithm: "HS384" });
 
     await expect(verifier.verify(token)).rejects.toBeInstanceOf(InvalidTokenError);
   });
 
   it("rechaza un token sin claim sub", async () => {
-    const token = jwt.sign({ role: "player", platformId: "betaso" }, SECRET, {
+    const token = jwt.sign({ role: "player" }, SECRET, {
       algorithm: "HS256",
     });
 

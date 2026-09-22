@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { rootContainer } from "@/di-container";
 import { env } from "@/env";
-import type { PlayerRef } from "@/shared/player-ref";
 import {
   type ParticipantInput,
   bootTestServer,
@@ -59,7 +58,7 @@ export interface SeatedMatch {
   /** El request con el que la sala se creó. Es la mitad viva del config; la otra es el modo. */
   readonly options: CreateMatchRequest;
   /**
-   * El MISMO snapshot que la sala normalizó: es lo único que traduce entre el `userUuid`
+   * El MISMO snapshot que la sala normalizó: es lo único que traduce entre el `userId`
    * con el que el test nombra a un jugador y el `seat-N` con el que el servidor lo nombra.
    * Sin él, cada test tendría que saber en qué posición lo sentó `configOf`.
    */
@@ -110,13 +109,14 @@ export async function revealHands(match: SeatedMatch): Promise<void> {
 export async function rejoinAs(
   server: ColyseusTestServer,
   match: SeatedMatch,
-  selector: string | PlayerRef,
+  selector: string,
 ): Promise<Room<unknown, MatchState>> {
   const playerId = playerIdOf(match, selector);
   const seat = match.config.seats.find((candidate) => candidate.playerId === playerId);
   if (!seat) throw new Error(`sin asiento para ${playerId}`);
-  // EL TOKEN SE FIRMA CON LA PAREJA DEL ASIENTO, no con el selector: un test que entró por
-  // `seat-1` tiene que volver como la misma persona, y la plataforma es parte de quién es.
+  // EL TOKEN SE FIRMA CON LA IDENTIDAD DEL ASIENTO, no con el selector: un test que entró por
+  // `seat-1` tiene que volver como la misma persona, y `seat-1` no es un `sub` que se pueda
+  // firmar.
   server.sdk.auth.token = mintToken(seat);
   // El parámetro de tipo elige el overload que devuelve el estado tipado. Sin él,
   // `joinById` resuelve al de `State = any` y el llamador termina casteando `back.state`
@@ -128,27 +128,20 @@ export async function rejoinAs(
 }
 
 // EL ÚNICO RESOLVEDOR de "a quién se refiere este test". Acepta el id opaco del asiento
-// —que es lo que el servidor devuelve en `currentTurn.playerId`— y también el `userUuid` o
-// la pareja entera, que es como los tests nombran a la gente. Sin esto, cada suite tendría
-// que saber que `configOf` sienta al primer participante en `seat-1`.
+// —que es lo que el servidor devuelve en `currentTurn.playerId`— y también el `userId` o
+// el `userId`, que es como los tests nombran a la gente. Sin esto, cada suite tendría que
+// saber que `configOf` sienta al primer participante en `seat-1`.
 //
-// El camino por `userUuid` EXIGE que sea único en la mesa: con el mismo UUID en dos
-// plataformas el selector es ambiguo, y elegir el primero sentaría al test en el asiento
-// equivocado sin decir nada. Ese caso se nombra con la pareja.
-export function playerIdOf(match: SeatedMatch, selector: string | PlayerRef): string {
-  if (typeof selector !== "string") {
-    const seat = match.config.seats.find(
-      (candidate) =>
-        candidate.platformId === selector.platformId && candidate.userUuid === selector.userUuid,
-    );
-    if (!seat) throw new Error(`sin asiento para ${JSON.stringify(selector)}`);
-    return seat.playerId;
-  }
+// El selector acepta las DOS formas y las distingue probando primero el `playerId`: desde que
+// la identidad se aplanó a `userId` los dos son `string`, así que ya no hay tipo que los
+// separe. No es ambiguo igual — `configOf` reparte `seat-N` y ningún `userId` de la suite
+// tiene esa forma.
+export function playerIdOf(match: SeatedMatch, selector: string): string {
   const direct = match.config.seats.find(({ playerId }) => playerId === selector);
   if (direct) return direct.playerId;
   // Un solo chequeo para los dos casos: el resto vacío dice "no es ambiguo" y `seat` presente
   // dice "existe" — que es además lo que `noUncheckedIndexedAccess` necesita para estrechar.
-  const [seat, ...ambiguous] = match.config.seats.filter(({ userUuid }) => userUuid === selector);
+  const [seat, ...ambiguous] = match.config.seats.filter(({ userId }) => userId === selector);
   if (!seat || ambiguous.length > 0) throw new Error(`selector ambiguo o ausente: ${selector}`);
   return seat.playerId;
 }
@@ -156,10 +149,7 @@ export function playerIdOf(match: SeatedMatch, selector: string | PlayerRef): st
 // El cliente de un asiento, o un fallo con nombre. `SeatedMatch.clients` está indexado por
 // string, así que leerlo devuelve `T | undefined`; el optional chaining convertiría un
 // asiento mal escrito en un test que no hace nada.
-export function clientOf(
-  match: SeatedMatch,
-  selector: string | PlayerRef,
-): SeatedMatch["clients"][string] {
+export function clientOf(match: SeatedMatch, selector: string): SeatedMatch["clients"][string] {
   const playerId = playerIdOf(match, selector);
   const client = match.clients[playerId];
   if (!client) throw new Error(`sin cliente para el asiento ${playerId}`);
@@ -198,7 +188,7 @@ export function legalPlayFor(
 
 export async function act(
   match: SeatedMatch,
-  selector: string | PlayerRef,
+  selector: string,
   type: string,
   payload: unknown = {},
 ): Promise<void> {

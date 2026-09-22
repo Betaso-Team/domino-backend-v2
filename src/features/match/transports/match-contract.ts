@@ -4,7 +4,6 @@ import type { Identity } from "@/features/auth";
 // va en un solo sentido —`game-mode` redeclaró su `Clock` estructural en la Tarea 4 justamente
 // para no tener que importar de acá— y eso es lo que mantiene el grafo acíclico.
 import type { GameMode } from "@/features/game-mode";
-import type { PlayerRef } from "@/shared/player-ref";
 import { z } from "zod";
 import type { DominoMatchConfig } from "../core/config";
 import type { MatchEventSink } from "../network/listeners";
@@ -26,9 +25,9 @@ const nonBlank = z.string().refine((value) => value.trim().length > 0, "no puede
 
 // LA IDENTIDAD SE NORMALIZA; LA MONEDA NO, y la asimetría es deliberada.
 //
-// `platformId` y `userUuid` son las dos mitades de una LLAVE: se comparan contra el token en
-// `DominoRoom.onJoin` y se concatenan en la clave del registro. Validar con trim y guardar sin
-// trim deja que `"betaso "` en el snapshot y `"betaso"` en el token sean el mismo jugador para
+// `userId` es una LLAVE: se compara contra el `sub` del token en `DominoRoom.onJoin` y es la
+// clave del registro compartido. Validar con trim y guardar sin trim deja que `"ada "` en el
+// snapshot y `"ada"` en el token sean el mismo jugador para
 // el validador y dos distintos para el cruce — o sea `SeatNotReservedError` con la inscripción
 // ya cobrada, por un espacio que nadie ve. `JwtVerifier` normaliza igual, y tienen que hacerlo
 // las DOS fronteras: normalizar una sola mueve el problema en vez de cerrarlo.
@@ -56,8 +55,7 @@ const identityPart = nonBlank.transform((value) => value.trim());
 const ucAmount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
 const participant = z.strictObject({
-  platformId: identityPart,
-  userUuid: identityPart,
+  userId: identityPart,
   displayName: nonBlank,
   username: nonBlank.optional(),
   profilePicture: nonBlank.optional(),
@@ -70,7 +68,7 @@ const teamAssignment = z.enum(["SHUFFLED", "SEAT_ORDER"]);
 // snapshot que se rebobina tienen los mismos asientos, y dos copias de esto derivan el día que
 // alguien arregle una sola.
 function checkTableShape(
-  seats: readonly { readonly platformId: string; readonly userUuid: string }[],
+  seats: readonly { readonly userId: string }[],
   context: z.RefinementCtx,
   path: string,
 ): void {
@@ -79,15 +77,15 @@ function checkTableShape(
   if (seats.length % 2 !== 0) {
     context.addIssue({ code: "custom", path: [path], message: "cantidad impar" });
   }
-  // LA PAREJA ENTERA es lo único único. El mismo `userUuid` en dos plataformas son dos
-  // personas; el mismo par dos veces es el mismo principal cobrando dos asientos.
+  // EL `userId` ES LO ÚNICO ÚNICO: el mismo dos veces es el mismo principal cobrando dos
+  // asientos.
   //
-  // Corre DESPUÉS del `.transform()` de cada campo —`superRefine` recibe la salida del
-  // objeto, no su entrada—, así que `"same"` y `" same "` ya son la misma clave acá: el
-  // padding no alcanza para colar la misma pareja dos veces.
+  // Corre DESPUÉS del `.transform()` del campo —`superRefine` recibe la salida del objeto,
+  // no su entrada—, así que `"same"` y `" same "` ya son la misma clave acá: el padding no
+  // alcanza para colar al mismo jugador dos veces.
   const seen = new Set<string>();
   seats.forEach((value, index) => {
-    const key = JSON.stringify([value.platformId, value.userUuid]);
+    const key = value.userId;
     if (seen.has(key)) {
       context.addIssue({
         code: "custom",
@@ -334,8 +332,7 @@ export function configFromRoomOptions(
     seed: options.seed,
     seats: options.seats.map((playerId) => ({
       playerId,
-      platformId: "betaso",
-      userUuid: playerId,
+      userId: playerId,
       displayName: playerId,
       currency: "USD",
     })),

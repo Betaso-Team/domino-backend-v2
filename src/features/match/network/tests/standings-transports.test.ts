@@ -31,12 +31,12 @@ function fakePublisher(): { readonly sent: Sent[]; readonly port: AmqpDelivery }
 }
 
 const entry = {
-  userUuid: "uuid-1",
+  userId: "uuid-1",
   username: "gana",
   profilePicture: "foto.png",
   currency: "VES",
   multiplier: 5,
-  opponentUuids: ["uuid-2"],
+  opponentIds: ["uuid-2"],
 };
 
 describe("AmqpRankingFeed", () => {
@@ -49,7 +49,7 @@ describe("AmqpRankingFeed", () => {
     expect(sent[0]?.pattern).toBe("ranking.save-participation");
   });
 
-  it("traduce userUuid a userId y no manda el aumento si no hubo", async () => {
+  it("traduce userId a userId y no manda el aumento si no hubo", async () => {
     const { sent, port } = fakePublisher();
     await new AmqpRankingFeed(port).won(entry);
 
@@ -77,8 +77,8 @@ describe("HttpLeagueFeed", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const result = {
-    winner: { userUuid: "uuid-1", username: "gana", profilePicture: "foto.png" },
-    losers: [{ userUuid: "uuid-2", username: "pierde", profilePicture: null }],
+    winner: { userId: "uuid-1", username: "gana", profilePicture: "foto.png" },
+    losers: [{ userId: "uuid-2", username: "pierde", profilePicture: null }],
   };
 
   function stubFetch(status = 200) {

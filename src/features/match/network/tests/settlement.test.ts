@@ -21,8 +21,8 @@ const options = {
   matchId: "money-1",
   gameModeId: "classic-2p",
   seats: seatsOf([
-    { platformId: "betaso", userUuid: "same", displayName: "Ada", currency: "VES" },
-    { platformId: "partner", userUuid: "same", displayName: "Lin", currency: "USD" },
+    { userId: "ada", displayName: "Ada", currency: "VES" },
+    { userId: "lin", displayName: "Lin", currency: "USD" },
   ]),
   seed: "money-seed",
   pointsToWin: 100,
@@ -41,10 +41,10 @@ const fourSeatOptions = {
   matchId: "money-4p",
   gameModeId: "classic-4p",
   seats: seatsOf([
-    { platformId: "betaso", userUuid: "u1", displayName: "Ada", currency: "VES" },
-    { platformId: "betaso", userUuid: "u2", displayName: "Lin", currency: "VES" },
-    { platformId: "partner", userUuid: "u3", displayName: "Rex", currency: "USD" },
-    { platformId: "partner", userUuid: "u4", displayName: "Zoe", currency: "COP" },
+    { userId: "u1", displayName: "Ada", currency: "VES" },
+    { userId: "u2", displayName: "Lin", currency: "VES" },
+    { userId: "u3", displayName: "Rex", currency: "USD" },
+    { userId: "u4", displayName: "Zoe", currency: "COP" },
   ]),
 } as const;
 
@@ -55,38 +55,23 @@ const matchOf = () => createMatchState(config);
 // recalcularlas mediría que dos expresiones idénticas dan lo mismo. Escritas a mano, pinean
 // el FORMATO —que es lo que el pagador va a guardar como única defensa contra el pago doble—
 // y se ponen rojas si alguien le cambia el orden o el separador.
-const rewardKey = '["money-1","REWARD","betaso","same"]';
-const refundKeys = [
-  '["money-1","REFUND","betaso","same"]',
-  '["money-1","REFUND","partner","same"]',
-];
+const rewardKey = '["money-1","REWARD","ada"]';
+const refundKeys = ['["money-1","REFUND","ada"]', '["money-1","REFUND","lin"]'];
 
 const refundOfMoney1 = {
   matchId: "money-1",
   rateId: options.rateId,
   kind: "REFUND",
   entries: [
-    {
-      platformId: "betaso",
-      userUuid: "same",
-      currency: "VES",
-      amount: 125,
-      idempotencyKey: refundKeys[0],
-    },
-    {
-      platformId: "partner",
-      userUuid: "same",
-      currency: "USD",
-      amount: 125,
-      idempotencyKey: refundKeys[1],
-    },
+    { userId: "ada", currency: "VES", amount: 125, idempotencyKey: refundKeys[0] },
+    { userId: "lin", currency: "USD", amount: 125, idempotencyKey: refundKeys[1] },
   ],
 };
 
 const abortReasons: readonly AbortReason[] = ["NEVER_STARTED", "NEVER_PLAYED", "INTERRUPTED"];
 
 describe("settlementOf", () => {
-  it("premia al ganador con su pareja y la moneda cobrada", () => {
+  it("premia al ganador con su identidad y la moneda cobrada", () => {
     const match = matchOf();
     const winnerTeamId = match.players[0]?.teamId as "A" | "B";
     expect(
@@ -95,15 +80,7 @@ describe("settlementOf", () => {
       matchId: "money-1",
       rateId: options.rateId,
       kind: "REWARD",
-      entries: [
-        {
-          platformId: "betaso",
-          userUuid: "same",
-          currency: "VES",
-          amount: 250,
-          idempotencyKey: rewardKey,
-        },
-      ],
+      entries: [{ userId: "ada", currency: "VES", amount: 250, idempotencyKey: rewardKey }],
     });
   });
 
@@ -136,32 +113,28 @@ describe("settlementOf", () => {
       kind: "REFUND",
       entries: [
         {
-          platformId: "betaso",
-          userUuid: "u1",
+          userId: "u1",
           currency: "VES",
           amount: 125,
-          idempotencyKey: '["money-4p","REFUND","betaso","u1"]',
+          idempotencyKey: '["money-4p","REFUND","u1"]',
         },
         {
-          platformId: "betaso",
-          userUuid: "u2",
+          userId: "u2",
           currency: "VES",
           amount: 125,
-          idempotencyKey: '["money-4p","REFUND","betaso","u2"]',
+          idempotencyKey: '["money-4p","REFUND","u2"]',
         },
         {
-          platformId: "partner",
-          userUuid: "u3",
+          userId: "u3",
           currency: "USD",
           amount: 125,
-          idempotencyKey: '["money-4p","REFUND","partner","u3"]',
+          idempotencyKey: '["money-4p","REFUND","u3"]',
         },
         {
-          platformId: "partner",
-          userUuid: "u4",
+          userId: "u4",
           currency: "COP",
           amount: 125,
-          idempotencyKey: '["money-4p","REFUND","partner","u4"]',
+          idempotencyKey: '["money-4p","REFUND","u4"]',
         },
       ],
     });
@@ -220,15 +193,15 @@ describe("settlementOf", () => {
 
   // EL MISMO FALLO PERO ENTRE DOS MESAS DEL MISMO TAMAÑO, que es el caso realista: dos 2P
   // tienen los mismos `seat-1`/`seat-2`, así que la forma coincide y solo la identidad
-  // congelada de cada asiento las distingue. Sin comparar la pareja, esto pagaba los 250 a
+  // congelada de cada asiento las distingue. Sin comparar el `userId`, esto pagaba los 250 a
   // alguien de la otra mesa con una instrucción impecable.
   it("rechaza otro estado del mismo tamaño y nombra la identidad que no coincide", () => {
     const otherTable = replayConfigOf({
       ...options,
       matchId: "money-2",
       seats: seatsOf([
-        { platformId: "betaso", userUuid: "ada", displayName: "Ada", currency: "VES" },
-        { platformId: "partner", userUuid: "rex", displayName: "Rex", currency: "USD" },
+        { userId: "rex", displayName: "Rex", currency: "USD" },
+        { userId: "zoe", displayName: "Zoe", currency: "COP" },
       ]),
     });
     expect(() =>
@@ -237,7 +210,7 @@ describe("settlementOf", () => {
         createMatchState(otherTable),
         config,
       ),
-    ).toThrow(/seat-1 es \["betaso","ada"\] en el estado y \["betaso","same"\] en el snapshot/);
+    ).toThrow(/seat-1 es rex en el estado y ada en el snapshot/);
   });
 
   // EL DECIMAL LLEGA ENTERO HASTA LA INSTRUCCIÓN, y es la mitad de esta tarea que un
@@ -251,8 +224,8 @@ describe("settlementOf", () => {
       ...options,
       matchId: "money-dec",
       seats: seatsOf([
-        { platformId: "betaso", userUuid: "u1", displayName: "Ada", currency: "VES" },
-        { platformId: "partner", userUuid: "u2", displayName: "Lin", currency: "USD" },
+        { userId: "u1", displayName: "Ada", currency: "VES" },
+        { userId: "u2", displayName: "Lin", currency: "USD" },
       ]),
       entryFee: 1.5,
       prize: 2.75,
@@ -265,8 +238,8 @@ describe("settlementOf", () => {
     ).toMatchObject({
       kind: "REFUND",
       entries: [
-        { platformId: "betaso", userUuid: "u1", currency: "VES", amount: 1.5 },
-        { platformId: "partner", userUuid: "u2", currency: "USD", amount: 1.5 },
+        { userId: "u1", currency: "VES", amount: 1.5 },
+        { userId: "u2", currency: "USD", amount: 1.5 },
       ],
     });
     expect(
