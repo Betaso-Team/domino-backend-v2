@@ -1,4 +1,5 @@
 export { MAX_REMATCHES_PER_CHAIN, RematchCoordinator } from "./rematch";
+export { registerCasualVeto, registerTournamentVeto } from "./veto";
 export type { RematchAntifraud, RematchCoordinatorDeps, RematchDoor } from "./rematch";
 export * from "./bet-charge";
 export * from "./events";

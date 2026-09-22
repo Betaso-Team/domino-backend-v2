@@ -1,3 +1,4 @@
+import { DEFAULT_TOURNAMENT_CONFIG } from "@/features/tournament";
 import type { Logger } from "@/logger";
 import type { DependencyContainer } from "tsyringe";
 import type { CommandName } from "../../../core/command";
@@ -14,9 +15,13 @@ import {
   MatchHistory,
   type MatchPieces,
   type StandingsFeeds,
+  registerCasualVeto,
+  registerTournamentVeto,
   reportStandings,
 } from "../../../network";
 import type { NetworkMatchEvent } from "../../../network/events";
+import type { MatchEventListener } from "../../../network/listeners";
+import type { DominoRoomOptions } from "../../match-contract";
 import { MessageRouter } from "../messages";
 import { CommandCatalog } from "./catalog";
 import { CommandHandler } from "./command-handler";
@@ -151,17 +156,43 @@ export function buildPieces(child: DependencyContainer, emit: MatchEventSink): M
   // Se arma SIEMPRE, aunque los dos destinos falten: el listener anota lo que no puede reportar, y
   // saltearlo acá convertiría una instancia sin configurar en una que reporta en silencio nada.
   const feeds = child.resolve<StandingsFeeds>("StandingsFeeds");
-  const listeners = child.isRegistered("RoomOptions")
-    ? []
-    : [
-        reportStandings({
-          config,
-          match,
-          ranking: feeds.ranking,
-          leagues: feeds.leagues,
-          log: child.resolve<Logger>("Logger"),
-        }),
-      ];
+  const options = child.isRegistered("RoomOptions")
+    ? child.resolve<DominoRoomOptions>("RoomOptions")
+    : undefined;
+
+  // ⚠ EL CIERRE SE REPORTA POR LOS DOS CAMINOS, y hasta acá no: el port dejó este listener
+  // detrás de un `isRegistered("RoomOptions") ? [] : [...]`, o sea que sólo corría en el camino
+  // del REQUEST — el viejo — y nunca en el del emparejador, que es por donde nace toda mesa
+  // casual desde que matchmaking existe. Las partidas reales no llegaban ni al ranking ni a la
+  // liga, en silencio: un reporte que no sale no falla, sólo deja una fila que nadie escribe.
+  //
+  // Se arma SIEMPRE, aunque los dos destinos falten: el listener anota lo que no puede reportar,
+  // y saltearlo convertiría una instancia sin configurar en una que reporta en silencio nada.
+  const listeners: MatchEventListener[] = [
+    reportStandings({
+      config,
+      match,
+      ranking: feeds.ranking,
+      leagues: feeds.leagues,
+      log: child.resolve<Logger>("Logger"),
+    }),
+  ];
+
+  // LOS DOS VETOS SÓLO EXISTEN CON `RoomOptions`, y no es una omisión del otro camino: los datos
+  // con los que deciden —cuántas revanchas lleva la cadena, de qué torneo es la mesa— viven en
+  // las opciones y el request no los tiene. Una mesa creada por request no es una mesa del
+  // emparejador, así que no hay a quién evitar en una cola por la que no pasó.
+  if (options?.mode === "CASUAL") listeners.push(registerCasualVeto(options, match));
+  if (options?.mode === "TOURNAMENT") {
+    listeners.push(
+      registerTournamentVeto({
+        options,
+        match,
+        config: DEFAULT_TOURNAMENT_CONFIG,
+        clock,
+      }),
+    );
+  }
 
   // `emit` sigue sin usarse: es el canal para el listener que PRODUZCA eventos, y el del cierre no
   // produce ninguno a propósito (las dos tablas son de plataforma y nadie de esta partida las mira).

@@ -191,6 +191,11 @@ export function settlementOf(
     // evento y otra al admitir en la sala nueva. Que la liquidación de la revancha sea la de
     // otra mesa es lo que hace que abortar la apertura no tenga nada que deshacer.
     case "REMATCH_ACCEPTED":
+    // LOS DOS VETOS TAMPOCO LIQUIDAN: no mueven plata, mueven a quién empareja el lobby. Están
+    // enumerados porque el `never` del final obliga a pasar por acá, que es exactamente lo que
+    // se quiere de un evento nuevo en un archivo que paga.
+    case "CASUAL_PAIR_VETOED":
+    case "PAIR_VETOED":
     case "PLAYER_DISCONNECTED":
     case "PLAYER_RECONNECTED":
       return undefined;

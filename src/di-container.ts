@@ -356,7 +356,10 @@ export const census = new PolledCensus({
   log: logger,
 });
 
-const casualVeto = new VetoBook(store, casualVetoKey, { ttlMs: 30 * 60_000 });
+// Se EXPORTA para que un E2E pueda comprobar que el veto se escribió de verdad. No es una puerta
+// nueva: el defecto que esto cerró fue justamente que nadie escribía el libro, y eso solo se ve
+// leyéndolo del lado de afuera de la cadena que lo llena.
+export const casualVeto = new VetoBook(store, casualVetoKey, { ttlMs: 30 * 60_000 });
 const tournamentVeto = new VetoBook(store, tournamentVetoKey, { ttlMs: 6 * 60 * 60_000 });
 const cooldown = new CooldownBook(store, DEFAULT_COOLDOWN, clock.now);
 const antifraud: AntifraudFlag =

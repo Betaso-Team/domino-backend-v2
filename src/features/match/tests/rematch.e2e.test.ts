@@ -1,3 +1,5 @@
+import { casualVeto } from "@/di-container";
+import { CASUAL_SCOPE } from "@/features/matchmaking";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state";
@@ -158,5 +160,33 @@ describe("la revancha, de punta a punta", () => {
 
     await waitUntil(() => match.serverState.phase === "FINISHED", 5_000);
     expect(match.serverState.rematch).toBeUndefined();
+  });
+
+  // ⚠ EL VETO, Y ES EL TEST QUE FALTABA CUANDO EL DEFECTO EXISTÍA. `matchmakingSink` escuchaba
+  // `CASUAL_PAIR_VETOED` desde el port de matchmaking y NADIE lo emitía, así que el libro se
+  // leía siempre vacío y el emparejador no evitaba a nadie nunca.
+  //
+  // No lo podía ver un test del productor —el defecto era que no se CONSTRUÍA— ni uno del
+  // consumidor, que compilaba solo. Lo único que distingue las dos situaciones es leer el libro
+  // del otro lado de la cadena entera: listener → evento → sink → `VetoBook.register`.
+  //
+  // La mesa nace con `rematchCount: 1`, o sea YA ES la revancha: terminar una partida normal no
+  // veta a nadie, que es la regla que el otro `it` de `veto.test.ts` fija.
+  it("una partida que YA ERA la revancha deja a los dos vetados para el emparejador", async () => {
+    const match = await seatPairAsMatchmaking(server, ["v1", "v2"], {
+      entryFee: 0,
+      prize: 0,
+      isFreeRoom: true,
+      rematchCount: 1,
+    });
+    await revealHands(match);
+    await playUntilDecided(match);
+
+    await waitUntil(
+      async () => (await casualVeto.vetoedFor(CASUAL_SCOPE, "v1")).includes("v2"),
+      5_000,
+    );
+
+    expect(await casualVeto.vetoedFor(CASUAL_SCOPE, "v2")).toContain("v1");
   });
 });
