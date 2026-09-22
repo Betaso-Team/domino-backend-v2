@@ -1812,9 +1812,50 @@ Baseline **1281 tests / 124 archivos**, con `typecheck`, suite, lint y `depcruis
 | `13c8a57` la sala registra su foto de la config | **PORTADO** la mitad de infraestructura. La pausa de cierre con tramo de «revelado» es de cartas de truco: sin pedido del front del dominó |
 | `8d4001a` la fila del historial no nace dos veces | **YA ESTABA** (`mongo-history.ts:80`, escrituras en fila por partida) |
 | `76477e4` lo que pidió el front | **YA ESTABA** con el port del front: `/matches/:roomId`, `/me/matches`, `/me/metrics`, la penalidad, `/players-in-match` y la fila de resumen (`platform.ts:205`). La fuga de `STRIKE_ADDED` **no existe acá**: la penalidad y los puntos van por jugador y nadie emite `STRIKE_ADDED` al notificador |
-| `3cab0f8` configuración editable sin deploy | **NO PORTADO, y no es una regresión contra v1.** `domino_settings` de v1 TIENE `playerTurnTimeout`/`playerExtraTimeout`/`matchmakingTimeout`, pero **nadie los escribe** —las únicas rutas de escritura son las dos de mantenimiento (`settings/router.ts:39`, `:60`)— y **nadie los lee**: las salas sólo consultan `isUnderMaintenance` (`domino-two-room.ts:99`) y el bot tiene los plazos a mano (`bot.setTurnTimeouts(60, 30, 10)`). Portarlo sería feature nueva. Si llega el pedido, la sala ya fotografía la config en su container (`bc6341c`) |
+| `3cab0f8` configuración editable sin deploy | **PORTADO** después, a pedido — ver el bloque siguiente. No era una regresión contra v1: `domino_settings` tenía `playerTurnTimeout`/`playerExtraTimeout`/`matchmakingTimeout` pero nadie los escribía (`settings/router.ts:39`, `:60` son sólo mantenimiento) ni los leía (`domino-two-room.ts:99`, y el bot con `setTurnTimeouts(60, 30, 10)` a mano) |
 | `cb83940`…`1124502` política de comentarios en inglés | **NO PORTADO**, a propósito: la doctrina de este repo vive en comentarios en español. Cambiarla es decisión del dueño, no un port |
 | `60dd091`, `0c99f17`, `5b3fead` | docs de truco; no hay equivalente acá |
+
+## Incremento completo — la configuración en caliente
+
+Portado de truco (`3cab0f8`). Baseline **1317 tests / 129 archivos**, con `typecheck`, suite, lint,
+`depcruise` (**396 módulos / 1597 dependencias**) y `docs:build` en verde. Por qué se portó aunque
+v1 no editara plazos: cambiar uno por entorno pide reiniciar, y el apagado ordenado aborta —y
+reembolsa— las partidas en curso de esa instancia.
+
+- **`features/settings` no conoce ninguna config.** El composition root empareja cada sección
+  (`match`, `matchmaking`) con su schema y sus defaults. En la base se guarda SÓLO lo que se aparta
+  del default, así que volver atrás es un borrado y un default movido en un deploy le llega a todo
+  el que no lo pisó.
+- **La presencia de `MONGO_URI` elige**, como todo: con Mongo, un documento propio
+  (`id: "domino_v2_runtime_config"`) en la colección `domino_settings` de v1, al lado del de
+  mantenimiento y sin tocarlo; sin Mongo, `MemorySettings`, que **no es un doble** —es el adaptador
+  de la instancia sola, igual que `MemoryHistory`—. Truco lo tiene en `tests/`; acá no.
+- **La ruta es `/internal/settings`, no `/settings`**: v1 sirve un `GET /settings` PÚBLICO con otro
+  contrato. Detrás de `X-Internal-Key` y **sin llave no se registra** (falla cerrado, como el
+  catálogo y el mantenimiento).
+- **La mesa FOTOGRAFÍA la config al nacer** (`GlobalConfigSource` en `onCreate`, registrada en el
+  container de la partida desde `bc6341c`). El E2E `src/tests/runtime-config.e2e.test.ts` mide que el
+  parche llega a la mesa SIGUIENTE y no a la abierta, mirando el `activeDeadline` de la ventana de
+  reparto —el DTO público del dominó no publica plazos—. Sin el cambio de la sala da rojo (796 ms).
+- **Cotas de v1 donde v1 las tiene** (`TIMEOUT_LIMITS`: turno 15–300 s, reserva 10–120 s,
+  búsqueda 30–600 s): v1 las declaraba y nunca las aplicaba. **No editables**: `tilesPerPlayer`
+  (regla de juego, no plazo) y los tres intervalos que el emparejador lee al arrancar. Un test fija
+  que TODO campo de las dos configs tiene cota o está declarado no editable.
+- ⚠ **`maxRematchesPerChain` ERA UN CAMPO MUERTO.** La config del emparejamiento lo declaraba y la
+  revancha usaba su propia constante `MAX_REMATCHES_PER_CHAIN`. Hacerlo editable sin conectarlo era
+  justo el «acepto e ignoro» que el port prohíbe. Ahora es una dependencia OBLIGATORIA de
+  `RematchCoordinator` —sin default, para que un cableado olvidado no quede verde— y la constante se
+  borró.
+- **El arranque espera la primera pasada, con plazo de 2 s** (`src/main.ts`), para que las primeras
+  mesas de un deploy no nazcan con la base si alguien la había editado.
+- **El replay rebobina con la BASE** (`src/replay.ts`): el desenlace sale igual —los vencimientos
+  están grabados—, pero los plazos del árbol impreso son los del entorno. La config con la que nació
+  cada mesa no se graba.
+
+**Sin verificar**: `mongo-settings.int.test.ts` pide `MONGO_INT_URI` y Docker no estaba corriendo, así
+que la convivencia con el documento de v1 está escrita y no medida contra un Mongo real. El cableado
+`maxRematchesPerChain` del root tampoco tiene test propio (el coordinador sí).
 
 ## Cómo se ejecuta una tarea
 

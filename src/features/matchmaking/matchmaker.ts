@@ -35,7 +35,10 @@ export interface MatchmakerDeps {
   readonly directory: PoolDirectory;
   readonly pool: MatchPool;
   readonly gateway: MatchGateway;
-  readonly config: MatchmakingConfig;
+  // UNA FUNCIÓN y no los valores, como `now` y `seedOf`: lo que contesta se puede editar con el
+  // servidor andando, y todo lo que se lee AL USAR toma el cambio sin reiniciar. Lo que se lee al
+  // arrancar —el tick— no es editable (`config-schema.ts`).
+  readonly config: () => MatchmakingConfig;
   // The first antifraude layer: it delays the re-entry of those who just played, and DESYNCHRONISES
   // them.
   readonly cooldown: CooldownBook;
@@ -71,7 +74,7 @@ export class Matchmaker {
 
   start(): void {
     if (this.ticking) return;
-    this.ticking = setInterval(() => void this.tick(), this.deps.config.tickIntervalMs);
+    this.ticking = setInterval(() => void this.tick(), this.deps.config().tickIntervalMs);
     // A pending interval must not hold the process open. Without it, the suite would never finish.
     this.ticking.unref?.();
     // MAINTENANCE EMPTIES THE QUEUES, and the subscription lives here and not in the composition
@@ -186,7 +189,7 @@ export class Matchmaker {
       const timer = setTimeout(() => {
         this.settle(playerId, (w) => w.reject(new MatchmakingError("TIMEOUT")));
         void this.deps.pool.cancel(playerId, spec.poolId);
-      }, this.deps.config.searchTimeoutMs);
+      }, this.deps.config().searchTimeoutMs);
       timer.unref?.();
       this.waiters.set(playerId, { poolId: spec.poolId, resolve, reject, timer });
     });
@@ -263,8 +266,8 @@ export class Matchmaker {
     const group = formGroup(waiting, {
       seats: spec.seats,
       now: this.deps.now(),
-      vetoBypassMs: this.deps.config.vetoBypassMs,
-      candidates: this.deps.config.groupingCandidates,
+      vetoBypassMs: this.deps.config().vetoBypassMs,
+      candidates: this.deps.config().groupingCandidates,
     });
     if (!group) return false;
 

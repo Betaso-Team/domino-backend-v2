@@ -1,7 +1,7 @@
 import { MemoryLogger } from "@/shared/tests/memory-logger";
 import { describe, expect, it, vi } from "vitest";
 import type { CasualRoomOptions, DominoRoomOptions, Seat } from "../../transports/match-contract";
-import { MAX_REMATCHES_PER_CHAIN, RematchCoordinator } from "../rematch";
+import { RematchCoordinator } from "../rematch";
 
 // LA MITAD DE LA REVANCHA QUE HABLA CON EL MUNDO. Lo que se mide acá es lo que el motor no
 // puede: las tres preguntas de la elegibilidad, y que la mesa nueva salga con la economía de la
@@ -24,6 +24,7 @@ const build = (
     canAfford?: boolean | ((playerId: string) => boolean);
     antifraud?: boolean | (() => Promise<boolean>);
     open?: () => Promise<readonly Seat[]>;
+    maxRematchesPerChain?: number;
   } = {},
 ) => {
   const opened: DominoRoomOptions[] = [];
@@ -48,6 +49,7 @@ const build = (
       },
     },
     seedOf: () => "semilla-de-la-revancha",
+    maxRematchesPerChain: () => over.maxRematchesPerChain ?? 1,
     log,
   });
   const door = { allow: vi.fn(), deny: vi.fn() };
@@ -73,9 +75,19 @@ describe("la elegibilidad", () => {
   // EL TOPE DE LA CADENA ES ANTI-ABUSO: sin él, dos cómplices se pasan la partida entre ellos
   // sin volver a pasar nunca por el emparejador, que es quien los separaría.
   it("no deja una segunda revancha en la misma cadena", async () => {
-    const chained = { ...TABLE, rematchCount: MAX_REMATCHES_PER_CHAIN };
+    const chained = { ...TABLE, rematchCount: 1 };
 
     expect(await build().coordinator.isEligible(chained, "match-2")).toBe(false);
+  });
+
+  // EL TOPE SALE DE LA CONFIG y no de una constante: subirlo en caliente deja jugar la revancha de
+  // la revancha. Sin este `it`, un coordinador que ignorara su dependencia seguía verde con el 1.
+  it("el tope es el de la config, no uno fijo", async () => {
+    const chained = { ...TABLE, rematchCount: 1 };
+
+    expect(
+      await build({ maxRematchesPerChain: 2 }).coordinator.isEligible(chained, "match-2"),
+    ).toBe(true);
   });
 
   it("el veto entre estos dos la apaga", async () => {
@@ -99,6 +111,7 @@ describe("la elegibilidad", () => {
       antifraud: async () => true,
       opener: { open: async () => [] },
       seedOf: () => "s",
+      maxRematchesPerChain: () => 1,
       log: new MemoryLogger(),
     });
 

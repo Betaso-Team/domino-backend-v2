@@ -31,6 +31,11 @@ export { CASUAL_SCOPE, VetoBook, casualVetoKey, tournamentVetoKey } from "./veto
 export type { VetoKey } from "./veto";
 export type { MatchmakingConfig } from "./config";
 export { DEFAULT_MATCHMAKING_CONFIG } from "./config";
+export {
+  MATCHMAKING_EDITABLE,
+  MATCHMAKING_NOT_EDITABLE,
+  matchmakingConfigPatch,
+} from "./config-schema";
 export type { MatchmakingErrorReason } from "./errors";
 export type { Maintenance, MaintenanceBook, MaintenanceSignal } from "./maintenance";
 export { OPEN, PolledMaintenanceSignal } from "./maintenance";

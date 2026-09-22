@@ -123,7 +123,7 @@ function build(specOver: Partial<PoolSpec> = {}, now = () => 1000) {
     directory,
     pool,
     gateway,
-    config: DEFAULT_MATCHMAKING_CONFIG,
+    config: () => DEFAULT_MATCHMAKING_CONFIG,
     cooldown,
     live: { matchOf: async (playerId) => live.get(playerId) },
     maintenance,

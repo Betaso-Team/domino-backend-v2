@@ -11,6 +11,7 @@ import {
 } from "@/features/match";
 import { DominoRoom } from "@/features/match/transports/colyseus/domino-room";
 import { LobbyRoom, registerMatchmakingHttp } from "@/features/matchmaking";
+import { registerSettingsHttp } from "@/features/settings";
 import { type StrikeBook, registerTournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, registerHealth } from "@/shared/http/health";
@@ -27,6 +28,9 @@ import {
   mongo,
   presence,
   rootContainer,
+  settingsSections,
+  settingsSignal,
+  settingsWriter,
 } from "./di-container";
 import { env } from "./env";
 import type { Logger } from "./logger";
@@ -167,6 +171,15 @@ const registerHttp = (app: Application) => {
     service: rootContainer.resolve(GameModeService),
     logger,
     internalApiKey: env.internalApiKey,
+  });
+  // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
+  // se registra. Antes del manejador de errores, como todas.
+  registerSettingsHttp(app, {
+    sections: settingsSections,
+    signal: settingsSignal,
+    writer: settingsWriter,
+    internalApiKey: env.internalApiKey,
+    log: logger,
   });
   app.use(httpErrorHandler(logger));
 };

@@ -17,7 +17,7 @@ import {
 import {
   DEFAULT_GLOBAL_CONFIG,
   type DominoMatchConfig,
-  type GlobalDominoConfig,
+  type GlobalConfigSource,
   playerIdsOf,
 } from "../../core/config";
 import { RuleViolationError } from "../../core/engine/errors";
@@ -143,7 +143,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const rootLogger = rootContainer.resolve<Logger>("Logger");
     this.log = rootLogger.child({ roomId: this.roomId });
 
-    const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
+    // SE PREGUNTA UNA VEZ, y ese valor es de la mesa mientras viva: va a su container de abajo y de
+    // ahí al motor, así que una edición que llegue a mitad de partida no le mueve los números a los
+    // que están jugando.
+    const global = rootContainer.resolve<GlobalConfigSource>("GlobalConfigSource")();
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
 
     // EL CATÁLOGO ES LA AUTORIDAD, Y SE CONSULTA UNA SOLA VEZ. El request nombra un modo; de acá
@@ -202,10 +205,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const child = rootContainer.createChildContainer();
     child.register("Config", { useValue: config });
     // LA CONFIG GLOBAL SE FOTOGRAFÍA ACÁ, y registrarla es lo que lo vuelve cierto para la partida
-    // entera: el cableado la resuelve de este container, así que sin esta línea el motor podía
-    // armarse con un valor distinto del que esta sala leyó arriba —entre las dos lecturas hay
-    // `await`—. Hoy el root la registra fija y da lo mismo; deja de dar lo mismo el día que sea
-    // editable en caliente, como ya lo es en truco (`13c8a57`).
+    // entera: el cableado la resuelve de este container, y sin esta línea caería al root, que es la
+    // BASE sin las ediciones en caliente —o sea que el motor se armaría con otros números que los
+    // que esta sala leyó arriba—.
     child.register("GlobalDominoConfig", { useValue: global });
     if (roomOptions) child.register("RoomOptions", { useValue: roomOptions });
 

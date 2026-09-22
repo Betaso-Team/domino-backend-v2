@@ -1,6 +1,6 @@
 import { listen } from "@colyseus/tools";
 import app from "./app.config";
-import { shutdown, startServices, stopAcceptingMatches } from "./di-container";
+import { settingsSignal, shutdown, startServices, stopAcceptingMatches } from "./di-container";
 import { env } from "./env";
 import { logger } from "./logger";
 
@@ -75,6 +75,15 @@ const morirSinServidor = (error: unknown): never => {
   process.exit(1);
 };
 
+// LA CONFIGURACIÓN PRIMERO, y su primera pasada ESPERADA: una instancia que levanta tiene que saber
+// los números en vigor antes de abrir una sola sala, o las primeras mesas de cada deploy correrían con
+// los defaults del entorno aunque alguien los hubiera editado. CON PLAZO, porque una base que no
+// contesta demora el arranque y no lo vuelve un bucle de reinicios; pasado el plazo se arranca con la
+// base y la pasada siguiente corrige. Portado de truco (`3cab0f8`).
+await Promise.race([
+  settingsSignal.check(),
+  new Promise((resolve) => setTimeout(resolve, 2_000).unref()),
+]);
 startServices();
 const server = await Promise.race([
   listen(app, env.port),

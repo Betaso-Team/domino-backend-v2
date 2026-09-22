@@ -65,6 +65,16 @@ Estas rutas requieren `X-Internal-Key`. Si `INTERNAL_API_KEY` no existe, no se r
 | `DELETE /game-modes/:uuid` | Baja lógica |
 | `GET /game-modes/reactive/:uuid` | Reactiva; conserva el verbo de v1 por compatibilidad |
 | `POST /game-modes/sync` | Encola una republicación completa del catálogo |
+| `GET /internal/settings` | Las secciones de config en caliente (`match`, `matchmaking`): en vigor, overrides y editables |
+| `GET /internal/settings/:section` | Una sección |
+| `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
+| `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
+
+**Config en caliente.** Una edición llega a las mesas que nacen DESPUÉS; una mesa ya abierta conserva
+los plazos con los que nació. El proceso que atiende el `PATCH` se refresca en el acto y el resto
+del clúster converge en 5 s. Fuera de lo editable quedan `tilesPerPlayer` (regla de juego) y los
+tres intervalos que el emparejador lee al arrancar (`tickIntervalMs`, `maintenancePollMs`,
+`censusPollMs`): se rechazan con 400 en vez de aceptarse e ignorarse.
 
 ## Eventos y salidas
 

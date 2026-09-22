@@ -5,7 +5,7 @@ export type { BetChargerDeps } from "./bet-charge";
 export { CachedBetLevelBook, NO_BET_LEVELS } from "./bet-levels";
 export type { BetLevelBook } from "./bet-levels";
 export { HttpBetLevelBook } from "./transports/http-bet-levels";
-export { MAX_REMATCHES_PER_CHAIN, RematchCoordinator } from "./rematch";
+export { RematchCoordinator } from "./rematch";
 export { registerCasualVeto, registerTournamentVeto } from "./veto";
 export type { RematchAntifraud, RematchCoordinatorDeps, RematchDoor } from "./rematch";
 export * from "./bet-charge";

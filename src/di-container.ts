@@ -36,12 +36,18 @@ import {
   CachedBetLevelBook,
   ColyseusMatchGateway,
   HttpBetLevelBook,
+  MATCH_EDITABLE,
   MatchPlatform,
   MatchRegistry,
   NO_BET_LEVELS,
   RematchCoordinator,
+  matchConfigPatch,
 } from "@/features/match";
-import { type GlobalDominoConfig, globalConfigWith } from "@/features/match/core/config";
+import {
+  type GlobalConfigSource,
+  type GlobalDominoConfig,
+  globalConfigWith,
+} from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
 import type { HistoryPort, HistoryReader } from "@/features/match/network/history";
 import type { StandingsFeeds } from "@/features/match/network/standings";
@@ -57,8 +63,10 @@ import {
   DEFAULT_COOLDOWN,
   DEFAULT_MATCHMAKING_CONFIG,
   HttpAntifraudFlag,
+  MATCHMAKING_EDITABLE,
   type MaintenanceBook,
   Matchmaker,
+  type MatchmakingConfig,
   MemoryMatchPool,
   MongoMaintenanceBook,
   OPEN,
@@ -67,9 +75,18 @@ import {
   ScopedPoolDirectory,
   VetoBook,
   casualVetoKey,
+  matchmakingConfigPatch,
   matchmakingSink,
   tournamentVetoKey,
 } from "@/features/matchmaking";
+import {
+  MemorySettings,
+  MongoSettings,
+  PolledSettingsSignal,
+  SETTINGS_POLL_MS,
+  type SettingsSection,
+  type SettingsWriter,
+} from "@/features/settings";
 import {
   AmqpParticipationTransport,
   CachedTournamentClient,
@@ -362,6 +379,56 @@ export const census = new PolledCensus({
   log: logger,
 });
 
+// ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────
+//
+// Portado de truco (`3cab0f8`). Los dos tokens de config —`GlobalDominoConfig` y
+// `MatchmakingConfig`— siguen significando LA BASE: lo que sale del entorno y del código, y lo que la
+// suite re-registra para acortar sus plazos. En la base queda sólo lo que se APARTA de eso, y la
+// señal compone las dos cosas.
+//
+// LA PRESENCIA DE `MONGO_URI` ELIGE, como en todo lo demás: con Mongo, un documento propio en la
+// colección `domino_settings` de v1 —la del mantenimiento—; sin Mongo, la memoria del proceso, que
+// con una sola instancia es exactamente lo correcto.
+//
+// Éste es el único lugar donde el nombre de una sección se encuentra con un tipo, porque es el único
+// que conoce todas las features. Los `defaults` se resuelven AL PREGUNTAR: un test que re-registra
+// la base con el servidor ya levantado tiene que ganar.
+rootContainer.register("MatchmakingConfig", { useValue: DEFAULT_MATCHMAKING_CONFIG });
+const settingsStore = mongo
+  ? new MongoSettings(mongo, "domino_settings", logger)
+  : new MemorySettings();
+export const settingsSections: readonly SettingsSection[] = [
+  {
+    name: "match",
+    schema: matchConfigPatch,
+    editable: MATCH_EDITABLE,
+    defaults: () => rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
+  },
+  {
+    name: "matchmaking",
+    schema: matchmakingConfigPatch,
+    editable: MATCHMAKING_EDITABLE,
+    defaults: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig"),
+  },
+];
+export const settingsSignal = new PolledSettingsSignal({
+  book: settingsStore,
+  sections: settingsSections,
+  intervalMs: SETTINGS_POLL_MS,
+  log: logger,
+});
+export const settingsWriter: SettingsWriter = settingsStore;
+// CON LO QUE NACE UNA MESA NUEVA. Una función y no un valor, y NUNCA re-registrada desde la pasada:
+// tsyringe apila en cada registro, así que un temporizador que registrara un valor haría crecer un
+// arreglo sin fin.
+rootContainer.register<GlobalConfigSource>("GlobalConfigSource", {
+  useValue: () => settingsSignal.effective<GlobalDominoConfig>("match"),
+});
+// El emparejamiento lee la suya POR USO y no por mesa: los números se preguntan cuando alguien entra
+// a la cola, no cuando arrancó el proceso.
+const matchmakingConfig = (): MatchmakingConfig =>
+  settingsSignal.effective<MatchmakingConfig>("matchmaking");
+
 // Se EXPORTA para que un E2E pueda comprobar que el veto se escribió de verdad. No es una puerta
 // nueva: el defecto que esto cerró fue justamente que nadie escribía el libro, y eso solo se ve
 // leyéndolo del lado de afuera de la cadena que lo llena.
@@ -404,7 +471,7 @@ export const matchmaker = new Matchmaker({
   directory: poolDirectory,
   pool: new MemoryMatchPool(),
   gateway,
-  config: DEFAULT_MATCHMAKING_CONFIG,
+  config: matchmakingConfig,
   cooldown,
   live: { matchOf: (playerId) => matchRegistry.matchOf(playerId) },
   maintenance: maintenanceSignal,
@@ -470,6 +537,7 @@ rootContainer.register(RematchCoordinator, {
     },
     opener: gateway,
     seedOf: randomUUID,
+    maxRematchesPerChain: () => matchmakingConfig().maxRematchesPerChain,
     log: logger,
   }),
 });
@@ -522,6 +590,7 @@ export const tournamentWatcher =
 rootContainer.register("StrikeBook", { useValue: strikes });
 
 export function startServices(): void {
+  settingsSignal.start();
   matchmaker.start();
   maintenanceSignal.start();
   census.start();
@@ -529,6 +598,7 @@ export function startServices(): void {
 }
 
 export function stopAcceptingMatches(): void {
+  settingsSignal.stop();
   matchmaker.stop();
   maintenanceSignal.stop();
   census.stop();
