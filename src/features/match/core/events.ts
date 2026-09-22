@@ -8,12 +8,20 @@ import type { PlayerId, TeamId } from "./ids";
 // eso es exactamente para lo que existe —el reloj del turno solo mira al que le toca—.
 // `NEGOTIATING_BET` es la ventana de respuesta del aumento de apuesta, y es de nivel RONDA
 // como las otras dos: la oferta muere con la ronda en la que se hizo.
+// Las TRES de la revancha son de nivel PARTIDA, y son tres porque esperan cosas distintas: que
+// alguien pida, que los demás contesten, y que el cliente alcance a consumir su reserva antes de
+// que la sala vieja se suelte. Distinguirlas importa para el REGISTRO además de para el
+// despacho: «nadie pidió» y «pidió uno y el otro no contestó» son dos finales distintos, y el
+// que audita una mesa quiere saber cuál fue.
 export type DeadlineKind =
   | "DEALING"
   | "TURN"
   | "NEGOTIATING_BET"
   | "PRESENTING_ROUND"
-  | "PRESENTING_MATCH";
+  | "PRESENTING_MATCH"
+  | "REMATCH_WINDOW"
+  | "REMATCH_NEGOTIATION"
+  | "REMATCH_ACCEPTED";
 
 // EL CRITERIO (spec §5.1): un evento existe SOLO si ocurre un hecho que no se puede
 // reconstruir del comando ni del estado resultante. Si el payload del evento solo
@@ -50,4 +58,13 @@ export type MatchEvent =
   // correr el reloj. Para soporte es la diferencia entre "dijo que no" y "no contestó".
   | { type: "BET_MULTIPLIER_REJECTED"; playerId: PlayerId }
   // ── Hitos terminales ────────────────────────────────────────────────────
-  | { type: "MATCH_RESOLVED"; winnerTeamId: TeamId; reason: "SCORE" | "ABANDONMENT" };
+  | { type: "MATCH_RESOLVED"; winnerTeamId: TeamId; reason: "SCORE" | "ABANDONMENT" }
+  // TODOS ACEPTARON LA REVANCHA. Es una CONSECUENCIA COMPUTADA y no el eco de un comando, que
+  // es lo que lo deja pasar el criterio: el último `RESPOND_REMATCH` dice «yo acepto», y lo que
+  // este evento dice es «ya no falta nadie» — que depende de quiénes seguían en la mesa en ese
+  // instante y no está en el payload de ningún comando. Es el gemelo de `ROUND_RESOLVED`.
+  //
+  // Es además la señal que la RED espera para abrir la mesa nueva, y por eso lleva la lista:
+  // el nodo se borra al cerrar la negociación, así que para cuando alguien reaccione ya no
+  // estaría. Quien abre la sala necesita saber a quiénes sentar.
+  | { type: "REMATCH_ACCEPTED"; playerIds: readonly PlayerId[] };

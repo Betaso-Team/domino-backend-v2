@@ -161,6 +161,11 @@ const matchSnapshot = z
       .default([]),
     isFreeRoom: z.boolean().default(false),
     multiplier: z.number().positive().safe().default(1),
+    // EL CUARTO CAMPO CON DEFAULT DEL SNAPSHOT, y el default es `false` a propósito: una partida
+    // grabada antes de que la revancha existiera se rebobina SIN ventana de revancha, que es
+    // exactamente lo que pasó. Con `true` el replay abriría una ventana que en su día no hubo y
+    // la reconstrucción dejaría de ser fiel.
+    isRematchEnabled: z.boolean().default(false),
   })
   .superRefine(({ seats }, context) => checkTableShape(seats, context, "seats"));
 
@@ -269,6 +274,9 @@ export function configOf(request: CreateMatchRequest, mode: GameMode): DominoMat
     // ganador tiene que sumar con el peso que aceptó al sentarse.
     multiplier: mode.multiplier,
     isFreeRoom: mode.isFreeRoom,
+    // TODA MESA CASUAL OFRECE REVANCHA, y esta función solo sienta mesas casuales: el torneo no
+    // pasa por acá. Cuando el catálogo tenga la palanca por modo, sale de `mode`.
+    isRematchEnabled: true,
     // VACÍO, y por ahora siempre: el catálogo de niveles de aumento vive en el backend
     // principal (en v1, `internal/bet-increase/config`) y este repo todavía no lo consulta.
     // Lista vacía = la mesa no ofrece aumentar, que es exactamente lo que hace el v1 cuando
@@ -345,6 +353,8 @@ export function configFromRoomOptions(
     entryFee: options.mode === "CASUAL" ? options.entryFee : 0,
     prize: options.mode === "CASUAL" ? options.prize : 0,
     multiplier: options.mode === "CASUAL" ? options.rankingWeight : 1,
+    // EL TORNEO NO OFRECE REVANCHA: ahí se vuelve a jugar cuando el torneo lo diga.
+    isRematchEnabled: options.mode === "CASUAL",
     betLevels: [],
     isFreeRoom: options.mode === "CASUAL" ? options.isFreeRoom : true,
   };

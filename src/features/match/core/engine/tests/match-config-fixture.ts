@@ -39,6 +39,9 @@ export const matchConfig = (
   // de más.
   betLevels: [],
   isFreeRoom: false,
+  // APAGADA por default, como la ventana de reparto y por el mismo motivo: estas suites
+  // miden el juego, no la revancha. Los tests de revancha la encienden.
+  isRematchEnabled: false,
   // PESO 1, el neutro del ranking: el motor no lo lee y estas suites no reportan nada afuera. La
   // suite del reporte del cierre pasa el peso que quiere medir por `overrides`.
   multiplier: 1,

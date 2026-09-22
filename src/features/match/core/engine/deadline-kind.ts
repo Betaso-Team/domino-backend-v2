@@ -13,8 +13,15 @@ import { matchPhaseOf, roundPhaseOf } from "./state-projections";
 // despacho da igual cuál de los dos venció, la rama es la misma. Quién los distingue
 // es `Turn.isConsumingExtendedTime`, y existe para el FRONT (que si no muestra una
 // cuenta atrás sin saber de qué) y para que el conductor sepa que ya no hay más colchón.
+// Las tres de la REVANCHA van PRIMERO, y no es orden arbitrario: son fases de PARTIDA y en
+// todas ellas `currentRound` ya no existe, así que caer más abajo daría la invariante del final
+// —«sin ventana temporizada»— en vez de la ventana que sí hay.
 export function deadlineKindOf(match: MatchState): DeadlineKind {
-  if (matchPhaseOf(match) === "PRESENTING_MATCH") return "PRESENTING_MATCH";
+  const phase = matchPhaseOf(match);
+  if (phase === "REMATCH_WINDOW") return "REMATCH_WINDOW";
+  if (phase === "REMATCH_NEGOTIATION") return "REMATCH_NEGOTIATION";
+  if (phase === "REMATCH_ACCEPTED") return "REMATCH_ACCEPTED";
+  if (phase === "PRESENTING_MATCH") return "PRESENTING_MATCH";
   if (match.currentRound && roundPhaseOf(match.currentRound) === "PRESENTING_ROUND") {
     return "PRESENTING_ROUND";
   }

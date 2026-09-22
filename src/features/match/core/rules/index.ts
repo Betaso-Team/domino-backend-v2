@@ -45,7 +45,12 @@ export {
   playersWithoutTilesSeen,
 } from "./legality";
 export type { MatchPhase, RoundEndReason, RoundPhase } from "./phases";
-export { canRequestRematch, canRespondRematch, rematchRespondersOf } from "./rematch";
+export {
+  canRequestRematch,
+  canRespondRematch,
+  isTableIntact,
+  rematchRespondersOf,
+} from "./rematch";
 export { hasPlayableTile, playableSides } from "./playable";
 export type { Ruling } from "./ruling";
 export { LEGAL, illegal, isIllegal } from "./ruling";

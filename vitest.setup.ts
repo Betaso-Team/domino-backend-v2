@@ -76,6 +76,11 @@ delete process.env.REDIS_URL;
 delete process.env.RABBITMQ_URL;
 process.env.PORT ??= "2567";
 process.env.PRESENTING_MATCH_MS ??= "120";
+// LOS TRES DE LA REVANCHA, encogidos como los demás. La ventana real es de 30 s: dejarla
+// entera haría que CADA e2e que termina una partida espere medio minuto a que la mesa muera.
+process.env.REMATCH_WINDOW_MS ??= "200";
+process.env.REMATCH_RESPONSE_MS ??= "150";
+process.env.REMATCH_HANDOFF_MS ??= "150";
 process.env.PRESENTING_ROUND_MS ??= "120";
 process.env.TURN_TIMEOUT_MS ??= "600";
 process.env.EXTRA_TIME_RESERVE_MS ??= "300";

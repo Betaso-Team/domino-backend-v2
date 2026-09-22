@@ -93,6 +93,12 @@ const schema = z.object({
   DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
   PRESENTING_ROUND_MS: z.coerce.number().int().positive().default(4_000),
   PRESENTING_MATCH_MS: z.coerce.number().int().positive().default(4_000),
+  // LOS TRES DE LA REVANCHA, configurables por la misma razón que los otros cinco: son
+  // producto, no juego. La ventana de 30 s es lo que el jugador tarda en decidir si quiere
+  // otra, y ese número se ajusta mirando cuántos la piden sobre el final — no recompilando.
+  REMATCH_WINDOW_MS: z.coerce.number().int().positive().default(30_000),
+  REMATCH_RESPONSE_MS: z.coerce.number().int().positive().default(5_000),
+  REMATCH_HANDOFF_MS: z.coerce.number().int().positive().default(6_000),
   SEATING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   /**
    * Cuánto se le guarda el asiento al que se cayó (`allowReconnection`). Va en SEGUNDOS
@@ -290,6 +296,9 @@ export interface Env {
   readonly dealingTimeoutMs: number;
   readonly presentingRoundMs: number;
   readonly presentingMatchMs: number;
+  readonly rematchWindowMs: number;
+  readonly rematchResponseMs: number;
+  readonly rematchHandoffMs: number;
   readonly seatingTimeoutMs: number;
   readonly reconnectionWindowSeconds: number;
   readonly logLevel: "debug" | "info";
@@ -362,6 +371,9 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     dealingTimeoutMs: parsed.DEALING_TIMEOUT_MS,
     presentingRoundMs: parsed.PRESENTING_ROUND_MS,
     presentingMatchMs: parsed.PRESENTING_MATCH_MS,
+    rematchWindowMs: parsed.REMATCH_WINDOW_MS,
+    rematchResponseMs: parsed.REMATCH_RESPONSE_MS,
+    rematchHandoffMs: parsed.REMATCH_HANDOFF_MS,
     seatingTimeoutMs: parsed.SEATING_TIMEOUT_MS,
     reconnectionWindowSeconds: parsed.RECONNECTION_WINDOW_SECONDS,
     logLevel: parsed.NODE_ENV === "production" ? "info" : "debug",

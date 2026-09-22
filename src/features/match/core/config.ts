@@ -94,6 +94,17 @@ export interface DominoMatchConfig {
    */
   readonly betLevels: readonly BetLevel[];
   /**
+   * SI ESTA MESA OFRECE REVANCHA. Hoy lo decide el modo —casual sí, torneo no: ahí se vuelve a
+   * jugar cuando el torneo lo diga, no cuando los jugadores se pongan de acuerdo— y se congela
+   * con el resto porque la mesa no puede cambiar de reglas mientras se juega.
+   *
+   * NO ES LO MISMO QUE PODER PAGARLA, y ésa es la distinción que justifica el campo: sin él, un
+   * torneo mostraría el botón de revancha apagado, diciéndole al jugador que le falta saldo
+   * cuando lo que pasa es que la revancha no existe ahí. Con esto en `false` la ventana ni
+   * siquiera se abre. Lo otro —saldo, antifraude, cadena— viaja en `RematchState.eligible`.
+   */
+  readonly isRematchEnabled: boolean;
+  /**
    * Una mesa gratis NO PUEDE AUMENTAR, y es un chequeo propio en vez de deducirse de
    * `betLevels` vacío: son dos hechos distintos —"no hay catálogo" y "acá no se juega por
    * plata"— y un catálogo mal cargado sobre una mesa gratis terminaría cobrando una entrada
@@ -149,6 +160,23 @@ export interface GlobalDominoConfig {
    * esperando y el turno de otro no puede quedar rehén de una propuesta que nadie contesta.
    */
   readonly betResponseTimeoutMs: number;
+  /**
+   * LOS TRES PLAZOS DE LA REVANCHA, y son tres porque esperan tres cosas distintas.
+   *
+   * `rematchWindowMs` es cuánto queda el botón en pantalla sin que nadie lo apriete.
+   * `rematchResponseMs` es cuánto tiene el resto de la mesa para contestar una solicitud, y es
+   * MUCHO más corto a propósito: el que pidió está mirando una pantalla que no avanza.
+   * `rematchHandoffMs` es lo que la sala VIEJA se sostiene después de que todos aceptaron —la
+   * nueva ya existe y cada uno tiene su reserva, pero soltarla antes de que el cliente la
+   * consuma lo deja sin la partida que acaba de aceptar—.
+   *
+   * Los tres números son los de v1 (`OPEN_WINDOW_MS`, `RESPONSE_WINDOW_MS`,
+   * `ACCEPTED_HANDOFF_MS`), y el del traspaso lleva su margen adentro: v1 lo eligió como «>3 s
+   * de pantalla de revancha aceptada» más lo que tarda el cliente en entrar a la sala nueva.
+   */
+  readonly rematchWindowMs: number;
+  readonly rematchResponseMs: number;
+  readonly rematchHandoffMs: number;
 }
 
 // Los plazos son los del v1, verificados en docs/reglas-de-juego-v1.md §5.1: 60 s de
@@ -167,6 +195,10 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   tilesPerPlayer: 7,
   // El número del v1 (`actionResponseTimeRemaining` del que responde un aumento).
   betResponseTimeoutMs: 10_000,
+  // Los tres del v1 (`rematch-manager.ts`).
+  rematchWindowMs: 30_000,
+  rematchResponseMs: 5_000,
+  rematchHandoffMs: 6_000,
 };
 
 export function globalConfigWith(overrides: Partial<GlobalDominoConfig>): GlobalDominoConfig {

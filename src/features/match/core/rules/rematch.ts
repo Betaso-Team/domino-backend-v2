@@ -61,6 +61,22 @@ export function canRespondRematch(playerId: PlayerId, match: PublicMatchView): R
 }
 
 /**
+ * ¿LA MESA SIGUE ENTERA? Es la condición para que la ventana ni siquiera se abra, y es de v1
+ * (`computeEligibility`: `players.length !== playersQuantity` ⇒ no elegible).
+ *
+ * SE VUELVE A JUGAR LA MESA, no lo que quedó de ella: con un asiento retirado no hay revancha
+ * posible ni con los tres que siguen, porque la mesa nueva necesita los cuatro. En 2P es más
+ * evidente todavía — el que ganó por abandono no tiene contra quién.
+ *
+ * Es la diferencia entre no abrir la ventana y abrirla apagada: acá NO HAY NADA que el jugador
+ * pueda arreglar, así que un botón gris durante treinta segundos solo le hace esperar. `eligible`
+ * es para lo que sí depende de él, que es tener saldo.
+ */
+export function isTableIntact(match: PublicMatchView): boolean {
+  return match.players.every((player) => !player.hasAbandoned);
+}
+
+/**
  * QUIÉNES TIENEN QUE ACEPTAR: todos los de la mesa que no pidieron y no se retiraron.
  *
  * Es UNA regla para las dos mesas —en 2P devuelve al rival, en 4P a los otros tres, del equipo

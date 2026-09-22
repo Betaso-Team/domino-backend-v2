@@ -96,13 +96,23 @@ describe("partida 2P completa", () => {
     const entries = await historyOf(MATCH_ID);
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.map((entry) => entry.seq)).toEqual(entries.map((_, index) => index + 1));
-    // El veredicto NO es la última línea: `MATCH_RESOLVED` abre la presentación de la
-    // partida, y lo último que queda escrito es el vencimiento de ESA ventana — el mismo
-    // que apaga la mesa. Afirmar solo sobre `at(-1)` diría que el registro se corta antes
-    // del apagado, que es justo el hueco que el historial existe para no dejar.
-    expect(entries.slice(-2).map((entry) => entry.type)).toEqual([
+    // EL VEREDICTO NO ES LA ÚLTIMA LÍNEA, y desde la revancha faltan DOS y no una:
+    // `MATCH_RESOLVED` abre la presentación de la partida, al vencer ésa se abre la ventana
+    // de revancha, y al vencer la ventana se apaga la mesa. Afirmar solo sobre `at(-1)`
+    // diría que el registro se corta antes del apagado, que es justo el hueco que el
+    // historial existe para no dejar.
+    //
+    // Los dos vencimientos se distinguen por su `kind` —`PRESENTING_MATCH` y
+    // `REMATCH_WINDOW`—, y por eso se asierta: sin eso, borrar la ventana de revancha
+    // dejaría este test verde con una línea menos.
+    expect(entries.slice(-3).map((entry) => entry.type)).toEqual([
       "MATCH_RESOLVED",
       "DEADLINE_EXPIRED",
+      "DEADLINE_EXPIRED",
+    ]);
+    expect(entries.slice(-2).map((entry) => (entry.payload as { kind?: string }).kind)).toEqual([
+      "PRESENTING_MATCH",
+      "REMATCH_WINDOW",
     ]);
   });
 

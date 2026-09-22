@@ -181,6 +181,16 @@ export function settlementOf(
     // desenlace acá — se asienta en `MatchState.acceptedBetExtra` y lo cobra el adaptador
     // que falta (ver `BetChargePort`). Cuando llegue, entra por este mismo `switch`.
     case "BET_MULTIPLIER_REJECTED":
+    // LA REVANCHA NO LIQUIDA ESTA MESA, y es la única entrada de acá que hay que argumentar
+    // porque suena a plata y no lo es. Aceptar una revancha no paga ni reembolsa NADA: la
+    // partida que acaba de terminar ya se liquidó por su propio desenlace —`MATCH_RESOLVED` o
+    // `MATCH_ABORTED`—, y la inscripción de la mesa NUEVA la cobra esa mesa en SU puerta, con
+    // su propio `matchId` y su propia clave de idempotencia.
+    //
+    // Devolver una instrucción acá sería cobrar dos veces la misma entrada: una por este
+    // evento y otra al admitir en la sala nueva. Que la liquidación de la revancha sea la de
+    // otra mesa es lo que hace que abortar la apertura no tenga nada que deshacer.
+    case "REMATCH_ACCEPTED":
     case "PLAYER_DISCONNECTED":
     case "PLAYER_RECONNECTED":
       return undefined;

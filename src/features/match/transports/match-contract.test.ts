@@ -248,6 +248,7 @@ describe("replayConfigOf", () => {
       ...snapshot,
       betLevels: [],
       isFreeRoom: false,
+      isRematchEnabled: false,
       multiplier: 1,
     });
   });

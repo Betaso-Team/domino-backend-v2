@@ -20,6 +20,8 @@ import { MoveLog } from "../core/engine/move-log";
 import { Player } from "../core/engine/player-facade";
 import { PlayerRepository } from "../core/engine/player-repository";
 import { Referee } from "../core/engine/referee-facade";
+import { RematchGate } from "../core/engine/rematch/gate";
+import { RematchNegotiation } from "../core/engine/rematch/negotiation";
 import { RoundDriver } from "../core/engine/round/driver";
 import { RoundPlayer } from "../core/engine/round/player";
 import { RoundReferee } from "../core/engine/round/referee";
@@ -32,6 +34,17 @@ import type { MatchState } from "../core/state";
 
 export interface EngineGraph {
   readonly match: MatchState;
+  /**
+   * LA COMPUERTA DE LA REVANCHA, y es lo ÚNICO del grafo que se escribe desde afuera.
+   *
+   * Sale acá porque su respuesta no es del juego: depende del saldo de los dos, del antifraude y
+   * del tope de la cadena, o sea de varias idas y vueltas de red. La RED la contesta durante la
+   * pausa de presentación y el conductor la lee al vencer esa pausa.
+   *
+   * No es la puerta trasera que `begin()` cerró: no hace avanzar nada ni mueve una fase. Deja un
+   * booleano que el conductor consulta UNA vez.
+   */
+  readonly rematchGate: RematchGate;
   /**
    * ARRANCAR la partida, y nada más. Antes acá salía el `MatchDriver` entero, y con él
    * `advance`/`timeout`: la sala podía hacer avanzar el juego sin pasar por un comando, y
@@ -46,6 +59,16 @@ export interface EngineGraph {
   hasOutcome(): boolean;
   /** ¿Este asiento sigue jugando? Lo pregunta la sala en la puerta, antes de sentar a nadie. */
   isStillPlaying(playerId: PlayerId): boolean;
+  /**
+   * LA REVANCHA YA NO ES POSIBLE, dicho desde afuera: un socket que se cayó mientras se
+   * negociaba, o la apertura de la sala nueva que falló.
+   *
+   * Es la segunda excepción a «el grafo no deja mover el juego desde afuera», y se gana el lugar
+   * por lo mismo que la compuerta: una desconexión es un hecho de PLATAFORMA y el motor no los
+   * mira. Sin esto, el que ofreció se queda mirando una cuenta atrás que ya no puede terminar en
+   * nada. Es inofensiva fuera de las fases de revancha.
+   */
+  closeRematch(): readonly MatchEvent[];
 }
 
 export interface EngineDeps {
@@ -96,6 +119,11 @@ export function buildEngineGraph(
     (playerId) => repository.round(playerId),
     bet,
   );
+  // LOS DOS DE LA REVANCHA. La compuerta nace SABIENDO si la mesa la ofrece —del snapshot
+  // congelado y no del modo, que el motor no conoce— y arranca sin permiso: hasta que la red
+  // conteste, no hay revancha. Cerrado es el lado seguro en el que equivocarse.
+  const gate = new RematchGate(config.isRematchEnabled);
+  const rematch = new RematchNegotiation(match);
   const matchDriver = new MatchDriver(
     match,
     deps.clock,
@@ -104,11 +132,15 @@ export function buildEngineGraph(
     matchReferee,
     players,
     roundDriver,
+    gate,
+    rematch,
   );
 
   return {
     match,
+    rematchGate: gate,
     begin: () => matchDriver.begin(),
+    closeRematch: () => matchDriver.closeRematch().events,
     referee,
     hasOutcome: () => matchReferee.outcome() !== undefined,
     isStillPlaying: (playerId) =>

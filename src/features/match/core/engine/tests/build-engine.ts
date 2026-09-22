@@ -24,6 +24,8 @@ import { MoveLog } from "../move-log";
 import { Player } from "../player-facade";
 import { PlayerRepository } from "../player-repository";
 import { Referee } from "../referee-facade";
+import { RematchGate } from "../rematch/gate";
+import { RematchNegotiation } from "../rematch/negotiation";
 import { RoundDriver } from "../round/driver";
 import { RoundPlayer } from "../round/player";
 import { RoundReferee } from "../round/referee";
@@ -79,6 +81,7 @@ interface EngineOptions {
   readonly extraTimeReserveMs?: number;
   readonly isDealWindowEnabled?: boolean;
   readonly betLevels?: readonly BetLevel[];
+  readonly isRematchEnabled?: boolean;
 }
 
 export function engineWithHands(
@@ -102,12 +105,18 @@ export function engineWithHands(
     extraTimeReserveMs: options.extraTimeReserveMs ?? 0,
     presentingRoundMs: 120,
     presentingMatchMs: 120,
+    // Los tres de la revancha, encogidos como los demás: lo que la suite mide es la
+    // transición, no cuánto dura.
+    rematchWindowMs: 300,
+    rematchResponseMs: 50,
+    rematchHandoffMs: 60,
   };
   const config: DominoMatchConfig = matchConfig(seats, {
     isDealWindowEnabled: options.isDealWindowEnabled ?? false,
     // Vacío salvo que la suite lo pida: una mesa sin catálogo no ofrece aumentar, que es el
     // reposo de producción.
     betLevels: options.betLevels ?? [],
+    isRematchEnabled: options.isRematchEnabled ?? false,
   });
   const match = createMatchState(config);
   const clockBox = { now: 1_000 };
@@ -149,6 +158,8 @@ export function engineWithHands(
     (playerId) => repository.round(playerId),
     bet,
   );
+  const gate = new RematchGate(config.isRematchEnabled);
+  const rematch = new RematchNegotiation(match);
   const matchDriver = new MatchDriver(
     match,
     clock,
@@ -157,6 +168,8 @@ export function engineWithHands(
     matchReferee,
     players,
     roundDriver,
+    gate,
+    rematch,
   );
   const commands = {
     ABANDON: new AbandonCommand(referee, players, matchDriver),
@@ -181,6 +194,7 @@ export function engineWithHands(
     players,
     referee,
     matchDriver,
+    gate,
     clockBox,
     scheduled,
     start: () => matchDriver.begin(),
