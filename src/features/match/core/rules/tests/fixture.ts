@@ -3,7 +3,7 @@ import type { BetLevel, DominoRulesConfig } from "../config";
 import type { PlayerId } from "../ids";
 import type { MatchPhase, RoundPhase } from "../phases";
 import type { TileLike } from "../tiles";
-import type { MatchView, PlayerView, RoundView } from "../view";
+import type { MatchView, PlayerView, RematchView, RoundView } from "../view";
 
 // LA MESA COMO OBJETO PLANO, y ése es el test.
 //
@@ -29,6 +29,8 @@ export interface ViewSetup {
   readonly abandoned?: readonly PlayerId[];
   readonly betOffer?: RoundView["betOffer"];
   readonly acceptedBetLevel?: number;
+  /** La negociación de revancha. Ausente: no hay ninguna en juego. */
+  readonly rematch?: RematchView;
   /** Con quién contesta `privateOf`. Ausente: con todos, que es el servidor. */
   readonly visibleHandsOf?: readonly PlayerId[];
 }
@@ -79,6 +81,7 @@ export function viewOf(setup: ViewSetup): MatchView {
     startedAt: 0,
     acceptedBetExtra: 0,
     acceptedBetLevel: setup.acceptedBetLevel ?? 0,
+    rematch: setup.rematch,
     privateOf(playerId) {
       const tiles = setup.hands[playerId];
       if (!tiles) return undefined;

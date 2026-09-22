@@ -47,4 +47,25 @@ export type RuleViolationCode =
   | "NO_BET_PENDING"
   // Contestar una oferta que no es para vos. En una mesa de dos es, sobre todo, el
   // proponente intentando aceptarse a sí mismo.
-  | "NOT_YOUR_BET";
+  | "NOT_YOUR_BET"
+  // LOS DE LA REVANCHA. Son seis, y ninguno habla de dinero: el saldo, el antifraude y el tope
+  // de la cadena se resuelven ANTES de que la ventana exista y se publican en
+  // `RematchState.eligible`, que el front lee para apagar el botón. Un jugador nunca recibe
+  // «no te alcanza» como respuesta a haber pedido revancha — se entera antes de pedir.
+  //
+  // `REMATCH_WINDOW_CLOSED` es el motivo TARDÍO por excelencia: la ventana dura 30 s y el que
+  // apretó tarde tiene que poder distinguirlo de un rechazo, porque no hay nada que reintentar.
+  | "REMATCH_WINDOW_CLOSED"
+  // Ya hay una solicitud sobre la mesa. Es lo que recibe el que PIERDE la carrera cuando los
+  // dos aprietan a la vez — y por eso se comprueba antes que la fase, que para entonces ya
+  // cambió (ver `rules/rematch.ts`).
+  | "REMATCH_ALREADY_REQUESTED"
+  | "NO_REMATCH_OPPONENT"
+  | "NO_REMATCH_PENDING"
+  | "NOT_YOUR_REMATCH"
+  | "REMATCH_ALREADY_ANSWERED"
+  // NO ESTÁ EN ESTA MESA, o se retiró de ella. Nace con la revancha porque es la primera
+  // ventana que corre con la partida ya dictaminada: mientras se juega, que el que manda un
+  // verbo esté sentado lo garantiza `onJoin`, y el retirado lo rechaza `MatchSeatGuard` antes
+  // de llegar a una regla.
+  | "PLAYER_NOT_IN_MATCH";

@@ -20,6 +20,7 @@ export * from "./board";
 export * from "./boneyard";
 export * from "./match";
 export * from "./player";
+export * from "./rematch";
 export * from "./round";
 export * from "./tile";
 // LA MITAD SERVIDOR DE LA FRONTERA DE LAS REGLAS. Sale por el barril del estado —y no por el de

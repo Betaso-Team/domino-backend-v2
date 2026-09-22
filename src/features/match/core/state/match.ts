@@ -1,5 +1,6 @@
 import { type SchemaType, schema, t } from "@colyseus/schema";
 import { PlayerState } from "./player";
+import { RematchState } from "./rematch";
 import { RoundState, RoundSummary } from "./round";
 
 // La unión se declara en `rules/phases` —es vocabulario del juego, no del wire— y se
@@ -60,6 +61,16 @@ export const MatchState = schema(
     // con aumento que sin él — quien los lee es la liquidación, al cerrar.
     acceptedBetExtra: t.number().default(0),
     acceptedBetLevel: t.number().default(0),
+    // LA REVANCHA, y VA AL FINAL por la misma razón que `RoundState.pastMoves`:
+    // `@colyseus/schema` codifica por ÍNDICE, así que un campo insertado en el medio corre
+    // todos los posteriores y un cliente con el schema pre-generado decodifica basura. Es la
+    // ruptura de wire que la identidad multiplataforma ya pagó una vez. Al final, un cliente
+    // viejo simplemente lo ignora.
+    //
+    // `.optional()` por lo mismo que `currentRound` y `betOffer`: sin él, `t.ref` auto-instancia
+    // el nodo al construir `MatchState` —su constructor no pide argumentos— y la rama nula
+    // —ausente = no hay revancha en juego— sería imposible de representar.
+    rematch: t.ref(RematchState).optional(),
   },
   "MatchState",
 );

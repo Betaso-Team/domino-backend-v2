@@ -20,10 +20,32 @@
 // muere sin veredicto no es una transición del juego, es la sala que se muere. Eso lo
 // cuenta `MATCH_ABORTED`, que es evento de PLATAFORMA (network/events.ts).
 //
-// Las dos fases de la REVANCHA (`REMATCH_WINDOW`, `REMATCH_NEGOTIATION`) van DESPUÉS del
-// veredicto y ANTES del terminal. NO entran en esta rebanada, pero el enum está ordenado
-// para recibirlas sin renombrar nada: es la razón entera de haber separado las palabras.
-export type MatchPhase = "NOT_STARTED" | "PLAYING" | "PRESENTING_MATCH" | "FINISHED";
+// Las TRES fases de la REVANCHA van DESPUÉS del veredicto y ANTES del terminal, y entraron sin
+// renombrar nada — que es la razón entera por la que `RESOLVED` y `FINISHED` se separaron antes
+// de que existieran. Cada una espera algo distinto, que es lo que las hace fases y no un
+// booleano:
+//
+//   · `REMATCH_WINDOW`      espera que ALGUIEN pida (30 s).
+//   · `REMATCH_NEGOTIATION` espera que los DEMÁS respondan (5 s).
+//   · `REMATCH_ACCEPTED`    espera el traspaso: la sala nueva ya existe y cada uno tiene su
+//                           reserva, pero la vieja se sostiene unos segundos para que el
+//                           cliente alcance a consumirla.
+//
+// SON TRES Y NO DOS, y ahí este repo se aparta de truco: allá hay `REMATCH_WINDOW` y
+// `REMATCH_NEGOTIATION` y nada más. La tercera es de v1 (`RematchPhase.ACCEPTED`), y existe
+// porque el front pinta una pantalla propia de «revancha aceptada»: sin la fase tendría que
+// inferirla de haber recibido un mensaje, que es justo lo que un estado sincronizado evita.
+//
+// NINGUNA de las tres es terminal: de las tres se sale a `FINISHED`, que sigue siendo el único.
+// Una revancha que no prospera no es un final distinto, es el mismo final más tarde.
+export type MatchPhase =
+  | "NOT_STARTED"
+  | "PLAYING"
+  | "PRESENTING_MATCH"
+  | "REMATCH_WINDOW"
+  | "REMATCH_NEGOTIATION"
+  | "REMATCH_ACCEPTED"
+  | "FINISHED";
 
 // UN EJE, UN CAMPO (spec §7.1): la fase reemplaza los booleanos del v1
 // (isRoundFinished + bloqueo derivado + roundEndReason codificaban lo mismo tres veces).

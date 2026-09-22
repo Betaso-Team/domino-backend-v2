@@ -140,6 +140,19 @@ export interface RoundView {
 //
 // Sin esta separación, cada `canProposeBet` tendría que construir un envoltorio para preguntar
 // algo que no tiene nada de privado.
+// LA REVANCHA COMO LA VE UNA REGLA. `eligible` NO está: es plata —saldo, antifraude, cadena— y
+// las reglas de la revancha juzgan la MESA, no el dinero. Que el motor no pueda leerlo desde una
+// regla es lo que impide escribir una legalidad que dependa de un saldo, que es justo lo que
+// haría imposible que estas reglas viajen al cliente.
+//
+// La compuerta que sí decide con esa respuesta vive en `engine/rematch/gate.ts`, fuera de las
+// reglas y con un solo lector: el conductor.
+export interface RematchView {
+  readonly requesterId: PlayerId;
+  readonly responderId: PlayerId;
+  readonly acceptedIds: ReadonlyList<string>;
+}
+
 export interface PublicMatchView {
   readonly phase: string;
   readonly scoreboard?: ScoreboardView;
@@ -151,6 +164,7 @@ export interface PublicMatchView {
   readonly startedAt: number;
   readonly acceptedBetExtra: number;
   readonly acceptedBetLevel: number;
+  readonly rematch?: RematchView;
 }
 
 // LO PÚBLICO MÁS LA PUERTA. `undefined` significa **no lo ves**, nunca "no tiene fichas": en el
