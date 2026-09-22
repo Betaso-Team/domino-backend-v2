@@ -30,9 +30,13 @@ import {
 } from "@/features/game-mode";
 import { LobbySettings } from "@/features/lobby/settings";
 import {
+  type BetLevelBook,
+  CachedBetLevelBook,
   ColyseusMatchGateway,
+  HttpBetLevelBook,
   MatchPlatform,
   MatchRegistry,
+  NO_BET_LEVELS,
   RematchCoordinator,
 } from "@/features/match";
 import { type GlobalDominoConfig, globalConfigWith } from "@/features/match/core/config";
@@ -407,6 +411,25 @@ export const matchmaker = new Matchmaker({
 // y hoy no se hace (ver la deuda en AGENTS.md). Sin esa mitad, el tope de la cadena
 // —`rematchCount`— es lo único que impide la repetición infinita, y alcanza: el par vuelve al
 // emparejador, que es quien los separa.
+// EL CATÁLOGO DE NIVELES DE AUMENTO, con el mismo criterio que el antifraude: hace falta el
+// backend Y la llave interna, porque es un endpoint interno del backend principal. Sin alguno de
+// los dos el libro es el de reposo y NINGUNA mesa ofrece aumentar — que es el lado seguro en el
+// que equivocarse: el `extra` de un nivel determina puntos de ranking reales, y ofrecer uno con
+// un valor inventado le entrega al jugador un puntaje que nadie configuró.
+//
+// La ventana de cache es la de v1 (30 s). Se consulta al crear CADA mesa, y los niveles de un
+// modo cambian cuando el panel los toca, no entre dos partidas.
+rootContainer.register<BetLevelBook>("BetLevelBook", {
+  useValue:
+    http && env.internalApiKey
+      ? new CachedBetLevelBook(
+          new HttpBetLevelBook(http, { value: env.internalApiKey }),
+          30_000,
+          clock.now,
+          logger,
+        )
+      : NO_BET_LEVELS,
+});
 rootContainer.register(RematchCoordinator, {
   useValue: new RematchCoordinator({
     wallet,

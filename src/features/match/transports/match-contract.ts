@@ -5,7 +5,7 @@ import type { Identity } from "@/features/auth";
 // para no tener que importar de acá— y eso es lo que mantiene el grafo acíclico.
 import type { GameMode } from "@/features/game-mode";
 import { z } from "zod";
-import type { DominoMatchConfig } from "../core/config";
+import type { BetLevel, DominoMatchConfig } from "../core/config";
 import type { MatchEventSink } from "../network/listeners";
 
 // Contrato en la raíz de transports porque matchmaking crea las salas. `mode` lo deja
@@ -237,7 +237,19 @@ export function requestOf(input: unknown): CreateMatchRequest {
  * mientras una mesa juega no puede cambiarle los puntos ni el premio, porque lo que la mesa
  * consume es esta copia. Es también lo que permite que `replay` rebobine sin base de datos.
  */
-export function configOf(request: CreateMatchRequest, mode: GameMode): DominoMatchConfig {
+/**
+ * @param betLevels los niveles de aumento que esta mesa ofrece, YA RESUELTOS. Entran por
+ * parámetro y no se consultan acá por lo mismo que el modo: esta función es SÍNCRONA y pura, y
+ * el catálogo de niveles vive en el backend principal. Quien los trae es la sala, que es async.
+ *
+ * El default vacío es el reposo: una instancia sin `BACKEND_URL` no ofrece aumentar, y eso es
+ * correcto en vez de estar roto.
+ */
+export function configOf(
+  request: CreateMatchRequest,
+  mode: GameMode,
+  betLevels: readonly BetLevel[] = [],
+): DominoMatchConfig {
   // EL ORDEN DE LAS DOS GUARDAS IMPORTA: primero "no sabemos jugar este modo" y después "pediste
   // mal la cantidad". Al revés, un pedido de cuatro contra un modo de cuatro saldría con el error
   // de cantidad —que coincide— y nadie se enteraría de que el problema es el modo.
@@ -280,15 +292,11 @@ export function configOf(request: CreateMatchRequest, mode: GameMode): DominoMat
     // TODA MESA CASUAL OFRECE REVANCHA, y esta función solo sienta mesas casuales: el torneo no
     // pasa por acá. Cuando el catálogo tenga la palanca por modo, sale de `mode`.
     isRematchEnabled: true,
-    // VACÍO, y por ahora siempre: el catálogo de niveles de aumento vive en el backend
-    // principal (en v1, `internal/bet-increase/config`) y este repo todavía no lo consulta.
-    // Lista vacía = la mesa no ofrece aumentar, que es exactamente lo que hace el v1 cuando
-    // no consigue el catálogo — falla CERRADO.
-    //
-    // Es el reposo correcto y no un pendiente disimulado: mientras el cobro no exista, una
-    // mesa que aceptara aumentos estaría prometiendo un premio mayor sin haber cobrado la
-    // diferencia. El día que el adaptador aparezca, llena esta lista y nada más cambia.
-    betLevels: [],
+    // LOS QUE EL LLAMADOR TRAJO. Vacío = la mesa no ofrece aumentar, que es el reposo y lo que
+    // hace v1 cuando no consigue el catálogo: falla CERRADO. Se congelan con el resto de la
+    // economía — el panel puede cambiar los niveles de un modo mientras la mesa se juega, y el
+    // que aceptó un x5 lo aceptó al precio de cuando se sentó.
+    betLevels,
   };
 }
 
@@ -353,6 +361,7 @@ export type MatchSinks = (options: DominoRoomOptions) => readonly MatchEventSink
 export function configFromRoomOptions(
   options: DominoRoomOptions,
   matchId: string,
+  betLevels: readonly BetLevel[] = [],
 ): DominoMatchConfig {
   return {
     matchId,
@@ -375,7 +384,7 @@ export function configFromRoomOptions(
     multiplier: options.mode === "CASUAL" ? options.rankingWeight : 1,
     // EL TORNEO NO OFRECE REVANCHA: ahí se vuelve a jugar cuando el torneo lo diga.
     isRematchEnabled: options.mode === "CASUAL",
-    betLevels: [],
+    betLevels,
     isFreeRoom: options.mode === "CASUAL" ? options.isFreeRoom : true,
   };
 }

@@ -26,6 +26,7 @@ import type { PlayerId } from "../../core/ids";
 import type { MatchState } from "../../core/state";
 import {
   AdmissionRefusedError,
+  type BetLevelBook,
   MatchEventNotifier,
   type MatchHistory,
   MatchPlatform,
@@ -153,9 +154,28 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // Acá adentro se rechaza el 4P (`UNSUPPORTED_GAME_MODE`) y la cantidad que no coincide, y las
     // dos cosas pasan ANTES de la génesis: el árbol de la partida nace unas líneas más abajo, en
     // el `child.resolve("MatchState")`.
+    // LOS NIVELES DE AUMENTO, del backend principal y por el MODO de esta mesa. Se resuelven acá
+    // —que es async— porque `configOf` es síncrona y pura; se congelan en el snapshot como el
+    // resto de la economía, así que editar los niveles de un modo con partidas en curso no le
+    // cambia el precio a nadie que ya se sentó.
+    //
+    // Falla CERRADO adentro del libro: sin backend, sin llave o con el endpoint caído la lista
+    // sale vacía y la mesa simplemente no ofrece aumentar.
+    // EL TORNEO NO PREGUNTA, y no es un ahorro de red: la apuesta de una mesa de torneo es del
+    // TORNEO, y dejar que dos jugadores la suban entre ellos cambiaría lo que vale esa partida en
+    // una tabla que no es de ellos. Es la misma frontera que la revancha.
+    const gameModeId =
+      roomOptions?.mode === "TOURNAMENT" ? undefined : (roomOptions ?? request)?.gameModeId;
+    const betLevels = gameModeId
+      ? await rootContainer.resolve<BetLevelBook>("BetLevelBook").levelsOf(gameModeId)
+      : [];
     const config = roomOptions
-      ? configFromRoomOptions(roomOptions, this.roomId)
-      : configOf(request as NonNullable<typeof request>, mode as NonNullable<typeof mode>);
+      ? configFromRoomOptions(roomOptions, this.roomId, betLevels)
+      : configOf(
+          request as NonNullable<typeof request>,
+          mode as NonNullable<typeof mode>,
+          betLevels,
+        );
     if (!roomOptions) {
       const maintenance = await rootContainer.resolve(LobbySettings).get();
       if (maintenance.isUnderMaintenance)
