@@ -39,7 +39,7 @@ export async function tournamentPoolSpec(
     // From the TOURNAMENT and not from a constant: the day the main backend serves four seats,
     // nothing changes here.
     seats: info.playersQuantity,
-    targetScore: info.pointsToWin,
+    pointsToWin: info.pointsToWin,
 
     async admit({ playerId, token }: Requester): Promise<void> {
       // The walkout penalty is charged at the queue's DOOR, the only place where it means anything:

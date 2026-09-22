@@ -65,6 +65,27 @@ const nodeMajorFloor = (range: string): number => {
   return Number(match[1]);
 };
 
+// EL ARRANQUE DE LOS SERVICIOS DE FONDO es un contrato entre dos archivos que no se leen entre
+// sí, que es de lo que trata este archivo entero. `src/main.ts` es el que CORRE y `src/app.config.ts`
+// el que se IMPORTA; el emparejador, el mantenimiento, el censo y el vigilante de torneos viven en
+// el container y alguien tiene que encenderlos.
+//
+// SE MIDE PORQUE EL OLVIDO NO FALLA, CUELGA. Sin `startServices()` el servidor levanta, acepta
+// sockets, contesta el HTTP y crea salas — y nadie se empareja nunca, porque la cola no tiene quién
+// la mire. No hay excepción, no hay log y el `/health` sigue en 200.
+describe("los servicios de fondo los enciende el que corre", () => {
+  const main = read(ENTRYPOINT_SOURCE);
+
+  it("main.ts llama a startServices antes de escuchar", () => {
+    expect(main).toContain("startServices()");
+    expect(main.indexOf("startServices()")).toBeLessThan(main.indexOf("listen(app"));
+  });
+
+  it("y los apaga al dejar de aceptar partidas", () => {
+    expect(main).toContain("stopAcceptingMatches()");
+  });
+});
+
 describe("el piso de node se dice en voz alta y en todos lados", () => {
   // CONTRA LA DEPENDENCIA Y NO CONTRA UN NÚMERO ESCRITO A MANO: así un bump de colyseus que
   // suba SU piso pone esto rojo en el gate, que es el único lugar barato donde enterarse.

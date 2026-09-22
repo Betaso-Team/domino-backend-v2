@@ -47,7 +47,7 @@ export interface PoolSpec {
    * of data.
    */
   readonly seats: number;
-  readonly targetScore: number;
+  readonly pointsToWin: number;
 
   /**
    * The scope's restrictions, resolved BEFORE queueing. This is where the price of

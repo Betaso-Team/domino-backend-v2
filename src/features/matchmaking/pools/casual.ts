@@ -25,7 +25,7 @@ export async function casualPoolSpec(gameModeId: string, deps: CasualPoolDeps): 
   return {
     poolId: gameModeId,
     seats: table.playersQuantity,
-    targetScore: table.pointsToWin,
+    pointsToWin: table.pointsToWin,
 
     // The balance is checked BEFORE queueing. It is a query and not a hold: between this and the
     // charge at admission the balance can change, so what decides is still the charge. What is

@@ -11,7 +11,14 @@ const ENV_MODULE_PATH = "src/env.ts";
 // configuración de ningún proceso, solo texto sobre cómo detectarla.
 const THIS_FILE_PATH = "src/env-single-reader.test.ts";
 
-const EXCLUDED_PATHS = new Set([ENV_MODULE_PATH, THIS_FILE_PATH]);
+// LA TERCERA EXCLUSIÓN, y es de la SUITE y no de la app. `src/tests/int-services.ts` lee la
+// única variable con la que un test de contrato se conecta a una base de verdad. No es
+// configuración del proceso —la app no la lee, no la conoce y no hay dos lugares que puedan
+// discrepar sobre su valor—, y concentrarla en un archivo es lo que mantiene esta lista en tres
+// entradas en vez de una por test de integración.
+const INT_SERVICES_PATH = "src/tests/int-services.ts";
+
+const EXCLUDED_PATHS = new Set([ENV_MODULE_PATH, THIS_FILE_PATH, INT_SERVICES_PATH]);
 
 // Lo que detecta:
 //   - `process.env` en cualquier forma (acceso global directo, o vía un import por defecto

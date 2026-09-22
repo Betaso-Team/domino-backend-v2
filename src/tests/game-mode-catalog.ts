@@ -21,6 +21,26 @@ import type { GameMode } from "@/features/game-mode";
 // LOS NÚMEROS SON LOS QUE LA SUITE YA USABA (`pointsToWin: 100`, `entryFee: 125`, `prize: 250`):
 // venían escritos en cada `casualTable` cuando el request los traía, y conservarlos es lo que hace
 // que el único cambio medible de esta tarea sea de DÓNDE salen, no cuánto valen.
+// LA MESA GRATIS, y no es un capricho del que la agregó: sin `BACKEND_URL` el container deja un
+// `canAfford` que contesta `false` siempre —es lo correcto, "no hay con qué preguntar" no puede
+// ser "sí"—, así que toda mesa PAGA se rechaza con `INSUFFICIENT_FUNDS` antes de entrar a la
+// cola. Un E2E de matchmaking que quiera medir cualquier otra cosa —el mantenimiento, el censo,
+// el emparejado— necesita una mesa cuyo `admit` salga antes de tocar la billetera, y eso es
+// `entryFee: 0`.
+//
+// `isFreeRoom` VA EXPLÍCITO: el repositorio NO lo deriva de `entryFee` —su default es `false`
+// (`memory-repository.ts:42`)—, así que una mesa sin inscripción que no lo declare igual sale
+// al ranking como paga. Hoy no cambia la admisión, que mira `entryFee`; cambia lo que se
+// reporta cuando la partida termina.
+export const FREE_2P: GameMode = await gameModes.create({
+  name: "gratis-2p",
+  playersQuantity: 2,
+  pointsToWin: 100,
+  entryFee: 0,
+  prize: 0,
+  isFreeRoom: true,
+});
+
 export const CASUAL_2P: GameMode = await gameModes.create({
   name: "clasica-2p",
   playersQuantity: 2,
