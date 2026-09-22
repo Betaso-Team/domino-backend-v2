@@ -16,6 +16,7 @@ import {
   type StandingsFeeds,
   reportStandings,
 } from "../../../network";
+import type { NetworkMatchEvent } from "../../../network/events";
 import { MessageRouter } from "../messages";
 import { CommandCatalog } from "./catalog";
 import { CommandHandler } from "./command-handler";
@@ -24,6 +25,11 @@ import { identityDecoder } from "./decoders";
 export type MatchStarter = () => void;
 export type MatchSeatGuard = (playerId: string) => boolean;
 export type MatchHasOutcome = () => boolean;
+// LO QUE LA SALA NECESITA DE LA REVANCHA, y son dos funciones y no el grafo: la sala no puede
+// alcanzar al conductor, que es lo que `EngineGraph` dejó de publicar. La compuerta la escribe
+// el coordinador de la red; el cierre lo dispara una desconexión, que es un hecho de
+// plataforma que el motor no mira.
+export type RematchCloser = () => readonly NetworkMatchEvent[];
 
 // Este archivo ya NO arma el grafo: lo pide a `buildEngineGraph` y solo decide qué queda
 // alcanzable desde el container. La génesis y el orden de construcción viven en UN solo
@@ -47,6 +53,8 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   child.register<MatchSeatGuard>("MatchSeatGuard", {
     useValue: (playerId) => graph.isStillPlaying(playerId),
   });
+  child.register("RematchDoor", { useValue: graph.rematchGate });
+  child.register<RematchCloser>("RematchCloser", { useValue: () => graph.closeRematch() });
   child.register("Command:ABANDON", { useValue: graph.commands.ABANDON });
   child.register("Command:PLAY_TILE", { useValue: graph.commands.PLAY_TILE });
   child.register("Command:DRAW_TILE", { useValue: graph.commands.DRAW_TILE });

@@ -314,6 +314,23 @@ export interface CasualRoomOptions extends CommonRoomOptions {
   readonly prize: number;
   readonly rankingWeight: number;
   readonly isFreeRoom: boolean;
+  /**
+   * CUÁNTAS REVANCHAS LLEVA ESTA CADENA. Ausente es CERO —la mesa original no tiene por qué
+   * declararse «la número cero»— y la revancha llega con uno, que es lo que la vuelve
+   * inelegible: `MAX_REMATCHES_PER_CHAIN` es 1 (ver `network/rematch.ts`).
+   *
+   * Es anti-abuso y es de v1: sin el tope, dos cómplices se pasan la partida entre ellos
+   * indefinidamente sin volver a pasar por el emparejador, que es quien los separaría.
+   */
+  readonly rematchCount?: number;
+  /**
+   * QUÉ CADENA. Lo bautiza la PRIMERA mesa y las revanchas lo heredan; sin él cada revancha
+   * empezaría una cadena nueva y el tope de la anterior no limitaría nada.
+   *
+   * Hoy nadie lo lee más que la mesa siguiente — existe para que el día que el reporte quiera
+   * agrupar «estas tres partidas fueron la misma sentada» el dato ya esté grabado.
+   */
+  readonly rematchChainId?: string;
 }
 
 export interface TournamentRoomOptions extends CommonRoomOptions {

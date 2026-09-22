@@ -29,6 +29,7 @@ import {
   MatchEventNotifier,
   type MatchHistory,
   MatchPlatform,
+  RematchCoordinator,
 } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
 import {
@@ -45,6 +46,7 @@ import {
   type MatchHasOutcome,
   type MatchSeatGuard,
   type MatchStarter,
+  type RematchCloser,
   buildCatalog,
   buildPieces,
   buildRouter,
@@ -68,6 +70,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private config!: DominoMatchConfig;
   private roomOptions?: DominoRoomOptions;
   private platform?: MatchPlatform;
+  private closeRematch: RematchCloser = () => [];
   // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
   // El default reutiliza el global: si algún día `onDrop` corriera antes de que
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
@@ -202,6 +205,24 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
           )
         : undefined;
     const platformSinks = platformSink ? [platformSink] : [];
+    // EL COORDINADOR DE LA REVANCHA, y entra por el mismo camino que la plataforma: un sink.
+    // Contesta la compuerta durante la pausa de presentación y abre la mesa nueva cuando todos
+    // aceptaron. Si el container no lo registró —un despliegue sin billetera— no hay revancha
+    // y la compuerta se queda en su default, que es cerrada.
+    this.closeRematch = child.resolve<RematchCloser>("RematchCloser");
+    const rematchSink =
+      roomOptions && rootContainer.isRegistered(RematchCoordinator)
+        ? rootContainer.resolve(RematchCoordinator).sinkFor(
+            roomOptions,
+            config.matchId,
+            child.resolve("RematchDoor"),
+            // POR CLIENTE Y NUNCA POR BROADCAST: una reserva de asiento es un secreto de su
+            // dueño, y quien tenga la ajena puede consumirla y dejarlo afuera de la partida.
+            (playerId, type, payload) => this.clientOf(playerId)?.send(type, payload),
+            () => this.notifier.notify(this.closeRematch()),
+          )
+        : undefined;
+    const rematchSinks = rematchSink ? [rematchSink] : [];
     const externalSinks =
       roomOptions && rootContainer.isRegistered("MatchSinks")
         ? rootContainer.resolve<MatchSinks>("MatchSinks")(roomOptions)
@@ -209,7 +230,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
       (events) => this.broadcast("events", events),
-      [...pieces.sinks, ...platformSinks, ...externalSinks],
+      [...pieces.sinks, ...platformSinks, ...rematchSinks, ...externalSinks],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
@@ -377,7 +398,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const playerId = this.playerIdOf(client);
     if (!playerId || this.clientOf(playerId)) return;
     this.player(playerId).connected = false;
-    this.notifier.notify([{ type: "PLAYER_DISCONNECTED", playerId }]);
+    // LA REVANCHA SE CIERRA CUANDO ALGUIEN SE VA, y es lo único que la sala le dice al motor
+    // sobre la revancha. Una desconexión es un hecho de PLATAFORMA y el juego no los mira; acá
+    // importa por una razón chica y concreta: sin esto, el que ofreció se queda mirando una
+    // cuenta atrás que ya no puede terminar en nada.
+    //
+    // Es inofensivo fuera de las fases de revancha —el conductor lo ignora— y también durante
+    // el TRASPASO, que es justamente cuando los dos clientes se van a propósito a consumir su
+    // reserva. Cerrar ahí les sacaría la revancha que ya tienen.
+    this.notifier.notify([{ type: "PLAYER_DISCONNECTED", playerId }, ...this.closeRematch()]);
     this.log.info("jugador salió", { playerId });
   }
 

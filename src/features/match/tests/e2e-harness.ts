@@ -20,6 +20,8 @@ import { playableSides } from "../core/rules/playable";
 import type { MatchState } from "../core/state";
 import type { BoardSide } from "../core/state/tile";
 import type { HistoryEntry, HistoryReader } from "../network/history";
+import type { CasualRoomOptions } from "../transports/match-contract";
+import { configFromRoomOptions } from "../transports/match-contract";
 import { type CreateMatchRequest, configOf, requestOf } from "../transports/match-contract";
 
 export {
@@ -56,8 +58,13 @@ export function signatureOf(state: MatchState): string {
 
 export interface SeatedMatch {
   readonly roomId: string;
-  /** El request con el que la sala se creó. Es la mitad viva del config; la otra es el modo. */
-  readonly options: CreateMatchRequest;
+  /**
+   * CON QUÉ SE CREÓ LA SALA, y son DOS formas porque hay dos caminos de creación de verdad: el
+   * `CreateMatchRequest` del orquestador y las `DominoRoomOptions` con las que el emparejador
+   * abre una mesa casual. `onCreate` los distingue con `isRoomOptions`, y sólo el segundo trae
+   * la economía que la plataforma y la revancha necesitan.
+   */
+  readonly options: CreateMatchRequest | CasualRoomOptions;
   /**
    * El MISMO snapshot que la sala normalizó: es lo único que traduce entre el `userId`
    * con el que el test nombra a un jugador y el `seat-N` con el que el servidor lo nombra.
@@ -67,6 +74,51 @@ export interface SeatedMatch {
   readonly serverState: MatchState;
   /** Indexado por el id OPACO del asiento, que es el que el servidor usa. */
   readonly clients: Record<string, Awaited<ReturnType<ColyseusTestServer["connectTo"]>>>;
+}
+
+/**
+ * LA MESA COMO LA ABRE MATCHMAKING, con `DominoRoomOptions` en vez de un `CreateMatchRequest`.
+ *
+ * Son DOS caminos de creación de verdad y no una comodidad del test: `onCreate` los distingue
+ * con `isRoomOptions`, y sólo el de las OPCIONES trae la economía de la mesa —`entryFee`,
+ * `prize`, la cadena de revancha— que la plataforma y la revancha necesitan. Una sala creada
+ * por request nace sin `roomOptions`, así que sus sinks ni se enganchan.
+ *
+ * Es el camino productivo de una mesa casual desde que existe el emparejador, y el único por el
+ * que se puede medir la revancha de punta a punta.
+ */
+export async function seatPairAsMatchmaking(
+  server: ColyseusTestServer,
+  seats: readonly [string, string],
+  over: Partial<CasualRoomOptions> = {},
+): Promise<SeatedMatch> {
+  const options: CasualRoomOptions = {
+    mode: "CASUAL",
+    gameModeId: CASUAL_2P.uuid,
+    seats: [...seats],
+    seed: `seed-${seats[0]}`,
+    pointsToWin: CASUAL_2P.pointsToWin,
+    entryFee: CASUAL_2P.entryFee,
+    prize: CASUAL_2P.prize,
+    rankingWeight: CASUAL_2P.multiplier,
+    isFreeRoom: CASUAL_2P.isFreeRoom,
+    ...over,
+  };
+  const config = configFromRoomOptions(options, "pendiente");
+  const room = await server.createRoom("domino", options);
+  const clients: SeatedMatch["clients"] = {};
+  for (const playerId of options.seats) {
+    server.sdk.auth.token = mintToken({ userId: playerId });
+    clients[playerId] = await server.connectTo(room);
+  }
+  return {
+    roomId: room.roomId,
+    options,
+    // El `matchId` real es el `roomId`, que recién se conoce después de crear la sala.
+    config: { ...config, matchId: room.roomId },
+    serverState: room.state as MatchState,
+    clients,
+  };
 }
 
 export async function seatPair(

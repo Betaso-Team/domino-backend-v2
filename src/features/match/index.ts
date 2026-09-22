@@ -18,6 +18,8 @@ export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
 export type { HistoryReader } from "./network/history";
 export { AdmissionRefusedError, MatchPlatform } from "./network/platform";
+export { MAX_REMATCHES_PER_CHAIN, RematchCoordinator } from "./network/rematch";
+export type { RematchAntifraud, RematchDoor } from "./network/rematch";
 export type {
   MatchRow,
   MatchSummary,

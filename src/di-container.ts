@@ -29,7 +29,12 @@ import {
   OutboxDispatcher,
 } from "@/features/game-mode";
 import { LobbySettings } from "@/features/lobby/settings";
-import { ColyseusMatchGateway, MatchPlatform, MatchRegistry } from "@/features/match";
+import {
+  ColyseusMatchGateway,
+  MatchPlatform,
+  MatchRegistry,
+  RematchCoordinator,
+} from "@/features/match";
 import { type GlobalDominoConfig, globalConfigWith } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
 import type { HistoryPort, HistoryReader } from "@/features/match/network/history";
@@ -389,6 +394,28 @@ export const matchmaker = new Matchmaker({
   now: clock.now,
   seedOf: randomUUID,
   log: logger,
+});
+// EL COORDINADOR DE LA REVANCHA, con las tres piezas que ya existían y una que es nueva sólo
+// como composición: el ANTIFRAUDE de la revancha es la MISMA bandera que apaga el veto del
+// emparejador, leída al revés — allá decide si evitar a un rival, acá si dejar repetir con él.
+//
+// ⚠ EL VETO SE CONSULTA PERO NO SE ESCRIBE ACÁ. Si estos dos ya están vetados entre sí, la
+// revancha no se ofrece; anotar el veto cuando una revancha TERMINA es del cierre de esa mesa,
+// y hoy no se hace (ver la deuda en AGENTS.md). Sin esa mitad, el tope de la cadena
+// —`rematchCount`— es lo único que impide la repetición infinita, y alcanza: el par vuelve al
+// emparejador, que es quien los separa.
+rootContainer.register(RematchCoordinator, {
+  useValue: new RematchCoordinator({
+    wallet,
+    antifraud: async (playerIds) => {
+      if (!(await antifraud.isRematchRulesEnabled())) return true;
+      const vetoed = await casualVeto.vetoedFor(CASUAL_SCOPE, playerIds[0] ?? "");
+      return !playerIds.some((playerId) => vetoed.includes(playerId));
+    },
+    opener: gateway,
+    seedOf: randomUUID,
+    log: logger,
+  }),
 });
 rootContainer.register(MatchPlatform, {
   useValue: new MatchPlatform({
