@@ -35,6 +35,10 @@ export type MatchHasOutcome = () => boolean;
 // el coordinador de la red; el cierre lo dispara una desconexión, que es un hecho de
 // plataforma que el motor no mira.
 export type RematchCloser = () => readonly NetworkMatchEvent[];
+// DESHACE EL AUMENTO cuando el cobro no salió. Tercera y última puerta del motor hacia afuera,
+// y por el mismo motivo que las otras dos: cobrar es RED y el motor asentó el trato sin poder
+// esperarla.
+export type MultiplierRevoker = () => readonly NetworkMatchEvent[];
 
 // Este archivo ya NO arma el grafo: lo pide a `buildEngineGraph` y solo decide qué queda
 // alcanzable desde el container. La génesis y el orden de construcción viven en UN solo
@@ -60,6 +64,9 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   });
   child.register("RematchDoor", { useValue: graph.rematchGate });
   child.register<RematchCloser>("RematchCloser", { useValue: () => graph.closeRematch() });
+  child.register<MultiplierRevoker>("MultiplierRevoker", {
+    useValue: () => graph.revokeMultiplier(),
+  });
   child.register("Command:ABANDON", { useValue: graph.commands.ABANDON });
   child.register("Command:PLAY_TILE", { useValue: graph.commands.PLAY_TILE });
   child.register("Command:DRAW_TILE", { useValue: graph.commands.DRAW_TILE });

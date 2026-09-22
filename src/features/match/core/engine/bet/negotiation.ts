@@ -14,6 +14,15 @@ import { currentRoundOf } from "../state-projections";
 export interface BetSettlement {
   readonly accepted: boolean;
   readonly turnRemainingMs: number;
+  /**
+   * LO ACORDADO, devuelto porque `settle` es lo que lo borra. Quien cobra lo necesita y ya no
+   * puede leerlo del árbol: la oferta muere en el mismo acto que cierra el trato.
+   *
+   * En cero cuando no hubo trato, que es lo mismo que decir que no hay nada que cobrar.
+   */
+  readonly level: number;
+  readonly extra: number;
+  readonly additionalEntryFee: number;
 }
 
 export class BetNegotiation {
@@ -56,7 +65,8 @@ export class BetNegotiation {
     const offer = round.betOffer;
     // Sin oferta no hay nada que cerrar. Es alcanzable: el plazo puede vencer en el mismo
     // tick en que entra la respuesta, y el segundo en llegar no debe aplicar nada.
-    if (!offer) return { accepted: false, turnRemainingMs: 0 };
+    if (!offer)
+      return { accepted: false, turnRemainingMs: 0, level: 0, extra: 0, additionalEntryFee: 0 };
 
     if (accepted) {
       // LO ACORDADO SUBE A LA PARTIDA y la oferta muere con su ronda. Es la partición del
@@ -64,9 +74,37 @@ export class BetNegotiation {
       this.match.acceptedBetExtra = offer.extra;
       this.match.acceptedBetLevel = offer.level;
     }
-    const turnRemainingMs = offer.turnRemainingMs;
+    const { turnRemainingMs, level, extra, additionalEntryFee } = offer;
     round.betOffer = undefined;
-    return { accepted, turnRemainingMs };
+    return {
+      accepted,
+      turnRemainingMs,
+      // SIEMPRE los números de la oferta, aceptada o no. Devolver ceros al rechazar obligaría a
+      // quien llama a mirar dos campos para saber si hay algo que hacer, y el que registra el
+      // rechazo quiere saber QUÉ se rechazó.
+      level,
+      extra,
+      additionalEntryFee,
+    };
+  }
+
+  /**
+   * DESHACE EL TRATO YA ASENTADO, y es lo único de esta clase que no lo pide un jugador.
+   *
+   * Lo pide la RED cuando el cobro no salió: el motor es SÍNCRONO por contrato, así que asienta
+   * el aumento sin esperar a la billetera y la compensación llega después. Sin esto, un cobro
+   * fallido dejaría la mesa diciendo x5 para siempre — y el cierre pagaría un premio con dinero
+   * que nunca entró.
+   *
+   * @returns el nivel que se deshizo, o `0` si no había nada acordado. Es idempotente: dos
+   * compensaciones sobre el mismo trato no dejan el escalar en negativo ni emiten dos eventos.
+   */
+  revoke(): number {
+    const level = this.match.acceptedBetLevel;
+    if (level === 0) return 0;
+    this.match.acceptedBetExtra = 0;
+    this.match.acceptedBetLevel = 0;
+    return level;
   }
 
   // Quién está esperando contestar. Lo necesita el reloj para poder decir en nombre de quién

@@ -108,6 +108,34 @@ describe("aumento de apuesta: responder", () => {
     expect(e.round().betOffer).toBeUndefined();
   });
 
+  // EL ACUERDO SE ANUNCIA CON TODO LO QUE EL COBRO NECESITA, y ése es el evento entero: el
+  // comando dice «acepto», esto dice CUÁNTO y A QUIÉNES. El cuánto NO está en el payload del
+  // comando —vive en la oferta, que `settle` borra en el mismo acto—, así que leerlo del árbol
+  // después es imposible. Es el gemelo de `REMATCH_ACCEPTED`.
+  it("aceptar anuncia el trato con lo que hace falta para cobrarlo", () => {
+    const e = started();
+    e.proposeBet("u1", 5);
+
+    expect(e.respondBet("u2", true)).toEqual([
+      {
+        type: "MULTIPLIER_AGREED",
+        level: 5,
+        extra: 5,
+        additionalEntryFee: 500,
+        playerIds: ["u1", "u2"],
+      },
+    ]);
+  });
+
+  // RECHAZAR NO ANUNCIA NADA: no hay nada que cobrar, y un evento de acuerdo sobre un «no» es
+  // exactamente el que haría cobrar una mesa que nadie aceptó.
+  it("rechazar no anuncia ningún trato", () => {
+    const e = started();
+    e.proposeBet("u1", 5);
+
+    expect(e.respondBet("u2", false)).toEqual([]);
+  });
+
   it("rechazar descongela sin tocar la plata", () => {
     const e = started();
     e.proposeBet("u1", 5);
@@ -175,5 +203,51 @@ describe("aumento de apuesta: el reloj", () => {
     e.proposeBet("u1", 2);
 
     expect(e.match.activeDeadline).not.toBe(turnDeadline);
+  });
+});
+
+// LA COMPENSACIÓN, que es lo único del aumento que no pide un jugador. El motor asienta el trato
+// sin esperar a la billetera —es síncrono por contrato— así que cuando el cobro no sale hay que
+// deshacerlo con un segundo acto. Sin esto el estado diría x5 para siempre sobre una mesa que
+// nadie pagó, y el cierre pagaría un premio con dinero que no entró.
+describe("aumento de apuesta: deshacerlo cuando el cobro no salió", () => {
+  it("devuelve el escalar de la partida a cero y dice qué nivel se cayó", () => {
+    const e = started();
+    e.proposeBet("u1", 5);
+    e.respondBet("u2", true);
+
+    expect(e.revokeMultiplier()).toBe(5);
+
+    expect(e.match.acceptedBetExtra).toBe(0);
+    expect(e.match.acceptedBetLevel).toBe(0);
+  });
+
+  // IDEMPOTENTE: dos compensaciones sobre el mismo trato no dejan el escalar en negativo ni
+  // anuncian dos veces que se cayó. El que cobra puede reintentar.
+  it("deshacer dos veces no deshace de más", () => {
+    const e = started();
+    e.proposeBet("u1", 5);
+    e.respondBet("u2", true);
+    e.revokeMultiplier();
+
+    expect(e.revokeMultiplier()).toBe(0);
+    expect(e.match.acceptedBetLevel).toBe(0);
+  });
+
+  it("sin nada acordado no hay nada que deshacer", () => {
+    expect(started().revokeMultiplier()).toBe(0);
+  });
+
+  // ⚠ DESHACER DEJA LA MESA COMO SI NADIE HUBIERA ACEPTADO, y eso incluye poder volver a
+  // proponer: el tope de «uno aceptado por partida» lo lleva `acceptedBetLevel`, que esto pone
+  // en cero. Es correcto — el aumento que no se pudo cobrar no ocupó el cupo —, y es la clase de
+  // consecuencia que conviene tener medida antes de que alguien la descubra jugando.
+  it("después de deshacerlo se puede volver a proponer", () => {
+    const e = started();
+    e.proposeBet("u1", 5);
+    e.respondBet("u2", true);
+    e.revokeMultiplier();
+
+    expect(() => e.proposeBet("u1", 2)).not.toThrow();
   });
 });

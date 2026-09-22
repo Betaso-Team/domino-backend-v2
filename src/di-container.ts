@@ -30,6 +30,7 @@ import {
 } from "@/features/game-mode";
 import { LobbySettings } from "@/features/lobby/settings";
 import {
+  BetCharger,
   type BetLevelBook,
   CachedBetLevelBook,
   ColyseusMatchGateway,
@@ -419,6 +420,15 @@ export const matchmaker = new Matchmaker({
 //
 // La ventana de cache es la de v1 (30 s). Se consulta al crear CADA mesa, y los niveles de un
 // modo cambian cuando el panel los toca, no entre dos partidas.
+// EL COBRO DEL AUMENTO. Se registra sólo con billetera: sin ella no habría a quién cobrarle —y
+// tampoco habría niveles, porque el libro depende del mismo backend, así que las dos ausencias
+// coinciden y ninguna mesa llega a ofrecer aumentar.
+//
+// El plazo es el de v1 (15 s) y es generoso a propósito: el que espera es un jugador que ya
+// apretó «acepto», y cortar antes de tiempo le anula un trato que iba a salir bien.
+rootContainer.register(BetCharger, {
+  useValue: new BetCharger({ wallet, ledger, timeoutMs: 15_000, log: logger }),
+});
 rootContainer.register<BetLevelBook>("BetLevelBook", {
   useValue:
     http && env.internalApiKey

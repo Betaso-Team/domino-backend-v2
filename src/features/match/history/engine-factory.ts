@@ -72,6 +72,15 @@ export interface EngineGraph {
    * nada. Es inofensiva fuera de las fases de revancha.
    */
   closeRematch(): readonly MatchEvent[];
+  /**
+   * DESHACE EL AUMENTO YA ACORDADO, y es la tercera excepción a «el grafo no deja mover el juego
+   * desde afuera» — por el mismo motivo que las otras dos: cobrar es RED, y el motor asentó el
+   * trato sin poder esperarla.
+   *
+   * La pide el listener del cobro cuando la billetera dijo que no. Es idempotente y devuelve
+   * vacío si no había nada acordado, así que llamarla de más no emite un evento de mentira.
+   */
+  revokeMultiplier(): readonly MatchEvent[];
 }
 
 export interface EngineDeps {
@@ -145,6 +154,10 @@ export function buildEngineGraph(
     rematchGate: gate,
     begin: () => matchDriver.begin(),
     closeRematch: () => matchDriver.closeRematch().events,
+    revokeMultiplier: () => {
+      const level = bet.revoke();
+      return level > 0 ? [{ type: "MULTIPLIER_REVOKED", level }] : [];
+    },
     referee,
     hasOutcome: () => matchReferee.outcome() !== undefined,
     isStillPlaying: (playerId) =>
@@ -160,7 +173,7 @@ export function buildEngineGraph(
       // MANO, no la de la mesa. Y reciben el juez del aumento aparte del `Referee` general
       // porque éste no es un juez del juego: no mira fichas, mira dinero.
       PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(betReferee, bet, roundDriver),
-      RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(betReferee, bet, roundDriver),
+      RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(betReferee, bet, roundDriver, match),
       // LOS DOS DE LA REVANCHA reciben el conductor de PARTIDA, al revés que los del aumento:
       // lo que mueven es la fase de la MESA y no la de la mano. Su juez tampoco lleva config —
       // las reglas de la revancha no miran un solo número de la mesa.

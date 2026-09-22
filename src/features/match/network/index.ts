@@ -1,3 +1,5 @@
+export { BetCharger } from "./bet-charge";
+export type { BetChargerDeps } from "./bet-charge";
 export { CachedBetLevelBook, NO_BET_LEVELS } from "./bet-levels";
 export type { BetLevelBook } from "./bet-levels";
 export { HttpBetLevelBook } from "./transports/http-bet-levels";

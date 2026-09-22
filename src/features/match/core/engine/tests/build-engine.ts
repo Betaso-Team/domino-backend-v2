@@ -186,6 +186,7 @@ export function engineWithHands(
       new BetReferee(match, config),
       bet,
       roundDriver,
+      match,
     ),
   };
 
@@ -210,6 +211,8 @@ export function engineWithHands(
       commands.PROPOSE_BET_MULTIPLIER.execute({ playerId, level }),
     respondBet: (playerId: string, accept: boolean) =>
       commands.RESPOND_BET_MULTIPLIER.execute({ playerId, accept }),
+    // La compensación del cobro, que en producción pide la RED por `EngineGraph`.
+    revokeMultiplier: () => bet.revoke(),
     fireTimeout(): readonly MatchEvent[] {
       if (!pending) throw new Error("no hay timeout programado");
       const run = pending;

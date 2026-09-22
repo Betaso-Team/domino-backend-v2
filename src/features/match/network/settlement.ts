@@ -190,6 +190,19 @@ export function settlementOf(
     // Devolver una instrucción acá sería cobrar dos veces la misma entrada: una por este
     // evento y otra al admitir en la sala nueva. Que la liquidación de la revancha sea la de
     // otra mesa es lo que hace que abortar la apertura no tenga nada que deshacer.
+    // LOS DOS DEL AUMENTO TAMPOCO LIQUIDAN ESTA MESA, y conviene decir por qué, porque los dos
+    // suenan a plata y uno además la mueve.
+    //
+    // `MULTIPLIER_AGREED` la mueve, pero NO por acá: lo cobra su propio listener contra la
+    // billetera, con su razón (`BET_MULTIPLIER`) y su clave de idempotencia, en el instante en
+    // que se acepta. `settlementOf` proyecta el DESENLACE de la mesa —premio o reembolso— y el
+    // aumento ya está adentro de ese número: sube `entryFee` y `prize` antes de que la partida
+    // termine. Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
+    //
+    // `MULTIPLIER_REVOKED` es el mismo caso al revés: el reembolso de lo que sí se cobró lo hace
+    // el que compensa, que es quien sabe a quién alcanzó a cobrarle.
+    case "MULTIPLIER_AGREED":
+    case "MULTIPLIER_REVOKED":
     case "REMATCH_ACCEPTED":
     // LOS DOS VETOS TAMPOCO LIQUIDAN: no mueven plata, mueven a quién empareja el lobby. Están
     // enumerados porque el `never` del final obliga a pasar por acá, que es exactamente lo que

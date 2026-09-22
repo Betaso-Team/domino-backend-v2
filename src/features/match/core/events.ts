@@ -67,4 +67,28 @@ export type MatchEvent =
   // Es además la señal que la RED espera para abrir la mesa nueva, y por eso lleva la lista:
   // el nodo se borra al cerrar la negociación, así que para cuando alguien reaccione ya no
   // estaría. Quien abre la sala necesita saber a quiénes sentar.
-  | { type: "REMATCH_ACCEPTED"; playerIds: readonly PlayerId[] };
+  | { type: "REMATCH_ACCEPTED"; playerIds: readonly PlayerId[] }
+  // EL AUMENTO ACORDADO, y es una CONSECUENCIA COMPUTADA y no el eco del `RESPOND_BET_MULTIPLIER`
+  // que lo cerró. Ese comando dice «acepto»; esto dice CUÁNTO, y el cuánto no está en su payload
+  // — vive en la oferta, que `settle` borra en el mismo acto. Es el gemelo de `REMATCH_ACCEPTED`.
+  //
+  // Es además la señal que la RED espera para cobrar, y por eso lleva todo lo que el cobro
+  // necesita: a quiénes y cuánto. Leerlo del árbol después no es opción, justamente porque la
+  // oferta ya no está.
+  | {
+      type: "MULTIPLIER_AGREED";
+      level: number;
+      extra: number;
+      additionalEntryFee: number;
+      playerIds: readonly PlayerId[];
+    }
+  // EL AUMENTO DESHECHO, y es el ÚNICO evento del catálogo que existe para revertir algo.
+  //
+  // Lo pide la RED cuando el cobro no salió: el motor asentó el trato —es síncrono, no puede
+  // esperar a una billetera— así que la compensación es un segundo acto y no un rollback. Sin
+  // esto el estado diría x5 para siempre sobre una mesa que nadie pagó, y el cierre pagaría un
+  // premio con dinero que no entró.
+  //
+  // Lleva el nivel que se cayó porque el cliente ya lo pintó: «se aceptó x5» y después nada es
+  // peor que «se aceptó x5» y después «se deshizo el x5».
+  | { type: "MULTIPLIER_REVOKED"; level: number };

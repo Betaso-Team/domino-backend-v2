@@ -26,6 +26,7 @@ import type { PlayerId } from "../../core/ids";
 import type { MatchState } from "../../core/state";
 import {
   AdmissionRefusedError,
+  BetCharger,
   type BetLevelBook,
   MatchEventNotifier,
   type MatchHistory,
@@ -47,6 +48,7 @@ import {
   type MatchHasOutcome,
   type MatchSeatGuard,
   type MatchStarter,
+  type MultiplierRevoker,
   type RematchCloser,
   buildCatalog,
   buildPieces,
@@ -243,6 +245,18 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
           )
         : undefined;
     const rematchSinks = rematchSink ? [rematchSink] : [];
+    // EL COBRO DEL AUMENTO, por el mismo camino que los otros dos: un sink. Se arma sólo si el
+    // container lo registró —un despliegue sin billetera no cobra— y en ese caso la mesa
+    // tampoco ofrece niveles, porque el libro de niveles depende del mismo backend.
+    const revokeMultiplier = child.resolve<MultiplierRevoker>("MultiplierRevoker");
+    const betChargeSink = rootContainer.isRegistered(BetCharger)
+      ? rootContainer.resolve(BetCharger).sinkFor(
+          config.matchId,
+          (events) => this.notifier.notify(events),
+          () => revokeMultiplier(),
+        )
+      : undefined;
+    const betChargeSinks = betChargeSink ? [betChargeSink] : [];
     const externalSinks =
       roomOptions && rootContainer.isRegistered("MatchSinks")
         ? rootContainer.resolve<MatchSinks>("MatchSinks")(roomOptions)
@@ -250,7 +264,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
       (events) => this.broadcast("events", events),
-      [...pieces.sinks, ...platformSinks, ...rematchSinks, ...externalSinks],
+      [...pieces.sinks, ...platformSinks, ...rematchSinks, ...betChargeSinks, ...externalSinks],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
