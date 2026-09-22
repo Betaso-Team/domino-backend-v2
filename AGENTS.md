@@ -1857,6 +1857,34 @@ reembolsa— las partidas en curso de esa instancia.
 que la convivencia con el documento de v1 está escrita y no medida contra un Mongo real. El cableado
 `maxRematchesPerChain` del root tampoco tiene test propio (el coordinador sí).
 
+## Port de truco — la tanda de la tarde del 22/09 (`155d4d7` … `0abf704`)
+
+Baseline **1320 tests / 129 archivos**, con `typecheck`, suite, lint, `depcruise` (**410 módulos /
+1646 dependencias**) y `docs:build` en verde.
+
+- **Las llaves** (`a462f76`, de `ebf22dd` + `155d4d7`). ⚠ **Acá no era sólo un renombre**: el
+  dominó usaba UNA `INTERNAL_API_KEY` para las dos direcciones —la presentaba al backend y la
+  exigía al que lo administra—, así que la llave del backend también movía los plazos del juego.
+  Ahora son `BETASO_BACKEND_API_KEY` (salida) y `BETASO_ADMIN_PANEL_API_KEY` (entrada), más
+  `BETASO_BACKEND_JWT_SECRET` y `BETASO_BACKEND_URL`; en producción son **cinco** obligatorias. Y
+  la entrada pasó del `X-Internal-Key` propio al **`x-internal-api-key`** de truco y del panel de
+  Betaso —el mismo panel recibía 401 acá—, escrito una sola vez en `shared/http/api-key.ts`; la
+  puerta es `requireAdminPanelKey`. Un e2e fija que la llave del backend no abre el panel.
+  ⚠ **ROMPE EL `.env` DE CADA SERVIDOR**: los nombres nuevos van ANTES del deploy de esta versión.
+- **Las rutas como `Router`** (`fdd1528`, de `0b0a467` + `0abf704`): cada responsabilidad es un
+  archivo que devuelve un `Router`, cada feature un `transports/http/register.ts`, y `app.config`
+  monta con `app.use`. ⚠ **Una diferencia de orden con truco**: el admin del catálogo se monta
+  ANTES que las lecturas, porque `GET /game-modes/reactive/:uuid` (mutación) tiene que ir antes que
+  `GET /game-modes/:uuid`. Lo pinea el test del orden, que ahora lee el `stack` del router
+  (`src/tests/routes.ts`).
+- **Las salas por feature** (`de 597e5af`): `transports/colyseus/register.ts` devuelve el pedazo
+  del mapa de `defineRoom`. `matchRooms` NO sale por el índice de `match` —sería un ciclo con el
+  container— y `registerMatchmaking`, que era código muerto, se borró.
+- **`env-single-reader.test.ts` era flaky** (`4f15b71`): recorría `src/` mientras
+  `architecture.test.ts` creaba y borraba features de mentira, y un `ENOENT` a mitad del recorrido
+  lo tumbaba con un caso distinto cada vez. Ahora perdona sólo lo que desaparece.
+- `ab991bd` son docs de truco (estructura v29); no hay equivalente acá.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
