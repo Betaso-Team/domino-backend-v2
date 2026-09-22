@@ -1800,6 +1800,22 @@ Baseline **1273 tests / 122 archivos**, con `typecheck`, suite, lint y `depcruis
 instance level will be ignored» porque tienen los dos `onAuth`. **Es falso** con la override que
 devuelve `true`: `callOnAuth` no produce `authData` y el de instancia corre (`Room.mjs:1101-1102`).
 
+## Port de truco — la tanda del 18 al 22/09 (`cb83940` … `5b3fead`)
+
+Baseline **1281 tests / 124 archivos**, con `typecheck`, suite, lint y `depcruise` (**381 módulos /
+1535 dependencias**) en verde. Cada commit se comparó contra el dominó antes de portar:
+
+| truco | acá |
+|---|---|
+| `10cdd0e` caché del catálogo + `RESTARTING` | **PORTADO** (`1bedd37`). `CachedGameModeReader` cachea SOLO `byUuid`: `activeByUuid` es con la que nace la sala y congela su economía, y pasa derecha |
+| `4fa5061` E2E del aviso de apagado | **PORTADO** (`restart.e2e.test.ts`); con `INTERNAL` se pone rojo |
+| `13c8a57` la sala registra su foto de la config | **PORTADO** la mitad de infraestructura. La pausa de cierre con tramo de «revelado» es de cartas de truco: sin pedido del front del dominó |
+| `8d4001a` la fila del historial no nace dos veces | **YA ESTABA** (`mongo-history.ts:80`, escrituras en fila por partida) |
+| `76477e4` lo que pidió el front | **YA ESTABA** con el port del front: `/matches/:roomId`, `/me/matches`, `/me/metrics`, la penalidad, `/players-in-match` y la fila de resumen (`platform.ts:205`). La fuga de `STRIKE_ADDED` **no existe acá**: la penalidad y los puntos van por jugador y nadie emite `STRIKE_ADDED` al notificador |
+| `3cab0f8` configuración editable sin deploy | **NO PORTADO.** Son ~1100 líneas y una feature nueva, y el pedido fue del front de TRUCO. Acá los plazos salen del entorno. Si llega el pedido, el primer consumidor ya está preparado: la sala fotografía la config en su container |
+| `cb83940`…`1124502` política de comentarios en inglés | **NO PORTADO**, a propósito: la doctrina de este repo vive en comentarios en español. Cambiarla es decisión del dueño, no un port |
+| `60dd091`, `0c99f17`, `5b3fead` | docs de truco; no hay equivalente acá |
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
