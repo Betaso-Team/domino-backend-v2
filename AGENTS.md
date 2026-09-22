@@ -1460,9 +1460,7 @@ Comparado archivo por archivo y símbolo por símbolo:
 - **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
 - **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
 - ~~`charge-multiplier`~~ — **HECHO**, ver el bloque del final.
-- **`logSink`** — la traza de cada evento al log. Chico, útil para soporte, no bloquea a nadie.
-- **Cinco archivos de test**: `shared/tests/{logger,retry,trace}.test.ts` y
-  `auth/transports/tests/{bearer,internal-key-guard}.test.ts`. El código está, los tests no.
+- ~~`logSink`~~ y ~~los cinco archivos de test~~ — **HECHOS**, ver el bloque del final.
 
 ## Incremento completo — el aumento de apuesta cobra
 
@@ -1545,9 +1543,70 @@ antes. **Nada de esto está certificado contra un backend de verdad**: el smoke 
 
 - **`reactions`** — deliberado: v1 del dominó no las tiene.
 - **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
-- **`logSink`** — la traza de cada evento al log. Chico y útil para soporte.
-- **Cinco archivos de test**: `shared/tests/{logger,retry,trace}.test.ts` y
-  `auth/transports/tests/{bearer,internal-key-guard}.test.ts`.
+- ~~`logSink`~~ y ~~los cinco archivos de test~~ — **HECHOS**, ver el bloque de abajo.
+
+## Incremento completo — la traza de cada hecho, y los tests que el port no trajo
+
+Lo último chico que quedaba de truco. Baseline **1108 → 1168 tests / 119 archivos**, con
+`typecheck`, suite, lint y `depcruise` (**371 módulos / 1484 dependencias**) en verde.
+Commit `9bfa6ae`.
+
+**`logSink` ES UN SINK Y NO LÍNEAS ADENTRO DEL MOTOR**, y eso es todo el diseño. El motor es
+dominio puro: no conoce un puerto de salida, y su forma de contar lo que pasó ya existe — devuelve
+eventos. Así que la traza entera cuesta un archivo y ni una línea en los comandos, los conductores
+o los aspectos. **No sabe de niveles ni pregunta por ninguno**: con el debug apagado la pieza
+directamente no se construye, y de eso se ocupa `di-container.ts`, que es el único que lee la
+configuración.
+
+⚠ **EL FILTRO ES MÁS ANCHO QUE EL DE TRUCO, y la diferencia es deliberada.** Allá pasan SOLO
+escalares, con un argumento de seguridad: las cartas viajan como objetos y un log con las cartas de
+una partida en curso convierte el acceso al panel en un vector de trampa. Acá ningún evento lleva
+fichas —`PLAY_TILE` es un COMANDO, y el criterio §5.1 es justamente que no haya eventos que repitan
+el payload de un comando—, así que el filtro estricto no protegería nada y sí perdería lo único
+interesante de cuatro hechos: `playerIds`. **Los objetos siguen afuera POR CONSTRUCCIÓN** y no por
+una lista de campos prohibidos que alguien mantenga: el día que un evento del dominó lleve una
+ficha, la lleva como objeto y no sale.
+
+Los cinco tests son sobre código que ya estaba vivo, y lo que mide cada uno es lo que no puede
+ponerse rojo por sí solo:
+
+| archivo | lo que mide, y por qué ningún otro test lo ve |
+|---|---|
+| `logger` | el ORDEN de los argumentos. `pino` recibe campos-después-mensaje y nuestra interfaz es al revés; invertirlo NO FALLA, deja `{"msg":"[object Object]"}` — y todo el repo loguea por esta fachada sin mirar lo que sale |
+| `retry` | las cuatro formas de SALIR: un rechazo no es una caída, el apagado no espera el backoff, el fallo intermedio avisa y el último avisa que ya no viene otro |
+| `trace` | el contrato del cable W3C y las dos formas de romperlo — no continuar una causa que vino, o arrastrar una que ya no corresponde (el `withoutTrace` de la fuga del reloj de la sala) |
+| `bearer` | que una falla NUESTRA no se disfrace de 401, y que el chequeo corra ANTES que la forma |
+| `internal-key` | la guarda de largo, que **no** es redundante con la comparación constante |
+
+Las dos que conviene no volver a descubrir:
+
+- **Una falla nuestra no es un 401.** Si el verificador revienta por falta del secreto, contestar
+  «no autorizado» manda al cliente a borrar una sesión que está bien: un incidente de configuración
+  se vuelve todos los jugadores deslogueados. Va a `next(e)`, que lo hace 500.
+- **`timingSafeEqual` LANZA con buffers de distinto tamaño**, así que sin el `a.length ===
+  b.length` una llave de largo equivocado sale **500 en vez de 401** — o sea que el status le dice
+  al que prueba que acertó el largo, justo lo que la comparación constante existe para no filtrar.
+
+⚠ **Y EL QUINTO NO ERA EL QUE TRUCO NOMBRA**: `features/auth/transports/internal-key-guard.ts` era
+**CÓDIGO MUERTO**, y se borró. Los tres consumidores —catálogo, lobby, historial— usan
+`shared/http/internal-key.ts`, que es otro archivo con otro header. La confusión es de DIRECCIÓN:
+`features/auth/internal-key.ts` es la mitad **SALIENTE** —la llave que NOSOTROS presentamos al
+backend principal, `x-internal-api-key`, y esa sí está viva vía `internalAuthHeaders`— y el guard
+duplicaba la **ENTRANTE** (`X-Internal-Key`) con el nombre equivocado. Testear el muerto habría
+dejado cobertura verde sobre una puerta que ninguna ruta usa, que es la peor de las dos opciones.
+
+Tres mutaciones verificadas a mano, cada una roja en el test que dice medirla: sin la guarda de
+largo (2 rojos), todo error de verificación como 401 (2 rojos), el token sin recortar (1 rojo).
+
+Una asimetría queda **fijada y no arreglada**: `Authorization: Bearer ` (el esquema pelado) llega
+al verificador como `""` y no como `undefined`, porque el prefijo está y la credencial se extrae
+vacía. Sale 401 igual. El test lo pinea para que nadie lo "corrija" moviendo a la puerta la
+decisión de qué es un token vacío — ahí habría que mantenerla dos veces.
+
+### Lo que sigue faltando de truco, después de esto
+
+- **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
+- **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P. **Es lo único que queda.**
 
 ## Cómo se ejecuta una tarea
 
