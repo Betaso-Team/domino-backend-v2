@@ -370,12 +370,15 @@ Dos cosas que aparecieron implementando y conviene no volver a descubrir:
 - **`settle` borra la oferta**, así que el remanente y el que calló se preguntan ANTES. El
   primer diseño los leía después y devolvía siempre cero.
 
-⚠ **No cobra.** `configOf` deja `betLevels: []`, o sea que ninguna mesa ofrece aumentar y
-`PROPOSE_BET_MULTIPLIER` siempre se rechaza con `BETTING_DISABLED`. La negociación está entera y
-probada; el dinero no. `network/bet-charge.ts` es el contrato del cobro y el argumento de por
-qué falta: cobrar es red y los comandos son síncronos por contrato, así que el cobro tiene que
-colgarse del acuerdo ya asentado — y queda una decisión de producto, compensar o reservar, que
-está escrita ahí.
+~~⚠ **No cobra.**~~ **YA COBRA** — ver el bloque del final. Este párrafo decía que `configOf`
+deja `betLevels: []` y que `network/bet-charge.ts` era sólo el contrato; las dos cosas dejaron de
+ser ciertas. La decisión de producto que este bloque dejaba abierta —compensar o reservar— se
+resolvió por COMPENSAR, que es lo que hace truco.
+
+⚠⚠ **Y EL MODELO DEL NIVEL ERA INCORRECTO.** `BetLevel` guardaba `additionalEntryFee` y
+`additionalPrize`, y el catálogo de v1 NO los tiene: devuelve `{ level, extra, additionalPoints }`.
+El `level` es el MULTIPLICADOR de la mesa (2, 3, 5), no un índice. Todo lo que este bloque dice
+sobre los niveles hay que leerlo con eso.
 
 Los dos campos nuevos del snapshot (`betLevels`, `isFreeRoom`) llevan **default en el schema del
 replay**: sin eso, toda la historia grabada antes de la feature dejaba de rebobinarse. El golden
@@ -1456,11 +1459,95 @@ Comparado archivo por archivo y símbolo por símbolo:
 
 - **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
 - **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
-- **`charge-multiplier`** — deliberado: el aumento no cobra (`network/bet-charge.ts`) y
-  `betLevels: []` hace que ninguna mesa lo ofrezca.
+- ~~`charge-multiplier`~~ — **HECHO**, ver el bloque del final.
 - **`logSink`** — la traza de cada evento al log. Chico, útil para soporte, no bloquea a nadie.
 - **Cinco archivos de test**: `shared/tests/{logger,retry,trace}.test.ts` y
   `auth/transports/tests/{bearer,internal-key-guard}.test.ts`. El código está, los tests no.
+
+## Incremento completo — el aumento de apuesta cobra
+
+Salió de preguntar si truco ya lo había hecho: sí, y con implementación completa
+(`casual/listeners/charge-multiplier.ts`). Baseline **1077 → 1108 tests / 113 archivos**, con
+`typecheck`, suite, lint y `depcruise` (**365 módulos / 1466 dependencias**) en verde.
+
+Tres commits: `30ea0b8` el modelo, `30478e0` el catálogo, `880cea4` el cobro.
+
+### ⚠ El primer paso fue una corrección, no una feature
+
+**`BetLevel` guardaba `additionalEntryFee` y `additionalPrize`, y NINGÚN catálogo puede
+llenarlos.** El de v1 (`internal/bet-increase/config`) devuelve `{ level, extra, additionalPoints }`
+y no podría traer más: **no sabe cuánto cuesta esta mesa**.
+
+El costo de no verlo era **cobrar cero**: el listener habría leído un campo que nadie llena,
+habría cobrado `0` a los dos y habría subido el premio igual — en silencio, sin excepción y sin
+un solo test rojo, porque toda la suite armaba sus niveles a mano y los llenaba.
+
+**EL `level` ES EL MULTIPLICADOR DE LA MESA y no un índice.** v1 usa 2, 3 y 5 y calcula
+`entryFee * level`; lo que se cobra es la DIFERENCIA. Truco hace lo mismo
+(`entryFee * (value - 1)`), así que los dos coincidían y el que estaba mal era este repo.
+`betAmountsOf` es una REGLA y vive en `rules/`: el cliente la necesita para mostrar el precio
+ANTES de proponer, que es cuando el jugador decide.
+
+### El catálogo de niveles falla CERRADO, al revés que el antifraude
+
+Y la asimetría es deliberada, escrita en los dos lados: el antifraude falla ENCENDIDO —dejar de
+vetar es peor que vetar de más— y esto falla hacia el NO porque el `extra` determina PUNTOS DE
+RANKING reales, y ofrecer un nivel inventado le entrega al jugador un puntaje que nadie configuró.
+
+- **La cache es POR MODO**, única diferencia con `CachedAntifraudFlag`: con un solo valor, una
+  mesa cara ofrecería los niveles de una barata.
+- **El fallo también se cachea**: sin eso un backend caído recibiría una llamada por cada mesa
+  que nace, que es cuando menos puede contestarlas.
+- **El adaptador no atrapa nada**: el fallo tiene que SALIR para que la cache decida. Si devolviera
+  `[]` ante un error, el que pueda tirar ese endpoint apagaría la feature sin que nadie lo vea.
+- **Una fila mal cargada no deja sin aumentar a la mesa entera** — se filtra — pero NO se
+  completa: un nivel sin `extra` se descarta en vez de valer `extra: 0`, que sería un aumento que
+  cobra de más y no da un punto. `additionalPoints` sí se completa con cero. Uno es un default, el
+  otro es una fila rota.
+- **El torneo no pregunta**: la apuesta de una mesa de torneo es del TORNEO. Misma frontera que la
+  revancha.
+
+### El motor es síncrono, así que se COMPENSA y no se revierte
+
+Es la decisión que `bet-charge.ts` dejaba abierta —compensar o reservar— y se resolvió como
+truco. No hay forma de meter el cobro adentro de `RespondBetMultiplierCommand` sin romper que los
+comandos sean síncronos, y eso es lo que impide que dos mensajes del mismo cliente se entrelacen a
+mitad de una mutación. El orden queda: **asentar, cobrar, y si falla, un segundo acto que deshace.**
+
+De ahí sale `revokeMultiplier`, la **tercera y última puerta del grafo hacia afuera**. Las otras
+dos son la compuerta y el cierre de la revancha, y las tres existen por lo mismo: el mundo es
+asíncrono y el juego no.
+
+`MULTIPLIER_AGREED` lleva `level`, `extra`, `additionalEntryFee` y los asientos porque el cuánto
+**no está en el payload del comando**: vive en la oferta, que `settle` borra en el mismo acto. Es
+el gemelo de `REMATCH_ACCEPTED`.
+
+**Las tres partes del «si no se puede» van juntas**, y cada una tapa algo distinto: en SERIE
+(en paralelo no se sabe quién pagó), con PLAZO (una billetera muda deja el trato en el limbo con
+la mesa diciendo x5), y al fallar REEMBOLSAR **y** ANULAR. La anulación va siempre, hayan salido o
+no los reembolsos. Un reembolso fallido queda ASENTADO y a la vista: deshacer un cobro pide
+reconciliación, y reconciliar pide que el registro sobreviva.
+
+`revoke` entra por `sinkFor` y **no por el constructor**: el cobrador es del PROCESO y el motor es
+de la MESA. Tomarlo al construir sería darle a todas las partidas el motor de una.
+
+⚠ **DESHACER DEVUELVE EL CUPO**: `acceptedBetLevel` en cero es también lo que lleva el tope de
+«uno aceptado por partida», así que tras una anulación se puede volver a proponer. Es correcto
+—el aumento que no se pudo cobrar no ocupó el cupo— y está medido.
+
+### ⚠ Lo que falta para verlo en producción es CONFIGURACIÓN, no código
+
+`BACKEND_URL` + `INTERNAL_API_KEY`, y que el panel cargue niveles para el modo. Sin eso el libro
+es el de reposo, ninguna mesa ofrece aumentar y este camino no corre — el mismo lado seguro de
+antes. **Nada de esto está certificado contra un backend de verdad**: el smoke no lo toca.
+
+### Lo que sigue faltando de truco, después de esto
+
+- **`reactions`** — deliberado: v1 del dominó no las tiene.
+- **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
+- **`logSink`** — la traza de cada evento al log. Chico y útil para soporte.
+- **Cinco archivos de test**: `shared/tests/{logger,retry,trace}.test.ts` y
+  `auth/transports/tests/{bearer,internal-key-guard}.test.ts`.
 
 ## Cómo se ejecuta una tarea
 
