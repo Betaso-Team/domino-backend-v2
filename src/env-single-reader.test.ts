@@ -38,8 +38,21 @@ function readsProcessEnv(source: string): boolean {
   return source.includes("process.env") || IMPORTS_PROCESS_MODULE.test(source);
 }
 
+// LO QUE DESAPARECE A MITAD DEL RECORRIDO NO EXISTE, y no es un error. `architecture.test.ts` crea y
+// borra features de mentira bajo `src/features/` en otro worker, así que entre el `readdir` y el
+// `read` un archivo puede irse: sin esto el escaneo lanzaba `ENOENT` y el test fallaba de a ratos,
+// con un caso distinto en cada corrida. Sólo se perdona `ENOENT`; cualquier otra falla sigue saliendo.
+function ignoringVanished<T>(read: () => T, fallback: T): T {
+  try {
+    return read();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return fallback;
+    throw error;
+  }
+}
+
 function listTsFilesUnderSrc(dir = "src"): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return ignoringVanished(() => readdirSync(dir, { withFileTypes: true }), []).flatMap((entry) => {
     const fullPath = `${dir}/${entry.name}`;
     if (entry.isDirectory()) return listTsFilesUnderSrc(fullPath);
     return entry.name.endsWith(".ts") ? [fullPath] : [];
@@ -49,7 +62,7 @@ function listTsFilesUnderSrc(dir = "src"): string[] {
 function filesReadingEnvOutsideEnvModule(): string[] {
   return listTsFilesUnderSrc()
     .filter((file) => !EXCLUDED_PATHS.has(file))
-    .filter((file) => readsProcessEnv(readFileSync(file, "utf8")));
+    .filter((file) => readsProcessEnv(ignoringVanished(() => readFileSync(file, "utf8"), "")));
 }
 
 // Fixture desechable usado solo para probar que el escaneo dispara. Nunca se commitea:
