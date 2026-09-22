@@ -26,6 +26,8 @@ export type {
   TilePlacement,
 } from "./actions";
 export { availableActionsFor } from "./actions";
+export type { BotConfig, BotMove } from "./bot";
+export { botMoveOf, canSeatBot } from "./bot";
 export type { BoardEnds, BoardSide } from "./board-ends";
 export { boardEndsOf } from "./board-ends";
 export type { RuleViolationCode } from "./codes";

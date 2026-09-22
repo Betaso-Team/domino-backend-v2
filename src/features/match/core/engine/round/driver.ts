@@ -188,6 +188,20 @@ export class RoundDriver implements Driver {
     return true;
   }
 
+  /**
+   * LE DEVUELVE EL RELOJ AL TURNO si es de este asiento. Lo llama el conductor de PARTIDA al
+   * sentar un bot: por el camino del reloj, el turno que la máquina hereda viene VENCIDO, y sin
+   * esto el próximo vencimiento la retira —ahora sí de verdad, porque un bot ya no se puede
+   * reemplazar por otro— con la mesa habiendo durado un tick más.
+   *
+   * No toca nada si el turno es de otro: retirarse no es privilegio de quien juega, y el que se
+   * va a mitad del turno ajeno no puede reiniciarle el reloj al que está pensando.
+   */
+  restartTurnIfOwnedBy(playerId: PlayerId): void {
+    if (currentTurnOf(currentRoundOf(this.match)).playerId !== playerId) return;
+    this.startTurn(playerId);
+  }
+
   private continueAfterDeal(): void {
     const round = currentRoundOf(this.match);
     round.phase = "PLAYING";

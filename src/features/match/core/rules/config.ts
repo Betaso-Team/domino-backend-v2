@@ -86,4 +86,16 @@ export interface DominoRulesConfig {
    * que nadie pagó.
    */
   readonly isFreeRoom: boolean;
+  /**
+   * ESTA MESA REEMPLAZA CON UNA MÁQUINA al que se retira, en vez de darla por terminada. Sale del
+   * catálogo (`enableBots`), y v1 lo tiene PROHIBIDO en las mesas de dos
+   * (`game-mode.dto.ts:28-36`): con un solo jugador por bando, el que queda simplemente gana, y
+   * ponerle un rival de plástico le cambiaría una victoria por una partida contra el servidor.
+   *
+   * Acá no hace falta repetir esa prohibición y es deliberado: la guarda de `canSeatBot` pregunta
+   * si queda ALGUIEN MÁS en el equipo del que se fue, y en una mesa de dos la respuesta es
+   * siempre que no. La regla del tamaño de la mesa sale de la regla del equipo en vez de ser un
+   * segundo chequeo que puede desincronizarse del primero.
+   */
+  readonly enableBots: boolean;
 }

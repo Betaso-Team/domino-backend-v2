@@ -147,6 +147,7 @@ export function buildEngineGraph(
     roundDriver,
     gate,
     rematch,
+    config,
   );
 
   return {
@@ -163,7 +164,7 @@ export function buildEngineGraph(
     isStillPlaying: (playerId) =>
       !match.players.find((player) => player.playerId === playerId)?.hasAbandoned,
     commands: {
-      ABANDON: new AbandonCommand(referee, players, matchDriver),
+      ABANDON: new AbandonCommand(referee, matchDriver),
       PLAY_TILE: new PlayTileCommand(referee, players, matchDriver, moves),
       DRAW_TILE: new DrawTileCommand(referee, players, matchDriver, moves),
       PASS: new PassCommand(referee, matchDriver, moves),

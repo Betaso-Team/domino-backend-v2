@@ -82,6 +82,7 @@ interface EngineOptions {
   readonly isDealWindowEnabled?: boolean;
   readonly betLevels?: readonly BetLevel[];
   readonly isRematchEnabled?: boolean;
+  readonly enableBots?: boolean;
 }
 
 export function engineWithHands(
@@ -117,6 +118,7 @@ export function engineWithHands(
     // reposo de producción.
     betLevels: options.betLevels ?? [],
     isRematchEnabled: options.isRematchEnabled ?? false,
+    enableBots: options.enableBots ?? false,
   });
   const match = createMatchState(config);
   const clockBox = { now: 1_000 };
@@ -170,9 +172,10 @@ export function engineWithHands(
     roundDriver,
     gate,
     rematch,
+    config,
   );
   const commands = {
-    ABANDON: new AbandonCommand(referee, players, matchDriver),
+    ABANDON: new AbandonCommand(referee, matchDriver),
     PLAY_TILE: new PlayTileCommand(referee, players, matchDriver, moves),
     DRAW_TILE: new DrawTileCommand(referee, players, matchDriver, moves),
     PASS: new PassCommand(referee, matchDriver, moves),

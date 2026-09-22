@@ -48,6 +48,14 @@ export type MatchEvent =
   // que el criterio prohíbe. Éste, en cambio, no lo pidió nadie — y para soporte
   // es toda la diferencia entre "se fue" y "lo sacaron".
   | { type: "ABANDON"; playerId: PlayerId }
+  // LA MÁQUINA SE SENTÓ EN ESE ASIENTO, y es un evento aunque a veces haya un comando detrás.
+  // No lo viola el criterio: `ABANDON` dice «me voy» y esto dice «la mesa sigue sin vos», que
+  // depende del modo y de quién más quede en tu equipo — nada de eso está en el payload del
+  // comando ni se deriva de él. Y por el camino del reloj no hay comando en absoluto.
+  //
+  // Para soporte es la línea que explica por qué una partida siguió después de que alguien se
+  // fue, y para quien liquida es la que dice que ese asiento ya no cobra.
+  | { type: "BOT_SEATED"; playerId: PlayerId }
   // El aumento RECHAZADO POR EL RELOJ, nunca por el verbo voluntario — mismo criterio que
   // `ABANDON`: el "no" dicho a mano ya quedó registrado como comando, y emitirlo encima
   // sería la transcripción 1:1 que el criterio prohíbe. Éste no lo dijo nadie: la mesa

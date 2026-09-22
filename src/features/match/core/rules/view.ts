@@ -79,6 +79,9 @@ export interface PlayerView {
   readonly hasSeenTiles: boolean;
   readonly extraTimeRemainingMs: number;
   readonly hand: HandView;
+  // Una regla SÍ lo mira: es la que elige la cara del veredicto de una tranca, que prefiere a un
+  // humano. Lo demás que el bot decide no es una regla sino una política, y vive en `bot.ts`.
+  readonly isBot: boolean;
 }
 
 export interface PlacedTileView {

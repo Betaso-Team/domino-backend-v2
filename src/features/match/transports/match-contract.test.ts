@@ -250,6 +250,7 @@ describe("replayConfigOf", () => {
       isFreeRoom: false,
       isRematchEnabled: false,
       multiplier: 1,
+      enableBots: false,
     });
   });
 

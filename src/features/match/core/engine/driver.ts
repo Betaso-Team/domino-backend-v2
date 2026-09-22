@@ -36,3 +36,19 @@ export interface Driver {
   advance(actorId: PlayerId, action: RoundAction): TransitionResult;
   timeout(): TransitionResult;
 }
+
+/**
+ * SE VA ALGUIEN, y alguien tiene que decidir qué queda: la mesa sigue con una máquina en ese
+ * asiento, o la partida se cierra por abandono.
+ *
+ * **ES UNA INTERFAZ APARTE Y NO UN CUARTO VERBO DE `Driver`**, porque retirarse es de nivel
+ * PARTIDA: el conductor de RONDA también implementa `Driver` y no tiene nada que decir acá —una
+ * mano no decide si la mesa sigue existiendo—. Metido ahí, tendría que implementarlo para lanzar.
+ *
+ * `bySystem` distingue quién lo pidió, y sólo cambia una cosa: el evento `ABANDON`. El verbo
+ * voluntario ya quedó registrado como comando y emitirlo encima sería la transcripción 1:1 que el
+ * criterio de eventos prohíbe; el retiro por reloj no lo pidió nadie.
+ */
+export interface Retirement {
+  retire(playerId: PlayerId, bySystem: boolean): TransitionResult;
+}

@@ -209,6 +209,11 @@ export function settlementOf(
     // se quiere de un evento nuevo en un archivo que paga.
     case "CASUAL_PAIR_VETOED":
     case "PAIR_VETOED":
+    // SENTAR UN BOT NO MUEVE PLATA EN EL MOMENTO, y sí cambia quién cobra al final: el asiento
+    // que pasa a jugar la máquina deja de ser un cobrador. Eso se resuelve en el REWARD del
+    // desenlace, que es donde están todos los asientos a la vista, y no acá — una instrucción por
+    // este evento sería pagarle a alguien a mitad de partida, con la mesa todavía sin ganador.
+    case "BOT_SEATED":
     case "PLAYER_DISCONNECTED":
     case "PLAYER_RECONNECTED":
       return undefined;

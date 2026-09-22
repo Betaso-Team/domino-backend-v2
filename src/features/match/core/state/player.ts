@@ -66,6 +66,21 @@ export const PlayerState = schema(
     hasSeenTiles: t.boolean().default(false),
     extraTimeRemainingMs: t.number().default(0),
     hand: t.ref(Hand),
+    // ⚠ VA AL FINAL, y no es orden alfabético: `@colyseus/schema` codifica por ÍNDICE, así que
+    // insertarlo entre `teamId` y `hand` corre todos los campos posteriores y un cliente con el
+    // schema pre-generado decodifica basura. Es la ruptura de wire que la identidad
+    // multiplataforma ya pagó una vez.
+    //
+    // ESTE ASIENTO LO JUEGA LA MÁQUINA. Nace del que se retiró de una mesa de cuatro: el bot no
+    // se sienta de cero, HEREDA el asiento —su mano, su equipo, su lugar en la rueda— para que
+    // el compañero que no hizo nada no quede jugando uno contra dos. Es la regla de v1, que lo
+    // marca sobre el MISMO jugador (`bot.id = player.id`, `on-leave.ts:114-115`) en vez de
+    // sentar a uno nuevo.
+    //
+    // Es PÚBLICO porque el front lo pinta, y es lo que separa a este campo de `hasAbandoned`:
+    // los dos dicen "acá no hay nadie" pero uno deja la mesa andando y el otro la cierra. Y
+    // separa además quién COBRA — el bot no, ver `network/settlement.ts`.
+    isBot: t.boolean().default(false),
   },
   "PlayerState",
 );

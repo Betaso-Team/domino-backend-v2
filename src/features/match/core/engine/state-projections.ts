@@ -99,9 +99,24 @@ export function roundActivePlayers(match: MatchState): PlayerState[] {
   return match.players.filter(isRoundActive);
 }
 
+/**
+ * ESTE EQUIPO YA NO TIENE A NADIE, y una máquina no cuenta como alguien.
+ *
+ * ⚠ **UN BOT NO SOSTIENE A UN EQUIPO**, y sin esa mitad hay un agujero que sólo aparece con
+ * cuatro asientos: se va uno, se le sienta un bot, se va su compañero — y como el bot no está
+ * marcado como retirado, el equipo entero de máquinas sigue contando como presente. La partida
+ * continúa con un bot jugando solo contra dos personas, y puede GANARLA: ahí el premio va a un
+ * equipo donde nadie cobra (`settlementOf` excluye bots y retirados), o sea plata trabada.
+ *
+ * Es el `checkOnlyOneTeam` de v1 (`on-leave.ts:96-100`), que filtra los bots por lo mismo. El bot
+ * existe para que el compañero que quedó pueda seguir jugando; sin ese compañero no hay nada que
+ * sostener.
+ *
+ * En una mesa de dos no cambia nada: ahí no se sienta ninguna máquina.
+ */
 export function hasTeamAbandoned(teamId: TeamId, match: MatchState): boolean {
   const members = match.players.filter((player) => player.teamId === teamId);
-  return members.length > 0 && members.every((player) => player.hasAbandoned);
+  return members.length > 0 && members.every((player) => player.hasAbandoned || player.isBot);
 }
 
 // Solo hay dos equipos.

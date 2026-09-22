@@ -111,12 +111,20 @@ export interface DominoMatchConfig {
    * que nadie pagó.
    */
   readonly isFreeRoom: boolean;
+  /**
+   * SI ESTA MESA REEMPLAZA CON UNA MÁQUINA al que se retira. Sale del catálogo y se congela con
+   * el resto: una mesa no puede cambiar de reglas mientras se juega, y menos ésta —el panel
+   * apagando los bots a mitad de partida le sacaría al compañero el socio que ya tiene sentado—.
+   * Lo que decide CUÁNDO se sienta uno es `canSeatBot`, en `rules/bot.ts`.
+   */
+  readonly enableBots: boolean;
 }
 
 // El nivel se declara en `rules/config` —es lo que la legalidad de una oferta JUZGA, así que
 // es vocabulario de regla— y se re-exporta acá, que es de donde lo importaba todo el mundo.
-// `DominoMatchConfig` satisface `DominoRulesConfig` por estructura: los dos campos que las
-// reglas necesitan (`betLevels`, `isFreeRoom`) están arriba, sin adaptador y sin cast.
+// `DominoMatchConfig` satisface `DominoRulesConfig` por estructura: los tres campos que las
+// reglas necesitan (`betLevels`, `isFreeRoom`, `enableBots`) están arriba, sin adaptador y sin
+// cast.
 export type { BetLevel };
 
 /** Los ids OPACOS de la mesa, en orden de asiento. Es lo único que el motor consume. */

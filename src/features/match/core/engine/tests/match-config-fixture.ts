@@ -39,6 +39,9 @@ export const matchConfig = (
   // de más.
   betLevels: [],
   isFreeRoom: false,
+  // SIN BOTS por default, como una mesa de dos: lo que estas suites miden es el juego, y una
+  // mesa que reemplaza al que se va no dejaría medir el retiro. La suite del bot lo enciende.
+  enableBots: false,
   // APAGADA por default, como la ventana de reparto y por el mismo motivo: estas suites
   // miden el juego, no la revancha. Los tests de revancha la encienden.
   isRematchEnabled: false,

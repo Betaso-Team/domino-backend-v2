@@ -27,6 +27,8 @@ export interface ViewSetup {
   readonly noRound?: boolean;
   readonly seenTiles?: readonly PlayerId[];
   readonly abandoned?: readonly PlayerId[];
+  /** Los asientos que juega la máquina. */
+  readonly bots?: readonly PlayerId[];
   readonly betOffer?: RoundView["betOffer"];
   readonly acceptedBetLevel?: number;
   /** La negociación de revancha. Ausente: no hay ninguna en juego. */
@@ -47,6 +49,7 @@ export function viewOf(setup: ViewSetup): MatchView {
     hasAbandoned: setup.abandoned?.includes(playerId) ?? false,
     hasSeenTiles: setup.seenTiles?.includes(playerId) ?? false,
     extraTimeRemainingMs: 30_000,
+    isBot: setup.bots?.includes(playerId) ?? false,
     hand: {
       tileCount: (setup.hands[playerId] ?? []).length,
       isRevealed: false,
@@ -100,5 +103,6 @@ export const BET_LEVELS: readonly BetLevel[] = [
 export const rulesConfig = (overrides: Partial<DominoRulesConfig> = {}): DominoRulesConfig => ({
   betLevels: BET_LEVELS,
   isFreeRoom: false,
+  enableBots: false,
   ...overrides,
 });

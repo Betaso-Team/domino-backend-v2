@@ -11,6 +11,10 @@ export class Player {
     this.repository.get(playerId).abandon();
   }
 
+  seatBot(playerId: PlayerId): void {
+    this.repository.get(playerId).seatBot();
+  }
+
   playTile(playerId: PlayerId, tile: TileLike, side: BoardSide): void {
     this.repository.round(playerId).playTile(tile, side);
   }

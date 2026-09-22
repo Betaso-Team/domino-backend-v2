@@ -163,6 +163,10 @@ const matchSnapshot = z
       )
       .default([]),
     isFreeRoom: z.boolean().default(false),
+    // CUARTO campo con default en el schema del replay, por lo mismo que los otros tres: toda la
+    // historia grabada antes de la mesa de cuatro tiene que seguir rebobinando. El default es el
+    // inocuo —una partida vieja es de dos, donde no hay bots que sentar—.
+    enableBots: z.boolean().default(false),
     multiplier: z.number().positive().safe().default(1),
     // EL CUARTO CAMPO CON DEFAULT DEL SNAPSHOT, y el default es `false` a propósito: una partida
     // grabada antes de que la revancha existiera se rebobina SIN ventana de revancha, que es
@@ -289,6 +293,7 @@ export function configOf(
     // ganador tiene que sumar con el peso que aceptó al sentarse.
     multiplier: mode.multiplier,
     isFreeRoom: mode.isFreeRoom,
+    enableBots: mode.enableBots,
     // TODA MESA CASUAL OFRECE REVANCHA, y esta función solo sienta mesas casuales: el torneo no
     // pasa por acá. Cuando el catálogo tenga la palanca por modo, sale de `mode`.
     isRematchEnabled: true,
@@ -386,6 +391,11 @@ export function configFromRoomOptions(
     isRematchEnabled: options.mode === "CASUAL",
     betLevels,
     isFreeRoom: options.mode === "CASUAL" ? options.isFreeRoom : true,
+    // EL EMPAREJADOR NO TRAE EL MODO ENTERO, así que acá no hay de dónde leerlo. Queda apagado, que
+    // es el reposo correcto: este camino sienta mesas de dos, donde `canSeatBot` diría que no
+    // igual. El día que el emparejador arme mesas de cuatro, el campo entra por `DominoRoomOptions`
+    // junto con el resto de la economía.
+    enableBots: false,
   };
 }
 

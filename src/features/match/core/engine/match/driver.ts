@@ -1,11 +1,13 @@
-import type { GlobalDominoConfig } from "../../config";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../../config";
 import type { MatchEvent } from "../../events";
 import type { PlayerId } from "../../ids";
+import { canSeatBot } from "../../rules/bot";
 import { isTableIntact } from "../../rules/rematch";
 import type { MatchState } from "../../state";
+import { SchemaMatchView } from "../../state/view";
 import type { Clock } from "../clock";
 import { deadlineKindOf } from "../deadline-kind";
-import type { Driver, RoundAction, TransitionResult } from "../driver";
+import type { Driver, Retirement, RoundAction, TransitionResult } from "../driver";
 import { InvariantViolationError } from "../errors";
 import type { Player } from "../player-facade";
 import type { RematchGate } from "../rematch/gate";
@@ -15,7 +17,7 @@ import { matchPhaseOf, roundActivePlayers } from "../state-projections";
 import type { TimeoutScheduler } from "../timeout-scheduler";
 import type { MatchReferee } from "./referee";
 
-export class MatchDriver implements Driver {
+export class MatchDriver implements Driver, Retirement {
   constructor(
     private readonly match: MatchState,
     private readonly clock: Clock,
@@ -29,6 +31,10 @@ export class MatchDriver implements Driver {
     // transiciones —abrir, negociar, aceptar, cerrar— son de acá, que es el dueño de la máquina.
     private readonly gate: RematchGate,
     private readonly rematch: RematchNegotiation,
+    // EL SNAPSHOT DE LA MESA, y lo único que este conductor le pregunta es si reemplaza con una
+    // máquina al que se va. Entra entero y no como un booleano suelto porque la guarda vive en
+    // `rules/` y pide la config de reglas, que este tipo satisface por estructura.
+    private readonly matchConfig: DominoMatchConfig,
   ) {}
 
   begin(): void {
@@ -81,9 +87,7 @@ export class MatchDriver implements Driver {
         this.syncTimeout();
         return { events, finished: false };
       }
-      this.players.abandon(playerId);
-      events.push({ type: "ABANDON", playerId });
-      const transition = this.advance(playerId, "ABANDONED");
+      const transition = this.retire(playerId, true);
       return { events: [...events, ...transition.events], finished: transition.finished };
     }
 
@@ -147,6 +151,31 @@ export class MatchDriver implements Driver {
     }
 
     throw new InvariantViolationError(`el conductor de PARTIDA no maneja ${kind}`);
+  }
+
+  /**
+   * SE VA ALGUIEN, Y ACÁ SE DECIDE SI LA MESA SIGUE. Es el único lugar donde eso se decide, y
+   * tiene que serlo: los dos caminos que retiran a un asiento —el verbo `ABANDON` y el reloj del
+   * turno— llegan acá, así que la mesa no puede comportarse distinto según por cuál entró.
+   *
+   * **SENTAR EL BOT NO RECONCILIA NADA**, y es la diferencia de fondo con el abandono. El asiento
+   * sigue en la rueda con sus fichas, así que no hay mano que pueda haberse cerrado ni tranca que
+   * destapar: no se llama a `advance`. Lo único que hace falta es devolverle el reloj, porque por
+   * el camino del timeout el turno que hereda viene vencido — sin eso el bot tiene un turno de
+   * duración cero y el siguiente vencimiento lo retira de nuevo, esta vez de verdad.
+   */
+  retire(playerId: PlayerId, bySystem: boolean): TransitionResult {
+    if (canSeatBot(playerId, new SchemaMatchView(this.match), this.matchConfig)) {
+      this.players.seatBot(playerId);
+      this.roundDriver.restartTurnIfOwnedBy(playerId);
+      this.syncTimeout();
+      return { events: [{ type: "BOT_SEATED", playerId }], finished: false };
+    }
+
+    this.players.abandon(playerId);
+    const events: MatchEvent[] = bySystem ? [{ type: "ABANDON", playerId }] : [];
+    const transition = this.advance(playerId, "ABANDONED");
+    return { events: [...events, ...transition.events], finished: transition.finished };
   }
 
   /**
