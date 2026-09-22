@@ -154,8 +154,11 @@ const matchSnapshot = z
         z.strictObject({
           level: z.number().int().positive().safe(),
           extra: z.number().nonnegative().safe(),
-          additionalEntryFee: ucAmount,
-          additionalPrize: ucAmount,
+          // LOS MONTOS NO ESTÁN, y la ausencia es la corrección: el catálogo del backend
+          // principal devuelve `{ level, extra, additionalPoints }` y la plata se deriva de la
+          // mesa (`betAmountsOf`). Guardarlos acá era pedirle al snapshot un dato que nadie
+          // produce — y un cobro cableado contra ellos habría cobrado cero, en silencio.
+          additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
         }),
       )
       .default([]),

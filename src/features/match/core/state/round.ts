@@ -40,10 +40,16 @@ export type Turn = SchemaType<typeof Turn>;
 // guardarlo sería un campo derivado (doctrina del repo). Tampoco lleva el instante de
 // vencimiento, que vive unificado en `MatchState.activeDeadline` como el de toda otra fase.
 //
-// SÍ lleva lo que el rival necesita para DECIDIR, porque es lo único que no puede derivar:
-// cuánto se suma al multiplicador (`extra`, que es lo que termina en los puntos de ranking)
-// y cuánto le sale a cada uno aceptar (`additionalEntryFee`). Un "sí" a ciegas sobre dinero
-// real no es un sí.
+// SÍ lleva lo que el rival necesita para DECIDIR: cuánto se suma al multiplicador (`extra`),
+// cuánto le sale a cada uno aceptar (`additionalEntryFee`) y cuántos puntos de ranking gana de
+// más el que termine ganando (`additionalPoints`). Un "sí" a ciegas sobre dinero real no es un
+// sí, y las dos mitades de la decisión son lo que se paga y lo que se lleva.
+//
+// ⚠ `additionalEntryFee` ES CALCULADO Y NO VIENE DEL CATÁLOGO, que es donde el modelo estuvo
+// mal: el catálogo del backend principal devuelve `{ level, extra, additionalPoints }` y nada
+// más. La plata sale de multiplicar la mesa (`betAmountsOf`), porque el que publica los niveles
+// no sabe cuánto cuesta esta mesa. Se guarda igual —y no se deriva en el cliente— porque es el
+// número sobre el que el jugador consiente, y derivarlo allá es la fórmula escrita dos veces.
 export const BetOffer = schema(
   {
     proposerId: t.string(),
@@ -59,6 +65,9 @@ export const BetOffer = schema(
     // acotado (una vez por ronda, y solo con el tablero casi vacío) pero es una ventaja real
     // en una mesa con plata, así que se devuelve exactamente lo que había.
     turnRemainingMs: t.number().default(0),
+    // AL FINAL, como todo campo nuevo de un nodo: schema codifica por ÍNDICE y meterlo en el
+    // medio corre los posteriores.
+    additionalPoints: t.number().default(0),
   },
   "BetOffer",
 );

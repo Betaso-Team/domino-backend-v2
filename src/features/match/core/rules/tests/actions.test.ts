@@ -78,7 +78,7 @@ describe("availableActionsFor", () => {
   });
 
   it("los niveles ofrecibles viajan con el verbo", () => {
-    expect(actionOf(base, "PROPOSE_BET_MULTIPLIER")?.levels).toEqual([1, 2]);
+    expect(actionOf(base, "PROPOSE_BET_MULTIPLIER")?.levels).toEqual([2, 3]);
   });
 
   it("una mesa que no aumenta no ofrece el verbo", () => {
@@ -92,7 +92,13 @@ describe("availableActionsFor", () => {
     const offered: ViewSetup = {
       ...base,
       roundPhase: "NEGOTIATING_BET",
-      betOffer: { proposerId: "u1", level: 1, extra: 1, additionalEntryFee: 10 },
+      betOffer: {
+        proposerId: "u1",
+        level: 1,
+        extra: 1,
+        additionalEntryFee: 10,
+        additionalPoints: 0,
+      },
     };
     expect(verbs(offered, "u2")).toEqual(["ABANDON", "RESPOND_BET_MULTIPLIER"]);
     expect(verbs(offered, "u1")).toEqual(["ABANDON"]);

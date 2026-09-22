@@ -86,9 +86,7 @@ describe("registro de jugadas de la mano", () => {
   });
 });
 
-const LEVELS: readonly BetLevel[] = [
-  { level: 1, extra: 2, additionalEntryFee: 50, additionalPrize: 100 },
-];
+const LEVELS: readonly BetLevel[] = [{ level: 2, extra: 2, additionalPoints: 100 }];
 
 // Manos que no se cierran solas: lo que se mide es que la negociación NO toque el registro.
 const betHands = {
@@ -114,11 +112,11 @@ describe("registro de jugadas: lo que NO entra", () => {
     const e = engineWithHands(betHands, [], { betLevels: LEVELS });
     e.start();
 
-    e.proposeBet("u2", 1);
+    e.proposeBet("u2", 2);
     e.respondBet("u1", true);
 
     expect([...e.round().pastMoves]).toEqual([]);
-    expect(e.match.acceptedBetLevel).toBe(1);
+    expect(e.match.acceptedBetLevel).toBe(2);
   });
 
   // EL RETIRO NO ES UNA JUGADA, y su registro ya existe en otro lado.

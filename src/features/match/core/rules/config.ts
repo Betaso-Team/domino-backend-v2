@@ -13,10 +13,45 @@
  * asientos, la tasa— no lo es.
  */
 export interface BetLevel {
+  /**
+   * EL MULTIPLICADOR DE LA MESA, y no un índice de una tabla: v1 usa 2, 3 y 5, y con él calcula
+   * `entryFee * level` y `prize * level`. Por eso los montos NO viven acá — son una función de
+   * la mesa, y esta lista viene del backend principal, que no sabe cuánto cuesta esta mesa.
+   */
   readonly level: number;
+  /** Se SUMA al multiplicador de la mesa al calcular los puntos de ranking (`multiplier + extra`). */
   readonly extra: number;
-  readonly additionalEntryFee: number;
-  readonly additionalPrize: number;
+  /**
+   * Los puntos de ranking que el ganador gana DE MÁS respecto a una partida sin aumento.
+   *
+   * Lo calcula el backend principal y viaja tal cual: la fórmula de puntos es suya, y
+   * duplicarla en cada motor es exactamente cómo los dos lados se desincronizan. Es el mismo
+   * argumento por el que el dominó no tiene `stakes.ts`.
+   */
+  readonly additionalPoints: number;
+}
+
+/**
+ * LO QUE CUESTA Y LO QUE PAGA ACEPTAR UN NIVEL, derivado de la mesa.
+ *
+ * ⚠ ES UNA REGLA Y NO UN CAMPO, y ese fue un defecto real del modelo: `BetLevel` guardaba
+ * `additionalEntryFee`/`additionalPrize` como si el catálogo los trajera, y el catálogo de v1
+ * NO los tiene — devuelve `{ level, extra, additionalPoints }` y nada más. Un cobro cableado
+ * contra esos campos habría cobrado CERO, en silencio, porque nadie los llenaba.
+ *
+ * La cuenta es la de v1 (`on-propose-bet-multiplier.ts:113-117`): la mesa entera se multiplica
+ * por el nivel, y lo que se cobra es la DIFERENCIA. Vive en `rules/` porque el cliente la
+ * necesita para mostrar el precio ANTES de proponer, que es cuándo el jugador decide.
+ */
+export function betAmountsOf(
+  level: number,
+  entryFee: number,
+  prize: number,
+): { readonly additionalEntryFee: number; readonly additionalPrize: number } {
+  return {
+    additionalEntryFee: entryFee * (level - 1),
+    additionalPrize: prize * (level - 1),
+  };
 }
 
 /**

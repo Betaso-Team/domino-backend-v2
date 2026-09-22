@@ -23,8 +23,8 @@ export class ProposeBetMultiplierCommand implements Command<"PROPOSE_BET_MULTIPL
     //
     // Devuelve el nivel además de juzgarlo: los números los pone el SERVIDOR, y buscarlos dos
     // veces dejaría abierta la puerta a que la guarda mire un nivel y el efecto aplique otro.
-    const option = this.betReferee.assertCanPropose(playerId, level);
-    this.bet.open(playerId, option, 0);
+    const { option, additionalEntryFee } = this.betReferee.assertCanPropose(playerId, level);
+    this.bet.open(playerId, option, additionalEntryFee, 0);
     this.roundDriver.freezeForBet();
     return [];
   }

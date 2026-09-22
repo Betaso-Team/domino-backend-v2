@@ -19,12 +19,23 @@ export interface BetSettlement {
 export class BetNegotiation {
   constructor(private readonly match: MatchState) {}
 
-  open(proposerId: PlayerId, option: BetLevel, turnRemainingMs: number): void {
+  /**
+   * @param additionalEntryFee cuánto le sale a cada uno aceptar. Llega CALCULADO y no sale del
+   * nivel: el catálogo remoto no trae montos —no sabe cuánto cuesta esta mesa— y la cuenta es
+   * `betAmountsOf`. Quien la hace es el juez, que es el único acá que tiene la config de la mesa.
+   */
+  open(
+    proposerId: PlayerId,
+    option: BetLevel,
+    additionalEntryFee: number,
+    turnRemainingMs: number,
+  ): void {
     const offer = new BetOffer();
     offer.proposerId = proposerId;
     offer.level = option.level;
     offer.extra = option.extra;
-    offer.additionalEntryFee = option.additionalEntryFee;
+    offer.additionalPoints = option.additionalPoints;
+    offer.additionalEntryFee = additionalEntryFee;
     offer.turnRemainingMs = turnRemainingMs;
     currentRoundOf(this.match).betOffer = offer;
   }

@@ -176,8 +176,8 @@ describe("canProposeBet", () => {
   const config = rulesConfig();
 
   it("es legal con el tablero recién abierto, y no mira el turno", () => {
-    expect(canProposeBet("u1", 1, viewOf(base), config).legal).toBe(true);
-    expect(canProposeBet("u2", 1, viewOf(base), config).legal).toBe(true);
+    expect(canProposeBet("u1", 2, viewOf(base), config).legal).toBe(true);
+    expect(canProposeBet("u2", 2, viewOf(base), config).legal).toBe(true);
   });
 
   it("la ventana aguanta una ficha y se cierra con dos", () => {
@@ -211,7 +211,13 @@ describe("canProposeBet", () => {
   it("una oferta viva bloquea la segunda", () => {
     const view = viewOf({
       ...base,
-      betOffer: { proposerId: "u2", level: 1, extra: 1, additionalEntryFee: 10 },
+      betOffer: {
+        proposerId: "u2",
+        level: 1,
+        extra: 1,
+        additionalEntryFee: 10,
+        additionalPoints: 0,
+      },
     });
     expect(codeOf(canProposeBet("u1", 1, view, config))).toBe("BET_ALREADY_PENDING");
   });
@@ -232,7 +238,7 @@ describe("canRespondBet", () => {
   const offered: ViewSetup = {
     ...base,
     roundPhase: "NEGOTIATING_BET",
-    betOffer: { proposerId: "u1", level: 1, extra: 1, additionalEntryFee: 10 },
+    betOffer: { proposerId: "u1", level: 1, extra: 1, additionalEntryFee: 10, additionalPoints: 0 },
   };
 
   it("contesta el que no propuso, le toque o no", () => {

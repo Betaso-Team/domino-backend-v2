@@ -93,8 +93,8 @@ export function viewOf(setup: ViewSetup): MatchView {
 
 // Un catálogo de dos niveles, con los números de un modo productivo de v1.
 export const BET_LEVELS: readonly BetLevel[] = [
-  { level: 1, extra: 1, additionalEntryFee: 10, additionalPrize: 18 },
-  { level: 2, extra: 2, additionalEntryFee: 20, additionalPrize: 36 },
+  { level: 2, extra: 1, additionalPoints: 10 },
+  { level: 3, extra: 2, additionalPoints: 25 },
 ];
 
 export const rulesConfig = (overrides: Partial<DominoRulesConfig> = {}): DominoRulesConfig => ({

@@ -111,6 +111,7 @@ export interface BetOfferView {
   readonly level: number;
   readonly extra: number;
   readonly additionalEntryFee: number;
+  readonly additionalPoints: number;
 }
 
 export interface RoundSummaryView {
