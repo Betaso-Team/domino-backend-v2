@@ -14,11 +14,15 @@ const codeOf = (ruling: ReturnType<typeof canRequestRematch>) =>
   isIllegal(ruling) ? ruling.code : undefined;
 
 // La mesa de dos recién dictaminada, con la ventana abierta y nadie que haya pedido todavía.
+// ⚠ EL NODO EXISTE DURANTE LA VENTANA, y el fixture tiene que decirlo: es quien lleva
+// `eligible`, así que se crea al abrir y no al pedir. Un fixture que lo dejara en `undefined`
+// —como lo hacía el primero— deja verde una guarda que en producción rechaza todo.
 const openWindow = (over: Partial<Parameters<typeof viewOf>[0]> = {}) =>
   viewOf({
     hands: { "seat-1": [], "seat-2": [] },
     noRound: true,
     matchPhase: "REMATCH_WINDOW",
+    rematch: { requesterId: "", responderId: "", acceptedIds: [] },
     ...over,
   });
 

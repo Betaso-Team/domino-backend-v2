@@ -16,6 +16,8 @@ const build = () =>
       REVEAL_TILES: { decode: vi.fn(() => ({ playerId: "u1" })) },
       PROPOSE_BET_MULTIPLIER: { decode: vi.fn(() => ({ playerId: "u1", level: 1 })) },
       RESPOND_BET_MULTIPLIER: { decode: vi.fn(() => ({ playerId: "u1", accept: true })) },
+      REQUEST_REMATCH: { decode: vi.fn(() => ({ playerId: "u1" })) },
+      RESPOND_REMATCH: { decode: vi.fn(() => ({ playerId: "u1", accept: true })) },
     },
     {
       ABANDON: { execute: vi.fn(() => []) },
@@ -25,6 +27,8 @@ const build = () =>
       REVEAL_TILES: { execute: vi.fn(() => []) },
       PROPOSE_BET_MULTIPLIER: { execute: vi.fn(() => []) },
       RESPOND_BET_MULTIPLIER: { execute: vi.fn(() => []) },
+      REQUEST_REMATCH: { execute: vi.fn(() => []) },
+      RESPOND_REMATCH: { execute: vi.fn(() => []) },
     },
   );
 
@@ -52,7 +56,9 @@ describe("CommandCatalog", () => {
       "PASS",
       "PLAY_TILE",
       "PROPOSE_BET_MULTIPLIER",
+      "REQUEST_REMATCH",
       "RESPOND_BET_MULTIPLIER",
+      "RESPOND_REMATCH",
       "REVEAL_TILES",
     ]);
   });

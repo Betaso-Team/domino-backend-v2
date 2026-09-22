@@ -58,6 +58,8 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   child.register("Command:RESPOND_BET_MULTIPLIER", {
     useValue: graph.commands.RESPOND_BET_MULTIPLIER,
   });
+  child.register("Command:REQUEST_REMATCH", { useValue: graph.commands.REQUEST_REMATCH });
+  child.register("Command:RESPOND_REMATCH", { useValue: graph.commands.RESPOND_REMATCH });
 
   // MatchDriver no se registra: la sala puede iniciar la partida por MatchStarter, pero
   // no puede alcanzar advance/timeout y saltarse los comandos. Ahora tampoco puede
@@ -74,6 +76,8 @@ export function buildCatalog(child: DependencyContainer): CommandCatalog {
       REVEAL_TILES: identityDecoder("REVEAL_TILES"),
       PROPOSE_BET_MULTIPLIER: identityDecoder("PROPOSE_BET_MULTIPLIER"),
       RESPOND_BET_MULTIPLIER: identityDecoder("RESPOND_BET_MULTIPLIER"),
+      REQUEST_REMATCH: identityDecoder("REQUEST_REMATCH"),
+      RESPOND_REMATCH: identityDecoder("RESPOND_REMATCH"),
     },
     {
       ABANDON: child.resolve("Command:ABANDON"),
@@ -83,6 +87,8 @@ export function buildCatalog(child: DependencyContainer): CommandCatalog {
       REVEAL_TILES: child.resolve("Command:REVEAL_TILES"),
       PROPOSE_BET_MULTIPLIER: child.resolve("Command:PROPOSE_BET_MULTIPLIER"),
       RESPOND_BET_MULTIPLIER: child.resolve("Command:RESPOND_BET_MULTIPLIER"),
+      REQUEST_REMATCH: child.resolve("Command:REQUEST_REMATCH"),
+      RESPOND_REMATCH: child.resolve("Command:RESPOND_REMATCH"),
     },
   );
 }

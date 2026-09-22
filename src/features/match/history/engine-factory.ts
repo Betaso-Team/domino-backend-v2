@@ -8,6 +8,8 @@ import {
   RespondBetMultiplierCommand,
   RevealTilesCommand,
 } from "../core/commands";
+import { RequestRematchCommand } from "../core/commands/request-rematch";
+import { RespondRematchCommand } from "../core/commands/respond-rematch";
 import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../core/config";
 import { BetNegotiation, BetReferee } from "../core/engine/bet";
 import type { Clock } from "../core/engine/clock";
@@ -22,6 +24,7 @@ import { PlayerRepository } from "../core/engine/player-repository";
 import { Referee } from "../core/engine/referee-facade";
 import { RematchGate } from "../core/engine/rematch/gate";
 import { RematchNegotiation } from "../core/engine/rematch/negotiation";
+import { RematchReferee } from "../core/engine/rematch/referee";
 import { RoundDriver } from "../core/engine/round/driver";
 import { RoundPlayer } from "../core/engine/round/player";
 import { RoundReferee } from "../core/engine/round/referee";
@@ -124,6 +127,7 @@ export function buildEngineGraph(
   // conteste, no hay revancha. Cerrado es el lado seguro en el que equivocarse.
   const gate = new RematchGate(config.isRematchEnabled);
   const rematch = new RematchNegotiation(match);
+  const rematchReferee = new RematchReferee(match);
   const matchDriver = new MatchDriver(
     match,
     deps.clock,
@@ -157,6 +161,11 @@ export function buildEngineGraph(
       // porque éste no es un juez del juego: no mira fichas, mira dinero.
       PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(betReferee, bet, roundDriver),
       RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(betReferee, bet, roundDriver),
+      // LOS DOS DE LA REVANCHA reciben el conductor de PARTIDA, al revés que los del aumento:
+      // lo que mueven es la fase de la MESA y no la de la mano. Su juez tampoco lleva config —
+      // las reglas de la revancha no miran un solo número de la mesa.
+      REQUEST_REMATCH: new RequestRematchCommand(rematchReferee, matchDriver),
+      RESPOND_REMATCH: new RespondRematchCommand(rematchReferee, matchDriver),
     },
   };
 }

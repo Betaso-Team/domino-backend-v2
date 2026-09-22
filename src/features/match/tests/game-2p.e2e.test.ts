@@ -6,7 +6,7 @@ import {
   act,
   bootServer,
   historyOf,
-  legalPlayFor,
+  playUntilDecided,
   revealHands,
   seatPair,
   waitUntil,
@@ -27,23 +27,11 @@ beforeAll(async () => {
   match = await seatPair(server, ["g1", "g2"], "seed-partida-completa");
   await revealHands(match);
 
-  // Tope de seguridad: una partida a 100 puntos no debería pasar de esto, y si
-  // lo pasa es un bucle. No se corta acá con un throw: agotar la vuelta deja la fase
-  // sin terminar y el primer test la reporta como lo que es, un fallo con su aserción.
-  for (let turns = 0; turns < 3_000; turns += 1) {
-    if (match.serverState.phase === "FINISHED") break;
-    const played = await playOneTurn(match);
-    if (!played) {
-      // Fuera de PLAYING: o es la pausa de la mano, o la de la partida. Los dos
-      // plazos son cortos en test, así que se espera a que el reloj los venza.
-      await waitUntil(
-        () =>
-          match.serverState.currentRound?.phase === "PLAYING" ||
-          match.serverState.phase === "FINISHED",
-        3_000,
-      );
-    }
-  }
+  await playUntilDecided(match);
+  // Y SE ESPERA AL TERMINAL: el golden captura el árbol APAGADO, no el de la ventana de
+  // revancha. Desde que la ventana existe, «se dejó de jugar» y «se terminó» son dos momentos
+  // distintos, y el que este fixture congela es el segundo.
+  await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
   // El golden se captura ACÁ y no dentro de un `it`: es el único punto donde el árbol
   // final y su historial están los dos completos y en alcance, y desde la Tarea 20 jugar
@@ -55,31 +43,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await server.shutdown();
 });
-
-// Juega una jugada legal del que tiene el turno, o roba, o pasa. Devuelve false
-// cuando la ronda dejó de estar en PLAYING.
-//
-// Espera con `act`, que compara la FIRMA del estado. El conteo total de fichas NO sirve
-// de señal: jugar mueve una de la mano al tablero y robar la mueve del pozo a la mano, así
-// que board + hand + boneyard es un invariante de la ronda y nunca se mueve. La firma, en
-// cambio, incluye el plazo vigente, y los tres verbos lo re-estampan.
-async function playOneTurn(seated: SeatedMatch): Promise<boolean> {
-  const round = seated.serverState.currentRound;
-  if (!round || round.phase !== "PLAYING") return false;
-
-  const playerId = round.currentTurn?.playerId;
-  if (!playerId) return false;
-
-  const play = legalPlayFor(seated.serverState, playerId);
-  if (play) {
-    await act(seated, playerId, "PLAY_TILE", play);
-  } else if (boneyardCountOf(round) > 0) {
-    await act(seated, playerId, "DRAW_TILE");
-  } else {
-    await act(seated, playerId, "PASS");
-  }
-  return true;
-}
 
 describe("partida 2P completa", () => {
   it("se jugó de punta a punta hasta que hubo veredicto", async () => {

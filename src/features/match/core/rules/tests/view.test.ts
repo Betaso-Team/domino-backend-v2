@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { roundState } from "../../engine/round/tests/round-fixture";
+import { RematchState } from "../../state/rematch";
 import { SchemaMatchView } from "../../state/view";
 import { canPlayTile, hasPlayable } from "../legality";
 import type { PublicMatchView } from "../view";
@@ -35,6 +36,37 @@ describe("SchemaMatchView", () => {
     match.currentRound = undefined;
     // Con un spread del árbol esto seguiría contestando la ronda de antes.
     expect(view.currentRound).toBeUndefined();
+  });
+
+  // ⚠ EL GUARDARRAÍL DE LOS CAMPOS OPCIONALES, y nació de un defecto real: `rematch` es una
+  // rama nula, así que en `PublicMatchView` es opcional — y un getter que falta en esta clase
+  // COMPILA IGUAL, porque omitir un opcional sigue satisfaciendo la interfaz.
+  //
+  // Faltó, y el resultado fue que toda regla de revancha leía `undefined` y contestaba
+  // `NO_REMATCH_PENDING` con la negociación abierta del otro lado del árbol. No lo vio el test
+  // de reglas —arma la vista como objeto plano, sin pasar por acá— ni el del motor, que llama
+  // al conductor sin juez. Lo encontró el E2E, que es el último lugar donde uno quiere
+  // enterarse.
+  //
+  // Se mide comparando las CLAVES del árbol contra las de la vista en vez de nombrar `rematch`:
+  // así el próximo campo opcional que alguien agregue al schema y olvide acá se pone rojo solo.
+  it("expone TODOS los campos del árbol, también los opcionales", () => {
+    const match = roundState(setup);
+    // LAS RAMAS NULAS SE INSTANCIAN, y sin esto el test es DECORATIVO: `toJSON()` omite la
+    // clave de un `.optional()` ausente, así que la comparación no tendría qué echar en falta
+    // y pasaría verde con el getter borrado. Medido.
+    match.rematch = new RematchState();
+    const view = new SchemaMatchView(match);
+    // `privateOf` es de la vista y no del árbol: es la puerta, no un campo.
+    const exposed = new Set([
+      ...Object.keys(view),
+      ...Object.keys(Object.getPrototypeOf(view) as object),
+      ...Object.getOwnPropertyNames(SchemaMatchView.prototype),
+    ]);
+
+    const missing = Object.keys(match.toJSON()).filter((field) => !exposed.has(field));
+
+    expect(missing).toEqual([]);
   });
 
   it("privateOf contesta por cada asiento en el servidor", () => {

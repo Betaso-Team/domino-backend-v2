@@ -23,6 +23,19 @@ export interface CommandPayloads {
   // Booleano y verbo propio, como en v1 — y no un QUIERO/NO_QUIERO compartido como truco,
   // que acá no tendría con quién compartirse: el dominó no tiene otros cantos.
   RESPOND_BET_MULTIPLIER: { playerId: PlayerId; accept: boolean };
+  // LOS DOS DE LA REVANCHA, y son los únicos verbos que se dicen con la partida YA
+  // dictaminada: viven entre el veredicto y el terminal.
+  //
+  // El par es el de v1 (`REQUEST_REMATCH` / `RESPOND_REMATCH`) y no el `OFFER_REMATCH` +
+  // QUIERO/NO_QUIERO de truco, por lo mismo que el aumento: acá no hay cantos con los que
+  // compartir una respuesta. La forma coincide con la del aumento —pedir y contestar con un
+  // booleano— y eso es deliberado: son las dos negociaciones de la mesa.
+  //
+  // El payload NO lleva a quién se le pide: se le pide a la MESA. Quiénes tienen que
+  // aceptar lo decide `rematchRespondersOf`, y dejar que el cliente lo nombre sería dejarlo
+  // elegir contra quién vuelve a jugar.
+  REQUEST_REMATCH: { playerId: PlayerId };
+  RESPOND_REMATCH: { playerId: PlayerId; accept: boolean };
 }
 
 export type CommandName = keyof CommandPayloads;

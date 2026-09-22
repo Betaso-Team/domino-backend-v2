@@ -31,6 +31,12 @@ export const COMMAND_PAYLOADS = {
   // Booleano OBLIGATORIO y sin default: un "sí" por omisión es lo último que puede tener un
   // mensaje que mueve dinero. Si no vino, el mensaje está mal — y mal es rechazo.
   RESPOND_BET_MULTIPLIER: z.object({ accept: z.boolean() }).strict(),
+  // PEDIR NO LLEVA PAYLOAD: se le pide a la MESA, no a alguien. Dejar que el cliente nombre a
+  // quién se lo pide sería dejarlo elegir contra quién vuelve a jugar.
+  REQUEST_REMATCH: z.object({}).strict(),
+  // Booleano obligatorio y sin default, por lo mismo que el del aumento: un «sí» por omisión
+  // sienta a alguien en una mesa que se le va a cobrar.
+  RESPOND_REMATCH: z.object({ accept: z.boolean() }).strict(),
 } satisfies Record<CommandName, z.ZodType>;
 
 export type WirePayload<N extends CommandName> = z.infer<(typeof COMMAND_PAYLOADS)[N]>;

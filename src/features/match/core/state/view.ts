@@ -49,6 +49,18 @@ export class SchemaMatchView implements MatchView {
   get acceptedBetExtra() {
     return this.match.acceptedBetExtra;
   }
+  // ⚠ ESTE GETTER FALTÓ UNA VEZ Y NADA LO DIJO. `rematch` es OPCIONAL en `PublicMatchView`
+  // —tiene que serlo: es una rama nula—, así que omitirlo acá COMPILA, y la clase sigue
+  // satisfaciendo la interfaz. El resultado fue que toda regla de revancha leía `undefined` y
+  // contestaba `NO_REMATCH_PENDING` con la negociación abierta del otro lado.
+  //
+  // Lo encontró el E2E y no pudieron encontrarlo ni el test de reglas —que arma la vista como
+  // objeto plano, sin pasar por esta clase— ni el del motor, que llama al conductor sin juez.
+  // Es el precio de que la vista tenga campos opcionales, y la contramedida es el test de
+  // `rules/tests/view.test.ts`, que mide esta clase contra el árbol de verdad.
+  get rematch() {
+    return this.match.rematch;
+  }
   get acceptedBetLevel() {
     return this.match.acceptedBetLevel;
   }

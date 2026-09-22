@@ -14,6 +14,7 @@ import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { Room } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
+import { boneyardCountOf } from "../core/engine/state-projections";
 import { boardEndsOf } from "../core/rules/board-ends";
 import { playableSides } from "../core/rules/playable";
 import type { MatchState } from "../core/state";
@@ -202,6 +203,67 @@ export async function act(
 // `await` en las aserciones es el precio de medir el MISMO contrato que usa producción —un
 // helper sincrónico acá exigiría que el arnés resolviera la implementación concreta, que es
 // el cast que `HistoryReader` vino a eliminar (ver network/history.ts).
+// Juega una jugada legal del que tiene el turno, o roba, o pasa. Devuelve false
+// cuando la ronda dejó de estar en PLAYING.
+//
+// Espera con `act`, que compara la FIRMA del estado. El conteo total de fichas NO sirve
+// de señal: jugar mueve una de la mano al tablero y robar la mueve del pozo a la mano, así
+// que board + hand + boneyard es un invariante de la ronda y nunca se mueve. La firma, en
+// cambio, incluye el plazo vigente, y los tres verbos lo re-estampan.
+export async function playOneTurn(seated: SeatedMatch): Promise<boolean> {
+  const round = seated.serverState.currentRound;
+  if (!round || round.phase !== "PLAYING") return false;
+
+  const playerId = round.currentTurn?.playerId;
+  if (!playerId) return false;
+
+  const play = legalPlayFor(seated.serverState, playerId);
+  if (play) {
+    await act(seated, playerId, "PLAY_TILE", play);
+  } else if (boneyardCountOf(round) > 0) {
+    await act(seated, playerId, "DRAW_TILE");
+  } else {
+    await act(seated, playerId, "PASS");
+  }
+  return true;
+}
+
+// DEJÓ DE HABER JUGADAS: o la mesa está en la ventana de revancha, o ya se apagó. Las pausas
+// de mano y de partida NO cuentan — son tránsito, y el reloj sale de ellas solo.
+const settled = (seated: SeatedMatch): boolean =>
+  seated.serverState.phase === "FINISHED" ||
+  seated.serverState.phase === "REMATCH_WINDOW" ||
+  seated.serverState.phase === "REMATCH_NEGOTIATION" ||
+  seated.serverState.phase === "REMATCH_ACCEPTED";
+
+/**
+ * JUEGA LA PARTIDA ENTERA y devuelve apenas deja de haber jugadas.
+ *
+ * ⚠ NO GARANTIZA `FINISHED`, y desde la revancha eso importa: una mesa casual llega a
+ * `REMATCH_WINDOW` y se queda ahí esperando a que alguien pida. El que quiera el terminal
+ * espera por él —`waitUntil(() => phase === "FINISHED")`— y el que quiera la ventana la
+ * encuentra abierta. Frenar siempre en el terminal le sacaría al segundo lo único que
+ * quiere medir.
+ *
+ * El tope es de seguridad: una partida a 100 puntos no debería pasar de ahí, y si lo pasa es
+ * un bucle. No se corta con un `throw`: agotar la vuelta deja la fase sin terminar, y la
+ * aserción del llamador la reporta como lo que es.
+ */
+export async function playUntilDecided(seated: SeatedMatch): Promise<void> {
+  for (let turns = 0; turns < 3_000; turns += 1) {
+    if (settled(seated)) break;
+    const played = await playOneTurn(seated);
+    if (!played) {
+      // Fuera de PLAYING: o es la pausa de la mano, o la de la partida. Los dos plazos son
+      // cortos en test, así que se espera a que el reloj los venza.
+      await waitUntil(
+        () => seated.serverState.currentRound?.phase === "PLAYING" || settled(seated),
+        3_000,
+      );
+    }
+  }
+}
+
 export function historyOf(matchId: string): Promise<readonly HistoryEntry[]> {
   return rootContainer.resolve<HistoryReader>("HistoryReader").of(matchId);
 }

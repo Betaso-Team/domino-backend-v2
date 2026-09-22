@@ -30,7 +30,12 @@ import type { PublicMatchView } from "./view";
  * emerger de un `if`.
  */
 export function canRequestRematch(playerId: PlayerId, match: PublicMatchView): Ruling {
-  if (match.rematch) return illegal("REMATCH_ALREADY_REQUESTED");
+  // ⚠ SE PREGUNTA POR EL `requesterId`, NO POR EL NODO, y la diferencia es todo: acá el nodo
+  // EXISTE desde que la ventana se abre, porque es quien lleva `eligible`. Truco puede
+  // preguntar por el nodo porque allá nace recién cuando alguien ofrece; copiar esa línea acá
+  // rechaza TODA solicitud con `REMATCH_ALREADY_REQUESTED` — o sea que la revancha no funciona
+  // nunca, y los tests de regla y de motor siguen verdes porque ninguno ve el nodo real.
+  if (match.rematch?.requesterId) return illegal("REMATCH_ALREADY_REQUESTED");
   if (match.phase !== "REMATCH_WINDOW") return illegal("REMATCH_WINDOW_CLOSED");
   const player = match.players.find((candidate) => candidate.playerId === playerId);
   if (!player || player.hasAbandoned) return illegal("PLAYER_NOT_IN_MATCH");
