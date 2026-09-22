@@ -151,26 +151,96 @@ describe("settlementOf", () => {
     expect(settlementOf({ type: "DEADLINE_EXPIRED", kind: "TURN" }, match, config)).toBeUndefined();
   });
 
-  it("rechaza un veredicto sin ganadores", () => {
+  it("rechaza un veredicto sobre un equipo donde no queda nadie que cobre", () => {
     const match = matchOf();
     for (const player of match.players) player.teamId = "B";
     expect(() =>
       settlementOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
-    ).toThrow(/exactamente un ganador, recibió 0/);
+    ).toThrow(/al menos un ganador que cobre, y el equipo A no tiene ninguno/);
+  });
+});
+
+// LA MESA DE CUATRO PAGA, y hasta este incremento no podía: la guarda pedía EXACTAMENTE un
+// ganador, que era lo que mantenía inerte la falta de una regla de reparto. La regla existía y
+// estaba en v1.
+describe("settlementOf — el premio de la pareja", () => {
+  const fourSeatConfig = replayConfigOf(fourSeatOptions);
+  const fourSeatMatch = () => createMatchState(fourSeatConfig);
+  const resolve = (match: ReturnType<typeof fourSeatMatch>) =>
+    settlementOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
+      match,
+      fourSeatConfig,
+    );
+
+  // ⚠ CADA GANADOR COBRA `prize` ENTERO Y NO LA MITAD, y ésa es la regla de v1: el premio del
+  // catálogo es POR CABEZA, no un pozo a repartir. Dividirlo entre los cobradores es el error que
+  // v1 documenta en su divisor nominal, y le pagaría de menos a los dos.
+  it("le paga el premio entero a cada uno de los dos", () => {
+    const instruction = resolve(fourSeatMatch());
+
+    expect(instruction).toEqual({
+      matchId: "money-4p",
+      rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+      kind: "REWARD",
+      entries: [
+        {
+          userId: "u1",
+          currency: "VES",
+          amount: 250,
+          idempotencyKey: '["money-4p","REWARD","u1"]',
+        },
+        {
+          userId: "u3",
+          currency: "USD",
+          amount: 250,
+          idempotencyKey: '["money-4p","REWARD","u3"]',
+        },
+      ],
+    });
   });
 
-  // LA OTRA MITAD DE LA GUARDA, y es la que puede pasar de verdad: una mesa de cuatro grabada se
-  // reconstruye sin objeción, así que dos ganadores del mismo equipo siguen siendo alcanzables.
-  // Sin esta aserción el guard podía ser `=== 0` y la suite seguía verde — pagando el premio
-  // ENTERO a cada uno de los dos, o sea el doble de lo que la mesa cobró.
-  it("rechaza varios ganadores en vez de pagarle el premio entero a cada uno", () => {
-    const match = matchOf();
-    for (const player of match.players) player.teamId = "A";
-    expect(() =>
-      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
-    ).toThrow(/exactamente un ganador, recibió 2/);
+  // ⚠ EL SOCIO QUE SE FUE NO COBRA, Y SU MITAD SE QUEDA EN LA CASA. Es lo que v1 decide con el
+  // divisor NOMINAL, y es el borde que parece un error: el que se quedó jugando cobra sólo lo
+  // suyo. Pagarle al que abandonó sería premiar el abandono con el premio de la mesa, y repartir
+  // su parte entre los que quedaron sería inventar una regla que v1 no tiene.
+  it("no le paga al que abandonó, y no reparte su parte", () => {
+    const match = fourSeatMatch();
+    const quitter = match.players.find((player) => player.playerId === "seat-3");
+    if (quitter) quitter.hasAbandoned = true;
+
+    expect(resolve(match)?.entries).toEqual([
+      { userId: "u1", currency: "VES", amount: 250, idempotencyKey: '["money-4p","REWARD","u1"]' },
+    ]);
   });
 
+  // Y TAMPOCO COBRA LA MÁQUINA que ocupó su asiento, que es el mismo caso una capa más arriba: el
+  // bot ES el que se fue. Sin este filtro, el premio saldría a nombre del que abandonó sólo
+  // porque le dejaron un reemplazo jugando.
+  it("no le paga al asiento que juega la máquina", () => {
+    const match = fourSeatMatch();
+    const bot = match.players.find((player) => player.playerId === "seat-3");
+    if (bot) bot.isBot = true;
+
+    expect(resolve(match)?.entries).toEqual([
+      { userId: "u1", currency: "VES", amount: 250, idempotencyKey: '["money-4p","REWARD","u1"]' },
+    ]);
+  });
+
+  // EL PISO SIGUE SIENDO UNO: un equipo de puras máquinas no tiene a quién pagarle, y eso es un
+  // invariante roto y no una instrucción vacía. Hoy no se alcanza —`hasTeamAbandoned` no deja que
+  // un equipo así sea coronado— y ésta es la última red, igual que antes.
+  it("un equipo de puras máquinas cierra la partida en vez de pagar", () => {
+    const match = fourSeatMatch();
+    for (const player of match.players) {
+      if (player.teamId === "A") player.isBot = true;
+    }
+
+    expect(() => resolve(match)).toThrow(/al menos un ganador que cobre/);
+  });
+});
+
+describe("settlementOf — el resto", () => {
   // EL FALLO QUE NO HACE RUIDO. Los `playerId` son posicionales, así que `seat-1` existe en
   // las dos mesas: sin la guarda esto NO daría cero ni dos ganadores —daría exactamente uno—
   // y emitiría una instrucción impecable, con el `matchId` y el `rateId` de la mesa de

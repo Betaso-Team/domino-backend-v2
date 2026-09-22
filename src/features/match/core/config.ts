@@ -185,6 +185,16 @@ export interface GlobalDominoConfig {
   readonly rematchWindowMs: number;
   readonly rematchResponseMs: number;
   readonly rematchHandoffMs: number;
+  /**
+   * CUÁNTO PIENSA LA MÁQUINA antes de jugar. Es el número de v1 (`playBotTile`, 1500 ms) y no es
+   * decoración: sin espera el bot juega en el mismo tick en que le llega el turno, la mesa se
+   * mueve sola y el que está mirando no alcanza a ver qué pasó.
+   *
+   * Es el otro plazo que el MOTOR no lee —lo consume `BotTurnTaker`, que es de la red, porque los
+   * comandos son síncronos y esto tiene que esperar—. Vive acá por lo mismo que
+   * `reconnectionWindowSeconds`: éste es el sobre en el que la mesa recibe sus plazos.
+   */
+  readonly botTurnDelayMs: number;
 }
 
 // Los plazos son los del v1, verificados en docs/reglas-de-juego-v1.md §5.1: 60 s de
@@ -203,6 +213,8 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   tilesPerPlayer: 7,
   // El número del v1 (`actionResponseTimeRemaining` del que responde un aumento).
   betResponseTimeoutMs: 10_000,
+  // El número del v1 (`playBotTile`).
+  botTurnDelayMs: 1_500,
   // Los tres del v1 (`rematch-manager.ts`).
   rematchWindowMs: 30_000,
   rematchResponseMs: 5_000,

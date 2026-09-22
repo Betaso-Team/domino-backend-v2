@@ -28,6 +28,7 @@ import {
   AdmissionRefusedError,
   BetCharger,
   type BetLevelBook,
+  BotTurnTaker,
   MatchEventNotifier,
   type MatchHistory,
   MatchPlatform,
@@ -85,6 +86,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private notifier!: MatchEventNotifier;
   private scheduler!: RoomTimeoutScheduler;
   private history!: MatchHistory;
+  // EL RELOJ DE LA MÁQUINA. Existe siempre y no sólo en las mesas con bots: su `poke()` es una
+  // consulta barata —¿el turno es de un asiento con la bandera puesta?— y hacerlo condicional
+  // obligaría a preguntar por el modo en los tres lugares que lo empujan.
+  private bots!: BotTurnTaker;
   private hasOutcome!: MatchHasOutcome;
   private isStillPlaying!: MatchSeatGuard;
   private startMatch!: MatchStarter;
@@ -201,8 +206,16 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       useValue: new StateViewVisibilityController(this.views),
     });
 
-    this.scheduler = new RoomTimeoutScheduler(this.clock, (events: readonly NetworkMatchEvent[]) =>
-      this.notifier.notify(events),
+    this.scheduler = new RoomTimeoutScheduler(
+      this.clock,
+      (events: readonly NetworkMatchEvent[]) => {
+        this.notifier.notify(events);
+        // EL OTRO EMPUJE, y es el que de verdad importa: el turno vencido es por donde se SIENTA la
+        // máquina, así que sin esto el bot recién nacido espera a que alguien mande un mensaje para
+        // jugar su primer turno — y en una mesa donde el resto está esperando su jugada, no llega
+        // ninguno. La partida se quedaría quieta hasta el siguiente vencimiento.
+        this.bots?.poke();
+      },
     );
     // El scheduler tiene que estar registrado antes de armar los actores: el conductor
     // del motor recibe solo el puerto y nunca debe conocer la sala.
@@ -270,6 +283,38 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
     // que queda es la tabla.
     this.router = buildRouter(catalog, this.history, (events) => this.notifier.notify(events));
+    // ⚠ EL BOT NO ENTRA POR EL ROUTER, y no es un atajo: el router es la frontera del CABLE, y su
+    // handler graba la fuente `"PLAYER"` por construcción —que es la mitad del valor de tenerlo—.
+    // Una jugada de la máquina es un acto del SISTEMA, y el historial que alguien va a auditar es
+    // justamente el de una partida que alguien abandonó.
+    this.bots = new BotTurnTaker(
+      match,
+      config,
+      (playerId, move) => {
+        // ⚠ LOS CAMPOS SE COPIAN A MANO Y NO CON SPREAD, y acá se paga la misma trampa que
+        // `log-sink.ts` ya documenta: **esparcir un nodo del schema devuelve un objeto VACÍO**.
+        // La ficha que la política elige sale del árbol VIVO —`SchemaMatchView` no copia nada— así
+        // que `{ ...move.tile }` deja `left`/`right` en `undefined` y el comando responde
+        // `TILE_NOT_IN_HAND` sobre una ficha que el bot tiene en la mano. Y el modo de falla es
+        // cruel: `JSON.stringify` del mismo nodo SÍ imprime los números —`toJSON` funciona— así
+        // que el log muestra la ficha correcta mientras el payload va vacío.
+        const payload =
+          move.type === "PLAY_TILE"
+            ? { playerId, left: move.tile.left, right: move.tile.right, side: move.side }
+            : { playerId };
+        const events = catalog.command(move.type).execute(payload as never);
+        this.history.command("SYSTEM", move.type, payload);
+        this.notifier.notify(events);
+      },
+      // ⚠ NUNCA MÁS DE MEDIO TURNO, y no es una optimización: con el plazo de reflexión más largo
+      // que el turno, la máquina PIENSA HASTA QUE SE LE VENCE Y LA RETIRAN — el reloj llega antes
+      // que su jugada, y como a un bot ya no se lo reemplaza por otro, ahí sí abandona. La mesa
+      // se comporta como si los bots no existieran y no falla nada. Lo destapó la suite, que
+      // corre con turnos de 600 ms contra los 1500 de v1; en producción el mínimo es el de v1 y
+      // esta línea no cambia nada.
+      Math.min(global.botTurnDelayMs, Math.floor(global.turnTimeoutMs / 2)),
+      (error) => this.log.warn("la máquina no pudo jugar", { error: String(error) }),
+    );
     this.hasOutcome = child.resolve<MatchHasOutcome>("MatchHasOutcome");
     this.isStillPlaying = child.resolve<MatchSeatGuard>("MatchSeatGuard");
     this.startMatch = child.resolve<MatchStarter>("MatchStarter");
@@ -455,6 +500,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       this.log.warn("partida abortada");
     }
     this.scheduler?.cancel();
+    this.bots?.cancel();
     this.seating?.clear();
     for (const view of this.views.values()) view.dispose();
     // Se esperan los latidos EN VUELO y recién después se borra: un latido que llegue tarde al
@@ -519,6 +565,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     } catch (error: unknown) {
       this.rejectMessage(error, client, type, playerId);
     }
+    // DESPUÉS DE CADA MENSAJE se mira si la mesa quedó esperando a una máquina, y también cuando
+    // el mensaje fue rechazado: el turno pudo haber pasado igual por el camino del error.
+    this.bots.poke();
   }
 
   // QUÉ SE LE CONTESTA AL CLIENTE cuando su mensaje no prosperó. Es un método y no el `catch`

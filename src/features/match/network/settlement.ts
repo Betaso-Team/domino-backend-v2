@@ -110,17 +110,39 @@ function rewardOf(
   // El equipo ganador se lee del ESTADO —que es quien reparte los asientos en equipos— y
   // la identidad se lee de la CONFIG, que es donde está congelada. Cruzarlos por el id
   // opaco es lo que mantiene al motor sin saber de plataformas.
+  // QUIÉN COBRA: el asiento del equipo ganador que todavía es de una PERSONA.
+  //
+  // ⚠ **LA REGLA DEL REPARTO ES LA DE v1, Y NO SE DIVIDE NADA**: cada ganador cobra `prize`
+  // ENTERO, que es el premio POR CABEZA del catálogo y no un pozo a repartir entre los dos. Está
+  // escrita y argumentada en `domino-room-state.ts:672-678`, incluido el borde que parece un
+  // error y no lo es: **si un socio se fue, el que queda cobra SÓLO lo suyo y la otra mitad se
+  // queda en la casa**. v1 lo dice en el divisor, que es NOMINAL (`playersQuantity / 2`) y no por
+  // cobradores reales — con el divisor real, un abandono le pagaría el pozo entero a uno solo.
+  //
+  // **LOS BOTS Y LOS RETIRADOS NO COBRAN**, y por eso este filtro no se puede sacar aunque el
+  // equipo ganador sea el correcto: el asiento que juega la máquina es el del que se fue, y
+  // pagarle sería premiar el abandono con el premio de la mesa. Es el
+  // `filter(player => !player.isBot)` de v1 (`:605`), más los que quedaron en `quitPlayers` —que
+  // acá son los `hasAbandoned`—.
   const winnerIds = new Set(
-    match.players.filter(({ teamId }) => teamId === winnerTeamId).map(({ playerId }) => playerId),
+    match.players
+      .filter(({ teamId }) => teamId === winnerTeamId)
+      .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
+      .map(({ playerId }) => playerId),
   );
   const winners = config.seats.filter(({ playerId }) => winnerIds.has(playerId));
-  // PLATA DE POR MEDIO: ante la duda, rechazar. Cero ganadores sería un veredicto sobre un
-  // equipo que no existe, y varios —el 4P, que `configOf` ya acepta— dejaría el premio de la
-  // mesa sin una regla escrita de cómo se parte. Las dos cosas son un invariante roto, y un
-  // invariante roto cierra la partida en vez de pagar de más.
-  if (winners.length !== 1) {
+  // PLATA DE POR MEDIO: ante la duda, rechazar. **Cero ganadores** sigue siendo un invariante
+  // roto —un veredicto sobre un equipo donde no queda nadie a quien pagarle—, y cierra la partida
+  // en vez de emitir una instrucción vacía que nadie podría auditar.
+  //
+  // ⚠ EL TECHO YA NO ES UNO, y eso es lo que abrió la mesa de cuatro. Era la guarda que mantenía
+  // inerte la falta de regla de reparto; ahora la regla está arriba, leída de v1, así que lo que
+  // queda es el piso. El techo es el tamaño del equipo: más ganadores que asientos en un equipo
+  // sería el estado y el snapshot contando cosas distintas, y eso `assertSameTable` ya lo
+  // rechazó antes de llegar acá.
+  if (winners.length === 0) {
     throw new InvariantViolationError(
-      `la liquidación 2P necesita exactamente un ganador, recibió ${winners.length}`,
+      `la liquidación necesita al menos un ganador que cobre, y el equipo ${winnerTeamId} no tiene ninguno`,
     );
   }
   return {

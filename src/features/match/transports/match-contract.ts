@@ -198,21 +198,20 @@ export class UnknownGameModeError extends Error {
 }
 
 /**
- * ⚠ EL 4P, Y NO ES FALTA DE MOTOR SINO DE REGLA DE PLATA. `settlementOf`
- * (`network/settlement.ts`) exige EXACTAMENTE UN ganador, así que el final de una mesa de cuatro
- * lanza `InvariantViolationError` en vez de repartir: no existe la regla escrita de cómo se parte
- * el premio entre compañeros, y repartirlo sin ella sería inventarla al liquidar.
+ * ⚠ ESTE MOTOR SIENTA MESAS DE DOS Y DE CUATRO, Y NADA MÁS. La de cuatro se abrió trayendo la
+ * regla de reparto de v1 —cada ganador cobra `prize` entero, el socio que se fue no cobra y su
+ * mitad se queda en la casa (`domino-room-state.ts:672-678`)— y el piso de `settlementOf` sigue
+ * siendo la última red: un equipo ganador sin nadie que cobre cierra la partida en vez de pagar.
  *
- * Ese throw cae DESPUÉS del veredicto, o sea que esa mesa no cobra premio (hubo desenlace) ni
- * reembolso (no se abortó): **plata trabada**. Rechazar el modo ANTES de génesis es lo que
- * mantiene la deuda inerte, y abrir el 4P de verdad es traer la regla del reparto — no borrar
- * esta guarda ni la de `settlementOf`, que sigue siendo la última red.
+ * Lo que este error rechaza ahora es una mesa de tres, de seis o de uno: cantidades que ni las
+ * reglas ni el reparto contemplan. `assignTeams` ya exige un número par, pero lanza DESPUÉS de
+ * génesis y con un mensaje de invariante — acá se rechaza antes, con el modo a la vista.
  */
 export class UnsupportedGameModeError extends Error {
   override readonly name = "UnsupportedGameModeError";
   constructor(mode: GameMode) {
     super(
-      `UNSUPPORTED_GAME_MODE: el modo ${mode.uuid} es de ${mode.playersQuantity} jugadores y este motor solo sienta mesas de 2`,
+      `UNSUPPORTED_GAME_MODE: el modo ${mode.uuid} es de ${mode.playersQuantity} jugadores y este motor solo sienta mesas de 2 o de 4`,
     );
   }
 }
@@ -255,9 +254,11 @@ export function configOf(
   betLevels: readonly BetLevel[] = [],
 ): DominoMatchConfig {
   // EL ORDEN DE LAS DOS GUARDAS IMPORTA: primero "no sabemos jugar este modo" y después "pediste
-  // mal la cantidad". Al revés, un pedido de cuatro contra un modo de cuatro saldría con el error
-  // de cantidad —que coincide— y nadie se enteraría de que el problema es el modo.
-  if (mode.playersQuantity !== 2) throw new UnsupportedGameModeError(mode);
+  // mal la cantidad". Al revés, un pedido de tres contra un modo de tres saldría con el error de
+  // cantidad —que coincide— y nadie se enteraría de que el problema es el modo.
+  if (mode.playersQuantity !== 2 && mode.playersQuantity !== 4) {
+    throw new UnsupportedGameModeError(mode);
+  }
   if (request.participants.length !== mode.playersQuantity) {
     throw new SeatCountMismatchError(request.participants.length, mode);
   }

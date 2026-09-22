@@ -10,6 +10,7 @@ import {
 import { ColyseusSDK } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { MatchState } from "../../core/state";
 import type { HistoryReader } from "../../network/history";
 import type { CreateMatchRequest, MatchParticipant } from "../match-contract";
 import type { DominoRoom } from "./domino-room";
@@ -204,10 +205,10 @@ describe("DominoRoom", () => {
     ).rejects.toThrow(/UNKNOWN_GAME_MODE/);
   });
 
-  // EL 4P SE RECHAZA ANTES DE GÉNESIS. No hay regla escrita de cómo se parte el premio entre
-  // compañeros, así que `settlementOf` lanza DESPUÉS del veredicto: sin premio y sin reembolso,
-  // plata trabada. La sala no llega a existir, que es lo que mantiene esa deuda inerte.
-  it("no crea la sala con un modo de cuatro jugadores", async () => {
+  // LA MESA DE CUATRO NACE, y hasta este incremento se rechazaba antes de génesis: `settlementOf`
+  // exigía exactamente un ganador, así que el final de una mesa de cuatro lanzaba DESPUÉS del
+  // veredicto —sin premio y sin reembolso, plata trabada—. La abrió la regla de reparto de v1.
+  it("crea la sala de cuatro y reparte los cuatro asientos", async () => {
     const testServer = requiredServer();
     const cuatro = await gameModes.create({
       name: "clasica-4p",
@@ -217,16 +218,29 @@ describe("DominoRoom", () => {
       prize: 250,
     });
 
-    await expect(
-      testServer.createRoom<DominoRoom>("domino", {
-        ...options("match-4p", [
-          ...defaultParticipants,
-          { userId: "c", displayName: "C", currency: "VES" },
-          { userId: "d", displayName: "D", currency: "VES" },
-        ]),
-        gameModeId: cuatro.uuid,
-      }),
-    ).rejects.toThrow(/UNSUPPORTED_GAME_MODE/);
+    const room = await testServer.createRoom<DominoRoom>("domino", {
+      ...options("match-4p", [
+        ...defaultParticipants,
+        { userId: "c", displayName: "C", currency: "VES" },
+        { userId: "d", displayName: "D", currency: "VES" },
+      ]),
+      gameModeId: cuatro.uuid,
+    });
+
+    const state = room.state as MatchState;
+    expect(state.players.map(({ playerId }) => playerId)).toEqual([
+      "seat-1",
+      "seat-2",
+      "seat-3",
+      "seat-4",
+    ]);
+    // Las parejas, que es lo que distingue esta mesa de dos partidas de a dos.
+    expect(state.players.map(({ teamId }) => teamId).filter((team) => team === "A")).toHaveLength(
+      2,
+    );
+    // ⚠ SIN POZO: cuatro manos de siete agotan las 28 fichas, así que la rama nula no se instancia
+    // y «no hay de dónde robar» deja de ser un estado y pasa a ser la forma del modo.
+    expect(state.currentRound?.boneyard).toBeUndefined();
   });
 
   // LA CANTIDAD LA DECIDE EL MODO. Cuatro participantes sobre un modo de dos serían cuatro

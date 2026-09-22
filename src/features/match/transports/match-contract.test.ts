@@ -185,21 +185,35 @@ describe("configOf", () => {
     expect(padded.seats[0]?.currency).toBe(" VES ");
   });
 
-  // ⚠ EL 4P SE RECHAZA ACÁ Y NO EN LA SALA, y la ubicación es la decisión. `configOf` es lo único
-  // que ve el request Y el modo, y es por donde pasa TODA mesa que nace: rechazar en la sala
-  // dejaría abierta cualquier segunda puerta de creación que aparezca. Es además donde ya vive la
-  // comparación de cantidad, y partir dos reglas sobre los mismos dos datos en dos archivos es la
-  // duplicación que este repo paga cada vez que la escribe.
-  //
-  // EL MOTIVO ES DINERO, no falta de motor: `settlementOf` exige EXACTAMENTE UN ganador, así que
-  // el final de una mesa de cuatro lanza DESPUÉS del veredicto — sin premio (hubo desenlace) y sin
-  // reembolso. Plata trabada. Rechazar antes de génesis es lo que mantiene esa deuda inerte, y
-  // abrir el 4P de verdad es traer la regla del reparto, no borrar esta línea.
-  it("rechaza un modo de cuatro con UNSUPPORTED_GAME_MODE", () => {
+  // LA MESA DE CUATRO NACE, y hasta este incremento no podía: se rechazaba acá porque
+  // `settlementOf` exigía exactamente un ganador y el final de una mesa de cuatro lanzaba DESPUÉS
+  // del veredicto —sin premio y sin reembolso, o sea plata trabada—. Lo que la abrió fue traer la
+  // regla de reparto de v1, no borrar la guarda.
+  it("sienta un modo de cuatro y le copia los bots", () => {
+    const config = configFrom(
+      { ...request, participants: [...participants, extra(1), extra(2)] },
+      modeOf({ playersQuantity: 4, enableBots: true }),
+    );
+
+    expect(config.seats.map(({ playerId }) => playerId)).toEqual([
+      "seat-1",
+      "seat-2",
+      "seat-3",
+      "seat-4",
+    ]);
+    expect(config.enableBots).toBe(true);
+  });
+
+  // ⚠ LO QUE SIGUE RECHAZÁNDOSE ES LA CANTIDAD QUE NI LAS REGLAS NI EL REPARTO CONTEMPLAN, y se
+  // rechaza ACÁ y no en la sala por la misma razón de siempre: `configOf` es lo único que ve el
+  // request Y el modo, y es por donde pasa TODA mesa que nace. `assignTeams` también exige un
+  // número par, pero lanza DESPUÉS de génesis y con un mensaje de invariante que no nombra el
+  // modo.
+  it.each([[3], [6], [1]])("rechaza un modo de %i con UNSUPPORTED_GAME_MODE", (quantity) => {
     expect(() =>
       configFrom(
         { ...request, participants: [...participants, extra(1), extra(2)] },
-        modeOf({ playersQuantity: 4 }),
+        modeOf({ playersQuantity: quantity as 2 | 4 }),
       ),
     ).toThrow(/UNSUPPORTED_GAME_MODE/);
   });
