@@ -201,6 +201,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
     const child = rootContainer.createChildContainer();
     child.register("Config", { useValue: config });
+    // LA CONFIG GLOBAL SE FOTOGRAFÍA ACÁ, y registrarla es lo que lo vuelve cierto para la partida
+    // entera: el cableado la resuelve de este container, así que sin esta línea el motor podía
+    // armarse con un valor distinto del que esta sala leyó arriba —entre las dos lecturas hay
+    // `await`—. Hoy el root la registra fija y da lo mismo; deja de dar lo mismo el día que sea
+    // editable en caliente, como ya lo es en truco (`13c8a57`).
+    child.register("GlobalDominoConfig", { useValue: global });
     if (roomOptions) child.register("RoomOptions", { useValue: roomOptions });
 
     // La vista es del asiento, no del socket: existe antes de que el dueño se conecte y
