@@ -1,22 +1,9 @@
-import type { Server } from "@colyseus/core";
-import { type LobbyDeps, LobbyRoom } from "./transports/colyseus";
-
 /**
  * The feature's public surface: the two transports' registers, plus the ports,
  * the config and today's implementations the composition root needs to wire it.
  * Nothing outside reaches the inside.
- *
- * Both registers TAKE what they need instead of resolving it from a container.
- * Not ceremony: the container builds the matcher, so a lobby resolving it from
- * there would make the container depend on the room and the room on the
- * container.
  */
-export function registerMatchmaking(gameServer: Server, deps: LobbyDeps): void {
-  gameServer.define("lobby", LobbyRoom, deps);
-}
-
-export type { LobbyDeps } from "./transports/colyseus";
-export { LobbyRoom } from "./transports/colyseus";
+export { type LobbyDeps, matchmakingRooms } from "./transports/colyseus";
 
 export { type MatchmakingHttpDeps, matchmakingHttp } from "./transports/http";
 

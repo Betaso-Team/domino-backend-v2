@@ -9,8 +9,8 @@ import {
   matchHttp,
   selectProcessIdToCreateRoom,
 } from "@/features/match";
-import { DominoRoom } from "@/features/match/transports/colyseus/domino-room";
-import { LobbyRoom, matchmakingHttp } from "@/features/matchmaking";
+import { matchRooms } from "@/features/match/transports/colyseus/register";
+import { matchmakingHttp, matchmakingRooms } from "@/features/matchmaking";
 import { settingsHttp } from "@/features/settings";
 import { type StrikeBook, tournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
@@ -35,14 +35,16 @@ import {
 import { env } from "./env";
 import type { Logger } from "./logger";
 
+// CADA FEATURE TRAE SU PEDAZO DEL MAPA DE SALAS (`transports/colyseus/register.ts`), como trae su
+// router HTTP.
 const rooms = {
-  lobby: defineRoom(LobbyRoom, {
+  ...matchmakingRooms({
     matchmaker,
     verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
     maintenance: maintenanceSignal,
     census,
   }),
-  domino: defineRoom(DominoRoom),
+  ...matchRooms(),
 };
 
 // EL COMPOSITION ROOT de la superficie Express. Acá —y solo acá— se resuelve del container
