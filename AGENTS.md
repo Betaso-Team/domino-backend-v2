@@ -1304,6 +1304,109 @@ la misma trampa que ya pagó `src/deploy-smoke.test.ts`.
 4. **Sigue sin haber orquestador que cobre.** `settlementOf` proyecta y nadie la llama — es lo que
    este incremento difirió a propósito.
 
+## Incremento completo — la revancha
+
+Sin plan escrito: salió de comparar el dominó con truco archivo por archivo y encontrar que la
+revancha era el único hueco que **v1 sí tiene** — o sea una regresión, no una feature de truco que
+el dominó no necesite. Baseline **1056 → 1070 tests / 109 archivos**, con `typecheck`, suite,
+`biome check` y `depcruise` (**358 módulos / 1415 dependencias**) en verde.
+
+Cuatro commits, uno por capa: `1e81564` las reglas, `8512dd1` el motor, `ac2729a` los verbos,
+`0a59b23` la red.
+
+**ES POSIBLE RECIÉN AHORA**, y no por casualidad: la revancha necesita CREAR una partida, y eso lo
+trajo el `MatchGateway` del incremento anterior. Su propio comentario lo anticipaba — «matchmaking
+dejó de ser su único cliente el día que la revancha también abrió partidas».
+
+### Se portó v1, no truco, y las diferencias importan
+
+| | truco | **lo que quedó (v1)** |
+|---|---|---|
+| verbos | `OFFER_REMATCH` + QUIERO/NO_QUIERO | **`REQUEST_REMATCH` / `RESPOND_REMATCH {accept}`** |
+| ventanas | una | **dos: 30 s para pedir, 5 s para contestar** (+ 6 s de traspaso) |
+| sin elegibilidad | no hay ventana | **ventana abierta con el botón apagado** |
+| el 2º que pide | ilegal | **cuenta como aceptación** |
+| anti-abuso | veto al terminar | **`MAX_REMATCHES_PER_CHAIN = 1` + `rematchCount`** |
+
+Las dos últimas son las que más cambian el comportamiento:
+
+- **La ventana se abre aunque no sean elegibles.** Truco argumenta «que nadie vea un botón que no
+  puede usar». Acá se abre con `eligible: false` y el front lo pinta apagado, porque «no te
+  alcanza» se arregla poniendo saldo y no mostrar nada se lee como que la revancha no existe. Es
+  además lo único que hace que `eligible` se gane el lugar en el árbol.
+- **El segundo que PIDE durante la negociación está aceptando.** Truco lo declara ilegal porque
+  «un verbo no puede significar dos cosas según cuándo llegue». El argumento es bueno y la
+  consecuencia es peor: con los dos apretando «Revancha» en el mismo segundo —que es lo que pasa
+  cuando los dos la quieren— uno recibe un error y la revancha muere. El doble sentido se paga a
+  propósito y se rutea en el CONDUCTOR, no en la regla: es una transición, no una legalidad.
+
+### La forma, en cuatro capas
+
+- **`MatchPhase` ganó TRES fases** —`REMATCH_WINDOW`, `REMATCH_NEGOTIATION`, `REMATCH_ACCEPTED`—
+  y el enum ya las esperaba: `rules/phases.ts` decía desde que `RESOLVED` y `FINISHED` se separaron
+  que iban «después del veredicto y antes del terminal». La tercera es de v1 y no de truco: el
+  front pinta una pantalla propia de «revancha aceptada». Ninguna es terminal.
+- **`RematchState` es una RAMA NULA y NO lleva su propia fase.** v1 tiene un `RematchPhase` de
+  cuatro valores porque su estado de partida no tiene dónde ponerlos; acá las tres vivas ya están
+  en `MatchPhase` y la cuarta —`closed`— es el nodo ausente. Un eje, un campo. Va AL FINAL del
+  schema, como `pastMoves`.
+- **`acceptedIds` es un arreglo y no un contador**, y no es por el 4P: con dos jugadores el front
+  ya necesita distinguir «ya acepté, espero» de «me están preguntando». Que deje el 4P resuelto es
+  la consecuencia.
+- **La compuerta tiene DOS preguntas.** «Esta mesa ofrece revancha» (el modo) y «estos dos pueden
+  jugarla» (saldo, antifraude, cadena) son hechos distintos: colapsarlos dejaría al torneo
+  mostrando un botón de revancha apagado, que miente sobre el motivo.
+- **La mesa que no está entera no abre ventana**, y lo encontró la suite: `lifecycle.e2e` se colgó
+  porque una partida ganada por ABANDONO abría treinta segundos de botón gris. Se vuelve a jugar LA
+  MESA, no lo que quedó de ella. Y a diferencia del saldo, ahí no hay nada que el jugador arregle.
+- **Las reglas no miran dinero**, y `eligible` ni siquiera está en `RematchView`: una regla que
+  quisiera consultarlo no compila.
+
+### ⚠ Cuatro defectos, y quién pudo encontrar cada uno
+
+1. **`canRequestRematch` copiaba `if (match.rematch)` de truco.** Allá el nodo nace cuando alguien
+   ofrece; acá nace al ABRIR la ventana, porque es quien lleva `eligible`. Resultado: rechazaba
+   TODA solicitud. Se pregunta por el `requesterId`. **Lo encontró el E2E**; el fixture de reglas
+   mentía (dejaba el nodo en `undefined` durante la ventana) y el del motor llama al conductor sin
+   pasar por el juez.
+2. **`SchemaMatchView` no exponía `rematch`, y COMPILÓ**: omitir un campo OPCIONAL sigue
+   satisfaciendo la interfaz. Toda regla leía `undefined`. Dejó un guardarraíl en
+   `rules/tests/view.test.ts` que compara las CLAVES del árbol contra las de la vista — y el
+   fixture INSTANCIA las ramas nulas, porque sin eso el test es decorativo (`toJSON()` omite la
+   clave de un `.optional()` ausente; medido).
+3. **El E2E corrió en verde con cinco errores de compilación**: `Room.state` del SDK está tipado
+   `object`. El gate sigue siendo `typecheck`.
+4. **Un test propio que había que borrar**: «no espera al que se retiró» en mesa de cuatro
+   fabricaba un estado que la máquina ya no alcanza —después del veredicto nadie se retira— desde
+   que existe la regla de la mesa entera.
+
+### ⚠ Lo que el E2E destapó y NO es de la revancha
+
+**La sala tiene DOS caminos de creación con DOS convenciones de identidad**, y los trajo el port
+de matchmaking:
+
+- `configOf` (request del orquestador) reparte asientos OPACOS: `seat-1`, `seat-2`.
+- `configFromRoomOptions` (el emparejador) usa **el id de cuenta como `playerId`**.
+
+Y **sólo el segundo trae la economía de la mesa**, así que una sala creada por request no engancha
+ni el sink de la plataforma ni el de la revancha. El arnés gana `seatPairAsMatchmaking`, que es el
+único camino por el que la revancha se puede medir de punta a punta. **Es deuda abierta**: la
+doctrina de la identidad opaca («`playerId` es OPACO y posicional») vale para un camino y no para
+el otro.
+
+### Deudas abiertas de ESTE incremento — NO CUMPLIDAS
+
+1. **El veto se consulta pero no se escribe.** Anotar el veto cuando una revancha TERMINA es del
+   cierre de esa mesa y no se hace. Sin esa mitad, el tope de la cadena es lo único que impide la
+   repetición — y alcanza, porque el par vuelve al emparejador, que es quien los separa.
+2. **Los dos caminos de creación con dos identidades** (arriba). Decidir cuál gana antes de que el
+   front dependa de los dos.
+3. **El smoke real no corrió.** Pide Docker. La revancha toca el ciclo de vida de la sala, que es
+   justo lo que el smoke certifica.
+4. **La revancha no re-chequea el saldo al abrir**, a diferencia de truco y de v1. Es deliberado y
+   está argumentado en `network/rematch.ts` — la admisión de la mesa nueva rechaza sólo al que no
+   puede — pero conviene medirlo el día que haya un backend de verdad contra el que probarlo.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
