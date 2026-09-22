@@ -22,7 +22,10 @@ describe("endpoint GET /maintenance (integración)", () => {
   const close = async (message: string) => {
     const res = await fetch(`http://127.0.0.1:${port}/internal/lobby/maintenance`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Internal-Key": env.internalApiKey ?? "" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-api-key": env.adminPanelApiKey ?? "",
+      },
       body: JSON.stringify({ isUnderMaintenance: true, message }),
     });
     expect(res.status).toBe(200);
@@ -39,7 +42,10 @@ describe("endpoint GET /maintenance (integración)", () => {
   afterAll(async () => {
     await fetch(`http://127.0.0.1:${port}/internal/lobby/maintenance`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Internal-Key": env.internalApiKey ?? "" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-api-key": env.adminPanelApiKey ?? "",
+      },
       body: JSON.stringify({ isUnderMaintenance: false }),
     });
     await maintenanceSignal.check();

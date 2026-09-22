@@ -25,7 +25,10 @@ describe("Mantenimiento end-to-end: el lobby avisa sin que le pregunten", () => 
   const set = async (maintenance: Maintenance) => {
     const res = await fetch(`http://127.0.0.1:${PORT}/internal/lobby/maintenance`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Internal-Key": env.internalApiKey ?? "" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-api-key": env.adminPanelApiKey ?? "",
+      },
       body: JSON.stringify(
         maintenance.isUnderMaintenance
           ? { isUnderMaintenance: true, message: maintenance.message }
@@ -105,7 +108,7 @@ describe("Mantenimiento end-to-end: el lobby avisa sin que le pregunten", () => 
   // búsqueda venza: sale con la razón, en la misma pasada que detectó el cambio.
   //
   // LA MESA ES LA GRATIS Y NO LA PAGA, y es la diferencia con truco que este archivo no puede
-  // esquivar: sin `BACKEND_URL` el `canAfford` del container contesta `false` siempre, así que una
+  // esquivar: sin `BETASO_BACKEND_URL` el `canAfford` del container contesta `false` siempre, así que una
   // mesa con inscripción saldría con `INSUFFICIENT_FUNDS` antes de llegar a la cola — y el test
   // mediría la billetera creyendo que mide el vaciado.
   it("al que ya estaba esperando lo sacan de la cola con su razón", async () => {

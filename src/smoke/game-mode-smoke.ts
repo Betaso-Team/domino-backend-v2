@@ -23,7 +23,7 @@ import { MongoClient } from "mongodb";
 // no sobreviviría a `compose run --rm` y además mentiría si una fase quedó a medias.
 
 const HTTP = "http://nginx:8080";
-const KEY = env.internalApiKey ?? "";
+const KEY = env.adminPanelApiKey ?? "";
 const EXCHANGE = "betaso";
 // LA COLA ES DURABLE Y CON NOMBRE, y se declara ANTES de la primera mutación. Un topic exchange
 // DESCARTA lo que no matchea ninguna binding: sin la cola puesta primero, el `game_mode.created`
@@ -49,7 +49,7 @@ async function pedir(
     method: método,
     headers: {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...(key === undefined ? {} : { "X-Internal-Key": key }),
+      ...(key === undefined ? {} : { "x-internal-api-key": key }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -396,7 +396,7 @@ const FASES = { normal, enqueue, recover } as const;
 
 async function run(): Promise<void> {
   assert.equal(env.runEngineSmoke, true, "game-mode-smoke exige RUN_ENGINE_SMOKE=1");
-  assert.ok(KEY, "el cliente smoke necesita INTERNAL_API_KEY para las mutaciones");
+  assert.ok(KEY, "el cliente smoke necesita BETASO_ADMIN_PANEL_API_KEY para las mutaciones");
   const fase = process.argv[2] as keyof typeof FASES | undefined;
   assert.ok(fase && fase in FASES, `fase desconocida: ${fase} — usá normal | enqueue | recover`);
   await FASES[fase]();

@@ -30,8 +30,9 @@ services:
       PORT: 2567
       PM2_INSTANCES: 2
       SERVER_ADDRESS: nginx:8080
-      JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
-      INTERNAL_API_KEY: smoke-internal-key-with-more-than-16-chars
+      BETASO_BACKEND_JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
+      BETASO_BACKEND_API_KEY: smoke-backend-key-with-more-than-16-chars
+      BETASO_ADMIN_PANEL_API_KEY: smoke-admin-panel-key-with-more-than-16-chars
       REDIS_URL: redis://redis:6379/1
       MONGO_URI: mongodb://mongo:27017/domino-smoke
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
@@ -41,9 +42,9 @@ services:
       # producción — y esa ruta no pide credencial, así que nada del otro lado lo pararía.
       #
       # `smoke/nginx.conf` la atiende con un 204. Es obligatoria porque `NODE_ENV=production`
-      # exige las cuatro (ver `src/env.ts`): sin esta línea el servidor muere al arrancar con
-      # «en producción faltan: BACKEND_URL» y el smoke entero se cae antes de la primera fase.
-      BACKEND_URL: http://nginx:8080/
+      # exige las cinco (ver `src/env.ts`): sin esta línea el servidor muere al arrancar con
+      # «en producción faltan: BETASO_BACKEND_URL» y el smoke entero se cae antes de la primera fase.
+      BETASO_BACKEND_URL: http://nginx:8080/
       TURN_TIMEOUT_MS: 5000
       EXTRA_TIME_RESERVE_MS: 1000
       DEALING_TIMEOUT_MS: 5000
@@ -80,8 +81,8 @@ services:
       target: smoke-client
     environment:
       NODE_ENV: test
-      JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
-      INTERNAL_API_KEY: smoke-internal-key-with-more-than-16-chars
+      BETASO_BACKEND_JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
+      BETASO_ADMIN_PANEL_API_KEY: smoke-admin-panel-key-with-more-than-16-chars
       MONGO_URI: mongodb://mongo:27017/domino-smoke
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       RUN_ENGINE_SMOKE: 1

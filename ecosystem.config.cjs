@@ -13,7 +13,7 @@
 //
 // LAS VARIABLES DE LA APLICACIÓN NO ESTÁN ACÁ: las lee el proceso del `.env` de al lado, con
 // `process.loadEnvFile()` en `src/env.ts` —EL CONSUMIDOR LEE EL SUYO—, y es el mismo archivo que
-// usa el compose. Un segundo lugar donde escribir `JWT_SECRET` sería un segundo lugar donde
+// usa el compose. Un segundo lugar donde escribir `BETASO_BACKEND_JWT_SECRET` sería un segundo lugar donde
 // tenerla desactualizada, y la que manda es siempre la última escrita.
 //
 // Y ES AL REVÉS DE COMO LO HACE v1, que llama a dotenv DESDE ESTE ARCHIVO y deja que el proceso

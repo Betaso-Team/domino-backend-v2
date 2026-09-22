@@ -1,4 +1,4 @@
-import { type InternalApiKey, internalAuthHeaders } from "@/features/auth";
+import { type ApiKey, betasoBackendAuthHeaders } from "@/features/auth";
 import type { HttpClient } from "@/shared/http";
 import type { BetLevel } from "../../core/config";
 import type { BetLevelBook } from "../bet-levels";
@@ -25,13 +25,13 @@ interface RawLevel {
 export class HttpBetLevelBook implements BetLevelBook {
   constructor(
     private readonly http: HttpClient,
-    private readonly apiKey: InternalApiKey,
+    private readonly apiKey: ApiKey,
   ) {}
 
   async levelsOf(gameModeId: string): Promise<readonly BetLevel[]> {
     const response = await this.http.get<{ levels?: unknown }>(
       `${PATH}?game=domino&gameModeId=${encodeURIComponent(gameModeId)}`,
-      internalAuthHeaders(this.apiKey),
+      betasoBackendAuthHeaders(this.apiKey),
     );
     const raw = Array.isArray(response?.levels) ? (response.levels as RawLevel[]) : [];
     // SE FILTRA LO QUE NO ES UN NIVEL en vez de rechazar la lista entera, y es lo que hace v1:

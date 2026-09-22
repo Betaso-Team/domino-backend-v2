@@ -67,8 +67,8 @@ services:
       # Configurable por la MISMA razón que el de Mongo, y acá el choque no es probable sino
       # seguro: truco escucha en el 2567 y el default del dominó es el 2567.
       - "${DOMINO_PORT:-2567}:2567"
-    # `JWT_SECRET` e `INTERNAL_API_KEY` salen del `.env` de al lado (ver `.env.example`). Sin la
-    # primera el proceso NO ARRANCA —a propósito—; sin la segunda arranca, pero
+    # `BETASO_BACKEND_JWT_SECRET` y `BETASO_ADMIN_PANEL_API_KEY` salen del `.env` de al lado (ver
+    # `.env.example`). Sin la primera el proceso NO ARRANCA —a propósito—; sin la segunda arranca, pero
     # `/internal/matches/:matchId/history` no se registra y responde 404 (fail closed en
     # `register-http.ts`). Un compose que no pasara el `.env` sería un 404 sin explicación.
     env_file:

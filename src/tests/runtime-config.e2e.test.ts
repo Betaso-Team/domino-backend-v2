@@ -12,7 +12,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // El DTO público del dominó no publica plazos, así que lo que se mira es el que el cliente de verdad
 // ve: el `activeDeadline` de la ventana de reparto, que se estampa cuando los dos se sientan.
 const PORT = 2610;
-const admin = { "Content-Type": "application/json", "X-Internal-Key": env.internalApiKey ?? "" };
+const admin = {
+  "Content-Type": "application/json",
+  "x-internal-api-key": env.adminPanelApiKey ?? "",
+};
 
 describe("La configuración editada en caliente (integración)", () => {
   let server: ColyseusTestServer;

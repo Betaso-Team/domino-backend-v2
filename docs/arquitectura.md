@@ -177,7 +177,7 @@ son fases distintas: cada una espera una clase diferente de input o timeout.
 | Ranking | RabbitMQ | La partida termina igual; no publica |
 | Liga | Backend HTTP | La partida termina igual; no reporta liga |
 
-La presencia de `MONGO_URI`, `REDIS_URL`, `RABBITMQ_URL` y `BACKEND_URL` elige cada capacidad. No
+La presencia de `MONGO_URI`, `REDIS_URL`, `RABBITMQ_URL` y `BETASO_BACKEND_URL` elige cada capacidad. No
 hay variables que nombren drivers.
 
 ## Dinero: qué hace y qué no hace

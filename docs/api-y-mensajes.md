@@ -53,7 +53,7 @@ cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 
 ## HTTP interno
 
-Estas rutas requieren `X-Internal-Key`. Si `INTERNAL_API_KEY` no existe, no se registran y responden
+Estas rutas requieren el header `x-internal-api-key` con la llave del panel de administración. Si `BETASO_ADMIN_PANEL_API_KEY` no existe, no se registran y responden
 404: fallan cerradas.
 
 | Método y ruta | Uso |

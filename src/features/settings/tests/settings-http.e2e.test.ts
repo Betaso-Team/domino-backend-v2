@@ -11,7 +11,10 @@ import { SETTINGS_ROUTE } from "../transports/http/register-http";
 // manera, ni una ruta registrada después del comodín. Portado de truco (`3cab0f8`).
 const PORT = 2611;
 const url = (path = "") => `http://127.0.0.1:${PORT}${SETTINGS_ROUTE}${path}`;
-const admin = { "Content-Type": "application/json", "X-Internal-Key": env.internalApiKey ?? "" };
+const admin = {
+  "Content-Type": "application/json",
+  "x-internal-api-key": env.adminPanelApiKey ?? "",
+};
 
 interface Section {
   readonly name: string;
@@ -47,6 +50,16 @@ describe("Los endpoints de configuración (integración)", () => {
 
   it("sin llave no se entra, ni siquiera a mirar", async () => {
     expect((await fetch(url())).status).toBe(401);
+  });
+
+  // LA LLAVE DE SALIDA NO ABRE LA ENTRADA. Son dos secretos a propósito (truco `ebf22dd`): el que
+  // tiene la que presentamos al backend, para preguntar un saldo, no puede mover los plazos del juego.
+  it("la llave del backend no abre el panel", async () => {
+    const res = await fetch(url(), {
+      headers: { "x-internal-api-key": env.backendApiKey ?? "" },
+    });
+
+    expect(res.status).toBe(401);
   });
 
   it("lista las secciones con lo que está en vigor y lo que se puede tocar", async () => {

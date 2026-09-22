@@ -143,7 +143,7 @@ const registerHttp = (app: Application) => {
   registerHealth(app, hardDependencies);
   registerLobbyHttp(app, {
     settings: rootContainer.resolve(LobbySettings),
-    internalApiKey: env.internalApiKey,
+    adminPanelApiKey: env.adminPanelApiKey,
   });
   registerMatchmakingHttp(app, maintenanceSignal, census);
   registerTournamentHttp(
@@ -156,7 +156,7 @@ const registerHttp = (app: Application) => {
     clock: rootContainer.resolve<Clock>("Clock"),
     logger,
     history: rootContainer.resolve<HistoryReader>("HistoryReader"),
-    internalApiKey: env.internalApiKey,
+    adminPanelApiKey: env.adminPanelApiKey,
     verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
     playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
   });
@@ -164,13 +164,13 @@ const registerHttp = (app: Application) => {
   // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta
   // puesta después queda con el HTML por defecto de Express, con el stack adentro.
   //
-  // Los GET son públicos y las cinco mutaciones viven detrás de `internalApiKey`; sin llave no se
+  // Los GET son públicos y las cinco mutaciones viven detrás de `adminPanelApiKey`; sin llave no se
   // registran (fail closed, §`features/game-mode/transports/http/register-http.ts`). Quien autentica
   // al administrador es el orquestador, no el dominó.
   registerGameModeHttp(app, {
     service: rootContainer.resolve(GameModeService),
     logger,
-    internalApiKey: env.internalApiKey,
+    adminPanelApiKey: env.adminPanelApiKey,
   });
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
   // se registra. Antes del manejador de errores, como todas.
@@ -178,7 +178,7 @@ const registerHttp = (app: Application) => {
     sections: settingsSections,
     signal: settingsSignal,
     writer: settingsWriter,
-    internalApiKey: env.internalApiKey,
+    adminPanelApiKey: env.adminPanelApiKey,
     log: logger,
   });
   app.use(httpErrorHandler(logger));

@@ -245,7 +245,7 @@ export function requestOf(input: unknown): CreateMatchRequest {
  * parámetro y no se consultan acá por lo mismo que el modo: esta función es SÍNCRONA y pura, y
  * el catálogo de niveles vive en el backend principal. Quien los trae es la sala, que es async.
  *
- * El default vacío es el reposo: una instancia sin `BACKEND_URL` no ofrece aumentar, y eso es
+ * El default vacío es el reposo: una instancia sin `BETASO_BACKEND_URL` no ofrece aumentar, y eso es
  * correcto en vez de estar roto.
  */
 export function configOf(

@@ -145,9 +145,9 @@ interface HistoryLine {
 }
 
 async function historyOf(matchId: string): Promise<readonly HistoryLine[]> {
-  assert.ok(env.internalApiKey, "falta INTERNAL_API_KEY en el cliente smoke");
+  assert.ok(env.adminPanelApiKey, "falta BETASO_ADMIN_PANEL_API_KEY en el cliente smoke");
   const response = await fetch(`${HTTP_URL}/internal/matches/${matchId}/history`, {
-    headers: { "X-Internal-Key": env.internalApiKey },
+    headers: { "x-internal-api-key": env.adminPanelApiKey },
   });
   if (response.status !== 200) return [];
   const body = (await response.json()) as { entries?: readonly HistoryLine[] };
@@ -255,7 +255,10 @@ async function play(roomA: SmokeRoom, roomB: SmokeRoom, config: DominoMatchConfi
 async function createGameMode(): Promise<GameMode> {
   const response = await fetch(`${HTTP_URL}/game-modes`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Internal-Key": env.internalApiKey ?? "" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-internal-api-key": env.adminPanelApiKey ?? "",
+    },
     body: JSON.stringify(MODE_INPUT),
   });
   assert.equal(

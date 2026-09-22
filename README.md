@@ -24,12 +24,12 @@ se pudra aparte del código.
 
 ```bash
 cp .env.example .env
-# editá el .env: JWT_SECRET e INTERNAL_API_KEY, mínimo 16 caracteres cada una
+# editá el .env: BETASO_BACKEND_JWT_SECRET y BETASO_ADMIN_PANEL_API_KEY, mínimo 16 caracteres cada una
 docker compose up --build
 ```
 
-`JWT_SECRET` es **obligatoria**: sin ella el proceso no arranca, a propósito.
-`INTERNAL_API_KEY` no lo es, pero sin ella las rutas internas de historial y mantenimiento
+`BETASO_BACKEND_JWT_SECRET` es **obligatoria**: sin ella el proceso no arranca, a propósito.
+`BETASO_ADMIN_PANEL_API_KEY` no lo es, pero sin ella las rutas internas de historial y mantenimiento
 **no se registran** y responden 404 — es fail closed, y es el 404 que más se investiga al pedo.
 
 `MONGO_URI` y `REDIS_URL` **no las pongas en el `.env`**: las fija el compose apuntando a los
@@ -50,7 +50,7 @@ compartido y se agrupan por `gameModeId` en `gameModesCount[].gameModeName`.
 El operador cambia mantenimiento sin desplegar con:
 
 ```bash
-curl -X POST -H "X-Internal-Key: <la del .env>" -H "Content-Type: application/json" \
+curl -X POST -H "x-internal-api-key: <BETASO_ADMIN_PANEL_API_KEY del .env>" -H "Content-Type: application/json" \
   -d '{"isUnderMaintenance":true,"message":"Actualizando mesas"}' \
   http://localhost:2567/internal/lobby/maintenance
 ```
@@ -84,7 +84,7 @@ Para mirar lo que quedó grabado:
 
 ```bash
 docker compose exec mongo mongosh domino --eval 'db.match_history.find().limit(1)'
-curl -H "X-Internal-Key: <la del .env>" http://localhost:2567/internal/matches/<matchId>/history
+curl -H "x-internal-api-key: <BETASO_ADMIN_PANEL_API_KEY del .env>" http://localhost:2567/internal/matches/<matchId>/history
 ```
 
 ## Levantar N instancias con pm2

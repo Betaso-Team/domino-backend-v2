@@ -750,7 +750,7 @@ GET    /game-modes/reactive/:uuid
 POST   /game-modes/sync
 ```
 
-Las mutaciones llevan `X-Internal-Key`. La llave nunca se entrega al navegador.
+Las mutaciones llevan `x-internal-api-key` con la llave del panel. La llave nunca se entrega al navegador.
 
 ## Persistencia mínima del orquestador
 

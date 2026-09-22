@@ -1,13 +1,13 @@
 import type { Request, RequestHandler, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
-import { INTERNAL_KEY_HEADER, requireInternalKey } from "./internal-key";
+import { API_KEY_HEADER, requireAdminPanelKey } from "./api-key";
 
-// LA PUERTA DE LAS RUTAS INTERNAS: la que pide la llave que el orquestador presenta para
-// administrar el catálogo, el mantenimiento del lobby y el historial de soporte.
+// LA PUERTA DE LAS RUTAS INTERNAS: la que pide la llave que el PANEL DE ADMINISTRACIÓN presenta para
+// administrar el catálogo, el mantenimiento, el historial de soporte y la configuración en caliente.
 //
-// ⚠ ES LA MITAD ENTRANTE, y no se confunde con `features/auth/internal-key.ts`, que es la SALIENTE
-// —la llave que NOSOTROS presentamos al backend principal, con otro nombre de header
-// (`x-internal-api-key`) porque es otro contrato con otra punta—.
+// ⚠ ES LA MITAD ENTRANTE. Viaja en el MISMO header que la saliente (`features/auth/api-key.ts`, la
+// llave que NOSOTROS presentamos al backend de Betaso), pero es OTRO secreto: el header es un
+// contrato de Betaso y el secreto es de cada dirección.
 //
 // Acá no hay identidad que extraer: la llave no dice QUIÉN habla, dice que el que habla es un
 // servidor autorizado. Por eso no cuelga nada de `req` y las rutas que protege no pueden auditar a
@@ -32,7 +32,7 @@ function fakeRes() {
 // case-insensitive del nombre lo resuelve express y no este archivo.
 const reqWith = (key?: string) =>
   ({
-    get: (name: string) => (name === INTERNAL_KEY_HEADER ? key : undefined),
+    get: (name: string) => (name === API_KEY_HEADER ? key : undefined),
   }) as unknown as Request;
 
 const knock = (guard: RequestHandler, key?: string) => {
@@ -42,7 +42,7 @@ const knock = (guard: RequestHandler, key?: string) => {
   return { sent, next };
 };
 
-const guard = requireInternalKey("la-llave");
+const guard = requireAdminPanelKey("la-llave");
 
 describe("la puerta de la llave interna", () => {
   it("con la llave correcta deja pasar sin contestar nada", () => {
@@ -89,7 +89,7 @@ describe("la puerta de la llave interna", () => {
   // Y con la llave configurada en blanco no pasa NADIE, ni siquiera el que manda el header vacío:
   // una instalación mal configurada no puede terminar siendo una puerta abierta.
   it("con la llave esperada vacía no deja pasar a nadie", () => {
-    const abierta = requireInternalKey("");
+    const abierta = requireAdminPanelKey("");
 
     expect(knock(abierta, "").sent.status).toBe(401);
     expect(knock(abierta, undefined).sent.status).toBe(401);

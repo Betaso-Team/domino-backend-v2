@@ -181,7 +181,7 @@ rootContainer.register("MatchCensus", { useValue: matchRegistry });
 // un interruptor que NOMBRA la implementación es deuda, no configuración —deja escribir
 // "mongo" sin URI y "memory" con una base andando al lado—, y truco ya borró el suyo por
 // esa razón. Acá el dato y la decisión son lo mismo, así que la combinación incoherente no
-// se puede escribir. Es el mismo fail-closed que la API interna usa con `INTERNAL_API_KEY`:
+// se puede escribir. Es el mismo fail-closed que la API interna usa con `BETASO_ADMIN_PANEL_API_KEY`:
 // la variable ausente es una decisión, no un error.
 //
 // Sin `MONGO_URI` queda `MemoryHistory`, que NO es un doble: es la implementación de
@@ -225,7 +225,7 @@ export const amqp = env.rabbitmqUrl ? new AmqpPublisher(env.rabbitmqUrl, logger)
 // preguntar `isRegistered` dos veces por algo que se decide una.
 //
 // CADA UNO DEPENDE DE LO SUYO Y POR SEPARADO: el ranking del broker, la liga del backend
-// principal. Una instancia con broker y sin `BACKEND_URL` reporta puntos y no liga, que es un
+// principal. Una instancia con broker y sin `BETASO_BACKEND_URL` reporta puntos y no liga, que es un
 // estado legítimo y no un error — el mismo criterio que el outbox que acumula sin publicador.
 //
 // SON DEL PROCESO y no de la sala: el publicador ya es único y el destino de liga no tiene estado.
@@ -306,10 +306,10 @@ export const ledger: Ledger = mongo
   : new MemoryLedger(clock.now);
 
 const httpWallet =
-  http && env.internalApiKey
+  http && env.backendApiKey
     ? new HttpWallet({
         http,
-        apiKey: { value: env.internalApiKey },
+        apiKey: { value: env.backendApiKey },
         accounts,
         matchAccounts,
         rates,
@@ -340,8 +340,8 @@ const wallet: WalletPort =
 export const economyOutbox = new Outbox(wallet, ledger, logger);
 
 const tournamentClient: TournamentClient | undefined =
-  http && env.internalApiKey
-    ? new HttpTournamentClient(http, { value: env.internalApiKey }, DEFAULT_TOURNAMENT_CONFIG)
+  http && env.backendApiKey
+    ? new HttpTournamentClient(http, { value: env.backendApiKey }, DEFAULT_TOURNAMENT_CONFIG)
     : undefined;
 const unavailableTournament: TournamentClient = {
   infoOf: async (id) => {
@@ -436,9 +436,9 @@ export const casualVeto = new VetoBook(store, casualVetoKey, { ttlMs: 30 * 60_00
 const tournamentVeto = new VetoBook(store, tournamentVetoKey, { ttlMs: 6 * 60 * 60_000 });
 const cooldown = new CooldownBook(store, DEFAULT_COOLDOWN, clock.now);
 const antifraud: AntifraudFlag =
-  http && env.internalApiKey
+  http && env.backendApiKey
     ? new CachedAntifraudFlag(
-        new HttpAntifraudFlag(http, { value: env.internalApiKey }),
+        new HttpAntifraudFlag(http, { value: env.backendApiKey }),
         5_000,
         clock.now,
         logger,
@@ -518,9 +518,9 @@ rootContainer.register(BetCharger, {
 });
 rootContainer.register<BetLevelBook>("BetLevelBook", {
   useValue:
-    http && env.internalApiKey
+    http && env.backendApiKey
       ? new CachedBetLevelBook(
-          new HttpBetLevelBook(http, { value: env.internalApiKey }),
+          new HttpBetLevelBook(http, { value: env.backendApiKey }),
           30_000,
           clock.now,
           logger,

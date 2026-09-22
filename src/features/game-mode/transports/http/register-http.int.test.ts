@@ -61,7 +61,7 @@ afterEach(() => {
 
 function harness(
   over: {
-    internalApiKey?: string | undefined;
+    adminPanelApiKey?: string | undefined;
     lease?: Lease;
     repository?: GameModeRepository;
   } = {},
@@ -88,7 +88,7 @@ function harness(
   registerGameModeHttp(app, {
     service,
     logger,
-    internalApiKey: "internalApiKey" in over ? over.internalApiKey : KEY,
+    adminPanelApiKey: "adminPanelApiKey" in over ? over.adminPanelApiKey : KEY,
   });
   app.use(httpErrorHandler(logger));
 
@@ -107,7 +107,7 @@ function harness(
     const response = await fetch(`http://127.0.0.1:${port}${path}`, {
       method,
       headers: {
-        ...(key === undefined ? {} : { "X-Internal-Key": key }),
+        ...(key === undefined ? {} : { "x-internal-api-key": key }),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -171,7 +171,7 @@ async function drain(outbox: MemoryGameModeOutbox): Promise<string[]> {
 // EL REGISTRO, MEDIDO SIN SERVIDOR. Lo que se mide acá es una decisión de wiring —qué rutas llegan a
 // existir y EN QUÉ ORDEN—, y eso un servidor no lo muestra: dos órdenes distintos pueden responder
 // igual hoy y dejar de hacerlo con la ruta que se agregue mañana.
-function routesRegisteredWith(internalApiKey: string | undefined): string[] {
+function routesRegisteredWith(adminPanelApiKey: string | undefined): string[] {
   const seen: string[] = [];
   const record = (method: string) => (path: string) => {
     seen.push(`${method} ${path}`);
@@ -195,7 +195,7 @@ function routesRegisteredWith(internalApiKey: string | undefined): string[] {
       vi.fn(),
     ),
     logger: fakeLogger(),
-    internalApiKey,
+    adminPanelApiKey,
   });
   return seen;
 }
@@ -246,7 +246,7 @@ describe("registerGameModeHttp: las siete rutas", () => {
         vi.fn(),
       ),
       logger,
-      internalApiKey: undefined,
+      adminPanelApiKey: undefined,
     });
 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("/game-modes"));
@@ -259,7 +259,7 @@ describe("registerGameModeHttp: las siete rutas", () => {
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
   ])("sin llave interna %s %s no existe", async (method, path) => {
-    const app = harness({ internalApiKey: undefined });
+    const app = harness({ adminPanelApiKey: undefined });
 
     const response =
       method === "GET"

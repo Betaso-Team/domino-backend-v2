@@ -1,6 +1,6 @@
 import { type TokenVerifier, authenticated, requireBearer } from "@/features/auth";
 import type { Logger } from "@/logger";
-import { requireInternalKey } from "@/shared/http/internal-key";
+import { requireAdminPanelKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import type { Application as Express } from "express";
 import { z } from "zod";
@@ -70,7 +70,7 @@ const PAGE_QUERY = z.object({
 // history, key)` deja tres parámetros de tipos estructuralmente compatibles seguidos
 // —`Clock`, `Logger` y `HistoryReader` son interfaces de un puñado de métodos—, así que
 // dos argumentos cambiados de orden pueden compilar. Nombrados, un cruce es un error en la
-// propiedad. De paso el `internalApiKey` sigue leyéndose por su nombre en el call site,
+// propiedad. De paso el `adminPanelApiKey` sigue leyéndose por su nombre en el call site,
 // que es donde importa que se vea la decisión de fail-closed.
 export interface MatchHttpDeps {
   readonly registry: MatchRegistry;
@@ -78,7 +78,7 @@ export interface MatchHttpDeps {
   readonly logger: Logger;
   readonly history: HistoryReader;
   /** `undefined` ⇒ la ruta interna NO se registra. Ver registerInternalHistoryHttp. */
-  readonly internalApiKey: string | undefined;
+  readonly adminPanelApiKey: string | undefined;
   readonly verifier?: TokenVerifier;
   readonly playerLog?: PlayerLog;
 }
@@ -157,17 +157,21 @@ export function registerMatchHttp(app: Express, deps: MatchHttpDeps): void {
 
 export function registerInternalHistoryHttp(
   app: Express,
-  { logger, history, internalApiKey }: Pick<MatchHttpDeps, "logger" | "history" | "internalApiKey">,
+  {
+    logger,
+    history,
+    adminPanelApiKey,
+  }: Pick<MatchHttpDeps, "logger" | "history" | "adminPanelApiKey">,
 ): void {
   // FAIL CLOSED: sin llave configurada la ruta interna NO EXISTE. La alternativa —
   // registrarla igual y dejar el guard comparando contra vacío— es peor que no tenerla,
   // porque el operador la ve responder y cree que está protegida.
-  if (!internalApiKey) {
+  if (!adminPanelApiKey) {
     // La RUTA va en el mensaje, no solo la causa y la variable. El que llega a este log
     // llega desde un 404 inexplicable, y busca por path: sin el path acá, el aviso que
     // explica el 404 es justamente el que no encuentra.
     logger.warn(
-      `API interna deshabilitada: falta INTERNAL_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
+      `API interna deshabilitada: falta BETASO_ADMIN_PANEL_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
     );
     return;
   }
@@ -192,7 +196,7 @@ export function registerInternalHistoryHttp(
   // verde de vitest, que borra los tipos sin chequearlos.
   app.get(
     HISTORY_ROUTE,
-    requireInternalKey(internalApiKey),
+    requireAdminPanelKey(adminPanelApiKey),
     validated({ params: HISTORY_PARAMS }, async ({ params }, response) => {
       // Contra `HistoryReader` y no contra la implementación: el cast a `MemoryHistory`
       // que estaba acá compilaba una promesa que el token no hacía.

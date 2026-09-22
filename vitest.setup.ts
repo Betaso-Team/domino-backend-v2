@@ -31,14 +31,17 @@ import dotenv from "dotenv";
 // `@colyseus/tools` no tiene `node_modules` propio.
 dotenv.config = () => ({ parsed: {} });
 
-// src/env.ts valida el entorno al importarse y lanza si falta JWT_SECRET (ver su cabecera).
+// src/env.ts valida el entorno al importarse y lanza si falta BETASO_BACKEND_JWT_SECRET (ver su cabecera).
 // Estos defaults evitan que cualquier test que importe env.ts — directa o transitivamente —
 // explote solo por correr sin variables configuradas.
 process.env.NODE_ENV ??= "test";
-process.env.JWT_SECRET ??= "test-secret-do-not-use-in-production";
+process.env.BETASO_BACKEND_JWT_SECRET ??= "test-secret-do-not-use-in-production";
 // Sin esto la API interna no se registra (fail closed) y sus tests e2e no tendrían
 // ruta contra la cual medir. El caso "sin llave" se prueba aparte, sin servidor.
-process.env.INTERNAL_API_KEY ??= "test-internal-key-do-not-use-in-production";
+process.env.BETASO_ADMIN_PANEL_API_KEY ??= "test-admin-panel-key-do-not-use-in-production";
+// La de SALIDA, DISTINTA a propósito: con el mismo valor, un test que confundiera las dos llaves
+// daría verde.
+process.env.BETASO_BACKEND_API_KEY ??= "test-backend-key-do-not-use-in-production";
 // SE BORRA, no se ignora, y es la única variable que este archivo saca en vez de poner.
 // La presencia de `MONGO_URI` es lo que elige la implementación del historial en el
 // composition root (ver src/di-container.ts), así que un desarrollador que la tenga

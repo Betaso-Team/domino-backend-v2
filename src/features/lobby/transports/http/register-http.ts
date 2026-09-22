@@ -1,4 +1,4 @@
-import { requireInternalKey } from "@/shared/http/internal-key";
+import { requireAdminPanelKey } from "@/shared/http/api-key";
 import type { Application } from "express";
 import { z } from "zod";
 import { DEFAULT_MAINTENANCE_MESSAGE } from "../../core/state";
@@ -11,27 +11,31 @@ const body = z.strictObject({
 
 export interface LobbyHttpDeps {
   readonly settings: LobbySettings;
-  readonly internalApiKey: string | undefined;
+  readonly adminPanelApiKey: string | undefined;
 }
 
 export function registerLobbyHttp(
   app: Application,
-  { settings, internalApiKey }: LobbyHttpDeps,
+  { settings, adminPanelApiKey }: LobbyHttpDeps,
 ): void {
   // La palanca que abre y cierra el juego no puede nacer pública por una variable ausente.
-  if (!internalApiKey) return;
+  if (!adminPanelApiKey) return;
 
-  app.post("/internal/lobby/maintenance", requireInternalKey(internalApiKey), async (req, res) => {
-    const parsed = body.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "BAD_REQUEST" });
-      return;
-    }
-    const value = {
-      isUnderMaintenance: parsed.data.isUnderMaintenance,
-      maintenanceMessage: parsed.data.message ?? DEFAULT_MAINTENANCE_MESSAGE,
-    };
-    await settings.set(value);
-    res.json(value);
-  });
+  app.post(
+    "/internal/lobby/maintenance",
+    requireAdminPanelKey(adminPanelApiKey),
+    async (req, res) => {
+      const parsed = body.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "BAD_REQUEST" });
+        return;
+      }
+      const value = {
+        isUnderMaintenance: parsed.data.isUnderMaintenance,
+        maintenanceMessage: parsed.data.message ?? DEFAULT_MAINTENANCE_MESSAGE,
+      };
+      await settings.set(value);
+      res.json(value);
+    },
+  );
 }

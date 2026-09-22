@@ -1,4 +1,4 @@
-import { requireInternalKey } from "@/shared/http/internal-key";
+import { requireAdminPanelKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import type { Logger } from "@/shared/logger";
 import type { Application, Request } from "express";
@@ -25,7 +25,7 @@ export interface SettingsHttpDeps {
   readonly sections: readonly SettingsSection[];
   readonly signal: PolledSettingsSignal;
   readonly writer: SettingsWriter;
-  readonly internalApiKey: string | undefined;
+  readonly adminPanelApiKey: string | undefined;
   readonly log: Logger;
 }
 
@@ -42,14 +42,14 @@ export interface SettingsHttpDeps {
 // (`SETTINGS_POLL_MS`). Y una mesa YA EN JUEGO se queda con la config con la que nació, porque la sala
 // la fotografía al crearse: los números de una mesa no se mueven debajo de los que están jugando.
 export function registerSettingsHttp(app: Application, deps: SettingsHttpDeps): void {
-  const { sections, signal, writer, internalApiKey, log } = deps;
-  if (!internalApiKey) {
-    log.warn("configuración en caliente APAGADA: sin INTERNAL_API_KEY no se registra", {
+  const { sections, signal, writer, adminPanelApiKey, log } = deps;
+  if (!adminPanelApiKey) {
+    log.warn("configuración en caliente APAGADA: sin BETASO_ADMIN_PANEL_API_KEY no se registra", {
       route: `${SETTINGS_ROUTE}/*`,
     });
     return;
   }
-  const admin = requireInternalKey(internalApiKey);
+  const admin = requireAdminPanelKey(adminPanelApiKey);
 
   const dtoOf = (section: SettingsSection): SectionDTO => ({
     name: section.name,

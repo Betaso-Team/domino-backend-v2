@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-`JWT_SECRET` es obligatorio. `INTERNAL_API_KEY` habilita las rutas internas. Mongo, Redis, RabbitMQ
+`BETASO_BACKEND_JWT_SECRET` es obligatorio. `BETASO_ADMIN_PANEL_API_KEY` (la que nos presenta el panel) habilita las rutas internas; `BETASO_BACKEND_API_KEY` (la que presentamos al backend) habilita torneo, antifraude y niveles de apuesta. Mongo, Redis, RabbitMQ
 y el backend principal son capacidades opcionales elegidas por la presencia de sus URLs.
 
 Con el stack local completo:

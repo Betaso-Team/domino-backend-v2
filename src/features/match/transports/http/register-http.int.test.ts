@@ -22,7 +22,7 @@ function fakeLogger(): Logger {
 // Un doble de Express que solo anota QUÉ rutas se registraron. No hace falta levantar un
 // servidor: lo que se mide acá es una decisión de wiring —si la ruta llega a existir—, y
 // el comportamiento de la ruta ya lo cubren los tests e2e con la llave puesta.
-function pathsRegisteredWith(internalApiKey: string | undefined): string[] {
+function pathsRegisteredWith(adminPanelApiKey: string | undefined): string[] {
   const paths: string[] = [];
   const app = { get: (path: string) => paths.push(path) } as unknown as Express;
   registerInternalHistoryHttp(app, {
@@ -34,7 +34,7 @@ function pathsRegisteredWith(internalApiKey: string | undefined): string[] {
         throw new Error("el registro de la ruta no debe leer el historial");
       },
     },
-    internalApiKey,
+    adminPanelApiKey,
   });
   return paths;
 }
@@ -51,7 +51,7 @@ describe("registerInternalHistoryHttp", () => {
   });
 
   // El aviso es lo ÚNICO que explica el 404 de una instancia sin llave, así que se mide que
-  // nombre la ruta: un warn que dice "falta INTERNAL_API_KEY" y no dice cuál path se apagó
+  // nombre la ruta: un warn que dice "falta BETASO_ADMIN_PANEL_API_KEY" y no dice cuál path se apagó
   // no lo encuentra el que busca por path.
   it("sin llave interna avisa nombrando la ruta que no se registró", () => {
     const logger = fakeLogger();
@@ -60,7 +60,7 @@ describe("registerInternalHistoryHttp", () => {
     registerInternalHistoryHttp(app, {
       logger,
       history: { of: () => Promise.resolve([]) },
-      internalApiKey: undefined,
+      adminPanelApiKey: undefined,
     });
 
     expect(logger.warn).toHaveBeenCalledWith(
@@ -85,7 +85,7 @@ describe("registerInternalHistoryHttp", () => {
     registerInternalHistoryHttp(app, {
       logger: fakeLogger(),
       history: { of: () => Promise.resolve(entries) },
-      internalApiKey: "k".repeat(16),
+      adminPanelApiKey: "k".repeat(16),
     });
     const server = app.listen(0, "127.0.0.1");
     await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -95,7 +95,7 @@ describe("registerInternalHistoryHttp", () => {
       const response = await fetch(
         `http://127.0.0.1:${port}/internal/matches/history-order/history`,
         {
-          headers: { "X-Internal-Key": "k".repeat(16) },
+          headers: { "x-internal-api-key": "k".repeat(16) },
         },
       );
       const body = (await response.json()) as { entries: readonly HistoryEntry[] };

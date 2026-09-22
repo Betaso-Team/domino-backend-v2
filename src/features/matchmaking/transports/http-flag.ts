@@ -1,4 +1,4 @@
-import { type InternalApiKey, internalAuthHeaders } from "@/features/auth";
+import { type ApiKey, betasoBackendAuthHeaders } from "@/features/auth";
 import type { HttpClient } from "@/shared/http";
 import type { AntifraudFlag } from "../antifraud-flag";
 
@@ -18,13 +18,13 @@ import type { AntifraudFlag } from "../antifraud-flag";
 export class HttpAntifraudFlag implements AntifraudFlag {
   constructor(
     private readonly http: HttpClient,
-    private readonly apiKey: InternalApiKey,
+    private readonly apiKey: ApiKey,
   ) {}
 
   async isRematchRulesEnabled(): Promise<boolean> {
     const response = await this.http.get<{ enabled?: boolean }>(
       "antifraud-settings/rematch-enabled",
-      internalAuthHeaders(this.apiKey),
+      betasoBackendAuthHeaders(this.apiKey),
     );
     return response?.enabled === true;
   }

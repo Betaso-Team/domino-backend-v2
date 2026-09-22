@@ -6,7 +6,7 @@ import type { BetLevel } from "../core/config";
 //
 // ⚠ LA LISTA VACÍA ES EL REPOSO Y NO UN ERROR. Sin niveles, `canProposeBet` rechaza con
 // `BETTING_DISABLED` y la mesa simplemente no ofrece aumentar. Es lo que hace v1 y es lo que
-// hace que una instancia sin `BACKEND_URL` sea segura en vez de estar rota.
+// hace que una instancia sin `BETASO_BACKEND_URL` sea segura en vez de estar rota.
 
 /**
  * FALLA CERRADO, y acá el criterio se aparta del de otros flags del repo.
@@ -22,7 +22,7 @@ export interface BetLevelBook {
   levelsOf(gameModeId: string): Promise<readonly BetLevel[]>;
 }
 
-/** El reposo: ninguna mesa ofrece aumentar. Es lo que corre sin `BACKEND_URL`. */
+/** El reposo: ninguna mesa ofrece aumentar. Es lo que corre sin `BETASO_BACKEND_URL`. */
 export const NO_BET_LEVELS: BetLevelBook = { levelsOf: async () => [] };
 
 /**

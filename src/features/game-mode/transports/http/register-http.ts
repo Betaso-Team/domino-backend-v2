@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "@/logger";
-import { requireInternalKey } from "@/shared/http/internal-key";
+import { requireAdminPanelKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import type { Application, Response } from "express";
 import {
@@ -27,7 +27,7 @@ import {
 // LO QUE CAMBIA RESPECTO DE v1 ES QUIÉN AUTORIZA. Allá cada mutación llevaba
 // `authMiddleware.isAuthenticated()` + `isAuthorized('admin')`, o sea que domino validaba al
 // administrador. Acá el panel NO autentica administradores contra domino: el orquestador valida al
-// admin y llama con `X-Internal-Key`. Los dos GET siguen públicos porque el jugador necesita el
+// admin y llama con `x-internal-api-key` (la llave del panel). Los dos GET siguen públicos porque el jugador necesita el
 // catálogo para entrar a una mesa.
 
 const BASE = "/game-modes";
@@ -42,7 +42,7 @@ export interface GameModeHttpDeps {
   readonly service: GameModeService;
   readonly logger: Logger;
   /** `undefined` ⇒ las cinco mutaciones NO se registran. Ver el fail closed de abajo. */
-  readonly internalApiKey: string | undefined;
+  readonly adminPanelApiKey: string | undefined;
 }
 
 // EL ENVELOPE HISTÓRICO, en dos funciones para que ninguna ruta lo escriba a mano: v1 contesta
@@ -88,7 +88,7 @@ function sendError(response: Response, error: unknown): void {
 }
 
 export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): void {
-  const { service, logger, internalApiKey } = deps;
+  const { service, logger, adminPanelApiKey } = deps;
 
   app.get(
     BASE,
@@ -103,13 +103,13 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
   // lo único que protege a esta ruta el día que se agregue un `GET /game-modes/:a/:b`, y revertirlo
   // convertiría toda reactivación en una consulta del modo llamado "reactive". Lo pinea el test que
   // asserta la lista de registros en orden.
-  if (internalApiKey) {
+  if (adminPanelApiKey) {
     app.get(
       `${BASE}/reactive/:uuid`,
       // LA CREDENCIAL PRIMERO Y EL SCHEMA DESPUÉS, en las cinco mutaciones: al revés, un anónimo
       // puede distinguir "forma inválida" de "forma válida" en una ruta que no tiene derecho a
       // tocar.
-      requireInternalKey(internalApiKey),
+      requireAdminPanelKey(adminPanelApiKey),
       validated({ params: UUID_PARAMS }, async ({ params }, response) => {
         try {
           await service.reactivate(params.uuid);
@@ -138,7 +138,7 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
   // FAIL CLOSED, y es la decisión del incremento entero: sin llave configurada las mutaciones NO
   // EXISTEN. La alternativa —registrarlas y comparar contra vacío— deja endpoints que configuran
   // dinero real respondiendo sin credencial, y el operador los ve contestar y los cree protegidos.
-  if (!internalApiKey) {
+  if (!adminPanelApiKey) {
     // LAS RUTAS VAN EN EL MENSAJE. El que llega a este log llega desde un 404 inexplicable en el
     // panel y busca por path: sin el path acá, el aviso que explica el 404 es justamente el que no
     // encuentra.
@@ -150,14 +150,14 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
       `GET ${BASE}/reactive/:uuid`,
     ].join(", ");
     logger.warn(
-      `API administrativa del catálogo deshabilitada: falta INTERNAL_API_KEY, no se registran ${missing}`,
+      `API administrativa del catálogo deshabilitada: falta BETASO_ADMIN_PANEL_API_KEY, no se registran ${missing}`,
     );
     return;
   }
 
   app.post(
     BASE,
-    requireInternalKey(internalApiKey),
+    requireAdminPanelKey(adminPanelApiKey),
     validated({ body: CREATE_BODY }, async ({ body }, response) => {
       try {
         // 201 y no 200, igual que v1 (`routes.ts:94`).
@@ -170,7 +170,7 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
 
   app.put(
     `${BASE}/:uuid`,
-    requireInternalKey(internalApiKey),
+    requireAdminPanelKey(adminPanelApiKey),
     validated({ params: UUID_PARAMS, body: UPDATE_BODY }, async ({ params, body }, response) => {
       try {
         sendData(response, 200, toDTO(await service.update(params.uuid, updateInputOf(body))));
@@ -184,7 +184,7 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
   // `POST /game-modes/:uuid` que pueda absorberlo. El orden es el del plan y el del archivo de v1.
   app.post(
     `${BASE}/sync`,
-    requireInternalKey(internalApiKey),
+    requireAdminPanelKey(adminPanelApiKey),
     validated({}, async (_input, response) => {
       try {
         // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
@@ -204,7 +204,7 @@ export function registerGameModeHttp(app: Application, deps: GameModeHttpDeps): 
 
   app.delete(
     `${BASE}/:uuid`,
-    requireInternalKey(internalApiKey),
+    requireAdminPanelKey(adminPanelApiKey),
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         // SIN `data`, igual que v1 (`routes.ts:167-170`): la baja devuelve el mensaje y nada más.

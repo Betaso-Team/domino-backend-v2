@@ -111,7 +111,7 @@ describe("la certificación del catálogo contra servicios reales", () => {
     expect(compose).toContain("rabbitmq:");
     expect(compose).toContain("rabbitmq-diagnostics");
     expect(compose).toContain("RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672");
-    expect(compose).toContain("INTERNAL_API_KEY");
+    expect(compose).toContain("BETASO_ADMIN_PANEL_API_KEY");
   });
 
   // EL CLIENTE NECESITA LAS DOS URLS PARA ASERTAR DESDE AFUERA: mira el documento en Mongo y el

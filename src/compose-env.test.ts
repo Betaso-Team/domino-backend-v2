@@ -9,7 +9,7 @@ import { parseEnv } from "./env";
 // leen entre sí, y la desincronización NO ROMPE NINGÚN GATE: `tsc` no lee YAML, la suite no levanta
 // contenedores, y `npm run test:deploy` necesita un Docker andando que el gate no tiene.
 //
-// Ya cobró una vez, en el incremento del ranking: `BACKEND_URL` pasó a ser obligatoria y el
+// Ya cobró una vez, en el incremento del ranking: `BETASO_BACKEND_URL` pasó a ser obligatoria y el
 // servicio del smoke no la tenía. El síntoma era el peor posible para diagnosticar —el servidor
 // muere ANTES de escuchar, así que nginx contesta 502 y el cliente del smoke falla midiendo un
 // `/ready` que nunca existió— y el rojo apunta a la fase, no a una variable que falta.
@@ -87,9 +87,9 @@ describe("el entorno del smoke del deploy arranca de verdad", () => {
   // acá, cada corrida le mete un resultado inventado a la liga real — y esa ruta no pide
   // credencial, así que nada del otro lado lo pararía. Tiene que quedar dentro del stack.
   it("la liga del smoke apunta adentro del stack, nunca al backend real", () => {
-    const { BACKEND_URL } = environmentOf("domino");
-    expect(BACKEND_URL).toBeDefined();
-    expect(new URL(String(BACKEND_URL)).hostname).toBe("nginx");
+    const { BETASO_BACKEND_URL } = environmentOf("domino");
+    expect(BETASO_BACKEND_URL).toBeDefined();
+    expect(new URL(String(BETASO_BACKEND_URL)).hostname).toBe("nginx");
   });
 
   // Y EL DOBLE QUE LA ATIENDE TIENE QUE EXISTIR. Sin esta ruta el POST cae en el `location /`, que

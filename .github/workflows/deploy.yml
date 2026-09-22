@@ -15,7 +15,7 @@
 # de prod, y un rojo permanente es un rojo que se deja de mirar.
 #
 # NINGÚN SECRETO VIVE EN ESTE ARCHIVO ni en el artefacto. Las variables de la aplicación
-# (`JWT_SECRET`, `INTERNAL_API_KEY`, `MONGO_URI`, `REDIS_URL`, …) están en el `.env` compartido del
+# (`BETASO_BACKEND_JWT_SECRET`, las dos `BETASO_*_API_KEY`, `MONGO_URI`, `REDIS_URL`, …) están en el `.env` compartido del
 # servidor, que se crea UNA vez a mano y que el despliegue nunca toca (§`scripts/deploy-remote.sh`).
 name: Deploy
 
