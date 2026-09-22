@@ -86,10 +86,8 @@ describe("la superficie Express", () => {
   // defecto de Express con el stack adentro, y el `NODE_ENV` por default de este repo es
   // `development`. El costo de equivocarse es filtrar el stack en una ruta administrativa.
   it("registra el catálogo antes del manejador de errores", () => {
-    expect(source.indexOf("registerGameModeHttp")).toBeGreaterThan(-1);
-    expect(source.indexOf("registerGameModeHttp")).toBeLessThan(
-      source.indexOf("httpErrorHandler("),
-    );
+    expect(source.indexOf("gameModeHttp(")).toBeGreaterThan(-1);
+    expect(source.indexOf("gameModeHttp(")).toBeLessThan(source.indexOf("httpErrorHandler("));
   });
 
   // RABBIT ENTRA A READINESS Y NO A `/health`. `/health` no consulta NADA a propósito —"reiniciame"

@@ -2,7 +2,8 @@ import type { AddressInfo } from "node:net";
 import type { Logger } from "@/logger";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import type { Lease } from "@/shared/mongo-lease";
-import express, { type Application } from "express";
+import { routesOf } from "@/tests/routes";
+import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GameModeRepository } from "../../core/catalog";
 import type { GameMode } from "../../core/game-mode";
@@ -10,7 +11,7 @@ import { GameModeService } from "../../service";
 import { MemoryGameModeOutbox } from "../memory-outbox";
 import { MemoryGameModeRepository } from "../memory-repository";
 import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contract";
-import { registerGameModeHttp } from "./register-http";
+import { gameModeHttp } from "./register";
 
 // LA FRONTERA MEDIDA CONTRA EL SERVICIO DE VERDAD y los adaptadores de memoria, no contra un doble
 // del servicio. Es el mismo argumento de `service.int.test.ts`: `MemoryGameModeRepository` y
@@ -85,11 +86,13 @@ function harness(
   // último. Sin el manejador, un rechazo sin manejar devuelve la página HTML de Express y el test
   // del 500 mediría otra cosa.
   app.use(express.json());
-  registerGameModeHttp(app, {
-    service,
-    logger,
-    adminPanelApiKey: "adminPanelApiKey" in over ? over.adminPanelApiKey : KEY,
-  });
+  app.use(
+    gameModeHttp({
+      service,
+      logger,
+      adminPanelApiKey: "adminPanelApiKey" in over ? over.adminPanelApiKey : KEY,
+    }),
+  );
   app.use(httpErrorHandler(logger));
 
   const server = app.listen(0, "127.0.0.1");
@@ -172,48 +175,41 @@ async function drain(outbox: MemoryGameModeOutbox): Promise<string[]> {
 // existir y EN QUÉ ORDEN—, y eso un servidor no lo muestra: dos órdenes distintos pueden responder
 // igual hoy y dejar de hacerlo con la ruta que se agregue mañana.
 function routesRegisteredWith(adminPanelApiKey: string | undefined): string[] {
-  const seen: string[] = [];
-  const record = (method: string) => (path: string) => {
-    seen.push(`${method} ${path}`);
-  };
-  const app = {
-    get: record("GET"),
-    post: record("POST"),
-    put: record("PUT"),
-    delete: record("DELETE"),
-  } as unknown as Application;
   const clock = mutableClock();
-  registerGameModeHttp(app, {
-    service: new GameModeService(
-      new MemoryGameModeRepository(clock),
-      new MemoryGameModeOutbox(clock),
-      {
-        async within(_name, _ttlMs, work) {
-          return work();
+  return routesOf(
+    gameModeHttp({
+      service: new GameModeService(
+        new MemoryGameModeRepository(clock),
+        new MemoryGameModeOutbox(clock),
+        {
+          async within(_name, _ttlMs, work) {
+            return work();
+          },
         },
-      },
-      vi.fn(),
-    ),
-    logger: fakeLogger(),
-    adminPanelApiKey,
-  });
-  return seen;
+        vi.fn(),
+      ),
+      logger: fakeLogger(),
+      adminPanelApiKey,
+    }),
+  );
 }
 
-describe("registerGameModeHttp: las siete rutas", () => {
+describe("gameModeHttp: las siete rutas", () => {
   // `reactive/:uuid` ANTES de `/:uuid`, y `sync` después del `POST` de la colección. Es el orden que
-  // el plan pide y el que hay que conservar: hoy Express no confunde `/game-modes/reactive/x` con
-  // `/game-modes/:uuid` —son dos segmentos contra uno—, pero una ruta futura con dos segmentos sí lo
-  // haría, y este arreglo es lo único que lo dice.
+  // hay que conservar: hoy Express no confunde `/game-modes/reactive/x` con `/game-modes/:uuid` —son
+  // dos segmentos contra uno—, pero una ruta futura con dos segmentos sí lo haría, y este arreglo es
+  // lo único que lo dice. Desde que las rutas son dos routers (`admin.ts` y `catalog.ts`), lo que lo
+  // garantiza es que el admin se monte PRIMERO (`register.ts`): al revés, como en truco, la lectura
+  // `/:uuid` quedaría adelante.
   it("registra las siete rutas de v1 en orden", () => {
     expect(routesRegisteredWith(KEY)).toEqual([
-      "GET /game-modes",
       "GET /game-modes/reactive/:uuid",
-      "GET /game-modes/:uuid",
       "POST /game-modes",
       "PUT /game-modes/:uuid",
       "POST /game-modes/sync",
       "DELETE /game-modes/:uuid",
+      "GET /game-modes",
+      "GET /game-modes/:uuid",
     ]);
   });
 
@@ -226,15 +222,9 @@ describe("registerGameModeHttp: las siete rutas", () => {
 
   it("sin llave interna avisa nombrando las rutas que no se registraron", () => {
     const logger = fakeLogger();
-    const app = {
-      get: () => undefined,
-      post: () => undefined,
-      put: () => undefined,
-      delete: () => undefined,
-    } as unknown as Application;
     const clock = mutableClock();
 
-    registerGameModeHttp(app, {
+    gameModeHttp({
       service: new GameModeService(
         new MemoryGameModeRepository(clock),
         new MemoryGameModeOutbox(clock),

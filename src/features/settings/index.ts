@@ -11,7 +11,7 @@ export { PolledSettingsSignal, SETTINGS_POLL_MS } from "./signal";
 export { MemorySettings } from "./transports/memory-settings";
 export { MongoSettings } from "./transports/mongo-settings";
 export {
-  SETTINGS_ROUTE,
   type SettingsHttpDeps,
-  registerSettingsHttp,
-} from "./transports/http/register-http";
+  settingsHttp,
+} from "./transports/http/register";
+export { SETTINGS_ROUTE } from "./transports/http/settings";

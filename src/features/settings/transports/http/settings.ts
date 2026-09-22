@@ -1,7 +1,7 @@
 import { requireAdminPanelKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import type { Logger } from "@/shared/logger";
-import type { Application, Request } from "express";
+import { type Request, Router } from "express";
 import type { SectionOverrides, SettingsSection } from "../../sections";
 import type { PolledSettingsSignal } from "../../signal";
 import type { SettingsWriter } from "../../store";
@@ -21,7 +21,7 @@ interface SectionDTO {
   editable: readonly string[];
 }
 
-export interface SettingsHttpDeps {
+export interface SettingsRoutesDeps {
   readonly sections: readonly SettingsSection[];
   readonly signal: PolledSettingsSignal;
   readonly writer: SettingsWriter;
@@ -41,13 +41,14 @@ export interface SettingsHttpDeps {
 // contesta con lo que va a usar de verdad. El resto del clúster converge en una pasada
 // (`SETTINGS_POLL_MS`). Y una mesa YA EN JUEGO se queda con la config con la que nació, porque la sala
 // la fotografía al crearse: los números de una mesa no se mueven debajo de los que están jugando.
-export function registerSettingsHttp(app: Application, deps: SettingsHttpDeps): void {
+export function settingsRoutes(deps: SettingsRoutesDeps): Router {
+  const router = Router();
   const { sections, signal, writer, adminPanelApiKey, log } = deps;
   if (!adminPanelApiKey) {
     log.warn("configuración en caliente APAGADA: sin BETASO_ADMIN_PANEL_API_KEY no se registra", {
       route: `${SETTINGS_ROUTE}/*`,
     });
-    return;
+    return router;
   }
   const admin = requireAdminPanelKey(adminPanelApiKey);
 
@@ -58,17 +59,17 @@ export function registerSettingsHttp(app: Application, deps: SettingsHttpDeps): 
     editable: section.editable,
   });
 
-  app.get(SETTINGS_ROUTE, admin, (_req, res) => {
+  router.get(SETTINGS_ROUTE, admin, (_req, res) => {
     res.json(sections.map(dtoOf));
   });
 
   for (const section of sections) {
     const route = `${SETTINGS_ROUTE}/${section.name}`;
-    app.get(route, admin, (_req, res) => {
+    router.get(route, admin, (_req, res) => {
       res.json(dtoOf(section));
     });
 
-    app.patch(
+    router.patch(
       route,
       admin,
       validated({ body: section.schema }, async ({ body }, res) => {
@@ -84,7 +85,7 @@ export function registerSettingsHttp(app: Application, deps: SettingsHttpDeps): 
       }),
     );
 
-    app.delete(route, admin, async (req, res, next) => {
+    router.delete(route, admin, async (req, res, next) => {
       try {
         await writer.clear(section.name);
         await signal.check();
@@ -98,9 +99,10 @@ export function registerSettingsHttp(app: Application, deps: SettingsHttpDeps): 
 
   // DESPUÉS de las secciones, así un nombre que nadie cableó contesta en el mismo idioma que el resto
   // en vez de caer al HTML de Express.
-  app.all(`${SETTINGS_ROUTE}/:section`, admin, (_req, res) => {
+  router.all(`${SETTINGS_ROUTE}/:section`, admin, (_req, res) => {
     res.status(404).json({ code: "SETTINGS_SECTION_NOT_FOUND" });
   });
+  return router;
 }
 
 // La llave autoriza pero no identifica, así que la dirección es el único rastro que deja un cambio.

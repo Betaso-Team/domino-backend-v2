@@ -248,7 +248,7 @@ async function play(roomA: SmokeRoom, roomB: SmokeRoom, config: DominoMatchConfi
 // existente significa que el entorno no está limpio, y eso es un fallo que conviene ver acá y no
 // tres aserciones más adelante.
 //
-// ⛔ ESTO TODAVÍA NO PUEDE CONTESTAR 201: la Tarea 11 es la que registra `registerGameModeHttp` en
+// ⛔ ESTO TODAVÍA NO PUEDE CONTESTAR 201: la Tarea 11 es la que monta `gameModeHttp` en
 // `src/app.config.ts` y la 12 la que arma las fases del compose que ejercitan este archivo. Queda
 // escrito acá porque es el llamador que justifica ese cableado, y porque el smoke sin esta llamada
 // no describiría el sistema que la Tarea 10 acaba de construir.

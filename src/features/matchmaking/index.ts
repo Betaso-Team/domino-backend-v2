@@ -18,7 +18,7 @@ export function registerMatchmaking(gameServer: Server, deps: LobbyDeps): void {
 export type { LobbyDeps } from "./transports/colyseus";
 export { LobbyRoom } from "./transports/colyseus";
 
-export { registerMatchmakingHttp } from "./transports/http";
+export { type MatchmakingHttpDeps, matchmakingHttp } from "./transports/http";
 
 export type { AntifraudFlag } from "./antifraud-flag";
 export { CachedAntifraudFlag } from "./antifraud-flag";

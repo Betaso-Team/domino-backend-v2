@@ -51,7 +51,7 @@ export { ColyseusMatchGateway } from "./transports/colyseus/gateway";
 // convierte en un error de matchmaking—, y una superficie pública con tipos que nadie nombra es
 // una superficie que nadie puede podar después.
 export { selectProcessIdToCreateRoom } from "./transports/colyseus/load-balancer";
-export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/register-http";
+export { type MatchHttpDeps, matchHttp } from "./transports/http/register";
 // LAS TRES FUNCIONES DE LA FRONTERA Y SUS TIPOS. `requestOf`/`configOf` son el camino de una mesa
 // que NACE —el segundo pide el `GameMode` ya resuelto contra el catálogo— y `replayConfigOf` el de
 // una que se REBOBINA. Los tres errores salen también: el que pide crear una sala tiene que poder

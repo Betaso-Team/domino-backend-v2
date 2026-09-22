@@ -1,5 +1,5 @@
 import { requireAdminPanelKey } from "@/shared/http/api-key";
-import type { Application } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import { DEFAULT_MAINTENANCE_MESSAGE } from "../../core/state";
 import type { LobbySettings } from "../../settings";
@@ -14,14 +14,13 @@ export interface LobbyHttpDeps {
   readonly adminPanelApiKey: string | undefined;
 }
 
-export function registerLobbyHttp(
-  app: Application,
-  { settings, adminPanelApiKey }: LobbyHttpDeps,
-): void {
+// LA PALANCA DEL MANTENIMIENTO, detrás de la llave del panel.
+export function maintenanceLeverRoutes({ settings, adminPanelApiKey }: LobbyHttpDeps): Router {
+  const router = Router();
   // La palanca que abre y cierra el juego no puede nacer pública por una variable ausente.
-  if (!adminPanelApiKey) return;
+  if (!adminPanelApiKey) return router;
 
-  app.post(
+  router.post(
     "/internal/lobby/maintenance",
     requireAdminPanelKey(adminPanelApiKey),
     async (req, res) => {
@@ -38,4 +37,5 @@ export function registerLobbyHttp(
       res.json(value);
     },
   );
+  return router;
 }

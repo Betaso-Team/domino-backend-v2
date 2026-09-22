@@ -1,20 +1,20 @@
 import type { TokenVerifier } from "@/features/auth";
-import { GameModeService, registerGameModeHttp } from "@/features/game-mode";
-import { LobbySettings, registerLobbyHttp } from "@/features/lobby";
+import { GameModeService, gameModeHttp } from "@/features/game-mode";
+import { LobbySettings, lobbyHttp } from "@/features/lobby";
 import {
   type Clock,
   type HistoryReader,
   MatchRegistry,
   type PlayerLog,
-  registerMatchHttp,
+  matchHttp,
   selectProcessIdToCreateRoom,
 } from "@/features/match";
 import { DominoRoom } from "@/features/match/transports/colyseus/domino-room";
-import { LobbyRoom, registerMatchmakingHttp } from "@/features/matchmaking";
-import { registerSettingsHttp } from "@/features/settings";
-import { type StrikeBook, registerTournamentHttp } from "@/features/tournament";
+import { LobbyRoom, matchmakingHttp } from "@/features/matchmaking";
+import { settingsHttp } from "@/features/settings";
+import { type StrikeBook, tournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
-import { type DependencyChecks, registerHealth } from "@/shared/http/health";
+import { type DependencyChecks, healthRoutes } from "@/shared/http/health";
 import { exposeServerTime } from "@/shared/http/server-time";
 import config from "@colyseus/tools";
 import { type ServerOptions, defineRoom, defineServer } from "colyseus";
@@ -117,7 +117,7 @@ const rooms = {
 // ⚠ Y `ping()` NO RECHAZA SOLO CON EL BROKER CAÍDO: **cuelga**. `amqplib` con `recovery: true` usa
 // `maxRetries: Infinity` (`lib/recovery.js:8`), así que la rama que rechaza el connect inicial es
 // inalcanzable (§`src/shared/amqp.ts`). Lo que lo convierte en un 503 y no en un `/ready` que no
-// contesta es el plazo POR CHEQUEO de `registerHealth` — el mismo que ya cubre el Mongo inalcanzable
+// contesta es el plazo POR CHEQUEO de `healthRoutes` — el mismo que ya cubre el Mongo inalcanzable
 // y por el mismo motivo: una base caída no falla, CUELGA. Sacar ese plazo saca a Rabbit del mapa sin
 // que ningún test de esta capa se ponga rojo.
 const mongoConnection = mongo;
@@ -140,47 +140,59 @@ const registerHttp = (app: Application) => {
   // profundo: no se solapan con ninguna. Son dos a propósito y la diferencia está argumentada
   // en `shared/http/health.ts` — `/health` no consulta nada porque "reiniciame" es la única
   // respuesta que destruye partidas en curso.
-  registerHealth(app, hardDependencies);
-  registerLobbyHttp(app, {
-    settings: rootContainer.resolve(LobbySettings),
-    adminPanelApiKey: env.adminPanelApiKey,
-  });
-  registerMatchmakingHttp(app, maintenanceSignal, census);
-  registerTournamentHttp(
-    app,
-    rootContainer.resolve<StrikeBook>("StrikeBook"),
-    rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+  app.use(healthRoutes(hardDependencies));
+  // CADA FEATURE ES UN ROUTER, y se monta en la raíz porque sus paths son absolutos: la guarda va por
+  // ruta y no por prefijo, y las dependencias entran ya resueltas (truco `0b0a467`). El orden de
+  // montaje es el de registro, y sólo importa DENTRO de una feature —el catálogo lo pinea—.
+  app.use(
+    lobbyHttp({
+      settings: rootContainer.resolve(LobbySettings),
+      adminPanelApiKey: env.adminPanelApiKey,
+    }),
   );
-  registerMatchHttp(app, {
-    registry: rootContainer.resolve(MatchRegistry),
-    clock: rootContainer.resolve<Clock>("Clock"),
-    logger,
-    history: rootContainer.resolve<HistoryReader>("HistoryReader"),
-    adminPanelApiKey: env.adminPanelApiKey,
-    verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-    playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
-  });
+  app.use(matchmakingHttp({ maintenance: maintenanceSignal, census }));
+  app.use(
+    tournamentHttp({
+      strikes: rootContainer.resolve<StrikeBook>("StrikeBook"),
+      verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+    }),
+  );
+  app.use(
+    matchHttp({
+      registry: rootContainer.resolve(MatchRegistry),
+      clock: rootContainer.resolve<Clock>("Clock"),
+      logger,
+      history: rootContainer.resolve<HistoryReader>("HistoryReader"),
+      adminPanelApiKey: env.adminPanelApiKey,
+      verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+      playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
+    }),
+  );
   // EL CATÁLOGO, y va ANTES del manejador de errores como todas las demás: Express reconoce ese
   // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta
   // puesta después queda con el HTML por defecto de Express, con el stack adentro.
   //
   // Los GET son públicos y las cinco mutaciones viven detrás de `adminPanelApiKey`; sin llave no se
-  // registran (fail closed, §`features/game-mode/transports/http/register-http.ts`). Quien autentica
+  // registran (fail closed, §`features/game-mode/transports/http/admin.ts`). Quien autentica
   // al administrador es el orquestador, no el dominó.
-  registerGameModeHttp(app, {
-    service: rootContainer.resolve(GameModeService),
-    logger,
-    adminPanelApiKey: env.adminPanelApiKey,
-  });
+  app.use(
+    gameModeHttp({
+      service: rootContainer.resolve(GameModeService),
+      logger,
+      adminPanelApiKey: env.adminPanelApiKey,
+    }),
+  );
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
   // se registra. Antes del manejador de errores, como todas.
-  registerSettingsHttp(app, {
-    sections: settingsSections,
-    signal: settingsSignal,
-    writer: settingsWriter,
-    adminPanelApiKey: env.adminPanelApiKey,
-    log: logger,
-  });
+  app.use(
+    settingsHttp({
+      sections: settingsSections,
+      signal: settingsSignal,
+      writer: settingsWriter,
+      adminPanelApiKey: env.adminPanelApiKey,
+      log: logger,
+    }),
+  );
   app.use(httpErrorHandler(logger));
 };
 

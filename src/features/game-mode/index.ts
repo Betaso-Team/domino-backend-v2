@@ -25,7 +25,7 @@
 // la Tarea 9, que vive adentro de esta misma feature. El día que un consumidor de afuera necesite
 // distinguirlos, salen; exportarlos antes es superficie que nadie puede podar después.
 //
-// `registerGameModeHttp` sale con su tipo de dependencias, igual que las otras dos superficies HTTP
+// `gameModeHttp` sale con su tipo de dependencias, igual que las otras dos superficies HTTP
 // del repo (`features/match/index.ts`, `features/lobby/index.ts`): el composition root es el único
 // que puede llamarla porque es el único que tiene el servicio armado y el único que lee
 // `env.adminPanelApiKey`. Los CUATRO ERRORES siguen sin salir: quien los traduce a 404/409/503 es esa
@@ -38,8 +38,8 @@ export { OutboxDispatcher } from "./outbox";
 export { GameModeService } from "./service";
 export {
   type GameModeHttpDeps,
-  registerGameModeHttp,
-} from "./transports/http/register-http";
+  gameModeHttp,
+} from "./transports/http/register";
 export { CachedGameModeReader } from "./transports/cached-reader";
 export { MemoryGameModeOutbox } from "./transports/memory-outbox";
 export { MemoryGameModeRepository } from "./transports/memory-repository";

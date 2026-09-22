@@ -3,7 +3,7 @@ import { env } from "@/env";
 import { bootTestServer } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { SETTINGS_ROUTE } from "../transports/http/register-http";
+import { SETTINGS_ROUTE } from "../transports/http/settings";
 
 // LEER Y EDITAR LA CONFIGURACIÓN de punta a punta: la llave, las cotas, el rechazo de un campo no
 // editable y el refresco del proceso que atendió la escritura. Se levanta el servidor de verdad
