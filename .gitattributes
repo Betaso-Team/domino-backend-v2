@@ -1,0 +1,4 @@
+# El checkout de Windows tiene core.autocrlf=true y materializa CRLF; biome formatea con
+# lineEnding "lf" por defecto, asi que `npm run lint` sale rojo en archivos que la tarea ni
+# toco. Los blobs del repo ya son LF: esto solo fuerza que el checkout tambien lo sea.
+* text=auto eol=lf

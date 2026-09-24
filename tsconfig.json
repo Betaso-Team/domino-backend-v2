@@ -2,18 +2,18 @@
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "dist",
-    "rootDir": "src",
+    "module": "ESNext",
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
+    "moduleResolution": "Bundler",
+    "noEmit": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "sourceMap": true,
-    "declaration": false
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts"]
 }

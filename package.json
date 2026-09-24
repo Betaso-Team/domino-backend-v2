@@ -4,24 +4,38 @@
   "description": "Backend del Dominó Betaso",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsup",
-    "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts",
+    "start": "node dist/main.js",
+    "dev": "tsx watch src/main.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "replay": "tsx src/replay.ts",
+    "smoke:client": "tsx src/smoke/engine-smoke.ts",
+    "smoke:game-mode": "tsx src/smoke/game-mode-smoke.ts",
+    "test:deploy": "node scripts/run-engine-smoke.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src",
-    "format": "biome format --write src",
+    "lint": "biome check src docs/.vitepress/config.ts docs/.vitepress/theme",
+    "format": "biome format --write src docs/.vitepress/config.ts docs/.vitepress/theme",
     "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:int": "vitest run --project int",
+    "test:e2e": "vitest run --project e2e",
     "test:watch": "vitest",
     "depcruise": "depcruise src --config .dependency-cruiser.cjs"
   },
   "dependencies": {
     "@colyseus/schema": "^5.0.27",
     "@colyseus/tools": "^0.18.3",
+    "amqplib": "^2.0.1",
     "colyseus": "^0.18.5",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.6.0",
     "pino": "^10.1.0",
     "reflect-metadata": "^0.2.2",
     "tsyringe": "^4.8.0",
@@ -35,9 +49,13 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "dependency-cruiser": "^16.10.0",
+    "mermaid": "^11.17.2",
+    "svg-pan-zoom": "^3.6.2",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitepress": "^1.6.4",
+    "vitepress-plugin-mermaid": "^2.0.17",
+    "vitest": "^3.2.7"
   }
 }

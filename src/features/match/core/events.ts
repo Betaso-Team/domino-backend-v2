@@ -1,0 +1,102 @@
+import type { PlayerId, TeamId } from "./ids";
+
+// A qué ventana sirve el único plazo del juego. Un solo campo en el estado
+// ⇒ un solo evento de vencimiento y un solo eje que lo discrimine.
+//
+// `DEALING` es la ventana de reparto (reglas §3.1). Es de nivel RONDA como el turno, pero
+// a diferencia del turno **no es de nadie en particular**: corre para todos a la vez, y
+// eso es exactamente para lo que existe —el reloj del turno solo mira al que le toca—.
+// `NEGOTIATING_BET` es la ventana de respuesta del aumento de apuesta, y es de nivel RONDA
+// como las otras dos: la oferta muere con la ronda en la que se hizo.
+// Las TRES de la revancha son de nivel PARTIDA, y son tres porque esperan cosas distintas: que
+// alguien pida, que los demás contesten, y que el cliente alcance a consumir su reserva antes de
+// que la sala vieja se suelte. Distinguirlas importa para el REGISTRO además de para el
+// despacho: «nadie pidió» y «pidió uno y el otro no contestó» son dos finales distintos, y el
+// que audita una mesa quiere saber cuál fue.
+export type DeadlineKind =
+  | "DEALING"
+  | "TURN"
+  | "NEGOTIATING_BET"
+  | "PRESENTING_ROUND"
+  | "PRESENTING_MATCH"
+  | "REMATCH_WINDOW"
+  | "REMATCH_NEGOTIATION"
+  | "REMATCH_ACCEPTED";
+
+// EL CRITERIO (spec §5.1): un evento existe SOLO si ocurre un hecho que no se puede
+// reconstruir del comando ni del estado resultante. Si el payload del evento solo
+// repetiría el del comando, no es un evento.
+//
+// Por eso PLAY_TILE y PASS dichos por el JUGADOR no están acá: el comando ya es el
+// registro. Los mismos verbos SÍ aparecen cuando los dice el SISTEMA por quien calló,
+// porque ahí no hay comando que los cuente. El evento existe ⟺ no hubo comando detrás.
+export type MatchEvent =
+  // ── Consecuencias computadas ────────────────────────────────────────────
+  | {
+      type: "ROUND_RESOLVED";
+      roundNumber: number;
+      winnerId: PlayerId;
+      winnerTeamId: TeamId | "";
+      points: number;
+      reason: "DOMINO" | "BLOCKED";
+    }
+  // ── Lo que el SISTEMA hizo ──────────────────────────────────────────────
+  | { type: "DEADLINE_EXPIRED"; kind: DeadlineKind }
+  // Retirado POR TIMEOUT, nunca por el verbo voluntario. Es el caso canónico de
+  // "el evento existe ⟺ no hubo comando detrás": el ABANDON voluntario ya quedó
+  // registrado como comando, así que emitirlo encima sería la transcripción 1:1
+  // que el criterio prohíbe. Éste, en cambio, no lo pidió nadie — y para soporte
+  // es toda la diferencia entre "se fue" y "lo sacaron".
+  | { type: "ABANDON"; playerId: PlayerId }
+  // LA MÁQUINA SE SENTÓ EN ESE ASIENTO, y es un evento aunque a veces haya un comando detrás.
+  // No lo viola el criterio: `ABANDON` dice «me voy» y esto dice «la mesa sigue sin vos», que
+  // depende del modo y de quién más quede en tu equipo — nada de eso está en el payload del
+  // comando ni se deriva de él. Y por el camino del reloj no hay comando en absoluto.
+  //
+  // Para soporte es la línea que explica por qué una partida siguió después de que alguien se
+  // fue, y para quien liquida es la que dice que ese asiento ya no cobra.
+  | { type: "BOT_SEATED"; playerId: PlayerId }
+  // El aumento RECHAZADO POR EL RELOJ, nunca por el verbo voluntario — mismo criterio que
+  // `ABANDON`: el "no" dicho a mano ya quedó registrado como comando, y emitirlo encima
+  // sería la transcripción 1:1 que el criterio prohíbe. Éste no lo dijo nadie: la mesa
+  // estaba congelada esperando una respuesta que no llegó, y alguien tenía que darla.
+  //
+  // El `playerId` es el del que CALLÓ, que es la información que no está en ningún otro
+  // lado: la oferta se borra al resolverse, así que sin esto no queda rastro de quién dejó
+  // correr el reloj. Para soporte es la diferencia entre "dijo que no" y "no contestó".
+  | { type: "BET_MULTIPLIER_REJECTED"; playerId: PlayerId }
+  // ── Hitos terminales ────────────────────────────────────────────────────
+  | { type: "MATCH_RESOLVED"; winnerTeamId: TeamId; reason: "SCORE" | "ABANDONMENT" }
+  // TODOS ACEPTARON LA REVANCHA. Es una CONSECUENCIA COMPUTADA y no el eco de un comando, que
+  // es lo que lo deja pasar el criterio: el último `RESPOND_REMATCH` dice «yo acepto», y lo que
+  // este evento dice es «ya no falta nadie» — que depende de quiénes seguían en la mesa en ese
+  // instante y no está en el payload de ningún comando. Es el gemelo de `ROUND_RESOLVED`.
+  //
+  // Es además la señal que la RED espera para abrir la mesa nueva, y por eso lleva la lista:
+  // el nodo se borra al cerrar la negociación, así que para cuando alguien reaccione ya no
+  // estaría. Quien abre la sala necesita saber a quiénes sentar.
+  | { type: "REMATCH_ACCEPTED"; playerIds: readonly PlayerId[] }
+  // EL AUMENTO ACORDADO, y es una CONSECUENCIA COMPUTADA y no el eco del `RESPOND_BET_MULTIPLIER`
+  // que lo cerró. Ese comando dice «acepto»; esto dice CUÁNTO, y el cuánto no está en su payload
+  // — vive en la oferta, que `settle` borra en el mismo acto. Es el gemelo de `REMATCH_ACCEPTED`.
+  //
+  // Es además la señal que la RED espera para cobrar, y por eso lleva todo lo que el cobro
+  // necesita: a quiénes y cuánto. Leerlo del árbol después no es opción, justamente porque la
+  // oferta ya no está.
+  | {
+      type: "MULTIPLIER_AGREED";
+      level: number;
+      extra: number;
+      additionalEntryFee: number;
+      playerIds: readonly PlayerId[];
+    }
+  // EL AUMENTO DESHECHO, y es el ÚNICO evento del catálogo que existe para revertir algo.
+  //
+  // Lo pide la RED cuando el cobro no salió: el motor asentó el trato —es síncrono, no puede
+  // esperar a una billetera— así que la compensación es un segundo acto y no un rollback. Sin
+  // esto el estado diría x5 para siempre sobre una mesa que nadie pagó, y el cierre pagaría un
+  // premio con dinero que no entró.
+  //
+  // Lleva el nivel que se cayó porque el cliente ya lo pintó: «se aceptó x5» y después nada es
+  // peor que «se aceptó x5» y después «se deshizo el x5».
+  | { type: "MULTIPLIER_REVOKED"; level: number };

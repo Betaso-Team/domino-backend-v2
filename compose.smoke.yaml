@@ -1,0 +1,89 @@
+name: domino-engine-smoke
+
+services:
+  redis:
+    image: redis:7-alpine
+
+  mongo:
+    image: mongo:7
+
+  # EL BROKER, CON HEALTHCHECK Y NO CON UN `depends_on` PELADO. `depends_on` sin condición sólo
+  # espera a que el contenedor ARRANQUE, y RabbitMQ tarda segundos más en aceptar conexiones: sin
+  # esto la app arrancaría contra un puerto que todavía no atiende y, con `recovery: true`,
+  # `amqplib` no falla —reintenta para siempre—, así que el síntoma sería un `/ready` colgado y no
+  # un error. El volumen queda anónimo y se lo lleva el `down -v`: la fase `recover` necesita que la
+  # cola durable del smoke NO sobreviva a la corrida anterior.
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  domino:
+    build:
+      context: .
+      target: smoke-server
+    environment:
+      NODE_ENV: production
+      PORT: 2567
+      PM2_INSTANCES: 2
+      SERVER_ADDRESS: nginx:8080
+      JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
+      INTERNAL_API_KEY: smoke-internal-key-with-more-than-16-chars
+      REDIS_URL: redis://redis:6379/1
+      MONGO_URI: mongodb://mongo:27017/domino-smoke
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      # LA LIGA APUNTA AL NGINX DEL STACK Y NO AL BACKEND REAL, y no es por comodidad: este smoke
+      # TERMINA UNA PARTIDA, así que el `POST leagues/save` se dispara de verdad. Con la URL
+      # productiva acá, cada corrida del smoke le metería un resultado inventado a la liga de
+      # producción — y esa ruta no pide credencial, así que nada del otro lado lo pararía.
+      #
+      # `smoke/nginx.conf` la atiende con un 204. Es obligatoria porque `NODE_ENV=production`
+      # exige las cuatro (ver `src/env.ts`): sin esta línea el servidor muere al arrancar con
+      # «en producción faltan: BACKEND_URL» y el smoke entero se cae antes de la primera fase.
+      BACKEND_URL: http://nginx:8080/
+      TURN_TIMEOUT_MS: 5000
+      EXTRA_TIME_RESERVE_MS: 1000
+      DEALING_TIMEOUT_MS: 5000
+      PRESENTING_ROUND_MS: 20
+      PRESENTING_MATCH_MS: 20
+      SEATING_TIMEOUT_MS: 5000
+      RECONNECTION_WINDOW_SECONDS: 5
+    depends_on:
+      redis:
+        condition: service_started
+      mongo:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.30.4-alpine3.24
+    volumes:
+      - ./smoke/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - domino
+
+  # EL CLIENTE MIDE DESDE AFUERA, y por eso recibe las dos URLs además de hablar HTTP: un cliente
+  # que sólo pidiera por HTTP mediría lo que el servidor DICE, no lo que quedó escrito. Acá abre
+  # Mongo para leer el documento y el outbox, y abre AMQP para leer el mensaje que llegó al
+  # consumidor — que es el único lugar donde se puede comparar el cuerpo publicado con el de v1.
+  #
+  # ⚠ NO tiene `depends_on: rabbitmq`: el runner lo invoca con `--no-deps` justamente porque una de
+  # las fases certifica que Rabbit está CAÍDO. Queda declarado igual para el caso en que alguien
+  # corra el servicio a mano.
+  smoke-client:
+    build:
+      context: .
+      target: smoke-client
+    environment:
+      NODE_ENV: test
+      JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
+      INTERNAL_API_KEY: smoke-internal-key-with-more-than-16-chars
+      MONGO_URI: mongodb://mongo:27017/domino-smoke
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      RUN_ENGINE_SMOKE: 1
+    depends_on:
+      - nginx

@@ -1,0 +1,114 @@
+# LA TAREA DE VERIFICAR, una sola vez y para todos los entornos.
+#
+# El eje es la TAREA y no el entorno. Lo que había en los otros repos de la organización era un
+# workflow por RAMA, copiados entre sí, que hacían pull y build EN EL SERVIDOR y reiniciaban pm2:
+# nada verificaba antes de tocar producción, la máquina que estaba sirviendo era la que compilaba,
+# y un build fallido dejaba el árbol a medio actualizar sin nada a lo que volver.
+#
+# No se dispara en `develop`/`stage`/`main`: ahí lo llama `deploy.yml` con `workflow_call`, así que
+# cada evento produce UNA corrida y no dos. Y como el despliegue depende de este workflow, nada
+# llega a un servidor sin haber pasado por acá.
+#
+# Deja empaquetado el artefacto que se despliega. Construir ACÁ y no en el servidor es la
+# diferencia entre un build roto que falla en rojo y uno que deja a medio compilar a la máquina que
+# está sirviendo partidas.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [develop, stage, main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    # SIN `services:`, Y ES LA DECISIÓN QUE ESTE ARCHIVO DECIDE DISTINTO QUE TRUCO.
+    #
+    # Allá el job levanta Redis y Mongo porque su suite LOS NECESITA de verdad. Acá la suite no los
+    # mira: `vitest.setup.ts` desactiva `dotenv.config` y BORRA `MONGO_URI` y `REDIS_URL` antes de
+    # que corra nada, y sin esas dos variables el historial es el de memoria y Colyseus usa su
+    # driver y su presence locales. Que `npm test` no dependa de ningún servicio externo es una
+    # PROPIEDAD DEL REPO, escrita a propósito y con su argumento largo en `vitest.setup.ts`.
+    #
+    # Entonces levantar los contenedores acá no agregaría cobertura: agregaría un job que MIENTE.
+    # Dos imágenes tirando health-checks durante toda la corrida, un lector que cree que la suite
+    # ejercita Mongo y Redis, y cero aserciones nuevas — porque no hay ninguna línea de test que
+    # pueda alcanzarlos mientras el setup borre esas variables.
+    #
+    # Lo que hoy cubre las ramas de infraestructura es un doble del driver
+    # (`src/features/match/network/transports/mongo-history.test.ts`) y, del lado de Redis, el hecho
+    # de que el adaptador sean CERO LÍNEAS PROPIAS: `src/shared/kv.ts` tiene la forma de la
+    # `Presence` de Colyseus, así que lo que correría contra un Redis real sería código de
+    # Colyseus. Si algún día se quiere ejercitarlos de verdad, lo que falta NO es este bloque: es
+    # una suite de integración aparte que no pase por `vitest.setup.ts`, y entonces sí un job
+    # propio con sus servicios. Agregar los servicios sin esos tests es ruido con forma de rigor.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # EL PISO DE NODE ESTÁ ESCRITO ACÁ Y EN OTROS TRES LUGARES que no se importan entre sí, y
+      # ninguno rompe el gate al desincronizarse. Por eso este número no queda suelto:
+      # `src/entrypoint.test.ts` lo lee de este archivo y lo compara contra el `engines` del
+      # `package.json`, que a su vez se compara contra el que declara colyseus. Un bump de colyseus
+      # que suba SU piso pone rojo el gate, que es el único lugar barato donde enterarse.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # LOS CUATRO PASOS SON LOS CUATRO COMANDOS DEL GATE, con los nombres de script del repo y no
+      # con los binarios sueltos: si alguien renombra un script, acá falla en vez de correr un
+      # `npx` que resuelve otra cosa. Y `typecheck` va PRIMERO porque es EL gate — vitest transpila
+      # con esbuild, que borra los tipos sin chequearlos, así que una suite verde no dice nada
+      # sobre si el proyecto compila (§AGENTS.md).
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Sin servicios y sin `.env`: si esto se pone rojo acá y verde en una máquina de desarrollo,
+      # lo que cambió es el entorno de esa máquina, y eso es justamente lo que el CI viene a decir.
+      - name: Tests unitarios
+        run: npm run test:unit
+
+      - name: Tests de integración y E2E
+        run: npm run test:int && npm run test:e2e
+
+      - name: Build
+        run: npm run build
+
+      - name: Docs
+        run: npm run docs:build
+
+      # Suite de integración separada: sí levanta Mongo/Redis porque además certifica el bundle,
+      # PM2 y los paths de Nginx. No contradice que Vitest sea hermético.
+      - name: Smoke Docker, PM2 y Nginx
+        env:
+          RUN_ENGINE_SMOKE: '1'
+        run: npm run test:deploy
+
+      # LO QUE VIAJA AL SERVIDOR: el bundle, con qué instalar las dependencias de producción, cómo
+      # arrancarlo, y EL PROPIO PROCEDIMIENTO DE DESPLIEGUE — que así es siempre el de la versión
+      # que se está desplegando, y no el que alguien dejó escrito en el servidor hace seis meses.
+      #
+      # Sin `.npmrc`: truco empaqueta el suyo, el dominó no tiene ninguno, y `tar` con un archivo
+      # inexistente falla (la misma razón por la que el `Dockerfile` tampoco lo copia).
+      - name: Empaquetar el release
+        run: >-
+          tar -czf domino-v2.tgz
+          dist package.json package-lock.json ecosystem.config.cjs scripts/deploy-remote.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: domino-v2.tgz
+          retention-days: 7
+          if-no-files-found: error
