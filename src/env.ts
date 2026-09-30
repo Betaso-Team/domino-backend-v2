@@ -64,6 +64,22 @@ loadEnvFileUnlessTest(process.env, () => {
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   /**
+   * EN QUÉ ENTORNO CORRE, que `NODE_ENV` no puede decir: vale `production` en dev, stage y prod por
+   * igual (portado de truco `b22ce07`). Hoy decide dos cosas: qué dice el campo `env` de cada línea
+   * del log, y si se montan las herramientas de Colyseus para probar a mano (`app.config.ts`).
+   *
+   * VIVE EN EL `.env` DEL SERVIDOR Y NO VIAJA CON EL DEPLOY, y es lo que este repo decide distinto
+   * que truco. Allá lo manda el workflow y tuvo que anotarlo además en `shared/deploy.env`, porque un
+   * rollback se pide desde el servidor sin el workflow que lo calculó. Acá cada servidor ES un
+   * entorno y su `.env` ya es lo único que el rollback relee (§`ecosystem.config.cjs`).
+   *
+   * SIN DECLARAR, FALLA CERRADO: con `NODE_ENV=production` es `prod`, fuera de producción es
+   * `local`. Truco elige `local` siempre, porque allá sólo decide cuánto se loguea; acá abre un
+   * monitor que muestra las manos de todos y corre cualquier método de una sala, así que un `.env`
+   * que se olvidó la línea no puede terminar con eso abierto en producción.
+   */
+  APP_ENV: z.enum(["local", "dev", "stage", "prod"]).optional(),
+  /**
    * El puerto BASE, que con varias instancias no es el puerto de ninguna salvo la primera.
    *
    * QUIEN SUMA NO SOMOS NOSOTROS NI pm2: es `@colyseus/tools`, adentro de su `listen()`
@@ -289,8 +305,17 @@ const schema = z.object({
   RUN_ENGINE_SMOKE: z.string().optional(),
 });
 
+export type AppEnv = NonNullable<z.infer<typeof schema>["APP_ENV"]>;
+
+/** Donde se prueba a mano: la máquina de quien escribe el código y el servidor de dev. */
+export function isDevEnvironment(appEnv: AppEnv): boolean {
+  return appEnv === "local" || appEnv === "dev";
+}
+
 export interface Env {
   readonly nodeEnv: z.infer<typeof schema>["NODE_ENV"];
+  /** Ver APP_ENV. Nunca `undefined`: sin declarar ya se resolvió al lado seguro. */
+  readonly appEnv: AppEnv;
   /** El puerto BASE, el que se le pasa a `listen()`. NO es el que esta instancia ata. Ver PORT. */
   readonly port: number;
   /** `undefined` ⇒ esto no lo levantó pm2. NO es la instancia 0. Ver NODE_APP_INSTANCE. */
@@ -375,6 +400,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   const listeningPort = parsed.PORT + (instanceIndex ?? 0);
   return {
     nodeEnv: parsed.NODE_ENV,
+    appEnv: parsed.APP_ENV ?? (parsed.NODE_ENV === "production" ? "prod" : "local"),
     port: parsed.PORT,
     instanceIndex,
     listeningPort,

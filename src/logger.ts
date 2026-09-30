@@ -27,5 +27,5 @@ export function wrap(instance: pino.Logger): Logger {
 }
 
 export const logger = wrap(
-  pino({ level: env.logLevel, base: { app: "domino-backend-v2", env: env.nodeEnv } }),
+  pino({ level: env.logLevel, base: { app: "domino-backend-v2", env: env.appEnv } }),
 );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "./env";
+import { isDevEnvironment, parseEnv } from "./env";
 
 describe("parseEnv", () => {
   it("acepta un entorno completo", () => {
@@ -282,5 +282,46 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), NODE_ENV: "staging" }),
     ).toThrow(/NODE_ENV/);
+  });
+
+  // `NODE_ENV` vale `production` en dev, stage y prod por igual, así que no puede decir EN CUÁL se
+  // está. `APP_ENV` sí, y lo que decide —hoy, montar las herramientas de Colyseus que muestran el
+  // estado entero de cada sala— no puede quedar prendido en prod por olvido.
+  describe("APP_ENV", () => {
+    const productivo = {
+      NODE_ENV: "production",
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+      MONGO_URI: "mongodb://mongo:27017/domino",
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+      BETASO_ADMIN_PANEL_API_KEY: "k".repeat(16),
+      BETASO_BACKEND_API_KEY: "b".repeat(16),
+      BETASO_BACKEND_URL: "https://api.elbetaso.com/api/",
+    };
+
+    it("sin declarar, fuera de producción es local", () => {
+      expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).appEnv).toBe("local");
+    });
+
+    // FALLA CERRADO: un servidor cuyo `.env` no lo declara no puede terminar con el monitor abierto.
+    it("sin declarar, en producción es prod", () => {
+      expect(parseEnv(productivo).appEnv).toBe("prod");
+    });
+
+    it("declarado, gana sobre NODE_ENV", () => {
+      expect(parseEnv({ ...productivo, APP_ENV: "dev" }).appEnv).toBe("dev");
+    });
+
+    it("rechaza un entorno que no existe", () => {
+      expect(() => parseEnv({ ...productivo, APP_ENV: "production" })).toThrow(/APP_ENV/);
+    });
+  });
+
+  it.each([
+    ["local", true],
+    ["dev", true],
+    ["stage", false],
+    ["prod", false],
+  ] as const)("isDevEnvironment(%s) es %s", (appEnv, esperado) => {
+    expect(isDevEnvironment(appEnv)).toBe(esperado);
   });
 });
