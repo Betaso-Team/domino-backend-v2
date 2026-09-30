@@ -42,7 +42,7 @@ export interface MatchmakingConfig {
   // reason: nobody decides anything with this number, so being a few seconds old costs nothing, while
   // taking it is expensive — it walks the cluster's whole census and sweeps the rooms that died.
   //
-  // It matches the beat at which the lobby publishes its banner, so the number a client sees is never
+  // It is also the beat at which the lobby publishes its banner, so the number a client sees is never
   // older than one pulse.
   readonly censusPollMs: number;
 }

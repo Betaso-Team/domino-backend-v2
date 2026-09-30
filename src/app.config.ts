@@ -10,7 +10,7 @@ import {
   selectProcessIdToCreateRoom,
 } from "@/features/match";
 import { matchRooms } from "@/features/match/transports/colyseus/register";
-import { matchmakingHttp, matchmakingRooms } from "@/features/matchmaking";
+import { type MatchmakingConfig, matchmakingHttp, matchmakingRooms } from "@/features/matchmaking";
 import { settingsHttp } from "@/features/settings";
 import { type StrikeBook, tournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
@@ -50,6 +50,7 @@ const rooms = {
     verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
     maintenance: maintenanceSignal,
     census,
+    pulseMs: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig").censusPollMs,
   }),
   ...matchRooms(),
 };

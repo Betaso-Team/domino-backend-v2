@@ -23,6 +23,11 @@ export interface LobbyDeps {
   // How many are playing across the cluster. Same shape as the switch and for the same reason: the
   // room decides nothing with it, it REPORTS it.
   readonly census: MatchCensus;
+  // How often the banner is published. A pulse of its own and not a reaction to someone joining or
+  // leaving: what it counts happens at the TABLES, so ten matches could start and end with the
+  // banner frozen until somebody opened the app. Read when the room is born, not when the process
+  // boots.
+  readonly pulseMs: () => number;
 }
 
 /**
@@ -53,11 +58,6 @@ export interface GameModeStats {
   readonly playersInMatch: number;
   readonly playersSearching: number;
 }
-
-// How often it is published. A pulse of its own and not a reaction to someone joining or leaving:
-// what it counts happens at the TABLES, so ten matches could start and end with the banner frozen
-// until somebody opened the app.
-const STATS_INTERVAL_MS = 5_000;
 
 // What is shown before the first pulse, which lasts as long as the first count takes. Zeroes and not
 // silence: the banner falls back to "I do not know yet", which breaks a screen the least. A LATER
@@ -137,7 +137,7 @@ export class LobbyRoom extends Room {
       this.broadcast("MAINTENANCE", maintenance),
     );
     // The banner, on the room's clock. It has to beat even when nobody joins or leaves.
-    this.ticker = this.clock.setInterval(() => void this.publishStats(), STATS_INTERVAL_MS);
+    this.ticker = this.clock.setInterval(() => void this.publishStats(), deps.pulseMs());
     void this.publishStats();
     this.onMessage("REQUEST_MATCH", (client, payload) => {
       void this.search(client, payload as RequestMatchPayload);
