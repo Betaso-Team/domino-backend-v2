@@ -76,6 +76,42 @@ del clúster converge en 5 s. Fuera de lo editable quedan `tilesPerPlayer` (regl
 tres intervalos que el emparejador lee al arrancar (`tickIntervalMs`, `maintenancePollMs`,
 `censusPollMs`): se rechazan con 400 en vez de aceptarse e ignorarse.
 
+### API del orquestador
+
+Dos rutas que sólo usa el orquestador de Betaso Juegos. Van con `x-internal-api-key` igual a
+`ORCHESTRATOR_API_KEY` (la del panel no las abre); sin esa variable no se registran y responden 404.
+Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
+cuerpo.
+
+**`POST /internal/matches`** abre una mesa. Cuerpo (`CreateMatchRequest`, estricto: una clave de más
+es 400): `mode` (`"CASUAL"`), `matchId`, `gameModeId` (uuid del catálogo), `participants` (2 a 4;
+cada uno `userId`, `displayName`, `currency` y, opcionales, `username` y `profilePicture`), `seed`,
+`teamAssignment` (`SHUFFLED` o `SEAT_ORDER`) y `rateId` (opaco: el `_id` de Mongo de la tasa de
+Betaso).
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `201` | `{ status, data: { roomId, seats: [{ userId, reservation }] } }` | La sala nació; cada jugador consume su `reservation` |
+| `400` | `{ code: "MALFORMED", detail }` | El cuerpo no cumple la forma |
+| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `422` | `{ error: "UNKNOWN_GAME_MODE" }`, `"UNSUPPORTED_GAME_MODE"` o `"SEAT_COUNT_MISMATCH"` | La sala rechazó la mesa: modo inexistente o dado de baja, 4P, o cantidad que no coincide con el modo |
+| `500` | | Cualquier otra falla es nuestra, incluido el mantenimiento |
+
+**`POST /internal/players/:userId/seat`** devuelve el asiento de quien sigue jugando (sin cuerpo).
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status, data: { matchId, reservation } }` | Sigue en una mesa; el `matchId` es el del orquestador |
+| `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
+| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
+| `500` | | La sala existe pero está bloqueada por reservas sin consumir: el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+
+**Estas mesas no mueven dinero ni reportan resultados.** Una sala creada por este camino no tiene
+`roomOptions`: no ofrece niveles de apuesta, no cobra aumentos, no toca la billetera ni el ledger,
+y al resolverse no publica `ranking.won` ni llama a la liga de Betaso. El dinero lo mueve el
+orquestador, y qué se reporta de estas mesas lo decide el Plan 3.
+
 ## Eventos y salidas
 
 ```mermaid

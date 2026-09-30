@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-`BETASO_BACKEND_JWT_SECRET` es obligatorio. `BETASO_ADMIN_PANEL_API_KEY` (la que nos presenta el panel) habilita las rutas internas; `BETASO_BACKEND_API_KEY` (la que presentamos al backend) habilita torneo, antifraude y niveles de apuesta. Mongo, Redis, RabbitMQ
+`BETASO_BACKEND_JWT_SECRET` es obligatorio. `BETASO_ADMIN_PANEL_API_KEY` (la que nos presenta el panel) habilita las rutas internas; `BETASO_BACKEND_API_KEY` (la que presentamos al backend) habilita torneo, antifraude y niveles de apuesta. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches` y `POST /internal/players/:userId/seat`; sin ella esas rutas responden 404, y si está el arranque exige `BILLING_AUTH_PUBLIC_KEY` y que no repita ninguna de las otras dos llaves. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor `JWT_ISSUER` (default `betaso-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; los HS256 del backend principal siguen valiendo. Mongo, Redis, RabbitMQ
 y el backend principal son capacidades opcionales elegidas por la presencia de sus URLs.
 
 Con el stack local completo:

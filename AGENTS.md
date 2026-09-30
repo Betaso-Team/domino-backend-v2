@@ -1933,7 +1933,11 @@ Y después la **API para el orquestador** (rama `feat/api-orquestador`, sobre
 `refactor/port-truco-integracion-front`): el orquestador de Betaso Juegos
 (`betaso-games-orchestrator/apps/domino-orchestrator`) empareja y le pide la mesa a dominó.
 `POST /internal/matches` abre una sala con un `CreateMatchRequest` —**sin `roomOptions`, así que la
-sala no cobra, no reembolsa ni paga: el dinero lo mueve el orquestador**— y
+sala no cobra, no reembolsa ni paga: el dinero lo mueve el orquestador**. Desde `3de2d3c` eso es
+verdad de punta a punta: esas salas no consultan niveles de apuesta, no enganchan el `BetCharger`
+(sin aumentos que cobrar ni filas `BET_MULTIPLIER` en el ledger) y no arman `reportStandings` (ni
+`ranking.won` ni `leagues.record`); niveles, cobro de aumentos y reportes de ranking/liga quedan
+FUERA de las mesas del orquestador hasta que el Plan 3 decida— y
 `POST /internal/players/:userId/seat` devuelve el asiento de quien sigue jugando, leído de
 `MatchRegistry.matchOf`. Las dos con `x-internal-api-key` y **su propia llave,
 `ORCHESTRATOR_API_KEY`** (fail closed sin ella); la del panel no las abre. `rateId` pasó a string
@@ -1947,6 +1951,8 @@ Hechos medidos en la Tarea 13, Parte B:
 - **Toda reserva sin consumir mantiene viva su sala ~15 s** (`seatReservationTimeout`) y retrasa `server.shutdown()` — los tests que obtienen una reserva tienen que consumirla.
 - **Pendiente de decidir:** qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing); `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
 - **`BILLING_AUTH_PUBLIC_KEY` se valida al boot** (EC P-256 solo público; una clave privada se rechaza).
+- **El ES256 exige el juego**: billing-auth firma `aud: ['orchestrator','domino']` para todos los juegos, así que el `JwtVerifier` rechaza un ES256 cuyo claim `game` no sea `"domino"` (un token de truco pasaría emisor y audiencia). Y `parseEnv` falla al arrancar si hay `ORCHESTRATOR_API_KEY` sin `BILLING_AUTH_PUBLIC_KEY`, o si esa llave repite `BETASO_ADMIN_PANEL_API_KEY` o `BETASO_BACKEND_API_KEY`.
+- **Bug previo, pendiente y con su propio ticket (no se arregla en esta rama):** `BetCharger.charge` trata `DuplicateMovementError` como "pagado", pero la clave del ledger es `(matchId, playerId, reason)` sin secuencia; tras un aumento revocado, un segundo aumento en la misma partida cuenta a los dos como pagados (`bet-charge.ts:84-89`, `legality.ts:170`).
 
 ## Cómo se ejecuta una tarea
 
