@@ -191,8 +191,23 @@ echo "▸ release   $RELEASE_DIR"
 echo "▸ anterior  ${PREVIOUS:-<ninguna: es el primer despliegue>}"
 echo "▸ app       $PM2_APP_NAME · $PM2_INSTANCES instancia(s) · puertos $PORT..$((PORT + PM2_INSTANCES - 1))"
 
-echo "▸ instalando dependencias de producción"
-(cd "$RELEASE_DIR" && npm ci --omit=dev --no-audit --no-fund)
+# LAS DEPENDENCIAS, REUSADAS cuando no cambiaron —que es casi siempre— (portado de truco `32d83de`).
+# La marca dice con qué se instalaron: el lockfile y el node que las compiló (un módulo nativo
+# compilado para otro node no carga). Si la del release anterior coincide, sus `node_modules` se
+# copian con HARDLINKS: medio segundo contra los ~10 del `npm ci`, y sin ocupar disco. Es seguro
+# porque un release no se modifica nunca después de desplegado; borrar el viejo sólo borra sus
+# enlaces. Sin marca —el primer despliegue con este script— se instala como siempre.
+STAMP_FILE="node_modules/.deploy-stamp"
+stamp="node $(node --version) · lock $(sha256sum "$RELEASE_DIR/package-lock.json" | cut -d' ' -f1)"
+if [ -n "$PREVIOUS" ] && [ -f "$PREVIOUS/$STAMP_FILE" ] && [ "$(cat "$PREVIOUS/$STAMP_FILE")" = "$stamp" ]; then
+  echo "▸ dependencias sin cambios: se reusan las de $(basename "$PREVIOUS")"
+  cp -al "$PREVIOUS/node_modules" "$RELEASE_DIR/node_modules"
+else
+  echo "▸ instalando dependencias de producción"
+  (cd "$RELEASE_DIR" && npm ci --omit=dev --no-audit --no-fund)
+  mkdir -p "$RELEASE_DIR/node_modules"
+  printf '%s\n' "$stamp" >"$RELEASE_DIR/$STAMP_FILE"
+fi
 
 # EL SYMLINK SE MUEVE ATÓMICAMENTE: `ln -sfn` sobre un enlace que ya existe borra y crea, y entre
 # esas dos operaciones `current` NO EXISTE. Se crea al lado y se renombra con `mv -Tf`, que es un
