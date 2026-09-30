@@ -123,7 +123,64 @@ describe("JwtVerifier con billing-auth", () => {
     await expect(both.verify(forged)).rejects.toBeInstanceOf(InvalidTokenError);
   });
 
+  // EXIGIMOS `exp`: billing-auth siempre lo pone, y un token que no vence nunca no es uno suyo.
+  it("rechaza un ES256 sin exp", async () => {
+    const noExp = jwt.sign({ sub: "p-1" }, BILLING_PRIVATE, {
+      algorithm: "ES256",
+      issuer: "betaso-auth",
+      audience: "domino",
+    });
+    await expect(both.verify(noExp)).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
+  it("rechaza un token alg none", async () => {
+    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const none = `${b64({ alg: "none", typ: "JWT" })}.${b64({ sub: "p-1" })}.`;
+    await expect(both.verify(none)).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
+  it.each([
+    ["texto suelto", "abc"],
+    ["cadena vacía", ""],
+    ["header que no es JSON", `${Buffer.from("no json").toString("base64url")}.e30.firma`],
+  ])("rechaza con InvalidTokenError un token malformado: %s", async (_name, token) => {
+    await expect(both.verify(token)).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
   it("sin la clave de billing-auth, un ES256 no entra", async () => {
     await expect(verifier.verify(billingToken())).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+});
+
+// LA CLAVE SE VALIDA AL ARRANCAR: el constructor corre al construir el container, así que una
+// clave mala tumba el arranque en vez de fallar jugador por jugador.
+describe("JwtVerifier: validación de la clave de billing-auth", () => {
+  const build = (publicKeyPem: string) => () =>
+    new JwtVerifier(SECRET, { publicKeyPem, issuer: "betaso-auth", audience: "domino" });
+
+  it("una clave que no es un PEM revienta al construir, nombrando la variable", () => {
+    expect(build("esto no es un pem")).toThrow(/BILLING_AUTH_PUBLIC_KEY/);
+  });
+
+  it("la clave PRIVADA de billing-auth revienta: dominó nunca debe poder firmar", () => {
+    expect(build(BILLING_PRIVATE)).toThrow(/BILLING_AUTH_PUBLIC_KEY/);
+  });
+
+  it("una pública RSA revienta: billing-auth firma ES256", () => {
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 })
+      .publicKey.export({ type: "spki", format: "pem" })
+      .toString();
+    expect(build(rsa)).toThrow(/BILLING_AUTH_PUBLIC_KEY/);
+  });
+
+  it("una pública EC de otra curva (P-384) revienta", () => {
+    const p384 = generateKeyPairSync("ec", { namedCurve: "P-384" })
+      .publicKey.export({ type: "spki", format: "pem" })
+      .toString();
+    expect(build(p384)).toThrow(/BILLING_AUTH_PUBLIC_KEY/);
+  });
+
+  it("la pública P-256 válida sí construye", () => {
+    expect(build(BILLING_PUBLIC)).not.toThrow();
   });
 });

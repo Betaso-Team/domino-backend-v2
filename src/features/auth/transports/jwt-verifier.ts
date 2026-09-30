@@ -1,3 +1,4 @@
+import { type KeyObject, createPrivateKey, createPublicKey } from "node:crypto";
 import jwt from "jsonwebtoken";
 import type { Identity, TokenVerifier } from "../identity";
 import { InvalidTokenError } from "../identity";
@@ -23,10 +24,15 @@ export interface BillingAuthTrust {
  * principal.
  */
 export class JwtVerifier implements TokenVerifier {
+  // La clave ya parseada y validada: se arma UNA vez, al construir, no en cada verificación.
+  private readonly billingKey: KeyObject | undefined;
+
   constructor(
     private readonly secret: string,
     private readonly billingAuth?: BillingAuthTrust,
-  ) {}
+  ) {
+    this.billingKey = billingAuth ? parseBillingKey(billingAuth.publicKeyPem) : undefined;
+  }
 
   async verify(token: string | undefined): Promise<Identity> {
     if (token === undefined) {
@@ -36,8 +42,8 @@ export class JwtVerifier implements TokenVerifier {
     let payload: string | jwt.JwtPayload;
     try {
       payload =
-        this.billingAuth && algorithmOf(token) === "ES256"
-          ? jwt.verify(token, this.billingAuth.publicKeyPem, {
+        this.billingAuth && this.billingKey && algorithmOf(token) === "ES256"
+          ? jwt.verify(token, this.billingKey, {
               algorithms: ["ES256"],
               issuer: this.billingAuth.issuer,
               audience: this.billingAuth.audience,
@@ -51,6 +57,11 @@ export class JwtVerifier implements TokenVerifier {
     if (typeof payload === "string") {
       throw new InvalidTokenError("payload no es un objeto");
     }
+    // billing-auth SIEMPRE pone `exp`: un ES256 sin vencimiento no es uno suyo. (El HS256 del
+    // backend principal queda como estaba.)
+    if (this.billingAuth && algorithmOf(token) === "ES256" && typeof payload.exp !== "number") {
+      throw new InvalidTokenError("sin claim exp");
+    }
     if (typeof payload.sub !== "string" || payload.sub.trim().length === 0) {
       throw new InvalidTokenError("sin claim sub");
     }
@@ -61,4 +72,34 @@ export class JwtVerifier implements TokenVerifier {
 // Solo LEE el header para elegir la rama; la firma la comprueba `jwt.verify` después.
 function algorithmOf(token: string): string | undefined {
   return jwt.decode(token, { complete: true })?.header.alg;
+}
+
+// FALLA AL ARRANCAR, no jugador por jugador: el constructor corre al armar el container. Acepta
+// SOLO una clave pública EC P-256 (ES256). Una clave PRIVADA se rechaza aunque Node sepa derivar
+// de ella la pública: dominó solo verifica, y no debe tener en la config nada con lo que firmar.
+function parseBillingKey(pem: string): KeyObject {
+  if (isPrivateKey(pem)) {
+    throw new Error(
+      "BILLING_AUTH_PUBLIC_KEY contiene una clave PRIVADA: debe ser la clave PÚBLICA de billing-auth",
+    );
+  }
+  let key: KeyObject;
+  try {
+    key = createPublicKey(pem);
+  } catch {
+    throw new Error("BILLING_AUTH_PUBLIC_KEY no es un PEM de clave pública válido");
+  }
+  if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
+    throw new Error("BILLING_AUTH_PUBLIC_KEY debe ser una clave pública EC P-256 (ES256)");
+  }
+  return key;
+}
+
+function isPrivateKey(pem: string): boolean {
+  try {
+    createPrivateKey(pem);
+    return true;
+  } catch {
+    return false;
+  }
 }
