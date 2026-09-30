@@ -51,17 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # EL PISO DE NODE ESTÁ ESCRITO ACÁ Y EN OTROS TRES LUGARES que no se importan entre sí, y
-      # ninguno rompe el gate al desincronizarse. Por eso este número no queda suelto:
-      # `src/entrypoint.test.ts` lo lee de este archivo y lo compara contra el `engines` del
-      # `package.json`, que a su vez se compara contra el que declara colyseus. Un bump de colyseus
-      # que suba SU piso pone rojo el gate, que es el único lugar barato donde enterarse.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-
-      - run: npm ci
+      # Node y `node_modules`, restaurado del caché cuando el lockfile no cambió. El piso de node
+      # vive ahí (§`.github/actions/install/action.yml`), y `src/entrypoint.test.ts` lo lee de ahí.
+      - uses: ./.github/actions/install
 
       # LOS CUATRO PASOS SON LOS CUATRO COMANDOS DEL GATE, con los nombres de script del repo y no
       # con los binarios sueltos: si alguien renombra un script, acá falla en vez de correr un
@@ -84,9 +76,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      - name: Docs
-        run: npm run docs:build
 
       # Suite de integración separada: sí levanta Mongo/Redis porque además certifica el bundle,
       # PM2 y los paths de Nginx. No contradice que Vitest sea hermético.
@@ -112,3 +101,20 @@ jobs:
           path: domino-v2.tgz
           retention-days: 7
           if-no-files-found: error
+
+  # LOS DOCS, EN PARALELO (truco `32d83de`). Siguen siendo una puerta —un enlace muerto o un
+  # diagrama que no compila rompe la corrida, que es la única forma de que no se pudran en
+  # silencio— pero no tienen por qué estar en el camino crítico: no los necesita el artefacto, así
+  # que sus segundos dejan de sumarse a los de la suite y el smoke.
+  #
+  # En `develop`/`stage`/`main` un push que SÓLO toca docs no despliega (`deploy.yml` los ignora):
+  # ahí la puerta la sostiene `docs.yml`.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/install
+
+      - name: Docs
+        run: npm run docs:build

@@ -22,6 +22,14 @@ name: Deploy
 on:
   push:
     branches: [develop, stage, main]
+    # LO QUE NO VIAJA EN EL ARTEFACTO NO DESPLIEGA (truco `32d83de`): un push que sólo toca esto sube
+    # al servidor el mismo binario que ya corre, y reiniciar pm2 por eso es cortar sockets por nada.
+    # Los docs igual se verifican, en `docs.yml`. Basta UN archivo fuera de esta lista para que el
+    # push despliegue entero.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
   workflow_dispatch:
     inputs:
       environment:

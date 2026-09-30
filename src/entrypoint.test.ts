@@ -111,10 +111,17 @@ describe("el piso de node se dice en voz alta y en todos lados", () => {
   //
   // Se lee el YAML como TEXTO, igual que el resto de este archivo: parsearlo pediría una
   // dependencia nueva para medir una línea. La forma es la que escribe `actions/setup-node`.
+  //
+  // EL NÚMERO VIVE EN LA ACCIÓN COMPARTIDA DE INSTALACIÓN, no en el workflow: todos los jobs
+  // instalan por ella. Y el workflow tiene que USARLA — un job que volviera a llamar a
+  // `setup-node` suelto sin versión correría con el node del runner, y acá no aparecería.
   it("el CI no verifica con un node por debajo de ese piso", () => {
     const nuestro = nodeMajorFloor(JSON.parse(read("package.json")).engines.node);
+    const ci = read(".github/workflows/ci.yml");
+    expect(ci).toContain("uses: ./.github/actions/install");
+    expect(ci).not.toContain("actions/setup-node");
     const versiones = [
-      ...read(".github/workflows/ci.yml").matchAll(/node-version:\s*'?(\d+)/g),
+      ...read(".github/actions/install/action.yml").matchAll(/node-version:\s*'?(\d+)/g),
     ].map((m) => Number(m[1]));
     expect(versiones.length).toBeGreaterThan(0);
     for (const mayor of versiones) expect(mayor).toBeGreaterThanOrEqual(nuestro);

@@ -1,0 +1,26 @@
+# LOS DOCS DE LAS RAMAS QUE DESPLIEGAN, cuando cambian (portado de truco `32d83de`).
+#
+# En esas ramas los docs se construían dentro del gate que llama `deploy.yml`, que ya no corre para
+# un push que sólo toca docs. Esto mantiene la puerta —un enlace muerto rompe la corrida— sin pagar
+# la suite, el smoke ni el despliegue. En un push que además toca código corre también el job `docs`
+# de `ci.yml`: es el mismo build dos veces, en paralelo y fuera del camino crítico.
+name: Docs
+
+on:
+  push:
+    branches: [develop, stage, main]
+    paths: ['docs/**']
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/install
+
+      - name: Docs
+        run: npm run docs:build
