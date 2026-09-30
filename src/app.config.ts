@@ -3,6 +3,7 @@ import { GameModeService, gameModeHttp } from "@/features/game-mode";
 import { LobbySettings, lobbyHttp } from "@/features/lobby";
 import {
   type Clock,
+  ColyseusMatchGateway,
   type HistoryReader,
   MatchRegistry,
   type PlayerLog,
@@ -208,6 +209,8 @@ const registerHttp = (app: Application) => {
       logger,
       history: rootContainer.resolve<HistoryReader>("HistoryReader"),
       adminPanelApiKey: env.adminPanelApiKey,
+      tables: rootContainer.resolve(ColyseusMatchGateway),
+      orchestratorApiKey: env.orchestratorApiKey,
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
       playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
     }),

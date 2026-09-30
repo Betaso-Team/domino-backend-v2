@@ -34,3 +34,7 @@ export const requireAdminPanelKey =
     }
     response.status(401).json({ error: "UNAUTHORIZED" });
   };
+
+// EL MISMO GUARDIA para cualquier llave de entrada: entre el panel y el orquestador cambia la
+// llave, no el chequeo.
+export const requireApiKey = requireAdminPanelKey;

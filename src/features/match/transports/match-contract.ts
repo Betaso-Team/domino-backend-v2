@@ -178,6 +178,10 @@ const matchSnapshot = z
   })
   .superRefine(({ seats }, context) => checkTableShape(seats, context, "seats"));
 
+// El MISMO schema, para que la API interna valide el cuerpo con el contrato de la sala y no con
+// una copia: si divergen, una mesa que la ruta acepta la sala la rechaza después de crearla.
+export const createMatchRequestSchema = createRequest;
+
 export type MatchParticipant = z.infer<typeof participant>;
 export type CreateMatchRequest = z.infer<typeof createRequest>;
 

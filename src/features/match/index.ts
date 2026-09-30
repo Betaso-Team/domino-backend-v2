@@ -74,6 +74,7 @@ export {
   type SeatCredentials,
   UnknownGameModeError,
   UnsupportedGameModeError,
+  createMatchRequestSchema,
 } from "./transports/match-contract";
 export {
   MatchRegistry,

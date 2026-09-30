@@ -178,6 +178,15 @@ const schema = z.object({
     .min(16, "BETASO_ADMIN_PANEL_API_KEY debe tener al menos 16 caracteres")
     .optional(),
   /**
+   * DE ENTRADA, la que presenta el ORQUESTADOR para abrir mesas y devolver asientos. Otra llave y
+   * no la del panel, por la misma regla que separó las demás: quien administra el catálogo no abre
+   * mesas, y quien abre mesas no administra. Ausente ⇒ esas rutas no existen (fail closed).
+   */
+  ORCHESTRATOR_API_KEY: z
+    .string()
+    .min(16, "ORCHESTRATOR_API_KEY debe tener al menos 16 caracteres")
+    .optional(),
+  /**
    * La URI de Mongo, donde queda escrito el historial de cada partida
    * (`mongodb://host:puerto/nombre` — la base viaja en la URI, como en truco y como en v1,
    * para que apuntar a otra sea cambiar UN valor).
@@ -356,6 +365,8 @@ export interface Env {
   readonly backendApiKey: string | undefined;
   /** DE ENTRADA. `undefined` ⇒ esta instancia no se administra. Ver BETASO_ADMIN_PANEL_API_KEY. */
   readonly adminPanelApiKey: string | undefined;
+  /** DE ENTRADA. `undefined` ⇒ el orquestador no puede abrir mesas acá. Ver ORCHESTRATOR_API_KEY. */
+  readonly orchestratorApiKey: string | undefined;
   /** `undefined` ⇒ el historial es el de memoria y muere con el proceso. Ver MONGO_URI. */
   readonly mongoUri: string | undefined;
   /** `undefined` ⇒ este proceso es un clúster de uno: driver, presence y registro locales. */
@@ -439,6 +450,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       : undefined,
     backendApiKey: parsed.BETASO_BACKEND_API_KEY,
     adminPanelApiKey: parsed.BETASO_ADMIN_PANEL_API_KEY,
+    orchestratorApiKey: parsed.ORCHESTRATOR_API_KEY,
     mongoUri: parsed.MONGO_URI,
     redisUrl: parsed.REDIS_URL,
     rabbitmqUrl: parsed.RABBITMQ_URL,

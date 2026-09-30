@@ -4,10 +4,12 @@ import { Router } from "express";
 import type { Clock } from "../../core/engine/clock";
 import type { HistoryReader } from "../../network/history";
 import type { PlayerLog } from "../../network/player-log";
+import type { ColyseusMatchGateway } from "../colyseus/gateway";
 import type { MatchRegistry } from "../match-registry";
 import { historyRoutes } from "./history";
 import { matchRoutes } from "./match";
 import { playerLogRoutes } from "./player-log";
+import { tablesRoutes } from "./tables";
 
 // TODAS las dependencias entran por PARÁMETRO OBLIGATORIO, ninguna con default y ninguna
 // leída de `env` acá adentro. El razonamiento ya estaba escrito para la llave interna
@@ -28,6 +30,9 @@ export interface MatchHttpDeps {
   readonly history: HistoryReader;
   /** `undefined` ⇒ la ruta interna NO se registra. Ver `historyRoutes`. */
   readonly adminPanelApiKey: string | undefined;
+  readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack">;
+  /** `undefined` ⇒ la API del orquestador NO se registra. Ver `tablesRoutes`. */
+  readonly orchestratorApiKey: string | undefined;
   readonly verifier?: TokenVerifier;
   readonly playerLog?: PlayerLog;
 }
@@ -42,5 +47,9 @@ export interface MatchHttpDeps {
 // seguiría dependiendo de tsyringe, escondiendo qué necesita, y sin poder testearse sin
 // armar un container—. Lo que un transporte no puede saber es que el container existe.
 export function matchHttp(deps: MatchHttpDeps): Router {
-  return Router().use(matchRoutes(deps)).use(playerLogRoutes(deps)).use(historyRoutes(deps));
+  return Router()
+    .use(matchRoutes(deps))
+    .use(playerLogRoutes(deps))
+    .use(historyRoutes(deps))
+    .use(tablesRoutes(deps));
 }

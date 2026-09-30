@@ -39,6 +39,7 @@ process.env.BETASO_BACKEND_JWT_SECRET ??= "test-secret-do-not-use-in-production"
 // Sin esto la API interna no se registra (fail closed) y sus tests e2e no tendrían
 // ruta contra la cual medir. El caso "sin llave" se prueba aparte, sin servidor.
 process.env.BETASO_ADMIN_PANEL_API_KEY ??= "test-admin-panel-key-do-not-use-in-production";
+process.env.ORCHESTRATOR_API_KEY ??= "test-orchestrator-key-do-not-use-in-production";
 // La de SALIDA, DISTINTA a propósito: con el mismo valor, un test que confundiera las dos llaves
 // daría verde.
 process.env.BETASO_BACKEND_API_KEY ??= "test-backend-key-do-not-use-in-production";

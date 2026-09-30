@@ -300,6 +300,17 @@ describe("parseEnv", () => {
     ).toThrow(/NODE_ENV/);
   });
 
+  it("sin ORCHESTRATOR_API_KEY no se abre la API del orquestador", () => {
+    expect(
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).orchestratorApiKey,
+    ).toBeUndefined();
+  });
+
+  it("rechaza una ORCHESTRATOR_API_KEY corta en vez de aceptar una llave enumerable", () => {
+    expect(() =>
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), ORCHESTRATOR_API_KEY: "corta" }),
+    ).toThrow(/ORCHESTRATOR_API_KEY/);
+  });
   // `NODE_ENV` vale `production` en dev, stage y prod por igual, así que no puede decir EN CUÁL se
   // está. `APP_ENV` sí, y lo que decide —hoy, montar las herramientas de Colyseus que muestran el
   // estado entero de cada sala— no puede quedar prendido en prod por olvido.

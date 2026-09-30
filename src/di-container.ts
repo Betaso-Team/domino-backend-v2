@@ -469,6 +469,8 @@ const poolDirectory = new ScopedPoolDirectory(
   },
 );
 const gateway = new ColyseusMatchGateway();
+// El MISMO gateway que usa el emparejador, registrado para la API del orquestador.
+rootContainer.register(ColyseusMatchGateway, { useValue: gateway });
 export const matchmaker = new Matchmaker({
   directory: poolDirectory,
   pool: new MemoryMatchPool(),
