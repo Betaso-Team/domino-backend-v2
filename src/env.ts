@@ -432,6 +432,25 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     if (faltan.length > 0)
       throw new Error(`Entorno inválido — en producción faltan: ${faltan.join(", ")}`);
   }
+  // LAS LLAVES DEL ORQUESTADOR SE VALIDAN ENTRE SÍ, y falla al arrancar porque el modo de falla es mudo:
+  // sin `BILLING_AUTH_PUBLIC_KEY` las mesas del orquestador se abren pero nadie puede entrar a ellas
+  // (sus jugadores traen ES256), y una llave repetida con la del panel o la de salida deja que una
+  // llave abra lo de otra — "cada llave abre lo suyo".
+  if (parsed.ORCHESTRATOR_API_KEY !== undefined) {
+    if (parsed.BILLING_AUTH_PUBLIC_KEY === undefined)
+      throw new Error(
+        "Entorno inválido — ORCHESTRATOR_API_KEY requiere BILLING_AUTH_PUBLIC_KEY: sin ella las mesas del orquestador abren y nadie puede entrar",
+      );
+    for (const [nombre, valor] of [
+      ["BETASO_ADMIN_PANEL_API_KEY", parsed.BETASO_ADMIN_PANEL_API_KEY],
+      ["BETASO_BACKEND_API_KEY", parsed.BETASO_BACKEND_API_KEY],
+    ] as const) {
+      if (valor === parsed.ORCHESTRATOR_API_KEY)
+        throw new Error(
+          `Entorno inválido — ORCHESTRATOR_API_KEY no puede ser igual a ${nombre}: cada llave abre lo suyo`,
+        );
+    }
+  }
   const instanceIndex = parsed.NODE_APP_INSTANCE;
   const listeningPort = parsed.PORT + (instanceIndex ?? 0);
   return {

@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { generateKeyPairSync } from "node:crypto";
 import dotenv from "dotenv";
 
 // EL `.env` NO EXISTE PARA LA SUITE, y esta línea es lo único que puede garantizarlo.
@@ -40,6 +41,11 @@ process.env.BETASO_BACKEND_JWT_SECRET ??= "test-secret-do-not-use-in-production"
 // ruta contra la cual medir. El caso "sin llave" se prueba aparte, sin servidor.
 process.env.BETASO_ADMIN_PANEL_API_KEY ??= "test-admin-panel-key-do-not-use-in-production";
 process.env.ORCHESTRATOR_API_KEY ??= "test-orchestrator-key-do-not-use-in-production";
+// `parseEnv` exige la clave pública de billing-auth cuando hay llave del orquestador (sin ella las
+// mesas abren y nadie entra). Una P-256 recién generada: es PÚBLICA y sin su privada nadie firma nada.
+process.env.BILLING_AUTH_PUBLIC_KEY ??= generateKeyPairSync("ec", { namedCurve: "P-256" })
+  .publicKey.export({ type: "spki", format: "pem" })
+  .toString();
 // La de SALIDA, DISTINTA a propósito: con el mismo valor, un test que confundiera las dos llaves
 // daría verde.
 process.env.BETASO_BACKEND_API_KEY ??= "test-backend-key-do-not-use-in-production";

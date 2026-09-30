@@ -311,6 +311,39 @@ describe("parseEnv", () => {
       parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), ORCHESTRATOR_API_KEY: "corta" }),
     ).toThrow(/ORCHESTRATOR_API_KEY/);
   });
+  describe("las llaves del orquestador", () => {
+    const base = { BETASO_BACKEND_JWT_SECRET: "s".repeat(16) };
+    const orq = "o".repeat(16);
+
+    it("con ORCHESTRATOR_API_KEY exige BILLING_AUTH_PUBLIC_KEY: sin ella nadie puede entrar", () => {
+      expect(() => parseEnv({ ...base, ORCHESTRATOR_API_KEY: orq })).toThrow(
+        /ORCHESTRATOR_API_KEY.*BILLING_AUTH_PUBLIC_KEY/,
+      );
+    });
+
+    it("con las dos definidas arranca", () => {
+      const pem = "pem-cualquiera";
+      expect(
+        parseEnv({ ...base, ORCHESTRATOR_API_KEY: orq, BILLING_AUTH_PUBLIC_KEY: pem })
+          .orchestratorApiKey,
+      ).toBe(orq);
+    });
+
+    it.each(["BETASO_ADMIN_PANEL_API_KEY", "BETASO_BACKEND_API_KEY"])(
+      "rechaza una ORCHESTRATOR_API_KEY igual a %s: cada llave abre lo suyo",
+      (otra) => {
+        expect(() =>
+          parseEnv({
+            ...base,
+            BILLING_AUTH_PUBLIC_KEY: "pem",
+            ORCHESTRATOR_API_KEY: orq,
+            [otra]: orq,
+          }),
+        ).toThrow(new RegExp(`ORCHESTRATOR_API_KEY.*${otra}`));
+      },
+    );
+  });
+
   // `NODE_ENV` vale `production` en dev, stage y prod por igual, así que no puede decir EN CUÁL se
   // está. `APP_ENV` sí, y lo que decide —hoy, montar las herramientas de Colyseus que muestran el
   // estado entero de cada sala— no puede quedar prendido en prod por olvido.
