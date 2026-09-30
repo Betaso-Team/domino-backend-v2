@@ -1937,7 +1937,14 @@ sala no cobra, no reembolsa ni paga: el dinero lo mueve el orquestador**. Desde 
 verdad de punta a punta: esas salas no consultan niveles de apuesta, no enganchan el `BetCharger`
 (sin aumentos que cobrar ni filas `BET_MULTIPLIER` en el ledger) y no arman `reportStandings` (ni
 `ranking.won` ni `leagues.record`); niveles, cobro de aumentos y reportes de ranking/liga quedan
-FUERA de las mesas del orquestador hasta que el Plan 3 decida— y
+FUERA de las mesas del orquestador por ahora. **Vuelven en el Plan 3, por el orquestador y no por
+dominó:** dominó le pedirá el cobro de un aumento acordado por la API interna y esperará la respuesta
+(el aumento vale solo si quedó pagado), y le publicará el resultado por RabbitMQ para que el
+orquestador reporte ranking y liga **a cada cliente con su `externalUserId`** — el `userId` de estas
+mesas es el `playerId` de billing-auth, que el cliente no conoce; el lobby propio de dominó sigue
+usando el `uuid` de Betaso como siempre. Ver el spec del orquestador
+(`betaso-games-orchestrator/docs/superpowers/specs/2026-09-27-orquestador-design.md`, «Aumentos de
+apuesta» y «Ranking y liga del cliente»)— y
 `POST /internal/players/:userId/seat` devuelve el asiento de quien sigue jugando, leído de
 `MatchRegistry.matchOf`. Las dos con `x-internal-api-key` y **su propia llave,
 `ORCHESTRATOR_API_KEY`** (fail closed sin ella); la del panel no las abre. `rateId` pasó a string
