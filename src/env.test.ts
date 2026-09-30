@@ -65,6 +65,22 @@ describe("parseEnv", () => {
     expect(env.logLevel).toBe("info");
   });
 
+  it("sin BILLING_AUTH_PUBLIC_KEY no confía en los tokens de billing-auth", () => {
+    expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).billingAuth).toBeUndefined();
+  });
+
+  it("con BILLING_AUTH_PUBLIC_KEY confía en billing-auth, con emisor y audiencia por defecto", () => {
+    const parsed = parseEnv({
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+      BILLING_AUTH_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
+    });
+    expect(parsed.billingAuth).toEqual({
+      publicKeyPem: "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----",
+      issuer: "betaso-auth",
+      audience: "domino",
+    });
+  });
+
   it("rechaza un entorno sin BETASO_BACKEND_JWT_SECRET", () => {
     expect(() => parseEnv({})).toThrow(/BETASO_BACKEND_JWT_SECRET/);
   });

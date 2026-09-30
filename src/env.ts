@@ -140,6 +140,19 @@ const schema = z.object({
     .string()
     .min(16, "BETASO_BACKEND_JWT_SECRET debe tener al menos 16 caracteres"),
   /**
+   * LA CLAVE PÚBLICA ES256 DE BILLING-AUTH, que firma los tokens de los jugadores que llegan por el
+   * orquestador. OPCIONAL: ausente, dominó acepta solo los HS256 del backend principal, como antes.
+   * Presente, acepta los dos (ver `JwtVerifier`). Un `.env` necesita el PEM en una línea con `\n`
+   * literales, y acá se vuelven saltos.
+   */
+  BILLING_AUTH_PUBLIC_KEY: z
+    .string()
+    .min(1)
+    .transform((pem) => pem.replace(/\\n/g, "\n"))
+    .optional(),
+  JWT_ISSUER: z.string().min(1).default("betaso-auth"),
+  JWT_AUDIENCE: z.string().min(1).default("domino"),
+  /**
    * DE SALIDA: lo que el dominó le PRESENTA al backend de Betaso para lo que pregunta como dominó y no
    * en nombre de un jugador —el torneo, el antifraude, los niveles de apuesta, la billetera—.
    * OPCIONAL: sin ella esas preguntas caen a su respuesta de reposo, que es el lado seguro de cada una.
@@ -312,6 +325,16 @@ export function isDevEnvironment(appEnv: AppEnv): boolean {
   return appEnv === "local" || appEnv === "dev";
 }
 
+/**
+ * Cómo reconocer un token de billing-auth. Es estructuralmente la misma `BillingAuthTrust` de
+ * `features/auth`, declarada acá porque `env.ts` no puede importar de una feature (depcruise).
+ */
+export interface BillingAuthTrust {
+  readonly publicKeyPem: string;
+  readonly issuer: string;
+  readonly audience: string;
+}
+
 export interface Env {
   readonly nodeEnv: z.infer<typeof schema>["NODE_ENV"];
   /** Ver APP_ENV. Nunca `undefined`: sin declarar ya se resolvió al lado seguro. */
@@ -327,6 +350,8 @@ export interface Env {
    */
   readonly listeningPort: number;
   readonly jwtSecret: string;
+  /** `undefined` ⇒ solo se aceptan los HS256 del backend principal. Ver BILLING_AUTH_PUBLIC_KEY. */
+  readonly billingAuth: BillingAuthTrust | undefined;
   /** DE SALIDA. `undefined` ⇒ no le preguntamos nada al backend de Betaso. Ver BETASO_BACKEND_API_KEY. */
   readonly backendApiKey: string | undefined;
   /** DE ENTRADA. `undefined` ⇒ esta instancia no se administra. Ver BETASO_ADMIN_PANEL_API_KEY. */
@@ -405,6 +430,13 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     instanceIndex,
     listeningPort,
     jwtSecret: parsed.BETASO_BACKEND_JWT_SECRET,
+    billingAuth: parsed.BILLING_AUTH_PUBLIC_KEY
+      ? {
+          publicKeyPem: parsed.BILLING_AUTH_PUBLIC_KEY,
+          issuer: parsed.JWT_ISSUER,
+          audience: parsed.JWT_AUDIENCE,
+        }
+      : undefined,
     backendApiKey: parsed.BETASO_BACKEND_API_KEY,
     adminPanelApiKey: parsed.BETASO_ADMIN_PANEL_API_KEY,
     mongoUri: parsed.MONGO_URI,

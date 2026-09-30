@@ -129,7 +129,9 @@ rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
 const clock: Clock = { now: () => Date.now() };
 rootContainer.register<Clock>("Clock", { useValue: clock });
 rootContainer.register<Logger>("Logger", { useValue: logger });
-rootContainer.register("TokenVerifier", { useValue: new JwtVerifier(env.jwtSecret) });
+rootContainer.register("TokenVerifier", {
+  useValue: new JwtVerifier(env.jwtSecret, env.billingAuth),
+});
 
 // EL PRESENCE Y EL DRIVER DE COLYSEUS, que son infraestructura del SERVIDOR y no de una feature:
 // Colyseus escribe ahí su registro de salas en cada creación y en cada reserva de asiento, y por
