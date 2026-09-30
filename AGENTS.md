@@ -1885,6 +1885,48 @@ Baseline **1320 tests / 129 archivos**, con `typecheck`, suite, lint, `depcruise
   lo tumbaba con un caso distinto cada vez. Ahora perdona sólo lo que desaparece.
 - `ab991bd` son docs de truco (estructura v29); no hay equivalente acá.
 
+## Port de truco — la tanda del 23 al 29/09 (`d6e3219` … `07d5e20`)
+
+Sólo lo de arquitectura, infraestructura, matchmaking, deploy y Colyseus; los arreglos propios del
+juego de truco quedaron afuera. Baseline **1331 tests** (985 unit / 244 int / 102 e2e, 131 archivos
++3 int saltados), con `typecheck`, suite, lint y `depcruise` (**412 módulos / 1654 dependencias**)
+en verde.
+
+| truco | acá |
+|---|---|
+| `b22ce07` `APP_ENV` (del 15/09, requisito de lo que sigue) | **PORTADO** (`54d49bc`), distinto en dos cosas — abajo |
+| `8e6c006` + `e465f21` playground y monitor en local/dev | **PORTADO** (`95172ad`), sin el import dinámico |
+| `96970aa` pulso del cartel desde `censusPollMs` | **PORTADO** (`4a85aa4`) con un e2e que da rojo con el cinco fijo |
+| `dfc6603` suite en paralelo en el CI | **PORTADO** (`0c6566d`) con una corrección que acá era obligatoria — abajo |
+| `32d83de` caché de `node_modules`, docs fuera del deploy, reuso de dependencias en el servidor | **PORTADO** (`cc233c9`, `ff6488b`). El backtick del heredoc no existe acá |
+| `ad1ccdd` sondear las bases una vez | **NO APLICA**: el CI del dominó no tiene servicios |
+| `fa246ad` core-loop: rake perdonado a nuevos + ventana blanda del emparejador | **NO PORTADO, y es regresión contra v1**: `Betaso-Domino-Backend/src/core-loop/` existe (`full-pot.ts`, `core-loop.service.ts`) y el lobby de v1 lo usa. Es negocio con plata; va en un incremento propio |
+| `cfb0393` abortar si alguien se va en la ventana de reparto | **NO PORTADO**: ciclo de vida de la partida y reembolso, no infraestructura. Revisar contra v1 antes de decidir |
+| `b0d7e4c` strike de torneo al que abandona por su cuenta | **NO PORTADO**: negocio de torneo |
+| `d6e3219` fijar el reparto desde `/settings/deal` en local/dev | **NO PORTADO**: herramienta de prueba, pero el preset (vira, flor) es de cartas; el gemelo del dominó sería fijar fichas |
+| `4a0873e`, `9068b10`, `133290a`, `7947c95`, `f109e86`, `d655a28`, `735ff75`, `07d5e20` | reglas y pausas de truco |
+
+- **`APP_ENV` vive en el `.env` de cada servidor y NO viaja con el deploy.** Truco lo manda el
+  workflow y tuvo que anotarlo en `shared/deploy.env` porque un rollback se pide sin workflow; acá
+  cada servidor ya es un entorno y su `.env` es lo único que el rollback relee. ⚠ **El servidor de
+  dev tiene que agregar `APP_ENV=dev`** para tener playground y monitor.
+- **Sin declarar FALLA CERRADO**: `prod` bajo `NODE_ENV=production`, `local` fuera. Truco elige
+  `local` siempre porque allá sólo decide el log; acá abre un monitor SIN LLAVE que muestra las
+  manos de todos y corre métodos de las salas (`/api/room/call`). El campo `env` del log pasó de
+  `nodeEnv` a `appEnv`: antes decía `production` también en dev.
+- **Sin import dinámico**: el paquete `colyseus` re-exporta playground, monitor y auth, así que se
+  cargan en todo entorno desde siempre. El monkey patch del playground corre al LLAMAR a
+  `playground()`, no al importarlo (`@colyseus/playground/build/index.mjs`).
+- ⚠ **`minWorkers` TIENE QUE SER IGUAL A `maxWorkers`** (`vitest.config.ts`). Con
+  `isolate=false`, un pool que puede achicarse termina hilos a mitad de corrida y `unit` muere con
+  «Terminating worker thread» — determinista. Y en el runner de dos núcleos vitest calcula
+  `min(núcleos - 1, máximo)` = 1, o sea que el port tal cual rompía el CI. vitest 3 tampoco lee
+  `poolOptions`/`isolate` dentro de un proyecto, por eso el flag va en los scripts y `npm test`
+  corre los tres.
+- **Sin verificar**: `actionlint`, `shellcheck` y el despliegue de verdad — Docker estaba apagado.
+  El reuso de dependencias se ensayó en seco con Git Bash (reusa con el mismo lockfile, reinstala
+  con otro). Este repo sigue sin el arnés de `deploy-remote.test.ts` que truco tiene.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
@@ -1895,9 +1937,9 @@ lo que prueba que el test mide algo.
 
 ```bash
 npm run typecheck   # tsc --noEmit  <- ESTE es el gate
-npm test            # vitest run
-npm run test:unit  # solo *.test.ts
-npm run test:int   # solo *.int.test.ts
+npm test            # los tres de abajo, en orden
+npm run test:unit  # solo *.test.ts, sin aislamiento de módulos
+npm run test:int   # solo *.int.test.ts, sin aislamiento de módulos
 npm run test:e2e   # solo *.e2e.test.ts
 npm run lint        # biome check src
 npm run format      # biome format --write src
