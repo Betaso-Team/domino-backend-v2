@@ -6,6 +6,11 @@ import { InvalidTokenError } from "../identity";
 // La lista explícita evita que el token elija un algoritmo distinto al contratado.
 const ALGORITHMS: jwt.Algorithm[] = ["HS256"];
 
+// billing-auth firma `aud: ['orchestrator','domino']` para TODOS los juegos, así que la audiencia no
+// dice de cuál es el token. El claim `game` sí: un ES256 de truco pasaría el emisor y la audiencia,
+// y sin esta exigencia sentaría a su dueño en una mesa de dominó.
+const BILLING_GAME = "domino";
+
 /** Cómo reconocer un token de billing-auth: su clave pública, quién lo emite y para quién. */
 export interface BillingAuthTrust {
   readonly publicKeyPem: string;
@@ -61,6 +66,9 @@ export class JwtVerifier implements TokenVerifier {
     // backend principal queda como estaba.)
     if (this.billingAuth && algorithmOf(token) === "ES256" && typeof payload.exp !== "number") {
       throw new InvalidTokenError("sin claim exp");
+    }
+    if (this.billingAuth && algorithmOf(token) === "ES256" && payload.game !== BILLING_GAME) {
+      throw new InvalidTokenError("el token no es de dominó");
     }
     if (typeof payload.sub !== "string" || payload.sub.trim().length === 0) {
       throw new InvalidTokenError("sin claim sub");

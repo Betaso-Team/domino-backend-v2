@@ -81,8 +81,12 @@ const trust = { publicKeyPem: BILLING_PUBLIC, issuer: "betaso-auth", audience: "
 const both = new JwtVerifier(SECRET, trust);
 
 // Como firma billing-auth: ES256, emisor betaso-auth y las dos audiencias.
-const billingToken = (over: jwt.SignOptions = {}, key = BILLING_PRIVATE) =>
-  jwt.sign({ sub: "p-1" }, key, {
+const billingToken = (
+  over: jwt.SignOptions = {},
+  key = BILLING_PRIVATE,
+  claims: Record<string, unknown> = { game: "domino" },
+) =>
+  jwt.sign({ sub: "p-1", ...claims }, key, {
     algorithm: "ES256",
     issuer: "betaso-auth",
     audience: ["orchestrator", "domino"],
@@ -109,6 +113,17 @@ describe("JwtVerifier con billing-auth", () => {
     );
   });
 
+  // billing-auth firma `aud: ['orchestrator','domino']` para TODOS los juegos: la audiencia no
+  // distingue el juego, el claim `game` sí. Un token de truco no puede sentar a nadie en dominó.
+  it("rechaza un ES256 de otro juego o sin claim game", async () => {
+    await expect(
+      both.verify(billingToken({}, BILLING_PRIVATE, { game: "truco" })),
+    ).rejects.toBeInstanceOf(InvalidTokenError);
+    await expect(both.verify(billingToken({}, BILLING_PRIVATE, {}))).rejects.toBeInstanceOf(
+      InvalidTokenError,
+    );
+  });
+
   it("rechaza un ES256 firmado con otra clave", async () => {
     const other = generateKeyPairSync("ec", { namedCurve: "P-256" })
       .privateKey.export({ type: "pkcs8", format: "pem" })
@@ -125,7 +140,7 @@ describe("JwtVerifier con billing-auth", () => {
 
   // EXIGIMOS `exp`: billing-auth siempre lo pone, y un token que no vence nunca no es uno suyo.
   it("rechaza un ES256 sin exp", async () => {
-    const noExp = jwt.sign({ sub: "p-1" }, BILLING_PRIVATE, {
+    const noExp = jwt.sign({ sub: "p-1", game: "domino" }, BILLING_PRIVATE, {
       algorithm: "ES256",
       issuer: "betaso-auth",
       audience: "domino",
