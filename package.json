@@ -21,9 +21,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src docs/.vitepress/config.ts docs/.vitepress/theme",
     "format": "biome format --write src docs/.vitepress/config.ts docs/.vitepress/theme",
-    "test": "vitest run",
-    "test:unit": "vitest run --project unit",
-    "test:int": "vitest run --project int",
+    "test": "npm run test:unit && npm run test:int && npm run test:e2e",
+    "test:unit": "vitest run --project unit --poolOptions.threads.isolate=false",
+    "test:int": "vitest run --project int --poolOptions.threads.isolate=false",
     "test:e2e": "vitest run --project e2e",
     "test:watch": "vitest",
     "depcruise": "depcruise src --config .dependency-cruiser.cjs"
