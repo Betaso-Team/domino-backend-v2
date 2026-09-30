@@ -178,8 +178,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // EL TORNEO NO PREGUNTA, y no es un ahorro de red: la apuesta de una mesa de torneo es del
     // TORNEO, y dejar que dos jugadores la suban entre ellos cambiaría lo que vale esa partida en
     // una tabla que no es de ellos. Es la misma frontera que la revancha.
-    const gameModeId =
-      roomOptions?.mode === "TOURNAMENT" ? undefined : (roomOptions ?? request)?.gameModeId;
+    //
+    // ⚠ UNA MESA DEL ORQUESTADOR (POR REQUEST) NO PREGUNTA TAMPOCO: el modo que nombra es de
+    // billing-auth y el libro le pregunta al backend de Betaso, que no lo conoce. Con niveles, la
+    // mesa ofrecería aumentos que dominó cobraría solo —"un juego nunca mueve dinero"—. Quién
+    // cobra un aumento en esas mesas lo decide el Plan 3; hasta entonces la lista es vacía.
+    const gameModeId = roomOptions?.mode === "CASUAL" ? roomOptions.gameModeId : undefined;
     const betLevels = gameModeId
       ? await rootContainer.resolve<BetLevelBook>("BetLevelBook").levelsOf(gameModeId)
       : [];
@@ -274,13 +278,19 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // container lo registró —un despliegue sin billetera no cobra— y en ese caso la mesa
     // tampoco ofrece niveles, porque el libro de niveles depende del mismo backend.
     const revokeMultiplier = child.resolve<MultiplierRevoker>("MultiplierRevoker");
-    const betChargeSink = rootContainer.isRegistered(BetCharger)
-      ? rootContainer.resolve(BetCharger).sinkFor(
-          config.matchId,
-          (events) => this.notifier.notify(events),
-          () => revokeMultiplier(),
-        )
-      : undefined;
+    //
+    // ⚠ SOLO CON `roomOptions`, como los sinks de plataforma, revancha y externos: una mesa por
+    // request es del orquestador y ese cobro escribiría `BET_MULTIPLIER` en el ledger de dominó y
+    // llamaría a la billetera de Betaso. Sin niveles nadie llega a aumentar, pero el sink no se
+    // engancha igual: la frontera no depende de que otra línea siga vacía.
+    const betChargeSink =
+      roomOptions && rootContainer.isRegistered(BetCharger)
+        ? rootContainer.resolve(BetCharger).sinkFor(
+            config.matchId,
+            (events) => this.notifier.notify(events),
+            () => revokeMultiplier(),
+          )
+        : undefined;
     const betChargeSinks = betChargeSink ? [betChargeSink] : [];
     const externalSinks =
       roomOptions && rootContainer.isRegistered("MatchSinks")

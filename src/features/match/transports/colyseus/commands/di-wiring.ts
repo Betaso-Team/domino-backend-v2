@@ -168,23 +168,26 @@ export function buildPieces(child: DependencyContainer, emit: MatchEventSink): M
     ? child.resolve<DominoRoomOptions>("RoomOptions")
     : undefined;
 
-  // ⚠ EL CIERRE SE REPORTA POR LOS DOS CAMINOS, y hasta acá no: el port dejó este listener
-  // detrás de un `isRegistered("RoomOptions") ? [] : [...]`, o sea que sólo corría en el camino
-  // del REQUEST — el viejo — y nunca en el del emparejador, que es por donde nace toda mesa
-  // casual desde que matchmaking existe. Las partidas reales no llegaban ni al ranking ni a la
-  // liga, en silencio: un reporte que no sale no falla, sólo deja una fila que nadie escribe.
+  // ⚠ EL CIERRE SE REPORTA SÓLO EN EL CAMINO DEL EMPAREJADOR (`RoomOptions`). Antes se armaba para
+  // los dos, y el del REQUEST —la mesa que abre el orquestador— publicaba `ranking.won` (RabbitMQ)
+  // y `leagues.record` (HTTP) con los `sub` de billing-auth, que el ranking y la liga de Betaso no
+  // conocen. Qué se reporta de esas mesas, y adónde, lo decide el Plan 3; hasta entonces callan.
   //
-  // Se arma SIEMPRE, aunque los dos destinos falten: el listener anota lo que no puede reportar,
-  // y saltearlo convertiría una instancia sin configurar en una que reporta en silencio nada.
-  const listeners: MatchEventListener[] = [
-    reportStandings({
-      config,
-      match,
-      ranking: feeds.ranking,
-      leagues: feeds.leagues,
-      log: child.resolve<Logger>("Logger"),
-    }),
-  ];
+  // En el camino del emparejador se arma SIEMPRE, aunque los dos destinos falten: el listener anota
+  // lo que no puede reportar, y saltearlo convertiría una instancia sin configurar en una que
+  // reporta en silencio nada. (Antes de que este listener corriera por los dos caminos, las
+  // partidas reales no llegaban ni al ranking ni a la liga: un reporte que no sale no falla.)
+  const listeners: MatchEventListener[] = options
+    ? [
+        reportStandings({
+          config,
+          match,
+          ranking: feeds.ranking,
+          leagues: feeds.leagues,
+          log: child.resolve<Logger>("Logger"),
+        }),
+      ]
+    : [];
 
   // LOS DOS VETOS SÓLO EXISTEN CON `RoomOptions`, y no es una omisión del otro camino: los datos
   // con los que deciden —cuántas revanchas lleva la cadena, de qué torneo es la mesa— viven en
