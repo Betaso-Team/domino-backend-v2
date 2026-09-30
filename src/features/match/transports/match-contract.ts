@@ -112,7 +112,8 @@ const createRequest = z
     participants: z.array(participant).min(2).max(4),
     seed: nonBlank,
     teamAssignment,
-    rateId: z.uuid(),
+    // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
+    rateId: nonBlank,
   })
   .superRefine(({ participants }, context) =>
     checkTableShape(participants, context, "participants"),
@@ -134,7 +135,8 @@ const matchSnapshot = z
     pointsToWin: z.number().int().positive().safe(),
     teamAssignment,
     isDealWindowEnabled: z.boolean(),
-    rateId: z.uuid(),
+    // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
+    rateId: nonBlank,
     entryFee: ucAmount,
     prize: ucAmount,
     // LOS TRES CAMPOS CON DEFAULT, y son los únicos de este schema que lo llevan: los goldens y

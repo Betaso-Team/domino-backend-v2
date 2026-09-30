@@ -165,7 +165,7 @@ describe("DominoRoom", () => {
     // el campo. Sin el patrón, cualquier otra falla de arranque —un container a medio cablear,
     // un puerto tomado— dejaría este test verde sin que `configOf` se llame una sola vez.
     await expect(
-      testServer.createRoom<DominoRoom>("domino", { ...options("match-bad"), rateId: "no-uuid" }),
+      testServer.createRoom<DominoRoom>("domino", { ...options("match-bad"), rateId: " " }),
     ).rejects.toThrow(/rateId/);
   });
 
