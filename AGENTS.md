@@ -1927,6 +1927,27 @@ en verde.
   El reuso de dependencias se ensayó en seco con Git Bash (reusa con el mismo lockfile, reinstala
   con otro). Este repo sigue sin el arnés de `deploy-remote.test.ts` que truco tiene.
 
+## Incremento en curso — API para el orquestador
+
+Y después la **API para el orquestador** (rama `feat/api-orquestador`, sobre
+`refactor/port-truco-integracion-front`): el orquestador de Betaso Juegos
+(`betaso-games-orchestrator/apps/domino-orchestrator`) empareja y le pide la mesa a dominó.
+`POST /internal/matches` abre una sala con un `CreateMatchRequest` —**sin `roomOptions`, así que la
+sala no cobra, no reembolsa ni paga: el dinero lo mueve el orquestador**— y
+`POST /internal/players/:userId/seat` devuelve el asiento de quien sigue jugando, leído de
+`MatchRegistry.matchOf`. Las dos con `x-internal-api-key` y **su propia llave,
+`ORCHESTRATOR_API_KEY`** (fail closed sin ella); la del panel no las abre. `rateId` pasó a string
+opaco (el de Betaso es un `_id` de Mongo). El `JwtVerifier` acepta además el ES256 de billing-auth
+si hay `BILLING_AUTH_PUBLIC_KEY`; el `alg` del header elige la clave y cada rama fija su algoritmo.
+
+Hechos medidos en la Tarea 13, Parte B:
+
+- **`createRoom` propaga el mensaje del error `onCreate` con su prefijo de código** (`UNKNOWN_GAME_MODE: …`), que es cómo la ruta responde 422 (medido sobre `@colyseus/core` 0.18.15); `MaintenanceModeError` no tiene prefijo y sale como 500 (pendiente).
+- **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. La ruta responde 404 solo si `matchMaker.query({ roomId })` no encuentra nada; una sala bloqueada es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa).
+- **Toda reserva sin consumir mantiene viva su sala ~15 s** (`seatReservationTimeout`) y retrasa `server.shutdown()` — los tests que obtienen una reserva tienen que consumirla.
+- **Pendiente de decidir:** qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing).
+- **`BILLING_AUTH_PUBLIC_KEY` se valida al boot** (EC P-256 solo público; una clave privada se rechaza).
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
