@@ -17,7 +17,14 @@ import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, healthRoutes } from "@/shared/http/health";
 import { exposeServerTime } from "@/shared/http/server-time";
 import config from "@colyseus/tools";
-import { type ServerOptions, defineRoom, defineServer } from "colyseus";
+import {
+  type ServerOptions,
+  createMiddleware,
+  defineRoom,
+  defineServer,
+  monitor,
+  playground,
+} from "colyseus";
 import express, { type Application } from "express";
 import {
   amqp,
@@ -32,7 +39,7 @@ import {
   settingsSignal,
   settingsWriter,
 } from "./di-container";
-import { env } from "./env";
+import { env, isDevEnvironment } from "./env";
 import type { Logger } from "./logger";
 
 // CADA FEATURE TRAE SU PEDAZO DEL MAPA DE SALAS (`transports/colyseus/register.ts`), como trae su
@@ -131,8 +138,42 @@ const hardDependencies: DependencyChecks = {
   ...(broker ? { rabbit: () => broker.ping() } : {}),
 };
 
+// LAS DOS HERRAMIENTAS DE COLYSEUS PARA PROBAR A MANO, sólo donde se prueba a mano: el playground y
+// el monitor (truco `8e6c006` + `e465f21`).
+//
+// ACÁ NO HACE FALTA EL IMPORT DINÁMICO DE TRUCO, y la razón es este mismo archivo: el paquete
+// `colyseus` re-exporta `@colyseus/playground`, `@colyseus/monitor` y `@colyseus/auth`, así que los
+// tres YA se cargan en todo entorno desde el primer import de arriba. Truco importa `@colyseus/core`
+// suelto y tuvo que cuidarse de que cargarlos no le pisara `Room.onAuth`; acá ese `onAuth` ya está
+// pisado siempre, y por eso cada sala lleva su override estática. Lo que sí toca `Room` —el
+// `applyMonkeyPatch` del playground— corre al LLAMAR a `playground()`, no al importarlo, así que
+// llamarlo sólo acá lo deja fuera de stage y prod.
+//
+// El `use` del playground no protege nada y no es opcional: con `NODE_ENV=production` —que el
+// servidor de dev tiene— el playground contesta 404 si no recibe ninguno.
+//
+// El monitor NO tiene esa compuerta ni llave: muestra el estado ENTERO de cada sala, manos
+// incluidas, y su `/api/room/call` corre cualquier método de una sala. Aceptable en un servidor de
+// prueba y en ningún otro lado — por eso `APP_ENV` sin declarar falla hacia `prod` (§`src/env.ts`).
+const devTools = isDevEnvironment(env.appEnv)
+  ? {
+      playground: playground({ use: [createMiddleware(async () => {})] }),
+      // `processId` porque dev puede correr dos instancias, y cuál tiene la sala es la primera
+      // pregunta.
+      monitor: monitor({
+        columns: ["roomId", "name", "clients", "maxClients", "locked", "elapsedTime", "processId"],
+      }),
+    }
+  : undefined;
+
 const registerHttp = (app: Application) => {
   const logger = rootContainer.resolve<Logger>("Logger");
+  // PRIMERAS, como en truco: son SPAs con router propio (better-call) y no tienen nada que hacer
+  // con el parser de cuerpo ni con las rutas del juego.
+  if (devTools) {
+    app.use("/playground", devTools.playground);
+    app.use("/monitor", devTools.monitor);
+  }
   app.use(express.json());
   // PRIMERO DE TODOS, porque es de la costura y no de una ruta: así la cabecera sale también
   // en las respuestas de los chequeos y en las de error, que son las que el cliente tiene a
