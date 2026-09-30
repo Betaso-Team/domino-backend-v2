@@ -63,6 +63,32 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect(back.roomId).toBe(opened.data.roomId);
   });
 
+  // UNA SALA BLOQUEADA NO ES UNA SALA AUSENTE: cada vuelta sin consumir es una reserva y cuenta
+  // contra `maxClients` (asientos × 2). Con 2 sentados, 2 reservas la bloquean y `joinById` tira el
+  // MISMO código que para una sala inexistente. Un 404 acá diría "no está en ninguna mesa" de quien
+  // sí está sentado, y el orquestador le abriría una segunda.
+  it("no contesta 404 cuando la sala existe pero está bloqueada", async () => {
+    const opened = (await (
+      await post("/internal/matches", casualTable(["o-i", "o-j"]))
+    ).json()) as Opened;
+    await sitEveryone(opened);
+    type Back = { data: { reservation: Record<string, unknown> } };
+    const pending: Back[] = [];
+    let locked: Response | undefined;
+    for (let i = 0; i < 4 && !locked; i++) {
+      const res = await post("/internal/players/o-i/seat");
+      if (res.status === 200) pending.push((await res.json()) as Back);
+      else locked = res;
+    }
+    expect(locked?.status).toBe(500);
+    // Se consumen las reservas que sí salieron: sin eso la sala espera su plazo (~15 s) y el cierre
+    // del servidor se cuelga. Consumir una reserva ya emitida no depende del bloqueo.
+    server.sdk.auth.token = mintToken("o-i");
+    for (const { data } of pending) {
+      await server.sdk.consumeSeatReservation(data.reservation as never);
+    }
+  });
+
   it("contesta 404 a quien no está en ninguna mesa", async () => {
     expect((await post("/internal/players/nadie/seat")).status).toBe(404);
   });
