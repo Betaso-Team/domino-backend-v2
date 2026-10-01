@@ -50,6 +50,9 @@ services:
       DEALING_TIMEOUT_MS: 5000
       PRESENTING_ROUND_MS: 20
       PRESENTING_MATCH_MS: 20
+      # La partida termina en la ventana de revancha (30 s por defecto) y no en FINISHED: el smoke
+      # espera 5 s como máximo a que el estado cambie, así que la ventana tiene que ser más corta.
+      REMATCH_WINDOW_MS: 20
       SEATING_TIMEOUT_MS: 5000
       RECONNECTION_WINDOW_SECONDS: 5
     depends_on:

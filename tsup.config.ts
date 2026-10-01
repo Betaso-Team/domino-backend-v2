@@ -15,4 +15,11 @@ export default defineConfig({
   // engine/errors.test.ts nunca lo vería, porque vitest no minifica. keepNames hace que la
   // garantía aguante sin importar qué se decida sobre minify más adelante.
   keepNames: true,
+  // SOLO NUESTRO CÓDIGO: toda dependencia queda afuera y se carga de `node_modules`. tsup solo
+  // externaliza las que `package.json` declara, así que las transitivas (`@colyseus/core` y su
+  // `debug`, CommonJS) entraban al bundle ESM y el proceso moría al importar con «Dynamic require
+  // of "tty" is not supported». Además, una copia de Colyseus adentro del bundle es una segunda
+  // copia del matchmaker.
+  platform: "node",
+  skipNodeModulesBundle: true,
 });
