@@ -41,7 +41,6 @@ export default withMermaid(
               text: "Catálogo y outbox",
               link: "/superpowers/specs/2026-09-15-catalogo-modos-v1-y-outbox-rabbitmq-design",
             },
-            { text: "Orquestador futuro", link: "/orquestador-multiplataforma" },
           ],
         },
       ],

@@ -11,5 +11,5 @@ export type { RouteSchemas, Validated } from "./validated";
 export { httpErrorHandler } from "./error-handler";
 export { exposeServerTime } from "./server-time";
 export { HttpClient, HttpError } from "./client";
-export { registerHealth } from "./health";
+export { healthRoutes } from "./health";
 export type { HttpClientOptions } from "./client";

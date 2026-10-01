@@ -5,6 +5,7 @@ import {
   casualTable,
   mintToken,
   participantOf,
+  waitUntil,
 } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -111,11 +112,11 @@ describe("la mesa de cuatro con máquinas", () => {
     expect(leaving?.hasAbandoned).toBe(false);
     expect(state.phase).toBe("PLAYING");
 
-    // Y JUEGA DE VERDAD: se le da su plazo de reflexión y el tablero tiene que haberse movido.
-    // Es lo único que no se puede medir sin levantar la sala — el reloj de la máquina es de la
-    // RED, porque los comandos del motor son síncronos y esto tiene que esperar.
-    await new Promise((resume) => setTimeout(resume, 2_500));
-    expect(state.currentRound?.board.tiles.length ?? 0).toBeGreaterThan(tilesBefore);
+    // Y JUEGA DE VERDAD: el tablero tiene que moverse. Es lo único que no se puede medir sin
+    // levantar la sala — el reloj de la máquina es de la RED, porque los comandos del motor son
+    // síncronos y esto tiene que esperar. Se espera a que pase y no un plazo fijo: la máquina
+    // piensa medio turno como mucho.
+    await waitUntil(() => (state.currentRound?.board.tiles.length ?? 0) > tilesBefore, 2_500);
 
     await room.disconnect();
   });
@@ -129,9 +130,14 @@ describe("la mesa de cuatro con máquinas", () => {
 
     quitter?.send("ABANDON", {});
     await room.waitForNextPatch();
-    await new Promise((resume) => setTimeout(resume, 2_500));
+    const reader = rootContainer.resolve<HistoryReader>("HistoryReader");
+    const systemPlayed = async () =>
+      (await reader.of(matchId)).some(
+        (entry) => entry.source === "SYSTEM" && entry.type === "PLAY_TILE",
+      );
+    await waitUntil(systemPlayed, 2_500);
 
-    const history = await rootContainer.resolve<HistoryReader>("HistoryReader").of(matchId);
+    const history = await reader.of(matchId);
     const bySystem = history.filter((entry) => entry.source === "SYSTEM");
 
     expect(bySystem.map((entry) => entry.type)).toContain("PLAY_TILE");

@@ -2,7 +2,7 @@
 // por constructor o por el container. Enforced por src/env-single-reader.test.ts.
 //
 // Efecto secundario a nivel de módulo: importar este archivo ejecuta `parseEnv(process.env)`
-// y lanza de inmediato si el entorno es inválido (p.ej. falta JWT_SECRET) — antes de que
+// y lanza de inmediato si el entorno es inválido (p.ej. falta BETASO_BACKEND_JWT_SECRET) — antes de que
 // corra cualquier código propio del importador. En test, vitest.setup.ts pone defaults para
 // que esto nunca truene solo por faltar configuración de entorno.
 import { z } from "zod";
@@ -64,6 +64,22 @@ loadEnvFileUnlessTest(process.env, () => {
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   /**
+   * EN QUÉ ENTORNO CORRE, que `NODE_ENV` no puede decir: vale `production` en dev, stage y prod por
+   * igual (portado de truco `b22ce07`). Hoy decide dos cosas: qué dice el campo `env` de cada línea
+   * del log, y si se montan las herramientas de Colyseus para probar a mano (`app.config.ts`).
+   *
+   * VIVE EN EL `.env` DEL SERVIDOR Y NO VIAJA CON EL DEPLOY, y es lo que este repo decide distinto
+   * que truco. Allá lo manda el workflow y tuvo que anotarlo además en `shared/deploy.env`, porque un
+   * rollback se pide desde el servidor sin el workflow que lo calculó. Acá cada servidor ES un
+   * entorno y su `.env` ya es lo único que el rollback relee (§`ecosystem.config.cjs`).
+   *
+   * SIN DECLARAR, FALLA CERRADO: con `NODE_ENV=production` es `prod`, fuera de producción es
+   * `local`. Truco elige `local` siempre, porque allá sólo decide cuánto se loguea; acá abre un
+   * monitor que muestra las manos de todos y corre cualquier método de una sala, así que un `.env`
+   * que se olvidó la línea no puede terminar con eso abierto en producción.
+   */
+  APP_ENV: z.enum(["local", "dev", "stage", "prod"]).optional(),
+  /**
    * El puerto BASE, que con varias instancias no es el puerto de ninguna salvo la primera.
    *
    * QUIEN SUMA NO SOMOS NOSOTROS NI pm2: es `@colyseus/tools`, adentro de su `listen()`
@@ -106,25 +122,75 @@ const schema = z.object({
    * distintos para el mismo plazo.
    *
    * Sale del entorno por la misma razón que las duraciones de fase: el camino de la
-   * ventana VENCIDA no se puede testear esperando dos minutos.
+   * ventana VENCIDA no se puede testear esperando dos minutos. Admite fracción (`0.5`):
+   * `allowReconnection` arma su timer con `seconds * 1000`, y la suite la espera entera.
    */
-  RECONNECTION_WINDOW_SECONDS: z.coerce.number().int().positive().default(120),
-  // Compartido con el backend principal. El dominó verifica y NUNCA firma.
-  JWT_SECRET: z.string().min(16, "JWT_SECRET debe tener al menos 16 caracteres"),
-  /**
-   * La llave de la API INTERNA (consola de soporte). OPCIONAL y sin default a propósito:
-   * un default es una llave publicada, y una llave publicada no protege nada.
-   *
-   * Ausente significa "esta instancia no expone `/internal/*`", y las rutas directamente
-   * NO se registran (ver register-http.ts). Es fail closed: una ruta interna viva con la
-   * llave vacía es PEOR que no tenerla, porque parece protegida.
-   *
-   * El mínimo de largo es el mismo criterio que el de JWT_SECRET: una llave corta se
-   * enumera, y acá el entorno es o la llave buena o ninguna.
-   */
-  INTERNAL_API_KEY: z
+  RECONNECTION_WINDOW_SECONDS: z.coerce.number().positive().default(120),
+  // ── Lo que hay del otro lado, y en qué dirección ─────────────────────────────────────────────
+  //
+  // Las cuatro variables `BETASO_*` llevan el nombre del INTERLOCUTOR y no de lo que son, porque del
+  // otro lado de esta frontera hay DOS servidores de Betaso —su backend y su panel de
+  // administración— y sus credenciales no son intercambiables. Lo que el nombre no puede decir es la
+  // DIRECCIÓN, que es lo que hace que sean dos secretos y no uno, y por eso lo dice cada una acá.
+  // Portado de truco (`ebf22dd`); hasta entonces el dominó usaba UNA sola `BETASO_ADMIN_PANEL_API_KEY` para las
+  // dos direcciones, así que el que tenía la llave del backend también administraba el dominó.
+
+  // Compartido con el BACKEND de Betaso, que es quien firma los tokens de los jugadores. Nadie se lo
+  // presenta a nadie: es el secreto con el que las dos puntas verifican. El dominó NUNCA firma.
+  //
+  // SIN MÍNIMO DE LARGO, como truco: el valor lo DICTA el backend de Betaso (`JWT_SECRET`), y el de dev
+  // mide 9 caracteres. Un mínimo acá no lo alarga: solo deja al dominó sin arrancar. Las llaves que
+  // son NUESTRAS (`BETASO_ADMIN_PANEL_API_KEY`, `ORCHESTRATOR_API_KEY`) sí lo conservan.
+  BETASO_BACKEND_JWT_SECRET: z
     .string()
-    .min(16, "INTERNAL_API_KEY debe tener al menos 16 caracteres")
+    .min(
+      1,
+      "BETASO_BACKEND_JWT_SECRET: obligatorio, es el secreto que comparte el backend de Betaso",
+    ),
+  /**
+   * LA CLAVE PÚBLICA ES256 DE BILLING-AUTH, que firma los tokens de los jugadores que llegan por el
+   * orquestador. OPCIONAL: ausente, dominó acepta solo los HS256 del backend principal, como antes.
+   * Presente, acepta los dos (ver `JwtVerifier`). Un `.env` necesita el PEM en una línea con `\n`
+   * literales, y acá se vuelven saltos.
+   */
+  BILLING_AUTH_PUBLIC_KEY: z
+    .string()
+    .min(1)
+    .transform((pem) => pem.replace(/\\n/g, "\n"))
+    .optional(),
+  JWT_ISSUER: z.string().min(1).default("betaso-auth"),
+  JWT_AUDIENCE: z.string().min(1).default("domino"),
+  /**
+   * DE SALIDA: lo que el dominó le PRESENTA al backend de Betaso para lo que pregunta como dominó y no
+   * en nombre de un jugador —el torneo, el antifraude, los niveles de apuesta, la billetera—.
+   * OPCIONAL: sin ella esas preguntas caen a su respuesta de reposo, que es el lado seguro de cada una.
+   *
+   * SIN MÍNIMO DE LARGO por lo mismo que el secreto del JWT: la dicta el backend de Betaso
+   * (`X_INTERNAL_API_KEY`), y la de dev mide 15 caracteres.
+   */
+  BETASO_BACKEND_API_KEY: z.string().min(1).optional(),
+  /**
+   * DE ENTRADA: lo que el PANEL DE ADMINISTRACIÓN de Betaso le presenta al dominó para tocar el
+   * catálogo de modos, el mantenimiento, el historial de soporte y la configuración en caliente
+   * (`/internal/settings`, que mueve todos los plazos del juego). A propósito NO es la de arriba:
+   * compartirlas dejaría que el que la tiene para preguntar un saldo también abra mesas.
+   *
+   * OPCIONAL y sin default: un default es una llave publicada. Ausente significa "esta instancia no
+   * se administra" y esas rutas directamente NO se registran. Es fail closed: una ruta interna viva
+   * con la llave vacía es PEOR que no tenerla, porque parece protegida.
+   */
+  BETASO_ADMIN_PANEL_API_KEY: z
+    .string()
+    .min(16, "BETASO_ADMIN_PANEL_API_KEY debe tener al menos 16 caracteres")
+    .optional(),
+  /**
+   * DE ENTRADA, la que presenta el ORQUESTADOR para abrir mesas y devolver asientos. Otra llave y
+   * no la del panel, por la misma regla que separó las demás: quien administra el catálogo no abre
+   * mesas, y quien abre mesas no administra. Ausente ⇒ esas rutas no existen (fail closed).
+   */
+  ORCHESTRATOR_API_KEY: z
+    .string()
+    .min(16, "ORCHESTRATOR_API_KEY debe tener al menos 16 caracteres")
     .optional(),
   /**
    * La URI de Mongo, donde queda escrito el historial de cada partida
@@ -133,7 +199,7 @@ const schema = z.object({
    *
    * OPCIONAL, y SU PRESENCIA ES LA QUE ELIGE LA IMPLEMENTACIÓN: sin ella el historial es el
    * de memoria y muere con el proceso; con ella es el de Mongo y sobrevive al reinicio. Es
-   * el mismo criterio que `INTERNAL_API_KEY` —la variable ausente es una decisión, no un
+   * el mismo criterio que las llaves de Betaso —la variable ausente es una decisión, no un
    * error— y es deliberadamente lo contrario a un `HISTORY_DRIVER`: un interruptor que
    * NOMBRA la implementación es deuda, no configuración, porque deja escribir "mongo" sin
    * URI y "memory" con una base andando al lado. Acá el dato y la decisión son lo mismo,
@@ -231,7 +297,7 @@ const schema = z.object({
    * ⚠ La ruta del otro lado va SIN credencial, tal como está en v1. No es una decisión de este
    * repo y está anotada donde se usa (`network/transports/http-leagues.ts`).
    */
-  BACKEND_URL: z.string().url().optional(),
+  BETASO_BACKEND_URL: z.string().url().optional(),
   /**
    * CÓMO SE LLEGA A ESTE PROCESO DESDE AFUERA, sin el puerto. Colyseus se lo manda al cliente en
    * la reserva de asiento, y por eso cada instancia anuncia la SUYA: con las salas repartidas, el
@@ -267,8 +333,27 @@ const schema = z.object({
   RUN_ENGINE_SMOKE: z.string().optional(),
 });
 
+export type AppEnv = NonNullable<z.infer<typeof schema>["APP_ENV"]>;
+
+/** Donde se prueba a mano: la máquina de quien escribe el código y el servidor de dev. */
+export function isDevEnvironment(appEnv: AppEnv): boolean {
+  return appEnv === "local" || appEnv === "dev";
+}
+
+/**
+ * Cómo reconocer un token de billing-auth. Es estructuralmente la misma `BillingAuthTrust` de
+ * `features/auth`, declarada acá porque `env.ts` no puede importar de una feature (depcruise).
+ */
+export interface BillingAuthTrust {
+  readonly publicKeyPem: string;
+  readonly issuer: string;
+  readonly audience: string;
+}
+
 export interface Env {
   readonly nodeEnv: z.infer<typeof schema>["NODE_ENV"];
+  /** Ver APP_ENV. Nunca `undefined`: sin declarar ya se resolvió al lado seguro. */
+  readonly appEnv: AppEnv;
   /** El puerto BASE, el que se le pasa a `listen()`. NO es el que esta instancia ata. Ver PORT. */
   readonly port: number;
   /** `undefined` ⇒ esto no lo levantó pm2. NO es la instancia 0. Ver NODE_APP_INSTANCE. */
@@ -280,8 +365,14 @@ export interface Env {
    */
   readonly listeningPort: number;
   readonly jwtSecret: string;
-  /** `undefined` ⇒ esta instancia no expone la API interna. Ver INTERNAL_API_KEY. */
-  readonly internalApiKey: string | undefined;
+  /** `undefined` ⇒ solo se aceptan los HS256 del backend principal. Ver BILLING_AUTH_PUBLIC_KEY. */
+  readonly billingAuth: BillingAuthTrust | undefined;
+  /** DE SALIDA. `undefined` ⇒ no le preguntamos nada al backend de Betaso. Ver BETASO_BACKEND_API_KEY. */
+  readonly backendApiKey: string | undefined;
+  /** DE ENTRADA. `undefined` ⇒ esta instancia no se administra. Ver BETASO_ADMIN_PANEL_API_KEY. */
+  readonly adminPanelApiKey: string | undefined;
+  /** DE ENTRADA. `undefined` ⇒ el orquestador no puede abrir mesas acá. Ver ORCHESTRATOR_API_KEY. */
+  readonly orchestratorApiKey: string | undefined;
   /** `undefined` ⇒ el historial es el de memoria y muere con el proceso. Ver MONGO_URI. */
   readonly mongoUri: string | undefined;
   /** `undefined` ⇒ este proceso es un clúster de uno: driver, presence y registro locales. */
@@ -315,13 +406,13 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     throw new Error(`Entorno inválido — ${detail}`);
   }
   const parsed = result.data;
-  // EN PRODUCCIÓN LAS CUATRO SON OBLIGATORIAS, y la asimetría con el schema es la decisión: para
+  // EN PRODUCCIÓN LAS CINCO SON OBLIGATORIAS, y la asimetría con el schema es la decisión: para
   // zod siguen siendo opcionales porque FUERA de producción "ausente" es una elección legítima —una
   // instancia sola, sin infraestructura, que es el despliegue de desarrollo y el de la suite—.
-  // Adentro de producción las cuatro ausencias fallan en SILENCIO, que es lo que las hace caras:
+  // Adentro de producción esas ausencias fallan en SILENCIO, que es lo que las hace caras:
   // sin `MONGO_URI` el proceso arranca creyendo que persiste y el catálogo entero muere con él;
   // sin `RABBITMQ_URL` el outbox acumula eventos que nadie va a publicar nunca, y el consumidor
-  // se queda con un catálogo viejo sin que falle nada de los dos lados; sin `INTERNAL_API_KEY`
+  // se queda con un catálogo viejo sin que falle nada de los dos lados; sin `BETASO_ADMIN_PANEL_API_KEY`
   // las mutaciones no se registran y el panel recibe 404 donde espera administrar.
   //
   // UN SOLO ERROR QUE LAS ENUMERA, no el primero que aparece: corregir de a una es un despliegue
@@ -332,11 +423,14 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       [
         ["MONGO_URI", parsed.MONGO_URI],
         ["RABBITMQ_URL", parsed.RABBITMQ_URL],
-        ["INTERNAL_API_KEY", parsed.INTERNAL_API_KEY],
-        // Sin `BACKEND_URL` la LIGA no recibe ninguna partida —ni las pagas ni las gratis— y el
+        ["BETASO_ADMIN_PANEL_API_KEY", parsed.BETASO_ADMIN_PANEL_API_KEY],
+        // Sin la llave de SALIDA el torneo, el antifraude y los niveles de apuesta caen a su reposo
+        // sin que nada falle: es la misma clase de ausencia silenciosa.
+        ["BETASO_BACKEND_API_KEY", parsed.BETASO_BACKEND_API_KEY],
+        // Sin `BETASO_BACKEND_URL` la LIGA no recibe ninguna partida —ni las pagas ni las gratis— y el
         // jugador ve su tabla congelada sin que nada falle de los dos lados. Es la cuarta
         // ausencia silenciosa, y entra acá por el mismo argumento que las otras tres.
-        ["BACKEND_URL", parsed.BACKEND_URL],
+        ["BETASO_BACKEND_URL", parsed.BETASO_BACKEND_URL],
       ] as const
     )
       .filter(([, valor]) => valor === undefined)
@@ -344,19 +438,48 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     if (faltan.length > 0)
       throw new Error(`Entorno inválido — en producción faltan: ${faltan.join(", ")}`);
   }
+  // LAS LLAVES DEL ORQUESTADOR SE VALIDAN ENTRE SÍ, y falla al arrancar porque el modo de falla es mudo:
+  // sin `BILLING_AUTH_PUBLIC_KEY` las mesas del orquestador se abren pero nadie puede entrar a ellas
+  // (sus jugadores traen ES256), y una llave repetida con la del panel o la de salida deja que una
+  // llave abra lo de otra — "cada llave abre lo suyo".
+  if (parsed.ORCHESTRATOR_API_KEY !== undefined) {
+    if (parsed.BILLING_AUTH_PUBLIC_KEY === undefined)
+      throw new Error(
+        "Entorno inválido — ORCHESTRATOR_API_KEY requiere BILLING_AUTH_PUBLIC_KEY: sin ella las mesas del orquestador abren y nadie puede entrar",
+      );
+    for (const [nombre, valor] of [
+      ["BETASO_ADMIN_PANEL_API_KEY", parsed.BETASO_ADMIN_PANEL_API_KEY],
+      ["BETASO_BACKEND_API_KEY", parsed.BETASO_BACKEND_API_KEY],
+    ] as const) {
+      if (valor === parsed.ORCHESTRATOR_API_KEY)
+        throw new Error(
+          `Entorno inválido — ORCHESTRATOR_API_KEY no puede ser igual a ${nombre}: cada llave abre lo suyo`,
+        );
+    }
+  }
   const instanceIndex = parsed.NODE_APP_INSTANCE;
   const listeningPort = parsed.PORT + (instanceIndex ?? 0);
   return {
     nodeEnv: parsed.NODE_ENV,
+    appEnv: parsed.APP_ENV ?? (parsed.NODE_ENV === "production" ? "prod" : "local"),
     port: parsed.PORT,
     instanceIndex,
     listeningPort,
-    jwtSecret: parsed.JWT_SECRET,
-    internalApiKey: parsed.INTERNAL_API_KEY,
+    jwtSecret: parsed.BETASO_BACKEND_JWT_SECRET,
+    billingAuth: parsed.BILLING_AUTH_PUBLIC_KEY
+      ? {
+          publicKeyPem: parsed.BILLING_AUTH_PUBLIC_KEY,
+          issuer: parsed.JWT_ISSUER,
+          audience: parsed.JWT_AUDIENCE,
+        }
+      : undefined,
+    backendApiKey: parsed.BETASO_BACKEND_API_KEY,
+    adminPanelApiKey: parsed.BETASO_ADMIN_PANEL_API_KEY,
+    orchestratorApiKey: parsed.ORCHESTRATOR_API_KEY,
     mongoUri: parsed.MONGO_URI,
     redisUrl: parsed.REDIS_URL,
     rabbitmqUrl: parsed.RABBITMQ_URL,
-    backendUrl: parsed.BACKEND_URL,
+    backendUrl: parsed.BETASO_BACKEND_URL,
     // TRES CASOS (ver SERVER_ADDRESS). El puerto va COMO PATH y no como `host:puerto` —es el
     // esquema de v1, lo que hace que el proxy que ya rutea v1 rutee esto sin aprender nada— y es
     // el EFECTIVO, no la base. Se arma acá —el único lector del entorno— y no en el composition

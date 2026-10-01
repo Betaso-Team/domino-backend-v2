@@ -11,7 +11,7 @@ import { z } from "zod";
 // POR QUÉ VIVE ACÁ. Nació dentro de `features/match/transports/http/` cuando era su único
 // consumidor, con un disparador de promoción escrito sobre una línea que se puede ir a
 // mirar: «el día que `app.config.ts` tenga una SEGUNDA llamada de registro de rutas». Ese
-// día llegó —`registerLobbyHttp` y `registerMatchHttp` conviven ahí, y el catálogo de modos
+// día llegó —`lobbyHttp` y `matchHttp` conviven ahí, y el catálogo de modos
 // trae la tercera—, así que la pieza subió. No es una preferencia de estilo: la Regla 4
 // (`feature-boundary`) prohíbe que una feature importe internals de otra, y frente a ese
 // error la salida barata es COPIAR el archivo. Dos copias de la costura que decide qué entra

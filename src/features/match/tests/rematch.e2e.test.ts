@@ -38,7 +38,7 @@ afterEach(async () => {
 // mesa. Creada por request, `roomOptions` queda en `undefined` y el sink de la revancha ni se
 // engancha — o sea que la ventana se abriría y la mesa nueva no existiría nunca.
 async function playedOut(seats: [string, string]): Promise<SeatedMatch> {
-  // LA MESA ES GRATIS, y son dos motivos que se suman. El primero es que sin `BACKEND_URL` la
+  // LA MESA ES GRATIS, y son dos motivos que se suman. El primero es que sin `BETASO_BACKEND_URL` la
   // admisión de una mesa PAGA falla al entrar —`accountOf` no tiene a quién preguntarle— y
   // nadie llega a jugar. El segundo es que `isEligible` de una mesa sin inscripción ni consulta
   // la billetera, así que `eligible` llega ENCENDIDO y estos tests miden la revancha en vez de

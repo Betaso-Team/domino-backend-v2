@@ -45,15 +45,17 @@ describe("smoke del deploy", () => {
     expect(runner).toContain("smoke:client");
   });
 
-  it("CI ejecuta el smoke después del build y antes de empaquetar", () => {
-    const ci = read(".github/workflows/ci.yml");
-    const build = ci.indexOf("name: Build");
-    const smoke = ci.indexOf("name: Smoke Docker, PM2 y Nginx");
-    const pack = ci.indexOf("name: Empaquetar el release");
-    expect(build).toBeGreaterThan(-1);
-    expect(smoke).toBeGreaterThan(build);
-    expect(pack).toBeGreaterThan(smoke);
-    expect(ci.slice(smoke, pack)).toContain("RUN_ENGINE_SMOKE: '1'");
-    expect(ci.slice(smoke, pack)).toContain("npm run test:deploy");
+  // EL SMOKE ES SU PROPIO JOB Y ES PUERTA DEL DEPLOY: corre en paralelo con la suite, pero nada llega a
+  // un servidor sin él. Lo que se pinea es eso, porque sacarlo del `needs` lo deja corriendo, verde o
+  // rojo, sin frenar nada.
+  it("el smoke es un job que el despliegue espera", () => {
+    const ci = read(".github/workflows/ci-cd.yml");
+    const smoke = ci.indexOf("\n  smoke:");
+    const next = ci.indexOf("\n  image:");
+    expect(smoke).toBeGreaterThan(-1);
+    expect(next).toBeGreaterThan(smoke);
+    expect(ci.slice(smoke, next)).toContain("RUN_ENGINE_SMOKE: '1'");
+    expect(ci.slice(smoke, next)).toContain("npm run test:deploy");
+    expect(ci).toMatch(/needs: \[target, verify, smoke, image, docs\]/);
   });
 });

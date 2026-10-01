@@ -1,22 +1,31 @@
 import type { TokenVerifier } from "@/features/auth";
-import { GameModeService, registerGameModeHttp } from "@/features/game-mode";
-import { LobbySettings, registerLobbyHttp } from "@/features/lobby";
+import { GameModeService, gameModeHttp } from "@/features/game-mode";
+import { LobbySettings, lobbyHttp } from "@/features/lobby";
 import {
   type Clock,
+  ColyseusMatchGateway,
   type HistoryReader,
   MatchRegistry,
   type PlayerLog,
-  registerMatchHttp,
+  matchHttp,
   selectProcessIdToCreateRoom,
 } from "@/features/match";
-import { DominoRoom } from "@/features/match/transports/colyseus/domino-room";
-import { LobbyRoom, registerMatchmakingHttp } from "@/features/matchmaking";
-import { type StrikeBook, registerTournamentHttp } from "@/features/tournament";
+import { matchRooms } from "@/features/match/transports/colyseus/register";
+import { type MatchmakingConfig, matchmakingHttp, matchmakingRooms } from "@/features/matchmaking";
+import { settingsHttp } from "@/features/settings";
+import { type StrikeBook, tournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
-import { type DependencyChecks, registerHealth } from "@/shared/http/health";
+import { type DependencyChecks, healthRoutes } from "@/shared/http/health";
 import { exposeServerTime } from "@/shared/http/server-time";
 import config from "@colyseus/tools";
-import { type ServerOptions, defineRoom, defineServer } from "colyseus";
+import {
+  type ServerOptions,
+  createMiddleware,
+  defineRoom,
+  defineServer,
+  monitor,
+  playground,
+} from "colyseus";
 import express, { type Application } from "express";
 import {
   amqp,
@@ -27,18 +36,24 @@ import {
   mongo,
   presence,
   rootContainer,
+  settingsSections,
+  settingsSignal,
+  settingsWriter,
 } from "./di-container";
-import { env } from "./env";
+import { env, isDevEnvironment } from "./env";
 import type { Logger } from "./logger";
 
+// CADA FEATURE TRAE SU PEDAZO DEL MAPA DE SALAS (`transports/colyseus/register.ts`), como trae su
+// router HTTP.
 const rooms = {
-  lobby: defineRoom(LobbyRoom, {
+  ...matchmakingRooms({
     matchmaker,
     verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
     maintenance: maintenanceSignal,
     census,
+    pulseMs: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig").censusPollMs,
   }),
-  domino: defineRoom(DominoRoom),
+  ...matchRooms(),
 };
 
 // EL COMPOSITION ROOT de la superficie Express. Acá —y solo acá— se resuelve del container
@@ -113,7 +128,7 @@ const rooms = {
 // ⚠ Y `ping()` NO RECHAZA SOLO CON EL BROKER CAÍDO: **cuelga**. `amqplib` con `recovery: true` usa
 // `maxRetries: Infinity` (`lib/recovery.js:8`), así que la rama que rechaza el connect inicial es
 // inalcanzable (§`src/shared/amqp.ts`). Lo que lo convierte en un 503 y no en un `/ready` que no
-// contesta es el plazo POR CHEQUEO de `registerHealth` — el mismo que ya cubre el Mongo inalcanzable
+// contesta es el plazo POR CHEQUEO de `healthRoutes` — el mismo que ya cubre el Mongo inalcanzable
 // y por el mismo motivo: una base caída no falla, CUELGA. Sacar ese plazo saca a Rabbit del mapa sin
 // que ningún test de esta capa se ponga rojo.
 const mongoConnection = mongo;
@@ -125,8 +140,42 @@ const hardDependencies: DependencyChecks = {
   ...(broker ? { rabbit: () => broker.ping() } : {}),
 };
 
+// LAS DOS HERRAMIENTAS DE COLYSEUS PARA PROBAR A MANO, sólo donde se prueba a mano: el playground y
+// el monitor (truco `8e6c006` + `e465f21`).
+//
+// ACÁ NO HACE FALTA EL IMPORT DINÁMICO DE TRUCO, y la razón es este mismo archivo: el paquete
+// `colyseus` re-exporta `@colyseus/playground`, `@colyseus/monitor` y `@colyseus/auth`, así que los
+// tres YA se cargan en todo entorno desde el primer import de arriba. Truco importa `@colyseus/core`
+// suelto y tuvo que cuidarse de que cargarlos no le pisara `Room.onAuth`; acá ese `onAuth` ya está
+// pisado siempre, y por eso cada sala lleva su override estática. Lo que sí toca `Room` —el
+// `applyMonkeyPatch` del playground— corre al LLAMAR a `playground()`, no al importarlo, así que
+// llamarlo sólo acá lo deja fuera de stage y prod.
+//
+// El `use` del playground no protege nada y no es opcional: con `NODE_ENV=production` —que el
+// servidor de dev tiene— el playground contesta 404 si no recibe ninguno.
+//
+// El monitor NO tiene esa compuerta ni llave: muestra el estado ENTERO de cada sala, manos
+// incluidas, y su `/api/room/call` corre cualquier método de una sala. Aceptable en un servidor de
+// prueba y en ningún otro lado — por eso `APP_ENV` sin declarar falla hacia `prod` (§`src/env.ts`).
+const devTools = isDevEnvironment(env.appEnv)
+  ? {
+      playground: playground({ use: [createMiddleware(async () => {})] }),
+      // `processId` porque dev puede correr dos instancias, y cuál tiene la sala es la primera
+      // pregunta.
+      monitor: monitor({
+        columns: ["roomId", "name", "clients", "maxClients", "locked", "elapsedTime", "processId"],
+      }),
+    }
+  : undefined;
+
 const registerHttp = (app: Application) => {
   const logger = rootContainer.resolve<Logger>("Logger");
+  // PRIMERAS, como en truco: son SPAs con router propio (better-call) y no tienen nada que hacer
+  // con el parser de cuerpo ni con las rutas del juego.
+  if (devTools) {
+    app.use("/playground", devTools.playground);
+    app.use("/monitor", devTools.monitor);
+  }
   app.use(express.json());
   // PRIMERO DE TODOS, porque es de la costura y no de una ruta: así la cabecera sale también
   // en las respuestas de los chequeos y en las de error, que son las que el cliente tiene a
@@ -136,38 +185,61 @@ const registerHttp = (app: Application) => {
   // profundo: no se solapan con ninguna. Son dos a propósito y la diferencia está argumentada
   // en `shared/http/health.ts` — `/health` no consulta nada porque "reiniciame" es la única
   // respuesta que destruye partidas en curso.
-  registerHealth(app, hardDependencies);
-  registerLobbyHttp(app, {
-    settings: rootContainer.resolve(LobbySettings),
-    internalApiKey: env.internalApiKey,
-  });
-  registerMatchmakingHttp(app, maintenanceSignal, census);
-  registerTournamentHttp(
-    app,
-    rootContainer.resolve<StrikeBook>("StrikeBook"),
-    rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+  app.use(healthRoutes(hardDependencies));
+  // CADA FEATURE ES UN ROUTER, y se monta en la raíz porque sus paths son absolutos: la guarda va por
+  // ruta y no por prefijo, y las dependencias entran ya resueltas (truco `0b0a467`). El orden de
+  // montaje es el de registro, y sólo importa DENTRO de una feature —el catálogo lo pinea—.
+  app.use(
+    lobbyHttp({
+      settings: rootContainer.resolve(LobbySettings),
+      adminPanelApiKey: env.adminPanelApiKey,
+    }),
   );
-  registerMatchHttp(app, {
-    registry: rootContainer.resolve(MatchRegistry),
-    clock: rootContainer.resolve<Clock>("Clock"),
-    logger,
-    history: rootContainer.resolve<HistoryReader>("HistoryReader"),
-    internalApiKey: env.internalApiKey,
-    verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-    playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
-  });
+  app.use(matchmakingHttp({ maintenance: maintenanceSignal, census }));
+  app.use(
+    tournamentHttp({
+      strikes: rootContainer.resolve<StrikeBook>("StrikeBook"),
+      verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+    }),
+  );
+  app.use(
+    matchHttp({
+      registry: rootContainer.resolve(MatchRegistry),
+      clock: rootContainer.resolve<Clock>("Clock"),
+      logger,
+      history: rootContainer.resolve<HistoryReader>("HistoryReader"),
+      adminPanelApiKey: env.adminPanelApiKey,
+      tables: rootContainer.resolve(ColyseusMatchGateway),
+      orchestratorApiKey: env.orchestratorApiKey,
+      verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
+      playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
+    }),
+  );
   // EL CATÁLOGO, y va ANTES del manejador de errores como todas las demás: Express reconoce ese
   // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta
   // puesta después queda con el HTML por defecto de Express, con el stack adentro.
   //
-  // Los GET son públicos y las cinco mutaciones viven detrás de `internalApiKey`; sin llave no se
-  // registran (fail closed, §`features/game-mode/transports/http/register-http.ts`). Quien autentica
+  // Los GET son públicos y las cinco mutaciones viven detrás de `adminPanelApiKey`; sin llave no se
+  // registran (fail closed, §`features/game-mode/transports/http/admin.ts`). Quien autentica
   // al administrador es el orquestador, no el dominó.
-  registerGameModeHttp(app, {
-    service: rootContainer.resolve(GameModeService),
-    logger,
-    internalApiKey: env.internalApiKey,
-  });
+  app.use(
+    gameModeHttp({
+      service: rootContainer.resolve(GameModeService),
+      logger,
+      adminPanelApiKey: env.adminPanelApiKey,
+    }),
+  );
+  // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
+  // se registra. Antes del manejador de errores, como todas.
+  app.use(
+    settingsHttp({
+      sections: settingsSections,
+      signal: settingsSignal,
+      writer: settingsWriter,
+      adminPanelApiKey: env.adminPanelApiKey,
+      log: logger,
+    }),
+  );
   app.use(httpErrorHandler(logger));
 };
 

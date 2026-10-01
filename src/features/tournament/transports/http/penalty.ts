@@ -1,7 +1,7 @@
 import { type TokenVerifier, authenticated } from "@/features/auth";
-import type { Application } from "express";
+import { Router } from "express";
 import { z } from "zod";
-import type { StrikeBook } from "../penalty";
+import type { StrikeBook } from "../../penalty";
 
 // Validated like every other route: a handler never sees an `unknown`, and here the id also reaches a
 // key built out of what the client sent.
@@ -32,12 +32,13 @@ interface PenaltyDTO {
  * It takes its pieces as parameters instead of resolving a container, like the
  * other registrars: composing is the entrypoint's job and this file is not one.
  */
-export function registerTournamentHttp(
-  app: Application,
-  strikes: Pick<StrikeBook, "penaltyOf">,
-  verifier: TokenVerifier,
-): void {
-  app.get(
+export function penaltyRoutes(deps: {
+  readonly strikes: Pick<StrikeBook, "penaltyOf">;
+  readonly verifier: TokenVerifier;
+}): Router {
+  const { strikes, verifier } = deps;
+  const router = Router();
+  router.get(
     "/me/tournaments/:tournamentId/penalty",
     authenticated(verifier, { params: PenaltyParams }, async (identity, { params }, res) => {
       const { strikes: count, blockedUntil } = await strikes.penaltyOf(
@@ -51,4 +52,5 @@ export function registerTournamentHttp(
       res.json(dto);
     }),
   );
+  return router;
 }

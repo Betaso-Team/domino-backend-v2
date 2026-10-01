@@ -1,7 +1,9 @@
+import { rootContainer } from "@/di-container";
 import { env } from "@/env";
 import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
 import {
   act,
   bootServer,
@@ -22,14 +24,24 @@ const HISTORY_URL = (matchId: string) =>
   `http://localhost:2585/internal/matches/${matchId}/history`;
 // La misma llave que vitest.setup.ts le pone al entorno: es la credencial de la consola
 // de soporte, no un dato de la partida.
-const INTERNAL_HEADERS = { "X-Internal-Key": env.internalApiKey ?? "" };
+const INTERNAL_HEADERS = { "x-internal-api-key": env.adminPanelApiKey ?? "" };
 
+let originalGlobalConfig: GlobalDominoConfig;
+
+// EL ÚNICO PLAZO QUE ESTE ARCHIVO EJERCITA: el abandono tiene que dejar la mesa EN la pausa de
+// presentación, y se afirma. Con el tick de vitest.setup.ts la pausa puede vencer antes de que el
+// poll de `act` la vea.
 beforeAll(async () => {
+  originalGlobalConfig = rootContainer.resolve("GlobalDominoConfig");
+  rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
+    useValue: globalConfigWith({ ...originalGlobalConfig, presentingMatchMs: 300 }),
+  });
   server = await bootServer(2585);
 });
 
 afterAll(async () => {
   await server.shutdown();
+  rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
 describe("ciclo de vida de una partida", () => {
@@ -226,7 +238,7 @@ describe("ciclo de vida de una partida", () => {
   // Las DOS llaves malas son dos ramas distintas del guard, y una sola no cubre la otra:
   // la corta muere en el `a.length === b.length` —que existe porque `timingSafeEqual` LANZA
   // con buffers de distinto largo—, y la del MISMO LARGO es la única que llega a la
-  // comparación en tiempo constante. Se deriva de `env.internalApiKey` y no se escribe a
+  // comparación en tiempo constante. Se deriva de `env.adminPanelApiKey` y no se escribe a
   // mano: una constante literal deja de medir el largo real el día que la llave de
   // vitest.setup.ts cambie, y el test seguiría verde midiendo la rama equivocada. Así
   // estaba antes —37 caracteres contra una llave de 42— y por eso se corrigió.
@@ -234,17 +246,17 @@ describe("ciclo de vida de una partida", () => {
     const match = await seatPair(server, ["k1", "k2"]);
     await revealHands(match);
 
-    const mismoLargo = "x".repeat(env.internalApiKey?.length ?? 0);
+    const mismoLargo = "x".repeat(env.adminPanelApiKey?.length ?? 0);
     const sinLlave = await fetch(HISTORY_URL("m-k1-k2"));
     const conLlaveCorta = await fetch(HISTORY_URL("m-k1-k2"), {
-      headers: { "X-Internal-Key": "corta" },
+      headers: { "x-internal-api-key": "corta" },
     });
     const conLlaveDelMismoLargo = await fetch(HISTORY_URL("m-k1-k2"), {
-      headers: { "X-Internal-Key": mismoLargo },
+      headers: { "x-internal-api-key": mismoLargo },
     });
 
-    expect(mismoLargo).toHaveLength(env.internalApiKey?.length ?? 0);
-    expect(mismoLargo).not.toBe(env.internalApiKey);
+    expect(mismoLargo).toHaveLength(env.adminPanelApiKey?.length ?? 0);
+    expect(mismoLargo).not.toBe(env.adminPanelApiKey);
     expect(sinLlave.status).toBe(401);
     expect(await sinLlave.json()).toEqual({ error: "UNAUTHORIZED" });
     expect(conLlaveCorta.status).toBe(401);

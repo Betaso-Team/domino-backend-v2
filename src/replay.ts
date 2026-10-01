@@ -151,6 +151,12 @@ const state = replay({
   // nunca tuvo —y un `extraTimeRemainingMs` inventado, que es estado observable del árbol
   // impreso—. Es el mismo riesgo que `writeGolden` ya había cerrado guardando el
   // `globalConfig` en el fixture; acá estaba abierto.
+  //
+  // ⚠ ES LA BASE, SIN LAS EDICIONES EN CALIENTE (`features/settings`). Una mesa nacida con un plazo
+  // editado se rebobina con el del entorno: el desenlace sale igual —los vencimientos están grabados
+  // como entradas del SISTEMA, no se recalculan—, pero los `activeDeadline` y el
+  // `extraTimeRemainingMs` del árbol impreso son los de la base. La config con la que nació cada mesa
+  // no se graba en ningún lado, por la misma razón que el `seed` (ver arriba).
   globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
   // Sin `startedAt`: el instante de arranque no está grabado en ninguna parte —`begin()` no
   // emite, así que la primera entrada del historial ya es posterior—, y la persistencia no

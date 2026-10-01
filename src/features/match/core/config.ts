@@ -221,6 +221,11 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   rematchHandoffMs: 6_000,
 };
 
+// CON LO QUE NACE UNA MESA NUEVA. Una FUNCIÓN y no un valor porque se pregunta por mesa y nunca se
+// captura: entre una mesa y la siguiente los números pueden haberse movido (config editable en
+// caliente, `features/settings`), y una mesa ya en juego no tiene que enterarse.
+export type GlobalConfigSource = () => GlobalDominoConfig;
+
 export function globalConfigWith(overrides: Partial<GlobalDominoConfig>): GlobalDominoConfig {
   return { ...DEFAULT_GLOBAL_CONFIG, ...overrides };
 }

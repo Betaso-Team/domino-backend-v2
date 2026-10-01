@@ -17,7 +17,7 @@ import {
 import {
   DEFAULT_GLOBAL_CONFIG,
   type DominoMatchConfig,
-  type GlobalDominoConfig,
+  type GlobalConfigSource,
   playerIdsOf,
 } from "../../core/config";
 import { RuleViolationError } from "../../core/engine/errors";
@@ -106,6 +106,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // cadena los ordena, y de paso le da al apagado algo que esperar: lo que se esté escribiendo
   // tiene que terminar ANTES de la limpieza, o la limpieza no limpia nada.
   private beats: Promise<void> = Promise.resolve();
+  // LA SALA NACIÓ: `onCreate` llegó al final. Desde `@colyseus/core` 0.18.14 un `onCreate` que
+  // lanza igual corre `onDispose`, y el `notifier` puede existir sin que la mesa haya abierto
+  // nunca. Sin esta bandera ese cierre emite `MATCH_ABORTED` de una mesa donde nadie se sentó.
+  private opened = false;
   private readonly views = new Map<PlayerId, StateView>();
   private readonly seated = new Set<PlayerId>();
   private readonly pendingReconnections = new Map<PlayerId, Deferred<Client>>();
@@ -139,7 +143,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const rootLogger = rootContainer.resolve<Logger>("Logger");
     this.log = rootLogger.child({ roomId: this.roomId });
 
-    const global = rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig");
+    // SE PREGUNTA UNA VEZ, y ese valor es de la mesa mientras viva: va a su container de abajo y de
+    // ahí al motor, así que una edición que llegue a mitad de partida no le mueve los números a los
+    // que están jugando.
+    const global = rootContainer.resolve<GlobalConfigSource>("GlobalConfigSource")();
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
 
     // EL CATÁLOGO ES LA AUTORIDAD, Y SE CONSULTA UNA SOLA VEZ. El request nombra un modo; de acá
@@ -171,8 +178,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // EL TORNEO NO PREGUNTA, y no es un ahorro de red: la apuesta de una mesa de torneo es del
     // TORNEO, y dejar que dos jugadores la suban entre ellos cambiaría lo que vale esa partida en
     // una tabla que no es de ellos. Es la misma frontera que la revancha.
-    const gameModeId =
-      roomOptions?.mode === "TOURNAMENT" ? undefined : (roomOptions ?? request)?.gameModeId;
+    //
+    // ⚠ UNA MESA DEL ORQUESTADOR (POR REQUEST) NO PREGUNTA TAMPOCO: el modo que nombra es de
+    // billing-auth y el libro le pregunta al backend de Betaso, que no lo conoce. Con niveles, la
+    // mesa ofrecería aumentos que dominó cobraría solo —"un juego nunca mueve dinero"—. Quién
+    // cobra un aumento en esas mesas lo decide el Plan 3; hasta entonces la lista es vacía.
+    const gameModeId = roomOptions?.mode === "CASUAL" ? roomOptions.gameModeId : undefined;
     const betLevels = gameModeId
       ? await rootContainer.resolve<BetLevelBook>("BetLevelBook").levelsOf(gameModeId)
       : [];
@@ -197,6 +208,11 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
     const child = rootContainer.createChildContainer();
     child.register("Config", { useValue: config });
+    // LA CONFIG GLOBAL SE FOTOGRAFÍA ACÁ, y registrarla es lo que lo vuelve cierto para la partida
+    // entera: el cableado la resuelve de este container, y sin esta línea caería al root, que es la
+    // BASE sin las ediciones en caliente —o sea que el motor se armaría con otros números que los
+    // que esta sala leyó arriba—.
+    child.register("GlobalDominoConfig", { useValue: global });
     if (roomOptions) child.register("RoomOptions", { useValue: roomOptions });
 
     // La vista es del asiento, no del socket: existe antes de que el dueño se conecte y
@@ -262,13 +278,19 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // container lo registró —un despliegue sin billetera no cobra— y en ese caso la mesa
     // tampoco ofrece niveles, porque el libro de niveles depende del mismo backend.
     const revokeMultiplier = child.resolve<MultiplierRevoker>("MultiplierRevoker");
-    const betChargeSink = rootContainer.isRegistered(BetCharger)
-      ? rootContainer.resolve(BetCharger).sinkFor(
-          config.matchId,
-          (events) => this.notifier.notify(events),
-          () => revokeMultiplier(),
-        )
-      : undefined;
+    //
+    // ⚠ SOLO CON `roomOptions`, como los sinks de plataforma, revancha y externos: una mesa por
+    // request es del orquestador y ese cobro escribiría `BET_MULTIPLIER` en el ledger de dominó y
+    // llamaría a la billetera de Betaso. Sin niveles nadie llega a aumentar, pero el sink no se
+    // engancha igual: la frontera no depende de que otra línea siga vacía.
+    const betChargeSink =
+      roomOptions && rootContainer.isRegistered(BetCharger)
+        ? rootContainer.resolve(BetCharger).sinkFor(
+            config.matchId,
+            (events) => this.notifier.notify(events),
+            () => revokeMultiplier(),
+          )
+        : undefined;
     const betChargeSinks = betChargeSink ? [betChargeSink] : [];
     const externalSinks =
       roomOptions && rootContainer.isRegistered("MatchSinks")
@@ -356,6 +378,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.onMessage("*", (client, type, payload) =>
       this.handleMessage(client, String(type), payload),
     );
+    this.opened = true;
     this.log.info("sala creada");
   }
 
@@ -493,7 +516,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // PRIMERO SE CORTA EL LATIDO: lo que sigue es limpieza, y un latido posterior volvería a
     // escribir justo lo que estamos por borrar — dejando la sala anunciada dos minutos más.
     this.heartbeat?.clear();
-    if (this.notifier && !this.hasOutcome()) {
+    if (this.opened && !this.hasOutcome()) {
       // Con revancha habrá fases posteriores al veredicto: la guarda futura debe mirar el
       // veredicto del juez, no la fase terminal, para no reembolsar una partida ya pagada.
       this.notifier.notify([{ type: "MATCH_ABORTED", reason: this.abortReason() }]);

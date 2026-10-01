@@ -1,0 +1,312 @@
+# VERIFICAR, EMPAQUETAR Y, SEGÚN LA RAMA, DESPLEGAR. Un solo workflow para todos los entornos.
+#
+# Portado del `_pipeline.yml` de games-orchestrator (7528030), donde lo comparten billing-auth y el
+# orquestador, aplanado para un repo de una sola app. Reemplaza al par `ci.yml` + `deploy.yml`.
+#
+#   develop → dev        push a la rama, o `workflow_dispatch` desde CUALQUIER rama (es lo que permite
+#   stage   → stage      probar una feature en el VPS de dev sin mergearla a develop)
+#   main    → prod
+#
+# Un PR o un push a cualquier otra rama solo verifica.
+#
+# LOS ENTORNOS SON Environments DE GITHUB (`dev`, `stage`, `prod`), con los mismos nombres de secretos y
+# variables en los tres:
+#
+#   DEPLOY_PATH            la raíz del despliegue en el servidor (/var/www/Betaso/domino-backend-v2)
+#   APP_NAME               nombre del proceso pm2 / proyecto de compose (domino-backend-v2-dev)
+#   INSTANCES              cuántas instancias (por defecto 1; con Docker, solo 1)
+#   NODE_BIN               (pm2) dónde están node y pm2 si no están en el PATH
+#   NODE_INTERPRETER       (pm2) con qué node corre el dominó
+#   PUBLIC_URL             si está, se comprueba `/health` por la puerta de entrada
+#   SSH_KNOWN_HOSTS        la clave del host, FIJADA
+#   secretos SSH_HOST · SSH_USER · SSH_KEY
+#
+# Y del REPOSITORIO:
+#
+#   DEPLOY_ENVIRONMENTS    los entornos que ya existen; el resto se saltea en vez de fallar. Hoy `dev`.
+#   DEPLOY_MODE            pm2 (por defecto) | docker | docker-build
+#
+# NINGÚN SECRETO DE LA APLICACIÓN VIVE ACÁ ni en el artefacto: están en el `shared/.env` del servidor,
+# que se crea UNA vez a mano y que el despliegue nunca toca (§`scripts/deploy/lib/deploy-common.sh`).
+#
+# Nada sale sin la suite en verde: `deploy` espera a `verify`, `smoke`, `image` y `docs`, y es el mismo
+# workflow que corre en los PRs.
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    # LO QUE NO VIAJA EN EL ARTEFACTO NO DESPLIEGA (truco `32d83de`): un push que sólo toca esto sube al
+    # servidor el mismo binario que ya corre. Los docs igual se verifican, en `docs.yml`. Basta UN archivo
+    # fuera de esta lista para que el push corra entero.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: A qué entorno desplegar
+        type: choice
+        options: [dev, stage, prod]
+        default: dev
+      mode:
+        description: Con qué medio (por defecto, el de DEPLOY_MODE)
+        type: choice
+        options: [default, pm2, docker, docker-build]
+        default: default
+
+permissions:
+  contents: read
+
+jobs:
+  # A DÓNDE VA ESTO Y CON QUÉ MEDIO. Un job aparte porque `environment:` y `concurrency:` del job de
+  # deploy necesitan el nombre ya resuelto, y el empaquetado necesita saber el medio.
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+      deploy: ${{ steps.pick.outputs.deploy }}
+      mode: ${{ steps.pick.outputs.mode }}
+    steps:
+      - id: pick
+        # LOS DATOS ENTRAN POR EL ENTORNO Y NO INTERPOLADOS EN EL SCRIPT: un nombre de rama es texto que
+        # eligió quien la creó, y un `${{ }}` adentro de un `run` se sustituye ANTES de que bash lo vea.
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_ENV: ${{ github.event.inputs.environment }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          ENABLED: ${{ vars.DEPLOY_ENVIRONMENTS }}
+          VAR_MODE: ${{ vars.DEPLOY_MODE }}
+        run: |
+          set -euo pipefail
+          target=""
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            target="${INPUT_ENV:-dev}"
+          elif [ "$EVENT" = "push" ]; then
+            case "$REF_NAME" in
+              develop) target=dev   ;;
+              stage)   target=stage ;;
+              main)    target=prod  ;;
+            esac
+          fi
+
+          mode="${INPUT_MODE:-default}"
+          [ "$mode" != default ] || mode="${VAR_MODE:-pm2}"
+          case "$mode" in
+            pm2 | docker | docker-build) ;;
+            *) echo "::error::DEPLOY_MODE vale '$mode': tiene que ser pm2, docker o docker-build"; exit 1 ;;
+          esac
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "environment=$target" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$target" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "▸ solo verificación (evento $EVENT, rama $REF_NAME)"
+          elif [[ ",${ENABLED// /}," == *",$target,"* ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "▸ destino: $target · medio: $mode"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::el entorno $target no está en DEPLOY_ENVIRONMENTS todavía: no se despliega"
+          fi
+
+  # SIN `services:`: la suite no mira Mongo ni Redis (`vitest.setup.ts` borra `MONGO_URI`, `REDIS_URL` y
+  # `RABBITMQ_URL`), así que levantarlos acá sería un job que miente. Lo que sí los usa es el smoke, abajo.
+  verify:
+    needs: target
+    runs-on: ubuntu-latest
+    env:
+      MODE: ${{ needs.target.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Node y `node_modules`, restaurado del caché cuando el lockfile no cambió. El piso de node vive
+      # ahí, y `src/entrypoint.test.ts` lo lee de ahí.
+      - uses: ./.github/actions/install
+
+      # `typecheck` va PRIMERO porque es EL gate: vitest transpila con esbuild, que borra los tipos sin
+      # chequearlos, así que una suite verde no dice nada sobre si el proyecto compila.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Los unitarios incluyen los de `scripts/deploy` (contra un servidor de mentira).
+      - name: Tests unitarios
+        run: npm run test:unit
+
+      - name: Tests de integración y E2E
+        run: npm run test:int && npm run test:e2e
+
+      - name: Build
+        run: npm run build
+
+      # Lo que viaja al servidor: el bundle y con qué instalar, o el compose y los scripts (Docker), o el
+      # código fuente (Docker construyendo en el servidor). En todos, los scripts de despliegue: así el
+      # procedimiento es siempre el de la versión que se está desplegando.
+      - name: Empaquetar el release
+        run: scripts/deploy/package-release.sh "$MODE" domino-release.tgz
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: domino-release.tgz
+          retention-days: 7
+          if-no-files-found: error
+
+  # LA CERTIFICACIÓN REAL, EN PARALELO: Docker, PM2 con dos instancias, Nginx, Mongo, Redis y RabbitMQ,
+  # con una partida jugada entera. Es puerta del deploy y no está en el camino de `verify`: son minutos
+  # que no tienen por qué sumarse a los de la suite.
+  smoke:
+    needs: target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/install
+
+      - name: Smoke Docker, PM2 y Nginx
+        env:
+          RUN_ENGINE_SMOKE: '1'
+        run: npm run test:deploy
+
+  # LA IMAGEN, EN PARALELO. Se construye SIEMPRE, aunque el modo sea pm2: un Dockerfile roto tiene que
+  # fallar en rojo acá y no el día que alguien cambie de medio. Solo se guarda como artefacto cuando el
+  # modo es `docker` (la imagen viaja por scp); con `docker-build` la construye el servidor.
+  image:
+    needs: target
+    runs-on: ubuntu-latest
+    env:
+      MODE: ${{ needs.target.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Construir la imagen (etapa runtime)
+        run: docker build --target runtime -t domino:ci .
+
+      # El CI no sabe el id del release (lo pone el despliegue): la etiqueta es `domino:ci` y el script
+      # del servidor la renombra.
+      - name: Guardar la imagen
+        if: env.MODE == 'docker'
+        run: docker save domino:ci | gzip > image.tar.gz
+
+      - uses: actions/upload-artifact@v7
+        if: env.MODE == 'docker'
+        with:
+          name: image
+          path: image.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  # LOS DOCS, EN PARALELO. Siguen siendo una puerta —un enlace muerto o un diagrama que no compila rompe
+  # la corrida— pero no están en el camino crítico.
+  docs:
+    needs: target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/install
+
+      - name: Docs
+        run: npm run docs:build
+
+  deploy:
+    needs: [target, verify, smoke, image, docs]
+    if: needs.target.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.target.outputs.environment }}
+    # Dos despliegues al MISMO entorno no pueden pisarse; a entornos distintos sí pueden ir juntos. Sin
+    # cancelar el que está en curso: cortarlo entre el symlink movido y el pm2 recargado es justo el
+    # estado del que este diseño viene a escapar.
+    concurrency:
+      group: deploy-${{ needs.target.outputs.environment }}
+      cancel-in-progress: false
+
+    steps:
+      # `release` trae el tarball; `image`, solo en el modo `docker`. Sin `name`, descargaría todos.
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+
+      - uses: actions/download-artifact@v8
+        if: needs.target.outputs.mode == 'docker'
+        with:
+          name: image
+
+      # La clave no pasa por ninguna action de terceros. Y el host se FIJA: aceptar la clave del primero
+      # que conteste es confiar en el DNS para entregar una llave de producción.
+      - name: Preparar el acceso
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+
+      # SUBIR Y CORRER EL PROCEDIMIENTO QUE VIAJA ADENTRO DEL ARTEFACTO: el script que se ejecuta es
+      # siempre el de la versión que se está desplegando.
+      #
+      # `NODE_INTERPRETER` es la lección que truco pagó con cuatro despliegues: el node de pm2 es el del
+      # DEMONIO, y colyseus 0.18 pide >= 22.
+      - name: Subir y desplegar
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          APP_NAME: ${{ vars.APP_NAME }}
+          INSTANCES: ${{ vars.INSTANCES }}
+          NODE_BIN: ${{ vars.NODE_BIN }}
+          NODE_INTERPRETER: ${{ vars.NODE_INTERPRETER }}
+          MODE: ${{ needs.target.outputs.mode }}
+          # EN QUÉ ENTORNO QUEDA CORRIENDO. Ya lo calculó `target` a partir de la rama; acá solo viaja.
+          # `NODE_ENV` no sirve para eso: vale `production` en todos.
+          APP_ENV: ${{ needs.target.outputs.environment }}
+        run: |
+          set -euo pipefail
+          # El nombre lleva fecha y commit: ordena solo —el rollback depende de eso— y dice de dónde
+          # salió sin abrir nada.
+          release="$(date -u +%Y%m%dT%H%M%S)-${GITHUB_SHA::7}"
+          dir="$DEPLOY_PATH/releases/$release"
+          opts=(-i "$HOME/.ssh/deploy" -o BatchMode=yes)
+          remote="$SSH_USER@$SSH_HOST"
+
+          case "$MODE" in
+            pm2) script=deploy-remote.sh ;;
+            *)   script=deploy-docker-remote.sh ;;
+          esac
+
+          echo "▸ dominó $release ($MODE) → $remote:$DEPLOY_PATH"
+          ssh "${opts[@]}" "$remote" "mkdir -p '$dir'"
+          scp "${opts[@]}" domino-release.tgz "$remote:/tmp/$release.tgz"
+          if [ "$MODE" = docker ]; then
+            scp "${opts[@]}" image.tar.gz "$remote:/tmp/$release.image.tar.gz"
+          fi
+
+          # Las variables viajan con `%q`: valores con espacios o comillas no rompen ni inyectan nada.
+          vars=$(printf 'APP_NAME=%q INSTANCES=%q APP_ENV=%q NODE_BIN=%q NODE_INTERPRETER=%q' \
+            "$APP_NAME" "${INSTANCES:-1}" "$APP_ENV" "$NODE_BIN" "$NODE_INTERPRETER")
+          ssh "${opts[@]}" "$remote" \
+            "set -e; tar -xzf '/tmp/$release.tgz' -C '$dir'; rm -f '/tmp/$release.tgz'; \
+             if [ -f '/tmp/$release.image.tar.gz' ]; then mv '/tmp/$release.image.tar.gz' '$dir/image.tar.gz'; fi; \
+             env $vars bash '$dir/scripts/deploy/$script'"
+
+      # POR LA PUERTA DE ENTRADA: DNS, Cloudflare, el vhost del proxy y el dominó. Se pregunta DESDE EL
+      # SERVIDOR y no desde el runner: Cloudflare le contesta 403 a las IPs de los runners de GitHub (el
+      # mismo `curl` desde otra máquina da 200). Va contra `/health` y no `/ready`: que las dependencias
+      # estén sanas ya lo dictaminó el script, instancia por instancia.
+      - name: Comprobar por la puerta de entrada
+        if: vars.PUBLIC_URL != ''
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/deploy" -o BatchMode=yes "$SSH_USER@$SSH_HOST" \
+            "curl -sS --fail-with-body --retry 5 --retry-delay 2 --retry-all-errors '$PUBLIC_URL/health'"

@@ -9,7 +9,7 @@ import type { ErrorRequestHandler } from "express";
 // parser de cuerpo y sin manejador de errores. Nadie más iba a poner esto.
 //
 // Acá sale un JSON con la misma forma que el resto de la capa (`{ error: ... }`, como el 404
-// y el 401 de register-http) y el detalle se queda en el log del servidor: un 500 es un BUG
+// y el 401 de las rutas internas) y el detalle se queda en el log del servidor: un 500 es un BUG
 // NUESTRO, así que el cliente no necesita saber cuál — y decírselo sería filtrar la cocina,
 // que con plata de por medio es el nombre técnico de un vector.
 //

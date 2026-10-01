@@ -13,7 +13,7 @@ export { TournamentWatcher } from "./watcher";
 export type { TournamentWatcherDeps } from "./watcher";
 export type { Penalty } from "./penalty";
 export { StrikeBook, penaltyMinutesFor } from "./penalty";
-export { registerTournamentHttp } from "./transports/http-penalty";
+export { type TournamentHttpDeps, tournamentHttp } from "./transports/http/register";
 export { HttpTournamentClient } from "./transports/http-client";
 export { CachedTournamentClient } from "./transports/cached-client";
 export { AmqpParticipationTransport } from "./transports/amqp-participation";

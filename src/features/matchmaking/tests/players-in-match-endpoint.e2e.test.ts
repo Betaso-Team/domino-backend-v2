@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 // son ASIENTOS vivos del clúster, que no es lo que v1 servía con otro nombre — de ahí el otro nombre.
 //
 // El censo se resuelve de `@/di-container` y no de un token: es la MISMA instancia que
-// `registerMatchmakingHttp` recibió al armar la app, y el test empuja su pasada a mano en vez de
+// `matchmakingHttp` recibió al armar la app, y el test empuja su pasada a mano en vez de
 // esperar el intervalo real.
 describe("endpoint GET /players-in-match (integración)", () => {
   let server: ColyseusTestServer;

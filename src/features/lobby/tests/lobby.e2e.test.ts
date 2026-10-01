@@ -95,7 +95,7 @@ describe("lobby", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Internal-Key": env.internalApiKey ?? "",
+        "x-internal-api-key": env.adminPanelApiKey ?? "",
       },
       body: JSON.stringify({ isUnderMaintenance: "sí" }),
     });
@@ -105,7 +105,7 @@ describe("lobby", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Internal-Key": env.internalApiKey ?? "",
+        "x-internal-api-key": env.adminPanelApiKey ?? "",
       },
       body: JSON.stringify({ isUnderMaintenance: true, message: "Actualizando mesas" }),
     });
@@ -128,7 +128,7 @@ describe("lobby", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Internal-Key": env.internalApiKey ?? "",
+        "x-internal-api-key": env.adminPanelApiKey ?? "",
       },
       body: JSON.stringify({ isUnderMaintenance: false }),
     });

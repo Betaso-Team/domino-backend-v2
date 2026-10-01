@@ -9,21 +9,32 @@ import {
 } from "@/tests/e2e";
 import { ColyseusSDK } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { type GlobalDominoConfig, globalConfigWith } from "../../core/config";
 import type { MatchState } from "../../core/state";
 import type { HistoryReader } from "../../network/history";
 import type { CreateMatchRequest, MatchParticipant } from "../match-contract";
+import { MatchRegistry } from "../match-registry";
 import type { DominoRoom } from "./domino-room";
 
 let server: ColyseusTestServer | undefined;
+let originalGlobalConfig: GlobalDominoConfig;
 
+// EL ÚNICO PLAZO QUE ESTE ARCHIVO EJERCITA: «disponer una partida con veredicto» se mide CON la
+// mesa en la pausa de presentación. Con el tick de vitest.setup.ts la pausa puede vencer antes de
+// que el poll la vea.
 beforeAll(async () => {
+  originalGlobalConfig = rootContainer.resolve("GlobalDominoConfig");
+  rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
+    useValue: globalConfigWith({ ...originalGlobalConfig, presentingMatchMs: 300 }),
+  });
   server = await bootTestServer(2584);
 });
 
 afterAll(async () => {
   await server?.cleanup();
   await server?.shutdown();
+  rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
 describe("DominoRoom", () => {
@@ -104,6 +115,31 @@ describe("DominoRoom", () => {
     expect(await historyTypes(matchId)).toContain("MATCH_ABORTED");
   });
 
+  // UNA SALA QUE NO TERMINÓ DE NACER NO TIENE PARTIDA QUE ABORTAR. Desde `@colyseus/core` 0.18.14
+  // un `onCreate` que lanza DISPONE la sala y corre `onDispose` —antes la dejaba viva y muda—, así
+  // que acá llega una sala a medio armar. Sin la guarda, el `notifier` ya existe y el cierre emite
+  // `MATCH_ABORTED`: un reembolso, un resumen y un cooldown de una mesa donde nadie se sentó. El
+  // `register` es el último `await` de `onCreate` y el que falla de verdad —Redis caído al nacer—.
+  it("no aborta una sala cuyo onCreate falló después de armar el motor", async () => {
+    const testServer = requiredServer();
+    const matchId = "match-half-born";
+    const register = vi
+      .spyOn(MatchRegistry.prototype, "register")
+      .mockRejectedValueOnce(new Error("almacén caído"));
+    const remove = vi.spyOn(MatchRegistry.prototype, "remove");
+    try {
+      await expect(testServer.createRoom<DominoRoom>("domino", options(matchId))).rejects.toThrow(
+        /almacén caído/,
+      );
+      // `remove` es lo último de `onDispose`: llegar ahí es haber pasado por la guarda.
+      await waitUntil(() => remove.mock.calls.length > 0);
+      expect(await historyTypes(matchId)).not.toContain("MATCH_ABORTED");
+    } finally {
+      register.mockRestore();
+      remove.mockRestore();
+    }
+  });
+
   it("rechaza el token de reconexión de quien ya abandonó", async () => {
     const testServer = requiredServer();
     const room = await testServer.createRoom<DominoRoom>("domino", options("match-out"));
@@ -139,7 +175,7 @@ describe("DominoRoom", () => {
     // el campo. Sin el patrón, cualquier otra falla de arranque —un container a medio cablear,
     // un puerto tomado— dejaría este test verde sin que `configOf` se llame una sola vez.
     await expect(
-      testServer.createRoom<DominoRoom>("domino", { ...options("match-bad"), rateId: "no-uuid" }),
+      testServer.createRoom<DominoRoom>("domino", { ...options("match-bad"), rateId: " " }),
     ).rejects.toThrow(/rateId/);
   });
 

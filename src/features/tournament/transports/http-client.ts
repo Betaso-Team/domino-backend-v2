@@ -1,4 +1,4 @@
-import { type InternalApiKey, internalAuthHeaders } from "@/features/auth";
+import { type ApiKey, betasoBackendAuthHeaders } from "@/features/auth";
 import type { HttpClient } from "@/shared/http";
 import {
   type TournamentClient,
@@ -52,7 +52,7 @@ const SEATS: Readonly<Record<string, number>> = { "1vs1": 2, "2vs2": 4 };
 export class HttpTournamentClient implements TournamentClient {
   constructor(
     private readonly http: HttpClient,
-    private readonly apiKey: InternalApiKey,
+    private readonly apiKey: ApiKey,
     private readonly config: TournamentConfig,
   ) {}
 
@@ -61,7 +61,7 @@ export class HttpTournamentClient implements TournamentClient {
     try {
       response = await this.http.get<ChampionshipResponse>(
         `${BASE}/${tournamentId}`,
-        internalAuthHeaders(this.apiKey),
+        betasoBackendAuthHeaders(this.apiKey),
       );
     } catch (e) {
       // It does not exist, or it did not answer. Both are "could not be played here" and both fall

@@ -25,7 +25,7 @@ import type { LeagueFeed, LeaguePlayer, RankingFeed } from "./standings";
 
 // LOS DOS DESTINOS SON OPCIONALES Y POR SEPARADO, y no es defensividad: dependen de dos cosas
 // distintas del entorno —el ranking del broker (`RABBITMQ_URL`), la liga del backend principal
-// (`BACKEND_URL`)— y exigir los dos juntos dejaría a una instancia con broker y sin URL sin
+// (`BETASO_BACKEND_URL`)— y exigir los dos juntos dejaría a una instancia con broker y sin URL sin
 // reportar tampoco el ranking, que sí puede.
 //
 // Ausente NO es un no-op silencioso: se anota. Es la misma política que el outbox del catálogo, que

@@ -1,13 +1,12 @@
 import express from "express";
 import { describe, expect, it } from "vitest";
-import { type DependencyChecks, registerHealth } from "./health";
+import { type DependencyChecks, healthRoutes } from "./health";
 
 // CONTRA UN EXPRESS DE VERDAD Y CON `fetch`, no llamando al handler a mano: lo que este
 // archivo tiene que medir es el STATUS que ve el balanceador, y un handler invocado
 // directamente no produce ninguno. Es la misma decisión que `http-root-route.e2e.test.ts`.
 async function serve(checks: DependencyChecks, timeoutMs?: number) {
-  const app = express();
-  registerHealth(app, checks, timeoutMs);
+  const app = express().use(healthRoutes(checks, timeoutMs));
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
   const address = server.address();

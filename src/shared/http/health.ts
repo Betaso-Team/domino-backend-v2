@@ -1,4 +1,4 @@
-import type { Application, Request, Response } from "express";
+import { type Request, type Response, Router } from "express";
 
 // LOS DOS CHEQUEOS DEL BALANCEADOR, y son DOS porque los contesta gente distinta que hace
 // cosas distintas con la respuesta:
@@ -58,20 +58,22 @@ function answersWithin(check: () => Promise<unknown>, ms: number): Promise<boole
   });
 }
 
-export function registerHealth(
-  app: Application,
+// LAS DOS SONDAS COMO UN ROUTER, igual que toda otra ruta (truco `0abf704`). Se monta ANTES que las
+// rutas de las features, en el mismo lugar que antes.
+export function healthRoutes(
   checks: DependencyChecks,
   timeoutMs: number = READINESS_TIMEOUT_MS,
-): void {
+): Router {
+  const router = Router();
   // VIVO. No consulta nada: que esta línea llegue a ejecutarse ya demuestra que el event loop
   // corre, que es exactamente lo que la pregunta quiere saber.
-  app.get("/health", (_request: Request, response: Response) => {
+  router.get("/health", (_request: Request, response: Response) => {
     response.json({ status: "ok", pid: process.pid, uptime: Math.round(process.uptime()) });
   });
 
   // LISTO. Acá sí se pregunta, porque una instancia que arrancó pero no llega a Redis acepta la
   // conexión y recién falla al crear la sala. Devuelve QUÉ falta y no solo que falta.
-  app.get("/ready", async (_request: Request, response: Response) => {
+  router.get("/ready", async (_request: Request, response: Response) => {
     const entries = Object.entries(checks);
     // A LA VEZ Y NO EN FILA, y el plazo es POR CHEQUEO: en fila, dos dependencias lentas se
     // sumarían y la segunda se reportaría caída por culpa de la primera.
@@ -85,4 +87,5 @@ export function registerHealth(
     }
     response.status(503).json({ status: "not-ready", missing });
   });
+  return router;
 }

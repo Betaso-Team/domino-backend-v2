@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { generateKeyPairSync } from "node:crypto";
 import dotenv from "dotenv";
 
 // EL `.env` NO EXISTE PARA LA SUITE, y esta línea es lo único que puede garantizarlo.
@@ -31,14 +32,23 @@ import dotenv from "dotenv";
 // `@colyseus/tools` no tiene `node_modules` propio.
 dotenv.config = () => ({ parsed: {} });
 
-// src/env.ts valida el entorno al importarse y lanza si falta JWT_SECRET (ver su cabecera).
+// src/env.ts valida el entorno al importarse y lanza si falta BETASO_BACKEND_JWT_SECRET (ver su cabecera).
 // Estos defaults evitan que cualquier test que importe env.ts — directa o transitivamente —
 // explote solo por correr sin variables configuradas.
 process.env.NODE_ENV ??= "test";
-process.env.JWT_SECRET ??= "test-secret-do-not-use-in-production";
+process.env.BETASO_BACKEND_JWT_SECRET ??= "test-secret-do-not-use-in-production";
 // Sin esto la API interna no se registra (fail closed) y sus tests e2e no tendrían
 // ruta contra la cual medir. El caso "sin llave" se prueba aparte, sin servidor.
-process.env.INTERNAL_API_KEY ??= "test-internal-key-do-not-use-in-production";
+process.env.BETASO_ADMIN_PANEL_API_KEY ??= "test-admin-panel-key-do-not-use-in-production";
+process.env.ORCHESTRATOR_API_KEY ??= "test-orchestrator-key-do-not-use-in-production";
+// `parseEnv` exige la clave pública de billing-auth cuando hay llave del orquestador (sin ella las
+// mesas abren y nadie entra). Una P-256 recién generada: es PÚBLICA y sin su privada nadie firma nada.
+process.env.BILLING_AUTH_PUBLIC_KEY ??= generateKeyPairSync("ec", { namedCurve: "P-256" })
+  .publicKey.export({ type: "spki", format: "pem" })
+  .toString();
+// La de SALIDA, DISTINTA a propósito: con el mismo valor, un test que confundiera las dos llaves
+// daría verde.
+process.env.BETASO_BACKEND_API_KEY ??= "test-backend-key-do-not-use-in-production";
 // SE BORRA, no se ignora, y es la única variable que este archivo saca en vez de poner.
 // La presencia de `MONGO_URI` es lo que elige la implementación del historial en el
 // composition root (ver src/di-container.ts), así que un desarrollador que la tenga
@@ -75,18 +85,25 @@ delete process.env.REDIS_URL;
 // olvido no sería un rojo sino una suite que se queda esperando.
 delete process.env.RABBITMQ_URL;
 process.env.PORT ??= "2567";
-process.env.PRESENTING_MATCH_MS ??= "120";
-// LOS TRES DE LA REVANCHA, encogidos como los demás. La ventana real es de 30 s: dejarla
-// entera haría que CADA e2e que termina una partida espere medio minuto a que la mesa muera.
-process.env.REMATCH_WINDOW_MS ??= "1500";
-process.env.REMATCH_RESPONSE_MS ??= "1000";
-process.env.REMATCH_HANDOFF_MS ??= "1000";
-process.env.PRESENTING_ROUND_MS ??= "120";
+// LOS PLAZOS SE DIVIDEN EN LOS QUE VENCEN Y LOS QUE SE CANCELAN (truco `9d543c6`), no en cortos
+// y largos. Los que VENCEN —las pausas de presentación— los espera el flujo entero en cada mano,
+// así que cuestan su valor cada vez: van a UN TICK. Colyseus avanza el reloj de la sala cada
+// 1000/60 ≈ 16,7 ms, así que 0, 1 y 20 disparan en el mismo tick.
+process.env.PRESENTING_MATCH_MS ??= "20";
+process.env.PRESENTING_ROUND_MS ??= "20";
+// LOS AMBIGUOS: los cancela el test que actúa (pedir, contestar, sentarse en la mesa nueva) y los
+// vence el que mide el vencimiento. Un tick no le daría tiempo al primero de mandar su mensaje;
+// 300 ms son de sobra para un viaje de ida y vuelta por el socket local. La ventana real es de 30 s.
+process.env.REMATCH_WINDOW_MS ??= "300";
+process.env.REMATCH_RESPONSE_MS ??= "300";
+process.env.REMATCH_HANDOFF_MS ??= "300";
+// LOS QUE SE CANCELAN casi siempre: el test juega antes de que venzan, así que no compran
+// velocidad. Achicarlos más no acelera nada y retira jugadores a mitad de un test.
 process.env.TURN_TIMEOUT_MS ??= "600";
 process.env.EXTRA_TIME_RESERVE_MS ??= "300";
 process.env.DEALING_TIMEOUT_MS ??= "800";
 process.env.SEATING_TIMEOUT_MS ??= "3000";
-// Tres segundos: el camino de la ventana vencida tiene que poder testearse. Es el plazo
-// más largo que queda en test, y sigue siendo mucho más que los 200 ms que tarda el SDK
-// en reintentar, así que el camino del bache de red no se lo come.
-process.env.RECONNECTION_WINDOW_SECONDS ??= "3";
+// Medio segundo, en fracción porque `allowReconnection` multiplica por 1000. El camino de la
+// ventana vencida la espera entera; el del bache de red la cancela, y el SDK reintenta a los
+// ~200 ms, así que le queda margen.
+process.env.RECONNECTION_WINDOW_SECONDS ??= "0.5";

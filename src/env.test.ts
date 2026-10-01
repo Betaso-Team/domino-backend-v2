@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { parseEnv } from "./env";
+import { isDevEnvironment, parseEnv } from "./env";
 
 describe("parseEnv", () => {
   it("acepta un entorno completo", () => {
-    // Producción exige además las cuatro de infraestructura (ver el describe de más abajo), así
+    // Producción exige además las cinco de infraestructura (ver el describe de más abajo), así
     // que el "entorno completo" de este test es el completo de verdad y no el mínimo que compila.
     const env = parseEnv({
       NODE_ENV: "production",
       PORT: "3000",
-      JWT_SECRET: "s".repeat(16),
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
       MONGO_URI: "mongodb://mongo:27017/domino",
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
-      INTERNAL_API_KEY: "k".repeat(16),
-      BACKEND_URL: "https://api.elbetaso.com/api/",
+      BETASO_ADMIN_PANEL_API_KEY: "k".repeat(16),
+      BETASO_BACKEND_API_KEY: "b".repeat(16),
+      BETASO_BACKEND_URL: "https://api.elbetaso.com/api/",
     });
     expect(env.port).toBe(3000);
     expect(env.nodeEnv).toBe("production");
@@ -20,7 +21,7 @@ describe("parseEnv", () => {
   });
 
   it("aplica los defaults de desarrollo", () => {
-    const env = parseEnv({ JWT_SECRET: "s".repeat(16) });
+    const env = parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) });
     expect(env.nodeEnv).toBe("development");
     expect(env.port).toBe(2567);
     expect(env.logLevel).toBe("debug");
@@ -34,7 +35,7 @@ describe("parseEnv", () => {
 
   it("permite acortar los plazos desde el entorno", () => {
     const env = parseEnv({
-      JWT_SECRET: "s".repeat(16),
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
       TURN_TIMEOUT_MS: "600",
       EXTRA_TIME_RESERVE_MS: "300",
       DEALING_TIMEOUT_MS: "800",
@@ -54,44 +55,89 @@ describe("parseEnv", () => {
   it("en producción el nivel de log baja a info", () => {
     const env = parseEnv({
       NODE_ENV: "production",
-      JWT_SECRET: "s".repeat(16),
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
       MONGO_URI: "mongodb://mongo:27017/domino",
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
-      INTERNAL_API_KEY: "k".repeat(16),
-      BACKEND_URL: "https://api.elbetaso.com/api/",
+      BETASO_ADMIN_PANEL_API_KEY: "k".repeat(16),
+      BETASO_BACKEND_API_KEY: "b".repeat(16),
+      BETASO_BACKEND_URL: "https://api.elbetaso.com/api/",
     });
     expect(env.logLevel).toBe("info");
   });
 
-  it("rechaza un entorno sin JWT_SECRET", () => {
-    expect(() => parseEnv({})).toThrow(/JWT_SECRET/);
+  it("sin BILLING_AUTH_PUBLIC_KEY no confía en los tokens de billing-auth", () => {
+    expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).billingAuth).toBeUndefined();
   });
 
-  it("rechaza un JWT_SECRET corto", () => {
-    expect(() => parseEnv({ JWT_SECRET: "corto" })).toThrow(/JWT_SECRET/);
+  it("con BILLING_AUTH_PUBLIC_KEY confía en billing-auth, con emisor y audiencia por defecto", () => {
+    const parsed = parseEnv({
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+      BILLING_AUTH_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\\nabc\\n-----END PUBLIC KEY-----",
+    });
+    expect(parsed.billingAuth).toEqual({
+      publicKeyPem: "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----",
+      issuer: "betaso-auth",
+      audience: "domino",
+    });
+  });
+
+  it("rechaza un entorno sin BETASO_BACKEND_JWT_SECRET", () => {
+    expect(() => parseEnv({})).toThrow(/BETASO_BACKEND_JWT_SECRET/);
+  });
+
+  // LAS QUE DICTA EL BACKEND DE BETASO no tienen mínimo de largo: las de dev miden 9 y 15, y un mínimo
+  // acá no las alarga, solo deja al dominó sin arrancar. Lo que sí se rechaza es la ausencia.
+  it("acepta el secreto del JWT y la llave del backend cortos, como los dicta Betaso", () => {
+    const env = parseEnv({
+      BETASO_BACKEND_JWT_SECRET: "nueve-car",
+      BETASO_BACKEND_API_KEY: "quince-caracter",
+    });
+    expect(env.jwtSecret).toBe("nueve-car");
+    expect(env.backendApiKey).toBe("quince-caracter");
+  });
+
+  it("rechaza un BETASO_BACKEND_JWT_SECRET vacío", () => {
+    expect(() => parseEnv({ BETASO_BACKEND_JWT_SECRET: "" })).toThrow(/BETASO_BACKEND_JWT_SECRET/);
   });
 
   it("rechaza un PORT que no es número", () => {
-    expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), PORT: "abc" })).toThrow(/PORT/);
+    expect(() => parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), PORT: "abc" })).toThrow(
+      /PORT/,
+    );
   });
 
   // Ausente es un estado LEGÍTIMO y significa "esta instancia no expone /internal/*".
   // Por eso no tiene default: un default es una llave publicada.
-  it("sin INTERNAL_API_KEY el entorno es válido y la llave queda indefinida", () => {
-    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).internalApiKey).toBeUndefined();
+  it("sin BETASO_ADMIN_PANEL_API_KEY el entorno es válido y la llave queda indefinida", () => {
+    expect(
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).adminPanelApiKey,
+    ).toBeUndefined();
   });
 
-  it("rechaza una INTERNAL_API_KEY corta en vez de aceptar una llave enumerable", () => {
-    expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), INTERNAL_API_KEY: "corta" })).toThrow(
-      /INTERNAL_API_KEY/,
-    );
+  // LAS DOS LLAVES SON DOS: cada una sale de su variable y ninguna cae en la otra. Con una sola
+  // variable para las dos direcciones —como estuvo el dominó hasta truco `ebf22dd`— el que tenía la
+  // llave del backend también administraba el dominó.
+  it("la llave del panel y la del backend son dos, y no se cruzan", () => {
+    const env = parseEnv({
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+      BETASO_ADMIN_PANEL_API_KEY: "p".repeat(16),
+      BETASO_BACKEND_API_KEY: "b".repeat(16),
+    });
+    expect(env.adminPanelApiKey).toBe("p".repeat(16));
+    expect(env.backendApiKey).toBe("b".repeat(16));
+  });
+
+  it("rechaza una BETASO_ADMIN_PANEL_API_KEY corta en vez de aceptar una llave enumerable", () => {
+    expect(() =>
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), BETASO_ADMIN_PANEL_API_KEY: "corta" }),
+    ).toThrow(/BETASO_ADMIN_PANEL_API_KEY/);
   });
 
   // Ausente es un estado LEGÍTIMO y significa "clúster de uno": Colyseus se queda con su driver
   // y su presence locales y el registro de partidas con el almacén de memoria. Es el mismo
   // criterio que MONGO_URI — la presencia del dato elige, sin un interruptor que la nombre.
   it("sin REDIS_URL el entorno es válido y el clúster queda en uno", () => {
-    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).redisUrl).toBeUndefined();
+    expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).redisUrl).toBeUndefined();
   });
 
   // RABBITMQ_URL sigue el mismo criterio que las otras dos URIs: la PRESENCIA del dato elige la
@@ -99,76 +145,86 @@ describe("parseEnv", () => {
   // instancia no publica al broker —el outbox sigue acumulando, que es el punto entero de que
   // sea durable—, y es lo que hace que `npm test` no toque la red.
   it("sin RABBITMQ_URL el entorno es válido y la URL queda indefinida", () => {
-    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).rabbitmqUrl).toBeUndefined();
+    expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).rabbitmqUrl).toBeUndefined();
   });
 
-  // `BACKEND_URL` sigue el mismo criterio, y afuera de producción su ausencia es la que deja a la
+  // `BETASO_BACKEND_URL` sigue el mismo criterio, y afuera de producción su ausencia es la que deja a la
   // suite sin tocar la red: sin ella no se construye el destino de liga y el cierre de la partida
   // anota que no reportó, en vez de intentar un POST contra un host que no existe.
-  it("sin BACKEND_URL el entorno es válido y la URL queda indefinida", () => {
-    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).backendUrl).toBeUndefined();
+  it("sin BETASO_BACKEND_URL el entorno es válido y la URL queda indefinida", () => {
+    expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).backendUrl).toBeUndefined();
   });
 
   // Se valida como URL y no como cadena no vacía, y es la única de las cuatro que lo hace: las
   // otras tres son URIs de esquemas propios (`mongodb://`, `amqp://`) o un secreto. Acá el valor
   // se CONCATENA con la ruta, así que un `api.elbetaso.com` sin esquema produciría un `fetch` que
   // falla por razones que no dicen que la variable está mal escrita.
-  it("rechaza un BACKEND_URL que no es una URL", () => {
-    expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), BACKEND_URL: "api.elbetaso.com" })).toThrow(
-      /BACKEND_URL/,
-    );
+  it("rechaza un BETASO_BACKEND_URL que no es una URL", () => {
+    expect(() =>
+      parseEnv({
+        BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+        BETASO_BACKEND_URL: "api.elbetaso.com",
+      }),
+    ).toThrow(/BETASO_BACKEND_URL/);
   });
 
-  // EN PRODUCCIÓN LAS CUATRO SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera
+  // EN PRODUCCIÓN LAS CINCO SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera
   // de producción, "ausente" es la decisión legítima de una instancia que corre sola y sin
   // infraestructura. En producción es lo contrario — un despliegue productivo sin `MONGO_URI`
   // arranca creyendo que persiste, sin `RABBITMQ_URL` acumula eventos que nadie va a publicar,
-  // sin `INTERNAL_API_KEY` deja el catálogo sin su API administrativa, y sin `BACKEND_URL` la
-  // liga no recibe ninguna partida. Las cuatro fallan en SILENCIO, que es exactamente la clase de
+  // sin `BETASO_ADMIN_PANEL_API_KEY` deja el catálogo sin su API administrativa, y sin `BETASO_BACKEND_URL` la
+  // liga no recibe ninguna partida. Todas fallan en SILENCIO, que es exactamente la clase de
   // error que un arranque tiene que rechazar.
   describe("en producción exige la infraestructura completa", () => {
     const productivo = {
       NODE_ENV: "production",
-      JWT_SECRET: "s".repeat(16),
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
       MONGO_URI: "mongodb://mongo:27017/domino",
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
-      INTERNAL_API_KEY: "k".repeat(16),
-      BACKEND_URL: "https://api.elbetaso.com/api/",
+      BETASO_ADMIN_PANEL_API_KEY: "k".repeat(16),
+      BETASO_BACKEND_API_KEY: "b".repeat(16),
+      BETASO_BACKEND_URL: "https://api.elbetaso.com/api/",
     };
 
     it("acepta el entorno productivo completo", () => {
       const env = parseEnv(productivo);
       expect(env.mongoUri).toBe("mongodb://mongo:27017/domino");
       expect(env.rabbitmqUrl).toBe("amqp://guest:guest@rabbitmq:5672");
-      expect(env.internalApiKey).toBe("k".repeat(16));
+      expect(env.adminPanelApiKey).toBe("k".repeat(16));
+      expect(env.backendApiKey).toBe("b".repeat(16));
       expect(env.backendUrl).toBe("https://api.elbetaso.com/api/");
     });
 
-    it.each([["MONGO_URI"], ["RABBITMQ_URL"], ["INTERNAL_API_KEY"], ["BACKEND_URL"]] as const)(
-      "rechaza producción sin %s",
-      (faltante) => {
-        const { [faltante]: _, ...incompleto } = productivo;
-        expect(() => parseEnv(incompleto)).toThrow(new RegExp(faltante));
-      },
-    );
+    it.each([
+      ["MONGO_URI"],
+      ["RABBITMQ_URL"],
+      ["BETASO_ADMIN_PANEL_API_KEY"],
+      ["BETASO_BACKEND_API_KEY"],
+      ["BETASO_BACKEND_URL"],
+    ] as const)("rechaza producción sin %s", (faltante) => {
+      const { [faltante]: _, ...incompleto } = productivo;
+      expect(() => parseEnv(incompleto)).toThrow(new RegExp(faltante));
+    });
 
     // UN SOLO ERROR QUE LAS ENUMERA, no el primero que aparece. Un arranque que dice "falta
     // MONGO_URI", se corrige, y entonces dice "falta RABBITMQ_URL" es tres despliegues en vez de
     // uno — y cada intento contra un entorno productivo cuesta una ventana de mantenimiento.
     it("nombra TODAS las que faltan en un solo error", () => {
-      const intento = () => parseEnv({ NODE_ENV: "production", JWT_SECRET: "s".repeat(16) });
+      const intento = () =>
+        parseEnv({ NODE_ENV: "production", BETASO_BACKEND_JWT_SECRET: "s".repeat(16) });
       expect(intento).toThrow(/MONGO_URI/);
       expect(intento).toThrow(/RABBITMQ_URL/);
-      expect(intento).toThrow(/INTERNAL_API_KEY/);
-      expect(intento).toThrow(/BACKEND_URL/);
+      expect(intento).toThrow(/BETASO_ADMIN_PANEL_API_KEY/);
+      expect(intento).toThrow(/BETASO_BACKEND_API_KEY/);
+      expect(intento).toThrow(/BETASO_BACKEND_URL/);
     });
 
     // La misma ausencia FUERA de producción no es un error: es el despliegue de desarrollo.
     it("fuera de producción las tres pueden faltar", () => {
-      const env = parseEnv({ JWT_SECRET: "s".repeat(16) });
+      const env = parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) });
       expect(env.mongoUri).toBeUndefined();
       expect(env.rabbitmqUrl).toBeUndefined();
-      expect(env.internalApiKey).toBeUndefined();
+      expect(env.adminPanelApiKey).toBeUndefined();
     });
   });
 
@@ -181,7 +237,11 @@ describe("parseEnv", () => {
   // `listen()` es el otro: pasarle éste contaría el índice dos veces —con base 2567 la instancia
   // 1 ataría 2569— y el síntoma es un puerto al que no llega nadie.
   it("el puerto efectivo le suma el índice de instancia a la base", () => {
-    const env = parseEnv({ JWT_SECRET: "s".repeat(16), PORT: "2567", NODE_APP_INSTANCE: "1" });
+    const env = parseEnv({
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+      PORT: "2567",
+      NODE_APP_INSTANCE: "1",
+    });
 
     expect(env.port).toBe(2567);
     expect(env.instanceIndex).toBe(1);
@@ -191,7 +251,7 @@ describe("parseEnv", () => {
   // `undefined` NO es la instancia 0: es que esto no lo levantó pm2, y ése es un caso distinto
   // —una sola instancia, que se anuncia SIN puerto en el path—.
   it("sin pm2 no hay índice y el puerto efectivo es la base", () => {
-    const env = parseEnv({ JWT_SECRET: "s".repeat(16), PORT: "2567" });
+    const env = parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), PORT: "2567" });
 
     expect(env.instanceIndex).toBeUndefined();
     expect(env.listeningPort).toBe(2567);
@@ -206,7 +266,7 @@ describe("parseEnv", () => {
   // lleva la conexión contesta con total confianza que esa sala no es suya.
   it("con pm2 anuncia el host y el puerto EFECTIVO como path", () => {
     const env = parseEnv({
-      JWT_SECRET: "s".repeat(16),
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
       SERVER_ADDRESS: "domino.betaso.com",
       PORT: "2567",
       NODE_APP_INSTANCE: "1",
@@ -219,7 +279,7 @@ describe("parseEnv", () => {
   // path, y ponérselo exigiría un proxy que rutee por prefijo para un despliegue que no lo pide.
   it("sin pm2 anuncia la dirección tal cual, sin puerto", () => {
     const env = parseEnv({
-      JWT_SECRET: "s".repeat(16),
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
       SERVER_ADDRESS: "domino.betaso.com",
       PORT: "2568",
     });
@@ -230,19 +290,107 @@ describe("parseEnv", () => {
   // Sin SERVER_ADDRESS no se anuncia NADA, y no una dirección a medias: el cliente vuelve al host
   // al que ya le habló, que es lo correcto con una instancia sola.
   it("sin SERVER_ADDRESS no anuncia ninguna dirección", () => {
-    expect(parseEnv({ JWT_SECRET: "s".repeat(16) }).publicAddress).toBeUndefined();
+    expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).publicAddress).toBeUndefined();
   });
 
   it("solo activa el smoke con el valor 1", () => {
-    expect(parseEnv({ JWT_SECRET: "s".repeat(16), RUN_ENGINE_SMOKE: "1" }).runEngineSmoke).toBe(
-      true,
-    );
-    expect(parseEnv({ JWT_SECRET: "s".repeat(16), RUN_ENGINE_SMOKE: "true" }).runEngineSmoke).toBe(
-      false,
-    );
+    expect(
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), RUN_ENGINE_SMOKE: "1" }).runEngineSmoke,
+    ).toBe(true);
+    expect(
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), RUN_ENGINE_SMOKE: "true" })
+        .runEngineSmoke,
+    ).toBe(false);
   });
 
   it("rechaza un NODE_ENV fuera del enum", () => {
-    expect(() => parseEnv({ JWT_SECRET: "s".repeat(16), NODE_ENV: "staging" })).toThrow(/NODE_ENV/);
+    expect(() =>
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), NODE_ENV: "staging" }),
+    ).toThrow(/NODE_ENV/);
+  });
+
+  it("sin ORCHESTRATOR_API_KEY no se abre la API del orquestador", () => {
+    expect(
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).orchestratorApiKey,
+    ).toBeUndefined();
+  });
+
+  it("rechaza una ORCHESTRATOR_API_KEY corta en vez de aceptar una llave enumerable", () => {
+    expect(() =>
+      parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), ORCHESTRATOR_API_KEY: "corta" }),
+    ).toThrow(/ORCHESTRATOR_API_KEY/);
+  });
+  describe("las llaves del orquestador", () => {
+    const base = { BETASO_BACKEND_JWT_SECRET: "s".repeat(16) };
+    const orq = "o".repeat(16);
+
+    it("con ORCHESTRATOR_API_KEY exige BILLING_AUTH_PUBLIC_KEY: sin ella nadie puede entrar", () => {
+      expect(() => parseEnv({ ...base, ORCHESTRATOR_API_KEY: orq })).toThrow(
+        /ORCHESTRATOR_API_KEY.*BILLING_AUTH_PUBLIC_KEY/,
+      );
+    });
+
+    it("con las dos definidas arranca", () => {
+      const pem = "pem-cualquiera";
+      expect(
+        parseEnv({ ...base, ORCHESTRATOR_API_KEY: orq, BILLING_AUTH_PUBLIC_KEY: pem })
+          .orchestratorApiKey,
+      ).toBe(orq);
+    });
+
+    it.each(["BETASO_ADMIN_PANEL_API_KEY", "BETASO_BACKEND_API_KEY"])(
+      "rechaza una ORCHESTRATOR_API_KEY igual a %s: cada llave abre lo suyo",
+      (otra) => {
+        expect(() =>
+          parseEnv({
+            ...base,
+            BILLING_AUTH_PUBLIC_KEY: "pem",
+            ORCHESTRATOR_API_KEY: orq,
+            [otra]: orq,
+          }),
+        ).toThrow(new RegExp(`ORCHESTRATOR_API_KEY.*${otra}`));
+      },
+    );
+  });
+
+  // `NODE_ENV` vale `production` en dev, stage y prod por igual, así que no puede decir EN CUÁL se
+  // está. `APP_ENV` sí, y lo que decide —hoy, montar las herramientas de Colyseus que muestran el
+  // estado entero de cada sala— no puede quedar prendido en prod por olvido.
+  describe("APP_ENV", () => {
+    const productivo = {
+      NODE_ENV: "production",
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+      MONGO_URI: "mongodb://mongo:27017/domino",
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+      BETASO_ADMIN_PANEL_API_KEY: "k".repeat(16),
+      BETASO_BACKEND_API_KEY: "b".repeat(16),
+      BETASO_BACKEND_URL: "https://api.elbetaso.com/api/",
+    };
+
+    it("sin declarar, fuera de producción es local", () => {
+      expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).appEnv).toBe("local");
+    });
+
+    // FALLA CERRADO: un servidor cuyo `.env` no lo declara no puede terminar con el monitor abierto.
+    it("sin declarar, en producción es prod", () => {
+      expect(parseEnv(productivo).appEnv).toBe("prod");
+    });
+
+    it("declarado, gana sobre NODE_ENV", () => {
+      expect(parseEnv({ ...productivo, APP_ENV: "dev" }).appEnv).toBe("dev");
+    });
+
+    it("rechaza un entorno que no existe", () => {
+      expect(() => parseEnv({ ...productivo, APP_ENV: "production" })).toThrow(/APP_ENV/);
+    });
+  });
+
+  it.each([
+    ["local", true],
+    ["dev", true],
+    ["stage", false],
+    ["prod", false],
+  ] as const)("isDevEnvironment(%s) es %s", (appEnv, esperado) => {
+    expect(isDevEnvironment(appEnv)).toBe(esperado);
   });
 });

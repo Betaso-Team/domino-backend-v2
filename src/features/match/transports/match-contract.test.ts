@@ -85,7 +85,7 @@ describe("requestOf", () => {
   });
 
   it.each<[string, Record<string, unknown>]>([
-    ["rateId no UUID", { rateId: "actual" }],
+    ["rateId vacío", { rateId: " " }],
     ["gameModeId vacío", { gameModeId: " " }],
     // LAS TRES DEL LARGO DE LA MESA. Sin ellas, borrar el `superRefine` de paridad deja la
     // suite entera en verde y una mesa de 3 revienta recién adentro de `assignTeams` — o sea
@@ -169,6 +169,13 @@ describe("configOf", () => {
     expect(config.rateId).toBe("00000000-0000-4000-8000-000000000001");
     // La ventana siempre encendida: es control de presencia, no una opción del modo.
     expect(config.isDealWindowEnabled).toBe(true);
+  });
+
+  // EL `rateId` ES DEL QUE COBRA, no nuestro. El de Betaso es el `_id` de Mongo de su documento de
+  // tasas, no un UUID: exigir una forma que el emisor no promete es rechazar mesas legítimas.
+  it("acepta un rateId que no es UUID", () => {
+    const config = configFrom({ ...request, rateId: "69977c3dc3bf3e710572f941" }, modeOf({}));
+    expect(config.rateId).toBe("69977c3dc3bf3e710572f941");
   });
 
   // LA IDENTIDAD SE GUARDA NORMALIZADA. El asiento se compara contra el `sub` del token, así
@@ -295,7 +302,7 @@ describe("replayConfigOf", () => {
     ["UC infinita", { prize: Number.POSITIVE_INFINITY }],
     ["UC insegura", { prize: Number.MAX_SAFE_INTEGER + 1 }],
     ["UC negativa", { prize: -1 }],
-    ["rateId no UUID", { rateId: "actual" }],
+    ["rateId vacío", { rateId: " " }],
     ["pointsToWin en cero", { pointsToWin: 0 }],
     ["ventana de reparto ausente", { isDealWindowEnabled: undefined }],
     ["asiento sin playerId", { seats: [{ ...participants[0] }, snapshot.seats[1]] }],

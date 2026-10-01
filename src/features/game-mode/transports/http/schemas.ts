@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { CreateGameMode, GameMode, UpdateGameMode } from "../../core/game-mode";
 
 // LA FRONTERA DE FORMA DEL CATÁLOGO: lo que entra por HTTP y lo que sale. No hay routing acá —eso es
-// `register-http.ts`— y no hay reglas de negocio: qué cuenta como duplicado o qué se puede reactivar
+// `admin.ts`/`catalog.ts`— y no hay reglas de negocio: qué cuenta como duplicado o qué se puede reactivar
 // lo decide el servicio.
 //
 // ESTE ARCHIVO ES LO QUE v1 NO TENÍA. Su DTO zod existe (`Betaso-Domino-Backend/src/game-modes/dto/
@@ -99,7 +99,7 @@ export const UPDATE_BODY = z.strictObject({
 // antes, y rechazar lo bueno es peor que no validar.
 //
 // Lo que sí se corta son los CARACTERES DE CONTROL, por el mismo argumento que el `matchId` del
-// historial (`features/match/transports/http/register-http.ts`): este valor entra del cliente y
+// historial (`features/match/transports/http/history.ts`): este valor entra del cliente y
 // termina en el log del operador, y un `%0A` llega decodificado a `request.params` y parte la línea
 // en dos. `\P{Cc}` es la categoría Unicode "Control" —cubre también los C1 y no mete controles
 // literales en el fuente, que es lo que la regla `noControlCharactersInRegex` de biome prohíbe—.

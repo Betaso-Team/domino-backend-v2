@@ -1777,6 +1777,217 @@ golden rebobina, los E2E de dos siguen verdes y el único cambio del árbol es e
 4. **La tranca de 4P no tiene E2E.** Está medida como regla y en el motor; llevar una mesa de
    cuatro a una tranca real pide conducir las cuatro manos a mano.
 
+## Actualización — Colyseus core 0.18.15 / colyseus 0.18.7 / sdk 0.18.3 / schema 5.0.33
+
+Baseline **1273 tests / 122 archivos**, con `typecheck`, suite, lint y `depcruise` (**378 módulos /
+1523 dependencias**) en verde. De las notas de release, dos tocan este repo y el resto no
+(`IdleKickPlugin`, WebTransport, Vite+Nitro, el monitor y uWebSockets no se usan):
+
+- **core 0.18.14: un `onCreate` que lanza ahora DISPONE la sala y corre `onDispose`.** Antes la
+  sala quedaba viva y muda, así que `onDispose` nunca veía una mesa a medio armar. Ahora sí, y la
+  guarda `this.notifier && !this.hasOutcome()` dejaba pasar una sala cuyo `register` falló (Redis
+  caído al nacer): emitía `MATCH_ABORTED` —reembolso, resumen y cooldown— de una mesa donde nadie
+  se sentó, y entre el `notifier` y el `hasOutcome` un throw daba `TypeError`. **La guarda es
+  `opened`**, que se prende en la última línea de `onCreate`. El reembolso no sacaba plata
+  (`refundMatch` revierte sólo lo cobrado, y la inscripción se cobra al ENTRAR), pero es un cierre
+  que miente. Medido: el test nuevo de `domino-room.e2e.test.ts` salió rojo antes del arreglo.
+- **core 0.18.13: el `onAuth` de instancia corre aunque el static de `@colyseus/auth` haya
+  decodificado el token.** La override `static onAuth → true` de las salas SIGUE haciendo falta:
+  sin ella, un token que ese decodificador no acepta sale `AUTH_FAILED` genérico en el
+  matchmaking, antes de que el `TokenVerifier` diga por qué. Cambió el motivo, no la decisión.
+
+⚠ `@colyseus/core` imprime al registrar `DominoRoom` y los lobbies «onAuth() defined at the
+instance level will be ignored» porque tienen los dos `onAuth`. **Es falso** con la override que
+devuelve `true`: `callOnAuth` no produce `authData` y el de instancia corre (`Room.mjs:1101-1102`).
+
+## Port de truco — la tanda del 18 al 22/09 (`cb83940` … `5b3fead`)
+
+Baseline **1281 tests / 124 archivos**, con `typecheck`, suite, lint y `depcruise` (**381 módulos /
+1535 dependencias**) en verde. Cada commit se comparó contra el dominó antes de portar:
+
+| truco | acá |
+|---|---|
+| `10cdd0e` caché del catálogo + `RESTARTING` | **PORTADO** (`1bedd37`). `CachedGameModeReader` cachea SOLO `byUuid`: `activeByUuid` es con la que nace la sala y congela su economía, y pasa derecha |
+| `4fa5061` E2E del aviso de apagado | **PORTADO** (`restart.e2e.test.ts`); con `INTERNAL` se pone rojo |
+| `13c8a57` la sala registra su foto de la config | **PORTADO** la mitad de infraestructura. La pausa de cierre con tramo de «revelado» es de cartas de truco: sin pedido del front del dominó |
+| `8d4001a` la fila del historial no nace dos veces | **YA ESTABA** (`mongo-history.ts:80`, escrituras en fila por partida) |
+| `76477e4` lo que pidió el front | **YA ESTABA** con el port del front: `/matches/:roomId`, `/me/matches`, `/me/metrics`, la penalidad, `/players-in-match` y la fila de resumen (`platform.ts:205`). La fuga de `STRIKE_ADDED` **no existe acá**: la penalidad y los puntos van por jugador y nadie emite `STRIKE_ADDED` al notificador |
+| `3cab0f8` configuración editable sin deploy | **PORTADO** después, a pedido — ver el bloque siguiente. No era una regresión contra v1: `domino_settings` tenía `playerTurnTimeout`/`playerExtraTimeout`/`matchmakingTimeout` pero nadie los escribía (`settings/router.ts:39`, `:60` son sólo mantenimiento) ni los leía (`domino-two-room.ts:99`, y el bot con `setTurnTimeouts(60, 30, 10)` a mano) |
+| `cb83940`…`1124502` política de comentarios en inglés | **NO PORTADO**, a propósito: la doctrina de este repo vive en comentarios en español. Cambiarla es decisión del dueño, no un port |
+| `60dd091`, `0c99f17`, `5b3fead` | docs de truco; no hay equivalente acá |
+
+## Incremento completo — la configuración en caliente
+
+Portado de truco (`3cab0f8`). Baseline **1317 tests / 129 archivos**, con `typecheck`, suite, lint,
+`depcruise` (**396 módulos / 1597 dependencias**) y `docs:build` en verde. Por qué se portó aunque
+v1 no editara plazos: cambiar uno por entorno pide reiniciar, y el apagado ordenado aborta —y
+reembolsa— las partidas en curso de esa instancia.
+
+- **`features/settings` no conoce ninguna config.** El composition root empareja cada sección
+  (`match`, `matchmaking`) con su schema y sus defaults. En la base se guarda SÓLO lo que se aparta
+  del default, así que volver atrás es un borrado y un default movido en un deploy le llega a todo
+  el que no lo pisó.
+- **La presencia de `MONGO_URI` elige**, como todo: con Mongo, un documento propio
+  (`id: "domino_v2_runtime_config"`) en la colección `domino_settings` de v1, al lado del de
+  mantenimiento y sin tocarlo; sin Mongo, `MemorySettings`, que **no es un doble** —es el adaptador
+  de la instancia sola, igual que `MemoryHistory`—. Truco lo tiene en `tests/`; acá no.
+- **La ruta es `/internal/settings`, no `/settings`**: v1 sirve un `GET /settings` PÚBLICO con otro
+  contrato. Detrás de `X-Internal-Key` y **sin llave no se registra** (falla cerrado, como el
+  catálogo y el mantenimiento).
+- **La mesa FOTOGRAFÍA la config al nacer** (`GlobalConfigSource` en `onCreate`, registrada en el
+  container de la partida desde `bc6341c`). El E2E `src/tests/runtime-config.e2e.test.ts` mide que el
+  parche llega a la mesa SIGUIENTE y no a la abierta, mirando el `activeDeadline` de la ventana de
+  reparto —el DTO público del dominó no publica plazos—. Sin el cambio de la sala da rojo (796 ms).
+- **Cotas de v1 donde v1 las tiene** (`TIMEOUT_LIMITS`: turno 15–300 s, reserva 10–120 s,
+  búsqueda 30–600 s): v1 las declaraba y nunca las aplicaba. **No editables**: `tilesPerPlayer`
+  (regla de juego, no plazo) y los tres intervalos que el emparejador lee al arrancar. Un test fija
+  que TODO campo de las dos configs tiene cota o está declarado no editable.
+- ⚠ **`maxRematchesPerChain` ERA UN CAMPO MUERTO.** La config del emparejamiento lo declaraba y la
+  revancha usaba su propia constante `MAX_REMATCHES_PER_CHAIN`. Hacerlo editable sin conectarlo era
+  justo el «acepto e ignoro» que el port prohíbe. Ahora es una dependencia OBLIGATORIA de
+  `RematchCoordinator` —sin default, para que un cableado olvidado no quede verde— y la constante se
+  borró.
+- **El arranque espera la primera pasada, con plazo de 2 s** (`src/main.ts`), para que las primeras
+  mesas de un deploy no nazcan con la base si alguien la había editado.
+- **El replay rebobina con la BASE** (`src/replay.ts`): el desenlace sale igual —los vencimientos
+  están grabados—, pero los plazos del árbol impreso son los del entorno. La config con la que nació
+  cada mesa no se graba.
+
+**Sin verificar**: `mongo-settings.int.test.ts` pide `MONGO_INT_URI` y Docker no estaba corriendo, así
+que la convivencia con el documento de v1 está escrita y no medida contra un Mongo real. El cableado
+`maxRematchesPerChain` del root tampoco tiene test propio (el coordinador sí).
+
+## Port de truco — la tanda de la tarde del 22/09 (`155d4d7` … `0abf704`)
+
+Baseline **1320 tests / 129 archivos**, con `typecheck`, suite, lint, `depcruise` (**410 módulos /
+1646 dependencias**) y `docs:build` en verde.
+
+- **Las llaves** (`a462f76`, de `ebf22dd` + `155d4d7`). ⚠ **Acá no era sólo un renombre**: el
+  dominó usaba UNA `INTERNAL_API_KEY` para las dos direcciones —la presentaba al backend y la
+  exigía al que lo administra—, así que la llave del backend también movía los plazos del juego.
+  Ahora son `BETASO_BACKEND_API_KEY` (salida) y `BETASO_ADMIN_PANEL_API_KEY` (entrada), más
+  `BETASO_BACKEND_JWT_SECRET` y `BETASO_BACKEND_URL`; en producción son **cinco** obligatorias. Y
+  la entrada pasó del `X-Internal-Key` propio al **`x-internal-api-key`** de truco y del panel de
+  Betaso —el mismo panel recibía 401 acá—, escrito una sola vez en `shared/http/api-key.ts`; la
+  puerta es `requireAdminPanelKey`. Un e2e fija que la llave del backend no abre el panel.
+  ⚠ **ROMPE EL `.env` DE CADA SERVIDOR**: los nombres nuevos van ANTES del deploy de esta versión.
+- **Las rutas como `Router`** (`fdd1528`, de `0b0a467` + `0abf704`): cada responsabilidad es un
+  archivo que devuelve un `Router`, cada feature un `transports/http/register.ts`, y `app.config`
+  monta con `app.use`. ⚠ **Una diferencia de orden con truco**: el admin del catálogo se monta
+  ANTES que las lecturas, porque `GET /game-modes/reactive/:uuid` (mutación) tiene que ir antes que
+  `GET /game-modes/:uuid`. Lo pinea el test del orden, que ahora lee el `stack` del router
+  (`src/tests/routes.ts`).
+- **Las salas por feature** (`97224b4`, de `597e5af`): `transports/colyseus/register.ts` devuelve el pedazo
+  del mapa de `defineRoom`. `matchRooms` NO sale por el índice de `match` —sería un ciclo con el
+  container— y `registerMatchmaking`, que era código muerto, se borró.
+- **`env-single-reader.test.ts` era flaky** (`4f15b71`): recorría `src/` mientras
+  `architecture.test.ts` creaba y borraba features de mentira, y un `ENOENT` a mitad del recorrido
+  lo tumbaba con un caso distinto cada vez. Ahora perdona sólo lo que desaparece.
+- `ab991bd` son docs de truco (estructura v29); no hay equivalente acá.
+
+## Port de truco — la tanda del 23 al 29/09 (`d6e3219` … `07d5e20`)
+
+Sólo lo de arquitectura, infraestructura, matchmaking, deploy y Colyseus; los arreglos propios del
+juego de truco quedaron afuera. Baseline **1331 tests** (985 unit / 244 int / 102 e2e, 131 archivos
++3 int saltados), con `typecheck`, suite, lint y `depcruise` (**412 módulos / 1654 dependencias**)
+en verde.
+
+| truco | acá |
+|---|---|
+| `b22ce07` `APP_ENV` (del 15/09, requisito de lo que sigue) | **PORTADO** (`54d49bc`), distinto en dos cosas — abajo |
+| `8e6c006` + `e465f21` playground y monitor en local/dev | **PORTADO** (`95172ad`), sin el import dinámico |
+| `96970aa` pulso del cartel desde `censusPollMs` | **PORTADO** (`4a85aa4`) con un e2e que da rojo con el cinco fijo |
+| `dfc6603` suite en paralelo en el CI | **PORTADO** (`0c6566d`) con una corrección que acá era obligatoria — abajo |
+| `32d83de` caché de `node_modules`, docs fuera del deploy, reuso de dependencias en el servidor | **PORTADO** (`cc233c9`, `ff6488b`). El backtick del heredoc no existe acá |
+| `ad1ccdd` sondear las bases una vez | **NO APLICA**: el CI del dominó no tiene servicios |
+| `fa246ad` core-loop: rake perdonado a nuevos + ventana blanda del emparejador | **NO PORTADO, y es regresión contra v1**: `Betaso-Domino-Backend/src/core-loop/` existe (`full-pot.ts`, `core-loop.service.ts`) y el lobby de v1 lo usa. Es negocio con plata; va en un incremento propio |
+| `cfb0393` abortar si alguien se va en la ventana de reparto | **NO PORTADO**: ciclo de vida de la partida y reembolso, no infraestructura. Revisar contra v1 antes de decidir |
+| `b0d7e4c` strike de torneo al que abandona por su cuenta | **NO PORTADO**: negocio de torneo |
+| `d6e3219` fijar el reparto desde `/settings/deal` en local/dev | **NO PORTADO**: herramienta de prueba, pero el preset (vira, flor) es de cartas; el gemelo del dominó sería fijar fichas |
+| `4a0873e`, `9068b10`, `133290a`, `7947c95`, `f109e86`, `d655a28`, `735ff75`, `07d5e20` | reglas y pausas de truco |
+
+- **`APP_ENV` vive en el `.env` de cada servidor y NO viaja con el deploy.** Truco lo manda el
+  workflow y tuvo que anotarlo en `shared/deploy.env` porque un rollback se pide sin workflow; acá
+  cada servidor ya es un entorno y su `.env` es lo único que el rollback relee. ⚠ **El servidor de
+  dev tiene que agregar `APP_ENV=dev`** para tener playground y monitor.
+- **Sin declarar FALLA CERRADO**: `prod` bajo `NODE_ENV=production`, `local` fuera. Truco elige
+  `local` siempre porque allá sólo decide el log; acá abre un monitor SIN LLAVE que muestra las
+  manos de todos y corre métodos de las salas (`/api/room/call`). El campo `env` del log pasó de
+  `nodeEnv` a `appEnv`: antes decía `production` también en dev.
+- **Sin import dinámico**: el paquete `colyseus` re-exporta playground, monitor y auth, así que se
+  cargan en todo entorno desde siempre. El monkey patch del playground corre al LLAMAR a
+  `playground()`, no al importarlo (`@colyseus/playground/build/index.mjs`).
+- ⚠ **`minWorkers` TIENE QUE SER IGUAL A `maxWorkers`** (`vitest.config.ts`). Con
+  `isolate=false`, un pool que puede achicarse termina hilos a mitad de corrida y `unit` muere con
+  «Terminating worker thread» — determinista. Y en el runner de dos núcleos vitest calcula
+  `min(núcleos - 1, máximo)` = 1, o sea que el port tal cual rompía el CI. vitest 3 tampoco lee
+  `poolOptions`/`isolate` dentro de un proyecto, por eso el flag va en los scripts y `npm test`
+  corre los tres.
+- **Sin verificar**: `actionlint`, `shellcheck` y el despliegue de verdad — Docker estaba apagado.
+  El reuso de dependencias se ensayó en seco con Git Bash (reusa con el mismo lockfile, reinstala
+  con otro). Este repo sigue sin el arnés de `deploy-remote.test.ts` que truco tiene.
+
+## Incremento en curso — API para el orquestador
+
+Y después la **API para el orquestador** (rama `feat/api-orquestador`, sobre
+`refactor/port-truco-integracion-front`): el orquestador de Betaso Juegos
+(`betaso-games-orchestrator/apps/domino-orchestrator`) empareja y le pide la mesa a dominó.
+`POST /internal/matches` abre una sala con un `CreateMatchRequest` —**sin `roomOptions`, así que la
+sala no cobra, no reembolsa ni paga: el dinero lo mueve el orquestador**. Desde `3de2d3c` eso es
+verdad de punta a punta: esas salas no consultan niveles de apuesta, no enganchan el `BetCharger`
+(sin aumentos que cobrar ni filas `BET_MULTIPLIER` en el ledger) y no arman `reportStandings` (ni
+`ranking.won` ni `leagues.record`); niveles, cobro de aumentos y reportes de ranking/liga quedan
+FUERA de las mesas del orquestador por ahora. **Vuelven en el Plan 3, por el orquestador y no por
+dominó:** dominó le pedirá el cobro de un aumento acordado por la API interna y esperará la respuesta
+(el aumento vale solo si quedó pagado), y le publicará el resultado por RabbitMQ para que el
+orquestador reporte ranking y liga **a cada cliente con su `externalUserId`** — el `userId` de estas
+mesas es el `playerId` de billing-auth, que el cliente no conoce; el lobby propio de dominó sigue
+usando el `uuid` de Betaso como siempre. Ver el spec del orquestador
+(`betaso-games-orchestrator/docs/superpowers/specs/2026-09-27-orquestador-design.md`, «Aumentos de
+apuesta» y «Ranking y liga del cliente»)— y
+`POST /internal/players/:userId/seat` devuelve el asiento de quien sigue jugando, leído de
+`MatchRegistry.matchOf`. Las dos con `x-internal-api-key` y **su propia llave,
+`ORCHESTRATOR_API_KEY`** (fail closed sin ella); la del panel no las abre. `rateId` pasó a string
+opaco (el de Betaso es un `_id` de Mongo). El `JwtVerifier` acepta además el ES256 de billing-auth
+si hay `BILLING_AUTH_PUBLIC_KEY`; el `alg` del header elige la clave y cada rama fija su algoritmo.
+
+Hechos medidos en la Tarea 13, Parte B:
+
+- **`createRoom` propaga el mensaje del error `onCreate` con su prefijo de código** (`UNKNOWN_GAME_MODE: …`), que es cómo la ruta responde 422 (medido sobre `@colyseus/core` 0.18.15); `MaintenanceModeError` no tiene prefijo y sale como 500 (pendiente).
+- **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. La ruta responde 404 solo si `matchMaker.query({ roomId })` no encuentra nada; una sala bloqueada es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa).
+- **Toda reserva sin consumir mantiene viva su sala ~15 s** (`seatReservationTimeout`) y retrasa `server.shutdown()` — los tests que obtienen una reserva tienen que consumirla.
+- **Pendiente de decidir:** qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing); `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
+- **`BILLING_AUTH_PUBLIC_KEY` se valida al boot** (EC P-256 solo público; una clave privada se rechaza).
+- **El ES256 exige el juego**: billing-auth firma `aud: ['orchestrator','domino']` para todos los juegos, así que el `JwtVerifier` rechaza un ES256 cuyo claim `game` no sea `"domino"` (un token de truco pasaría emisor y audiencia). Y `parseEnv` falla al arrancar si hay `ORCHESTRATOR_API_KEY` sin `BILLING_AUTH_PUBLIC_KEY`, o si esa llave repite `BETASO_ADMIN_PANEL_API_KEY` o `BETASO_BACKEND_API_KEY`.
+- **Bug previo, pendiente y con su propio ticket (no se arregla en esta rama):** `BetCharger.charge` trata `DuplicateMovementError` como "pagado", pero la clave del ledger es `(matchId, playerId, reason)` sin secuencia; tras un aumento revocado, un segundo aumento en la misma partida cuenta a los dos como pagados (`bet-charge.ts:84-89`, `legality.ts:170`).
+
+## Incremento en curso — el CI/CD de games-orchestrator (rama `ci/despliegue`)
+
+El CI/CD de la segunda tanda (`ci.yml` + `deploy.yml` + `scripts/deploy-remote.sh`) **nunca corrió**:
+el repo no tenía Environments ni variables, y en el VPS de dev `domino-backend-dev` es el dominó **v1**.
+Se reemplazó por el estilo de billing-auth y el orquestador (`games-orchestrator`, `7528030`), portado y
+**acoplado al dominó**, sin la abstracción de app del monorepo: `.github/workflows/ci-cd.yml` y
+`scripts/deploy/` (lib común, pm2, Docker, empaquetado y sus tests). El detalle está en
+`docs/operacion.md`, «Despliegue y rollback».
+
+- **El bundle metía `@colyseus/core` adentro y el proceso moría al importar** con `Dynamic require of
+  "tty" is not supported` (`debug`, CommonJS, dentro de un bundle ESM). tsup solo externaliza lo que
+  declara `package.json`, y `@colyseus/core` es transitiva. `skipNodeModulesBundle` lo arregla
+  (`8020330`). Tenía rojo el smoke del CI desde el 24/09, y habría tumbado el primer deploy.
+- **El smoke del motor se colgaba en `REMATCH_WINDOW`**: la partida ya no termina en `FINISHED` sino
+  en la ventana de revancha (30 s), y el smoke espera 5 s a que el estado cambie. Ahora
+  `REMATCH_WINDOW_MS: 20` en `compose.smoke.yaml`.
+- **Los tiempos de los tests** siguen el criterio de truco `9d543c6`: los plazos que vencen van a un
+  tick y los que el test cancela se quedan; el sondeo de `waitUntil` bajó de 10 a 1 ms (`db6e0b0`). La
+  e2e pasó de ~23 s a ~8,5 s.
+- **Docker corre `domino-server`, perfil `server`**: es la única excepción al «sin perfiles» de
+  `compose.yaml`, y separa el uso de servidor del local. El `domino` local exige `./.env` y compose lo
+  valida aunque no se lo levante, así que el despliegue con Docker también enlaza el `.env` compartido.
+  Una sola instancia: varias necesitan el ruteo por path, que es de pm2.
+- **Los tests de `scripts/deploy` corren en el proyecto `unit`**, contra un servidor de mentira
+  (procesos reales con su cwd, y pm2, docker, curl y npm falsos). Que el rollback saltea un `FAILED`
+  se verificó por mutación.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
@@ -1787,9 +1998,9 @@ lo que prueba que el test mide algo.
 
 ```bash
 npm run typecheck   # tsc --noEmit  <- ESTE es el gate
-npm test            # vitest run
-npm run test:unit  # solo *.test.ts
-npm run test:int   # solo *.int.test.ts
+npm test            # los tres de abajo, en orden
+npm run test:unit  # solo *.test.ts, sin aislamiento de módulos
+npm run test:int   # solo *.int.test.ts, sin aislamiento de módulos
 npm run test:e2e   # solo *.e2e.test.ts
 npm run lint        # biome check src
 npm run format      # biome format --write src

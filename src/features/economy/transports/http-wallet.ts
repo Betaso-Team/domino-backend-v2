@@ -1,4 +1,4 @@
-import { type InternalApiKey, internalAuthHeaders } from "@/features/auth";
+import { type ApiKey, betasoBackendAuthHeaders } from "@/features/auth";
 import { type HttpClient, HttpError } from "@/shared/http";
 import type { AccountDirectory } from "../accounts";
 import type { MatchAccounts } from "../match-accounts";
@@ -29,7 +29,7 @@ type ChargeableReason = keyof typeof CHARGE_REASON;
 
 export interface HttpWalletDeps {
   readonly http: HttpClient;
-  readonly apiKey: InternalApiKey;
+  readonly apiKey: ApiKey;
   // The LIVE account, for the door: there is no match there to freeze anything to, and whoever asks
   // carries their token.
   readonly accounts: AccountDirectory;
@@ -112,7 +112,7 @@ export class HttpWallet {
     try {
       const balance = await this.deps.http.get<number>(
         `wallets/my-balance-microservice?${query}`,
-        internalAuthHeaders(this.deps.apiKey),
+        betasoBackendAuthHeaders(this.deps.apiKey),
       );
       // A balance that is not a number is an answer we do not understand, and treating it as zero
       // would lock the player out over a contract change on the other side.

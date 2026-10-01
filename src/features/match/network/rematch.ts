@@ -17,9 +17,6 @@ import type { MatchEventSink } from "./listeners";
 // caminos angostos: un booleano que se deja en la compuerta, y un evento al que este sink
 // reacciona.
 
-/** UNA SOLA REVANCHA POR CADENA: partida original → una revancha, y ahí se corta. Es de v1. */
-export const MAX_REMATCHES_PER_CHAIN = 1;
-
 /**
  * LA MITAD DE LA ELEGIBILIDAD QUE NO ES PLATA. La arma el composition root, que es el único
  * lugar que conoce a la vez esta feature y dónde vive el libro de vetos.
@@ -44,6 +41,17 @@ export interface RematchCoordinatorDeps {
   readonly opener: MatchOpener;
   /** El `seed` de la mesa nueva. Es de afuera por lo mismo que el de la primera: reproducible. */
   readonly seedOf: () => string;
+  /**
+   * CUÁNTAS REVANCHAS ADMITE UNA CADENA antes de cortarla (v1: una). Es anti-abuso: sin tope, dos
+   * cómplices se pasan la partida entre ellos sin volver nunca por el emparejador, que es quien los
+   * separaría. Una FUNCIÓN porque es editable en caliente (`maxRematchesPerChain` de la config del
+   * emparejamiento, que es de la misma familia que el cooldown y el veto) y se lee al usar.
+   *
+   * OBLIGATORIA y sin default a propósito: durante dos incrementos ese campo de la config existió y
+   * no lo leía nadie, porque la revancha tenía su propia constante. Un default acá volvería a dejar
+   * verde un cableado olvidado.
+   */
+  readonly maxRematchesPerChain: () => number;
   readonly log: Logger;
 }
 
@@ -109,7 +117,7 @@ export class RematchCoordinator {
     try {
       // EL TOPE DE LA CADENA ES LO PRIMERO porque es lo único que no cuesta red. La partida
       // original llega con 0 y es elegible; la revancha llega con 1 y ya no lo es.
-      if ((options.rematchCount ?? 0) >= MAX_REMATCHES_PER_CHAIN) return false;
+      if ((options.rematchCount ?? 0) >= this.deps.maxRematchesPerChain()) return false;
       if (!(await this.deps.antifraud(options.seats))) return false;
       if (options.entryFee <= 0) return true;
       const answers = await Promise.all(

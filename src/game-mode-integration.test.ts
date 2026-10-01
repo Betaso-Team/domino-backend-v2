@@ -111,7 +111,7 @@ describe("la certificación del catálogo contra servicios reales", () => {
     expect(compose).toContain("rabbitmq:");
     expect(compose).toContain("rabbitmq-diagnostics");
     expect(compose).toContain("RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672");
-    expect(compose).toContain("INTERNAL_API_KEY");
+    expect(compose).toContain("BETASO_ADMIN_PANEL_API_KEY");
   });
 
   // EL CLIENTE NECESITA LAS DOS URLS PARA ASERTAR DESDE AFUERA: mira el documento en Mongo y el
@@ -140,7 +140,7 @@ describe("la certificación del catálogo contra servicios reales", () => {
   // —igual que ya hace con los dos primeros—, así que un `services:` sería una segunda
   // infraestructura que hay que mantener sincronizada y que no agrega una sola aserción.
   it("CI conserva un solo paso de deploy y ningún bloque services", () => {
-    const ci = read(".github/workflows/ci.yml");
+    const ci = read(".github/workflows/ci-cd.yml");
     // La CLAVE YAML, no la palabra: el archivo ARGUMENTA en un comentario por qué no la tiene, y
     // una aserción sobre la substring pelada se pondría roja por la propia explicación.
     expect(ci).not.toMatch(/^\s+services:\s*$/m);

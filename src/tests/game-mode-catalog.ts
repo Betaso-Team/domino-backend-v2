@@ -21,7 +21,7 @@ import type { GameMode } from "@/features/game-mode";
 // LOS NÚMEROS SON LOS QUE LA SUITE YA USABA (`pointsToWin: 100`, `entryFee: 125`, `prize: 250`):
 // venían escritos en cada `casualTable` cuando el request los traía, y conservarlos es lo que hace
 // que el único cambio medible de esta tarea sea de DÓNDE salen, no cuánto valen.
-// LA MESA GRATIS, y no es un capricho del que la agregó: sin `BACKEND_URL` el container deja un
+// LA MESA GRATIS, y no es un capricho del que la agregó: sin `BETASO_BACKEND_URL` el container deja un
 // `canAfford` que contesta `false` siempre —es lo correcto, "no hay con qué preguntar" no puede
 // ser "sí"—, así que toda mesa PAGA se rechaza con `INSUFFICIENT_FUNDS` antes de entrar a la
 // cola. Un E2E de matchmaking que quiera medir cualquier otra cosa —el mantenimiento, el censo,

@@ -14,13 +14,17 @@ export type { Clock } from "./core/engine/clock";
 // `MatchState` y `DominoMatchConfig` salen como TIPO y no como valor: nombrar el árbol y el
 // snapshot es lo que hace falta para pasarlos; construirlos afuera de la feature no.
 export type { DominoMatchConfig } from "./core/config";
+// LO EDITABLE EN CALIENTE de la config global: los campos, sus cotas y los que no se tocan. El
+// composition root lo empareja con un nombre de sección; la feature `settings` no conoce ninguna
+// config.
+export { MATCH_EDITABLE, MATCH_NOT_EDITABLE, matchConfigPatch } from "./config-schema";
 export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
 export type { HistoryReader } from "./network/history";
 export { AdmissionRefusedError, MatchPlatform } from "./network/platform";
 export { BetCharger, CachedBetLevelBook, HttpBetLevelBook, NO_BET_LEVELS } from "./network";
 export type { BetLevelBook } from "./network";
-export { MAX_REMATCHES_PER_CHAIN, RematchCoordinator } from "./network/rematch";
+export { RematchCoordinator } from "./network/rematch";
 export type { RematchAntifraud, RematchDoor } from "./network/rematch";
 export type {
   MatchRow,
@@ -47,7 +51,7 @@ export { ColyseusMatchGateway } from "./transports/colyseus/gateway";
 // convierte en un error de matchmaking—, y una superficie pública con tipos que nadie nombra es
 // una superficie que nadie puede podar después.
 export { selectProcessIdToCreateRoom } from "./transports/colyseus/load-balancer";
-export { type MatchHttpDeps, registerMatchHttp } from "./transports/http/register-http";
+export { type MatchHttpDeps, matchHttp } from "./transports/http/register";
 // LAS TRES FUNCIONES DE LA FRONTERA Y SUS TIPOS. `requestOf`/`configOf` son el camino de una mesa
 // que NACE —el segundo pide el `GameMode` ya resuelto contra el catálogo— y `replayConfigOf` el de
 // una que se REBOBINA. Los tres errores salen también: el que pide crear una sala tiene que poder
@@ -70,6 +74,7 @@ export {
   type SeatCredentials,
   UnknownGameModeError,
   UnsupportedGameModeError,
+  createMatchRequestSchema,
 } from "./transports/match-contract";
 export {
   MatchRegistry,

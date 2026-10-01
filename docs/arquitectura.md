@@ -177,7 +177,7 @@ son fases distintas: cada una espera una clase diferente de input o timeout.
 | Ranking | RabbitMQ | La partida termina igual; no publica |
 | Liga | Backend HTTP | La partida termina igual; no reporta liga |
 
-La presencia de `MONGO_URI`, `REDIS_URL`, `RABBITMQ_URL` y `BACKEND_URL` elige cada capacidad. No
+La presencia de `MONGO_URI`, `REDIS_URL`, `RABBITMQ_URL` y `BETASO_BACKEND_URL` elige cada capacidad. No
 hay variables que nombren drivers.
 
 ## Dinero: qué hace y qué no hace
@@ -188,7 +188,7 @@ hay variables que nombren drivers.
 - Una mesa 4P no se liquida: falta una regla de producto para repartir el premio entre compañeros.
 - El orquestador que entregue instrucciones al wallet está diseñado, pero no vive en este backend.
 
-La propuesta del orquestador está en [Orquestador multiplataforma](./orquestador-multiplataforma.md).
+El orquestador vive en `betaso-games-orchestrator` (`apps/domino-orchestrator`), y la API que le expone este backend está en `docs/api-y-mensajes.md` y en `AGENTS.md`, «API para el orquestador».
 
 ## Dónde empezar a leer código
 

@@ -112,7 +112,8 @@ const createRequest = z
     participants: z.array(participant).min(2).max(4),
     seed: nonBlank,
     teamAssignment,
-    rateId: z.uuid(),
+    // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
+    rateId: nonBlank,
   })
   .superRefine(({ participants }, context) =>
     checkTableShape(participants, context, "participants"),
@@ -134,7 +135,8 @@ const matchSnapshot = z
     pointsToWin: z.number().int().positive().safe(),
     teamAssignment,
     isDealWindowEnabled: z.boolean(),
-    rateId: z.uuid(),
+    // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
+    rateId: nonBlank,
     entryFee: ucAmount,
     prize: ucAmount,
     // LOS TRES CAMPOS CON DEFAULT, y son los únicos de este schema que lo llevan: los goldens y
@@ -175,6 +177,10 @@ const matchSnapshot = z
     isRematchEnabled: z.boolean().default(false),
   })
   .superRefine(({ seats }, context) => checkTableShape(seats, context, "seats"));
+
+// El MISMO schema, para que la API interna valide el cuerpo con el contrato de la sala y no con
+// una copia: si divergen, una mesa que la ruta acepta la sala la rechaza después de crearla.
+export const createMatchRequestSchema = createRequest;
 
 export type MatchParticipant = z.infer<typeof participant>;
 export type CreateMatchRequest = z.infer<typeof createRequest>;
@@ -245,7 +251,7 @@ export function requestOf(input: unknown): CreateMatchRequest {
  * parámetro y no se consultan acá por lo mismo que el modo: esta función es SÍNCRONA y pura, y
  * el catálogo de niveles vive en el backend principal. Quien los trae es la sala, que es async.
  *
- * El default vacío es el reposo: una instancia sin `BACKEND_URL` no ofrece aumentar, y eso es
+ * El default vacío es el reposo: una instancia sin `BETASO_BACKEND_URL` no ofrece aumentar, y eso es
  * correcto en vez de estar roto.
  */
 export function configOf(
@@ -334,7 +340,8 @@ export interface CasualRoomOptions extends CommonRoomOptions {
   /**
    * CUÁNTAS REVANCHAS LLEVA ESTA CADENA. Ausente es CERO —la mesa original no tiene por qué
    * declararse «la número cero»— y la revancha llega con uno, que es lo que la vuelve
-   * inelegible: `MAX_REMATCHES_PER_CHAIN` es 1 (ver `network/rematch.ts`).
+   * inelegible: el tope de la cadena es 1 por default (`maxRematchesPerChain` de la config del
+   * emparejamiento, que `network/rematch.ts` lee al usar).
    *
    * Es anti-abuso y es de v1: sin el tope, dos cómplices se pasan la partida entre ellos
    * indefinidamente sin volver a pasar por el emparejador, que es quien los separaría.

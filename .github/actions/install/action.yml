@@ -1,0 +1,34 @@
+# NODE Y LAS DEPENDENCIAS, de la misma forma en todos los jobs (portado de truco `32d83de`).
+#
+# Se cachea `node_modules` entero y no sólo el caché de npm: con ése solo, `npm ci` igual tarda en
+# armar el árbol. Con acierto no se instala nada.
+#
+# La clave es lo ÚNICO que protege de reusar módulos que no corresponden, así que lleva todo lo que
+# cambia el árbol: el lockfile, el sistema y la arquitectura (hay binarios nativos: esbuild, biome)
+# y la versión MAYOR de node. Sin acierto, `npm ci` como siempre —y el job, si termina bien, guarda
+# el árbol nuevo—.
+#
+# EL PISO DE NODE ESTÁ ESCRITO ACÁ Y EN OTROS TRES LUGARES que no se importan entre sí, y ninguno
+# rompe el gate al desincronizarse. Por eso este número no queda suelto: `src/entrypoint.test.ts` lo
+# lee de este archivo y lo compara contra el `engines` del `package.json`, que a su vez se compara
+# contra el que declara colyseus. Un bump de colyseus que suba SU piso pone rojo el gate, que es el
+# único lugar barato donde enterarse. Si se cambia, se cambia también el `node22` de la clave.
+name: Instalar
+description: node 22 y node_modules, restaurado del caché cuando el lockfile no cambió
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: '22'
+
+    - id: modules
+      uses: actions/cache@v6
+      with:
+        path: node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}
+
+    - if: steps.modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci

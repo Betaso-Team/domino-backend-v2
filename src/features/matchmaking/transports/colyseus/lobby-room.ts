@@ -23,6 +23,11 @@ export interface LobbyDeps {
   // How many are playing across the cluster. Same shape as the switch and for the same reason: the
   // room decides nothing with it, it REPORTS it.
   readonly census: MatchCensus;
+  // How often the banner is published. A pulse of its own and not a reaction to someone joining or
+  // leaving: what it counts happens at the TABLES, so ten matches could start and end with the
+  // banner frozen until somebody opened the app. Read when the room is born, not when the process
+  // boots.
+  readonly pulseMs: () => number;
 }
 
 /**
@@ -53,11 +58,6 @@ export interface GameModeStats {
   readonly playersInMatch: number;
   readonly playersSearching: number;
 }
-
-// How often it is published. A pulse of its own and not a reaction to someone joining or leaving:
-// what it counts happens at the TABLES, so ten matches could start and end with the banner frozen
-// until somebody opened the app.
-const STATS_INTERVAL_MS = 5_000;
 
 // What is shown before the first pulse, which lasts as long as the first count takes. Zeroes and not
 // silence: the banner falls back to "I do not know yet", which breaks a screen the least. A LATER
@@ -93,12 +93,14 @@ export class LobbyRoom extends Room {
   private ticker?: Delayed;
   private stats: LobbyStats = EMPTY_STATS;
 
-  // @colyseus/auth instala un static onAuth que decodifica el JWT ANTES de instanciar la sala, y
-  // su resultado gana: `Room._onJoin` usa el `authData` del matchmaking y ni llama al `onAuth` de
-  // instancia (`@colyseus/core/build/Room.mjs:1098`). Sin esta neutralización `client.auth` es el
-  // payload crudo —`{ sub, iat, exp }`—, así que `credentials.userId` es `undefined` y
-  // toda búsqueda muere con `INTERNAL`. Es la misma override que ya llevan `DominoRoom` y el lobby
-  // viejo; truco no la necesita porque no tiene el módulo instalado.
+  // @colyseus/auth instala un static onAuth que decodifica el JWT ANTES de instanciar la sala.
+  // Hasta `@colyseus/core` 0.18.12 su resultado GANABA: `Room._onJoin` no llamaba al `onAuth` de
+  // instancia, `client.auth` quedaba en el payload crudo —`{ sub, iat, exp }`— y toda búsqueda
+  // moría con `INTERNAL`. Desde 0.18.13 el de instancia corre igual (`Room.mjs:1101`), pero la
+  // override SIGUE haciendo falta: sin ella un token que ese decodificador no acepta sale
+  // `AUTH_FAILED` genérico en el matchmaking, antes de que nuestro verificador diga POR QUÉ. Es la
+  // misma override que ya llevan `DominoRoom` y el lobby viejo; truco no la necesita porque no
+  // tiene el módulo instalado.
   static override async onAuth(
     _token: string,
     _options: unknown,
@@ -135,7 +137,7 @@ export class LobbyRoom extends Room {
       this.broadcast("MAINTENANCE", maintenance),
     );
     // The banner, on the room's clock. It has to beat even when nobody joins or leaves.
-    this.ticker = this.clock.setInterval(() => void this.publishStats(), STATS_INTERVAL_MS);
+    this.ticker = this.clock.setInterval(() => void this.publishStats(), deps.pulseMs());
     void this.publishStats();
     this.onMessage("REQUEST_MATCH", (client, payload) => {
       void this.search(client, payload as RequestMatchPayload);
