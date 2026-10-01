@@ -46,7 +46,7 @@ const playerStateOf = (match: SeatedMatch, selector: string) =>
 // PLAYING el plazo del turno son 600 ms + 300 de reserva en test, así que un jugador caído
 // al que le toca jugar lo retira el motor antes de que alcance a volver, y el test mediría
 // esa carrera y no la reconexión. Tapada, esta suite mantiene `dealingTimeoutMs` un segundo
-// por encima de los 3 s de la ventana de reconexión para que haya margen de sobra. Ese
+// por encima de la ventana de reconexión para que haya margen de sobra. Ese
 // override local evita que el default E2E de 800 ms cambie lo que está bajo prueba acá:
 // cada test mide reconexión, no el retiro por reparto. El camino 2, que sí necesita ver
 // una mano, levanta las fichas de UN solo jugador: alcanza para que su vista tenga las

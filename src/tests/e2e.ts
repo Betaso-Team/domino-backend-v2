@@ -86,6 +86,10 @@ export async function joinAs(server: ColyseusTestServer, roomId: string, userId:
   return server.sdk.joinById(roomId, {});
 }
 
+// SONDEA CADA 1 ms Y NO CADA 10: el arnés juega una partida entera con un `waitUntil` por turno, y
+// con 10 ms (≈ 11 reales) el sondeo era lo que más costaba de la suite. Medido: la revancha, que
+// juega siete partidas, bajó de 20 s a 4,4 s. Lo que se espera es el estado del SERVIDOR, en el
+// mismo proceso, así que llega apenas el mensaje se procesa.
 export async function waitUntil(
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 5_000,
@@ -93,6 +97,6 @@ export async function waitUntil(
   const deadline = Date.now() + timeoutMs;
   while (!(await predicate())) {
     if (Date.now() > deadline) throw new Error("waitUntil: se agotó el plazo");
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
 }

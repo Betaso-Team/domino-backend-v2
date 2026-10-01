@@ -85,18 +85,25 @@ delete process.env.REDIS_URL;
 // olvido no sería un rojo sino una suite que se queda esperando.
 delete process.env.RABBITMQ_URL;
 process.env.PORT ??= "2567";
-process.env.PRESENTING_MATCH_MS ??= "120";
-// LOS TRES DE LA REVANCHA, encogidos como los demás. La ventana real es de 30 s: dejarla
-// entera haría que CADA e2e que termina una partida espere medio minuto a que la mesa muera.
-process.env.REMATCH_WINDOW_MS ??= "1500";
-process.env.REMATCH_RESPONSE_MS ??= "1000";
-process.env.REMATCH_HANDOFF_MS ??= "1000";
-process.env.PRESENTING_ROUND_MS ??= "120";
+// LOS PLAZOS SE DIVIDEN EN LOS QUE VENCEN Y LOS QUE SE CANCELAN (truco `9d543c6`), no en cortos
+// y largos. Los que VENCEN —las pausas de presentación— los espera el flujo entero en cada mano,
+// así que cuestan su valor cada vez: van a UN TICK. Colyseus avanza el reloj de la sala cada
+// 1000/60 ≈ 16,7 ms, así que 0, 1 y 20 disparan en el mismo tick.
+process.env.PRESENTING_MATCH_MS ??= "20";
+process.env.PRESENTING_ROUND_MS ??= "20";
+// LOS AMBIGUOS: los cancela el test que actúa (pedir, contestar, sentarse en la mesa nueva) y los
+// vence el que mide el vencimiento. Un tick no le daría tiempo al primero de mandar su mensaje;
+// 300 ms son de sobra para un viaje de ida y vuelta por el socket local. La ventana real es de 30 s.
+process.env.REMATCH_WINDOW_MS ??= "300";
+process.env.REMATCH_RESPONSE_MS ??= "300";
+process.env.REMATCH_HANDOFF_MS ??= "300";
+// LOS QUE SE CANCELAN casi siempre: el test juega antes de que venzan, así que no compran
+// velocidad. Achicarlos más no acelera nada y retira jugadores a mitad de un test.
 process.env.TURN_TIMEOUT_MS ??= "600";
 process.env.EXTRA_TIME_RESERVE_MS ??= "300";
 process.env.DEALING_TIMEOUT_MS ??= "800";
 process.env.SEATING_TIMEOUT_MS ??= "3000";
-// Tres segundos: el camino de la ventana vencida tiene que poder testearse. Es el plazo
-// más largo que queda en test, y sigue siendo mucho más que los 200 ms que tarda el SDK
-// en reintentar, así que el camino del bache de red no se lo come.
-process.env.RECONNECTION_WINDOW_SECONDS ??= "3";
+// Medio segundo, en fracción porque `allowReconnection` multiplica por 1000. El camino de la
+// ventana vencida la espera entera; el del bache de red la cancela, y el SDK reintenta a los
+// ~200 ms, así que le queda margen.
+process.env.RECONNECTION_WINDOW_SECONDS ??= "0.5";

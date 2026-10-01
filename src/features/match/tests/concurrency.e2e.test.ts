@@ -99,7 +99,7 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
       // legal ahí. Es el equivalente al hueco que el v1 dejaba con sleep(6000).
       //
       // Se espera con `act` —que compara la firma del estado— y no con un `waitUntil` sobre
-      // `phase === "PRESENTING_MATCH"`: esa ventana dura `presentingMatchMs`, 120 ms en
+      // `phase === "PRESENTING_MATCH"`: esa ventana dura `presentingMatchMs`, un tick en
       // test, así que un poll cada 10 ms puede llegar tarde y esperar para siempre una fase
       // que ya pasó a FINISHED.
       try {

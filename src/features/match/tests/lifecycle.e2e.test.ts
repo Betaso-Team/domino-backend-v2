@@ -1,7 +1,9 @@
+import { rootContainer } from "@/di-container";
 import { env } from "@/env";
 import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
 import {
   act,
   bootServer,
@@ -24,12 +26,22 @@ const HISTORY_URL = (matchId: string) =>
 // de soporte, no un dato de la partida.
 const INTERNAL_HEADERS = { "x-internal-api-key": env.adminPanelApiKey ?? "" };
 
+let originalGlobalConfig: GlobalDominoConfig;
+
+// EL ÚNICO PLAZO QUE ESTE ARCHIVO EJERCITA: el abandono tiene que dejar la mesa EN la pausa de
+// presentación, y se afirma. Con el tick de vitest.setup.ts la pausa puede vencer antes de que el
+// poll de `act` la vea.
 beforeAll(async () => {
+  originalGlobalConfig = rootContainer.resolve("GlobalDominoConfig");
+  rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
+    useValue: globalConfigWith({ ...originalGlobalConfig, presentingMatchMs: 300 }),
+  });
   server = await bootServer(2585);
 });
 
 afterAll(async () => {
   await server.shutdown();
+  rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
 describe("ciclo de vida de una partida", () => {

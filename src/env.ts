@@ -122,9 +122,10 @@ const schema = z.object({
    * distintos para el mismo plazo.
    *
    * Sale del entorno por la misma razón que las duraciones de fase: el camino de la
-   * ventana VENCIDA no se puede testear esperando dos minutos.
+   * ventana VENCIDA no se puede testear esperando dos minutos. Admite fracción (`0.5`):
+   * `allowReconnection` arma su timer con `seconds * 1000`, y la suite la espera entera.
    */
-  RECONNECTION_WINDOW_SECONDS: z.coerce.number().int().positive().default(120),
+  RECONNECTION_WINDOW_SECONDS: z.coerce.number().positive().default(120),
   // ── Lo que hay del otro lado, y en qué dirección ─────────────────────────────────────────────
   //
   // Las cuatro variables `BETASO_*` llevan el nombre del INTERLOCUTOR y no de lo que son, porque del

@@ -10,6 +10,7 @@ import {
 import { ColyseusSDK } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { type GlobalDominoConfig, globalConfigWith } from "../../core/config";
 import type { MatchState } from "../../core/state";
 import type { HistoryReader } from "../../network/history";
 import type { CreateMatchRequest, MatchParticipant } from "../match-contract";
@@ -17,14 +18,23 @@ import { MatchRegistry } from "../match-registry";
 import type { DominoRoom } from "./domino-room";
 
 let server: ColyseusTestServer | undefined;
+let originalGlobalConfig: GlobalDominoConfig;
 
+// EL ÚNICO PLAZO QUE ESTE ARCHIVO EJERCITA: «disponer una partida con veredicto» se mide CON la
+// mesa en la pausa de presentación. Con el tick de vitest.setup.ts la pausa puede vencer antes de
+// que el poll la vea.
 beforeAll(async () => {
+  originalGlobalConfig = rootContainer.resolve("GlobalDominoConfig");
+  rootContainer.register<GlobalDominoConfig>("GlobalDominoConfig", {
+    useValue: globalConfigWith({ ...originalGlobalConfig, presentingMatchMs: 300 }),
+  });
   server = await bootTestServer(2584);
 });
 
 afterAll(async () => {
   await server?.cleanup();
   await server?.shutdown();
+  rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
 describe("DominoRoom", () => {
