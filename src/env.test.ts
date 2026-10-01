@@ -85,10 +85,19 @@ describe("parseEnv", () => {
     expect(() => parseEnv({})).toThrow(/BETASO_BACKEND_JWT_SECRET/);
   });
 
-  it("rechaza un BETASO_BACKEND_JWT_SECRET corto", () => {
-    expect(() => parseEnv({ BETASO_BACKEND_JWT_SECRET: "corto" })).toThrow(
-      /BETASO_BACKEND_JWT_SECRET/,
-    );
+  // LAS QUE DICTA EL BACKEND DE BETASO no tienen mínimo de largo: las de dev miden 9 y 15, y un mínimo
+  // acá no las alarga, solo deja al dominó sin arrancar. Lo que sí se rechaza es la ausencia.
+  it("acepta el secreto del JWT y la llave del backend cortos, como los dicta Betaso", () => {
+    const env = parseEnv({
+      BETASO_BACKEND_JWT_SECRET: "nueve-car",
+      BETASO_BACKEND_API_KEY: "quince-caracter",
+    });
+    expect(env.jwtSecret).toBe("nueve-car");
+    expect(env.backendApiKey).toBe("quince-caracter");
+  });
+
+  it("rechaza un BETASO_BACKEND_JWT_SECRET vacío", () => {
+    expect(() => parseEnv({ BETASO_BACKEND_JWT_SECRET: "" })).toThrow(/BETASO_BACKEND_JWT_SECRET/);
   });
 
   it("rechaza un PORT que no es número", () => {

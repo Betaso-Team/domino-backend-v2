@@ -137,9 +137,13 @@ const schema = z.object({
 
   // Compartido con el BACKEND de Betaso, que es quien firma los tokens de los jugadores. Nadie se lo
   // presenta a nadie: es el secreto con el que las dos puntas verifican. El dominó NUNCA firma.
+  //
+  // SIN MÍNIMO DE LARGO, como truco: el valor lo DICTA el backend de Betaso (`JWT_SECRET`), y el de dev
+  // mide 9 caracteres. Un mínimo acá no lo alarga: solo deja al dominó sin arrancar. Las llaves que
+  // son NUESTRAS (`BETASO_ADMIN_PANEL_API_KEY`, `ORCHESTRATOR_API_KEY`) sí lo conservan.
   BETASO_BACKEND_JWT_SECRET: z
     .string()
-    .min(16, "BETASO_BACKEND_JWT_SECRET debe tener al menos 16 caracteres"),
+    .min(1, "BETASO_BACKEND_JWT_SECRET: obligatorio, es el secreto que comparte el backend de Betaso"),
   /**
    * LA CLAVE PÚBLICA ES256 DE BILLING-AUTH, que firma los tokens de los jugadores que llegan por el
    * orquestador. OPCIONAL: ausente, dominó acepta solo los HS256 del backend principal, como antes.
@@ -158,12 +162,10 @@ const schema = z.object({
    * en nombre de un jugador —el torneo, el antifraude, los niveles de apuesta, la billetera—.
    * OPCIONAL: sin ella esas preguntas caen a su respuesta de reposo, que es el lado seguro de cada una.
    *
-   * El mínimo de largo es el mismo criterio que el del secreto del JWT: una llave corta se enumera.
+   * SIN MÍNIMO DE LARGO por lo mismo que el secreto del JWT: la dicta el backend de Betaso
+   * (`X_INTERNAL_API_KEY`), y la de dev mide 15 caracteres.
    */
-  BETASO_BACKEND_API_KEY: z
-    .string()
-    .min(16, "BETASO_BACKEND_API_KEY debe tener al menos 16 caracteres")
-    .optional(),
+  BETASO_BACKEND_API_KEY: z.string().min(1).optional(),
   /**
    * DE ENTRADA: lo que el PANEL DE ADMINISTRACIÓN de Betaso le presenta al dominó para tocar el
    * catálogo de modos, el mantenimiento, el historial de soporte y la configuración en caliente
