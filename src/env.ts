@@ -143,7 +143,10 @@ const schema = z.object({
   // son NUESTRAS (`BETASO_ADMIN_PANEL_API_KEY`, `ORCHESTRATOR_API_KEY`) sí lo conservan.
   BETASO_BACKEND_JWT_SECRET: z
     .string()
-    .min(1, "BETASO_BACKEND_JWT_SECRET: obligatorio, es el secreto que comparte el backend de Betaso"),
+    .min(
+      1,
+      "BETASO_BACKEND_JWT_SECRET: obligatorio, es el secreto que comparte el backend de Betaso",
+    ),
   /**
    * LA CLAVE PÚBLICA ES256 DE BILLING-AUTH, que firma los tokens de los jugadores que llegan por el
    * orquestador. OPCIONAL: ausente, dominó acepta solo los HS256 del backend principal, como antes.
