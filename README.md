@@ -141,58 +141,21 @@ de 120 s, que es para lo que el TTL existe.
 
 ## Cómo se despliega
 
-Dos workflows en `.github/workflows/`, y **el eje es la tarea, no el entorno**.
+Un solo workflow, `.github/workflows/ci-cd.yml`, con el mismo estilo que billing-auth y el orquestador
+en games-orchestrator: `develop → dev`, `stage → stage`, `main → prod`, y un `workflow_dispatch` desde
+cualquier rama. **Construye en el CI y no en el servidor**, y nada llega a un servidor sin la suite,
+el smoke, la imagen y los docs en verde. El medio es pm2 (por defecto), `docker` o `docker-build`.
 
-`ci.yml` **verifica y empaqueta**: typecheck, lint, suite, build, y deja un `domino-v2.tgz` con
-`dist/`, `package.json`, `package-lock.json`, `ecosystem.config.cjs` y `scripts/deploy-remote.sh`.
-Construye **en el CI y no en el servidor**, que es la diferencia entre un build roto que falla en
-rojo y uno que deja a medio compilar a la máquina que está sirviendo partidas. Corre en cada PR, y
-en `develop`/`stage`/`main` lo llama `deploy.yml` — así cada evento produce una corrida y nada llega
-a un servidor sin haber pasado por él. **No levanta Mongo ni Redis**: la suite no los usa (ver
-más abajo), así que levantarlos sería un job que miente.
+En el servidor, el `.env` real vive en `shared/` y se crea **una vez a mano**: ningún secreto pasa por
+GitHub. El despliegue voltea el symlink `current`, gatea contra `/ready` instancia por instancia y
+**comprueba** qué corre de verdad (`/proc/<pid>/cwd`): pm2 guarda la ruta absoluta del script y no la
+actualiza al recargar, por eso `ecosystem.config.cjs` arranca desde `current` (`PM2_CWD`). Si el release
+nuevo no queda sano, vuelve solo al anterior y el pipeline falla igual.
 
-`deploy.yml` **despliega**, con el entorno como dato: `develop → dev`, `stage → stage`,
-`main → prod`, más un `workflow_dispatch` desde cualquier rama para probar una feature en el VPS de
-dev sin mergearla. Los tres Environments guardan los secretos con el **mismo nombre**, así que no
-hay sufijos por entorno y `prod` puede exigir la aprobación de una persona.
+Para volver atrás sin rehacer el pipeline: `./rollback` en la raíz del despliegue. Salta los releases
+marcados `FAILED`. Los scripts (`scripts/deploy/`) **son de Linux** y viajan **dentro del artefacto**.
 
-| Environment | secretos | variables |
-|---|---|---|
-| dev / stage / prod | `SSH_HOST`, `SSH_USER`, `SSH_KEY` | `DEPLOY_PATH`, `PM2_APP_NAME`, `PM2_INSTANCES`, `NODE_BIN`, `NODE_INTERPRETER`, `SSH_KNOWN_HOSTS`, `PUBLIC_URL` |
-| repositorio | — | `DEPLOY_ENVIRONMENTS` (los entornos que ya tienen servidor) |
-
-En el servidor queda así, y el **`.env` real se crea UNA vez a mano** en `shared/` — el despliegue
-solo lo enlaza, y por eso ningún secreto de la aplicación pasa por GitHub:
-
-```
-/var/www/Betaso/domino-backend-v2/
-├── shared/.env                  se crea a mano; el deploy NUNCA lo toca
-├── releases/<fecha>-<commit>/   dist/ + package.json + ecosystem.config.cjs + node_modules
-└── current ──► releases/<id>    el symlink que decide qué corre
-```
-
-El despliegue instala las dependencias de producción, voltea el symlink y **gatea contra `/ready`
-instancia por instancia, contra 127.0.0.1**. Si la release nueva no queda sana **repone la anterior
-y falla en rojo igual**: que la vieja haya vuelto no significa que se haya desplegado lo que se
-pidió. Se conservan dos releases, que es lo que hace falta para poder volver.
-
-**pm2 apunta al symlink y no a la carpeta del release**, y no es un detalle: pm2 guarda la ruta
-absoluta del script y **no la actualiza al recargar**, así que con una carpeta nueva por despliegue
-un `pm2 reload` sigue corriendo la versión anterior. Por eso `ecosystem.config.cjs` lee
-`PM2_CWD`, y por eso el deploy **comprueba** con `/proc/<pid>/cwd` desde dónde corre cada proceso
-en vez de asumirlo.
-
-Para volver atrás sin rehacer el pipeline, desde el servidor:
-
-```bash
-bash /var/www/Betaso/domino-backend-v2/current/scripts/deploy-remote.sh --rollback
-```
-
-Salta los releases marcados `FAILED` — si no, el rollback de emergencia iría a parar justo al que
-acaba de fallar, que es el más nuevo que hay en disco.
-
-`scripts/deploy-remote.sh` **es de Linux** (`/proc`, `mv -Tf`, `readlink -f`) y viaja **dentro del
-artefacto**: el que corre es siempre el de la versión que se está desplegando.
+El detalle (layout, medios, variables de GitHub, cómo preparar un servidor): `docs/operacion.md`.
 
 ## Smoke del deploy
 

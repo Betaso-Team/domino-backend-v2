@@ -19,12 +19,12 @@ description: node 22 y node_modules, restaurado del caché cuando el lockfile no
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v5
       with:
         node-version: '22'
 
     - id: modules
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: node_modules
         key: node-modules-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json') }}

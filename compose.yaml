@@ -119,5 +119,39 @@ services:
       - redis
     restart: unless-stopped
 
+  # EL DOMINÓ DE UN SERVIDOR, el que levanta `scripts/deploy/deploy-docker-remote.sh`. Es la ÚNICA
+  # excepción al «sin perfiles» de arriba, y no la contradice: el perfil no elige un almacenamiento, separa
+  # dos usos que no se mezclan. `docker compose up` en una máquina de desarrollo no lo ve; el despliegue
+  # lo pide con `COMPOSE_PROFILES=server` y `--no-deps`, así que Mongo, Redis y RabbitMQ son los del
+  # servidor (`shared/.env`, con `host.docker.internal`), no los de este archivo.
+  #
+  # Lo que cambia contra `domino`: la imagen lleva la etiqueta del release (`domino:<id>`, que es lo que
+  # hace posible el rollback) y nunca se baja de un registro; el puerto queda en loopback, porque adelante
+  # está el proxy; y el entorno es el `shared/.env` entero, sin URIs fijas.
+  domino-server:
+    profiles: [server]
+    image: domino:${RELEASE:-local}
+    build:
+      context: .
+      target: runtime
+    pull_policy: never
+    init: true
+    ports:
+      - "127.0.0.1:${PORT:-2567}:2567"
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      - PORT=2567
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Por encima del `kill_timeout` de pm2: el drenado de las salas.
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    restart: unless-stopped
+
 volumes:
   mongo-data:

@@ -117,7 +117,7 @@ describe("el piso de node se dice en voz alta y en todos lados", () => {
   // `setup-node` suelto sin versión correría con el node del runner, y acá no aparecería.
   it("el CI no verifica con un node por debajo de ese piso", () => {
     const nuestro = nodeMajorFloor(JSON.parse(read("package.json")).engines.node);
-    const ci = read(".github/workflows/ci.yml");
+    const ci = read(".github/workflows/ci-cd.yml");
     expect(ci).toContain("uses: ./.github/actions/install");
     expect(ci).not.toContain("actions/setup-node");
     const versiones = [

@@ -49,7 +49,7 @@ module.exports = {
       // anterior. Re-aplicar el archivo de configuración —que era la mitigación planeada— no
       // ayuda.
       //
-      // La solución es que LA RUTA QUE SE LE DA NUNCA CAMBIE: `deploy-remote.sh` invoca a pm2
+      // La solución es que LA RUTA QUE SE LE DA NUNCA CAMBIE: `scripts/deploy/deploy-remote.sh` invoca a pm2
       // con `PM2_CWD` apuntando al symlink `current`, pm2 guarda esa ruta —que es la misma para
       // siempre— y el symlink es lo que decide qué versión hay del otro lado. Y como eso estuvo
       // mal una vez, el despliegue lo CHEQUEA en vez de asumirlo, con `/proc/<pid>/cwd`.
@@ -67,10 +67,13 @@ module.exports = {
       // Es opcional a propósito: en una máquina donde el demonio ya corre el node correcto,
       // fijarlo obligaría a actualizar esto en cada upgrade de node.
       ...(process.env.NODE_INTERPRETER ? { interpreter: process.env.NODE_INTERPRETER } : {}),
-      time: true,
+      // SIN EL TIMESTAMP DE pm2: cada línea es un JSON de pino que ya trae su `time`, y el prefijo
+      // de pm2 la deja de hacer JSON para cualquiera que la lea (`./logs`, `jq`).
+      time: false,
       watch: false,
       exec_mode: "fork",
-      instances: Number.parseInt(process.env.PM2_INSTANCES, 10) || 1,
+      // `INSTANCES` es la del despliegue (§`scripts/deploy`); `PM2_INSTANCES`, la del smoke.
+      instances: Number.parseInt(process.env.INSTANCES || process.env.PM2_INSTANCES, 10) || 1,
 
       // EL PROCESO AVISA CUANDO TERMINÓ DE LEVANTAR. El `process.send('ready')` lo manda
       // `@colyseus/tools` al final de su `listen()`; sin `wait_ready`, pm2 daría la instancia
@@ -97,8 +100,13 @@ module.exports = {
       // nosotros: es `@colyseus/tools`, adentro de su `listen()`. pm2 solo aporta el índice.
       // `PORT` es entonces la BASE, y con dos instancias no es el puerto de la segunda
       // (§`src/env.ts`). No se configura acá: sale del `.env`.
+      //
+      // `RELEASE` y `APP_ENV` sí vienen de acá: los pone el despliegue (qué release corre, y en qué
+      // entorno, que calculó el workflow) y no son configuración de producto.
       env: {
         NODE_ENV: "production",
+        ...(process.env.RELEASE ? { RELEASE: process.env.RELEASE } : {}),
+        ...(process.env.APP_ENV ? { APP_ENV: process.env.APP_ENV } : {}),
       },
     },
   ],

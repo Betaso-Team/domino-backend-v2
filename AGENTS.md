@@ -1961,6 +1961,33 @@ Hechos medidos en la Tarea 13, Parte B:
 - **El ES256 exige el juego**: billing-auth firma `aud: ['orchestrator','domino']` para todos los juegos, así que el `JwtVerifier` rechaza un ES256 cuyo claim `game` no sea `"domino"` (un token de truco pasaría emisor y audiencia). Y `parseEnv` falla al arrancar si hay `ORCHESTRATOR_API_KEY` sin `BILLING_AUTH_PUBLIC_KEY`, o si esa llave repite `BETASO_ADMIN_PANEL_API_KEY` o `BETASO_BACKEND_API_KEY`.
 - **Bug previo, pendiente y con su propio ticket (no se arregla en esta rama):** `BetCharger.charge` trata `DuplicateMovementError` como "pagado", pero la clave del ledger es `(matchId, playerId, reason)` sin secuencia; tras un aumento revocado, un segundo aumento en la misma partida cuenta a los dos como pagados (`bet-charge.ts:84-89`, `legality.ts:170`).
 
+## Incremento en curso — el CI/CD de games-orchestrator (rama `ci/despliegue`)
+
+El CI/CD de la segunda tanda (`ci.yml` + `deploy.yml` + `scripts/deploy-remote.sh`) **nunca corrió**:
+el repo no tenía Environments ni variables, y en el VPS de dev `domino-backend-dev` es el dominó **v1**.
+Se reemplazó por el estilo de billing-auth y el orquestador (`games-orchestrator`, `7528030`), portado y
+**acoplado al dominó**, sin la abstracción de app del monorepo: `.github/workflows/ci-cd.yml` y
+`scripts/deploy/` (lib común, pm2, Docker, empaquetado y sus tests). El detalle está en
+`docs/operacion.md`, «Despliegue y rollback».
+
+- **El bundle metía `@colyseus/core` adentro y el proceso moría al importar** con `Dynamic require of
+  "tty" is not supported` (`debug`, CommonJS, dentro de un bundle ESM). tsup solo externaliza lo que
+  declara `package.json`, y `@colyseus/core` es transitiva. `skipNodeModulesBundle` lo arregla
+  (`8020330`). Tenía rojo el smoke del CI desde el 24/09, y habría tumbado el primer deploy.
+- **El smoke del motor se colgaba en `REMATCH_WINDOW`**: la partida ya no termina en `FINISHED` sino
+  en la ventana de revancha (30 s), y el smoke espera 5 s a que el estado cambie. Ahora
+  `REMATCH_WINDOW_MS: 20` en `compose.smoke.yaml`.
+- **Los tiempos de los tests** siguen el criterio de truco `9d543c6`: los plazos que vencen van a un
+  tick y los que el test cancela se quedan; el sondeo de `waitUntil` bajó de 10 a 1 ms (`db6e0b0`). La
+  e2e pasó de ~23 s a ~8,5 s.
+- **Docker corre `domino-server`, perfil `server`**: es la única excepción al «sin perfiles» de
+  `compose.yaml`, y separa el uso de servidor del local. El `domino` local exige `./.env` y compose lo
+  valida aunque no se lo levante, así que el despliegue con Docker también enlaza el `.env` compartido.
+  Una sola instancia: varias necesitan el ruteo por path, que es de pm2.
+- **Los tests de `scripts/deploy` corren en el proyecto `unit`**, contra un servidor de mentira
+  (procesos reales con su cwd, y pm2, docker, curl y npm falsos). Que el rollback saltea un `FAILED`
+  se verificó por mutación.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
