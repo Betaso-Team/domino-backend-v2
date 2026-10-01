@@ -111,7 +111,15 @@ async function declararCola(): Promise<void> {
 // SE DRENA LA COLA, no se consume un mensaje: lo que hay que comparar es el CUERPO, y devolverlos
 // todos deja que el llamador afirme cuál esperaba sin depender del orden en que el despachador los
 // haya sacado. Se hace `ack` de lo que se saca porque la cola es durable y sobrevive entre fases.
-async function drenarCola(mínimo: number): Promise<readonly Record<string, unknown>[]> {
+//
+// `hasta` es para cuando lo que se espera NO es el primero en llegar: la entrega es AL MENOS UNA VEZ, y
+// una entrada cuyo confirm se perdió al caerse el broker se reentrega —en orden— ANTES que la
+// siguiente. Medido en el CI: la fase `recover` recibió dos copias del `created` y cortó sin esperar
+// al `updated` que venía detrás.
+async function drenarCola(
+  mínimo: number,
+  hasta: (mensajes: readonly Record<string, unknown>[]) => boolean = () => true,
+): Promise<readonly Record<string, unknown>[]> {
   assert.ok(env.rabbitmqUrl, "el cliente smoke necesita RABBITMQ_URL");
   const connection = await connect(env.rabbitmqUrl);
   const channel = await connection.createChannel();
@@ -124,7 +132,7 @@ async function drenarCola(mínimo: number): Promise<readonly Record<string, unkn
         mensajes.push(JSON.parse(mensaje.content.toString()) as Record<string, unknown>);
         channel.ack(mensaje);
       }
-      return mensajes.length >= mínimo ? mensajes : undefined;
+      return mensajes.length >= mínimo && hasta(mensajes) ? mensajes : undefined;
     });
   } finally {
     await channel.close();
@@ -330,7 +338,10 @@ async function recover(): Promise<void> {
 
   // LO PENDIENTE SALE SOLO. Nadie vuelve a tocar HTTP acá: el despachador tiene que haberlo
   // publicado por su cuenta al volver el broker, que es la promesa entera del outbox.
-  const recuperados = await drenarCola(1);
+  // Hasta que llegue el de la fase `enqueue`: antes pueden llegar reentregas de lo ya publicado.
+  const recuperados = await drenarCola(1, (mensajes) =>
+    mensajes.some((evento) => evento.prize === 99),
+  );
   assert.ok(
     recuperados.some((evento) => evento.prize === 99),
     `el evento encolado con el broker caído nunca salió — llegaron: ${JSON.stringify(recuperados)}`,
