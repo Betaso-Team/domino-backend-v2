@@ -2015,6 +2015,11 @@ del orquestador está mockeado** (registro contable y wallet falsos); de este la
   producción `BETASO_GAMES_RABBITMQ_URL`). `vitest.setup.ts` borra `BETASO_GAMES_RABBITMQ_URL`.
 - Smoke real con Docker verde (`RUN_ENGINE_SMOKE=1 npm run test:deploy`): la partida pidió el cobro al
   stub, arrancó y cerró con 120 entradas de historial.
+- **`match_result_outbox` vence lo ENVIADO a los 7 días** (TTL sobre `sentAt`, opción
+  `sentRetentionSeconds` de `MongoOutboxStore`); lo pendiente no tiene `sentAt` y no vence nunca. El
+  catálogo NO lleva TTL: su reconciliador necesita los `SENT`. Mientras duran, son la red si el broker
+  pierde su disco (procedimiento en `docs/operacion.md`). Un resultado con más de 10 minutos sin salir
+  loguea `error` en cada fallo (`stuckAfterMs`).
 
 **Una mesa terminada ya no retiene a nadie** (portado de truco): el registro suelta en cada latido a
 quien dejó de jugar, y la sala late además después de cada hecho. Se suelta al tener VEREDICTO —no en

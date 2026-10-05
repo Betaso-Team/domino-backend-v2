@@ -82,6 +82,30 @@ sequenceDiagram
 Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos durante el deploy. Un
 `kill -9` no ejecuta este flujo: las claves huérfanas desaparecen por TTL.
 
+## Resultados de partida (mesas del orquestador)
+
+Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
+`betaso_games` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
+(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite, con espera
+creciente hasta 5 minutos.
+
+- **Un resultado trabado** deja un `warn` por cada fallo, y pasados **10 minutos** sin salir cada fallo
+  es un `error` con `«el resultado de partida lleva demasiado sin salir»`. Es la línea que conviene
+  alertar: detrás hay un premio que no se pagó.
+- **Si el broker pierde su disco**, se pierde lo que estaba en las colas sin consumir, pero dominó
+  conserva cada resultado de los últimos 7 días. Para reenviarlos, se vuelven a `PENDING` los enviados
+  desde un poco antes del incidente; el despachador los publica solo:
+
+  ```js
+  db.match_result_outbox.updateMany(
+    { status: "SENT", sentAt: { $gte: ISODate("<instante anterior al incidente>") } },
+    { $set: { status: "PENDING", attempts: 0, nextAttemptAt: new Date() }, $unset: { sentAt: "" } },
+  )
+  ```
+
+  Repetirlos es seguro: el orquestador encuentra las órdenes de un premio por su clave y no paga dos
+  veces, y cada cliente descarta un reporte repetido por `Idempotency-Key`.
+
 ## Verificación
 
 ```bash

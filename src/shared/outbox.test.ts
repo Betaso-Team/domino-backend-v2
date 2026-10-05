@@ -51,8 +51,9 @@ function recording() {
   };
 }
 
-function fixture(perTick?: number) {
+function fixture(perTick?: number, stuckAfterMs?: number) {
   const time = clock();
+  const log = fakeLogger();
   const store = new MemoryOutboxStore<string, { n: number }>(time);
   const delivery = recording();
   const dispatcher = new TopicOutboxDispatcher({
@@ -62,12 +63,13 @@ function fixture(perTick?: number) {
     delivery: delivery.port,
     lease: new MemoryLease(),
     clock: time,
-    log: fakeLogger(),
+    log,
     label: "resultado de partida",
     publishOptions: (entry) => ({ mandatory: true, messageId: entry.dedupeKey }),
     ...(perTick !== undefined && { perTick }),
+    ...(stuckAfterMs !== undefined && { stuckAfterMs }),
   });
-  return { time, store, delivery, dispatcher };
+  return { time, store, delivery, dispatcher, log };
 }
 
 // Un turno del event loop: `wake()` no devuelve promesa.
@@ -122,6 +124,28 @@ describe("TopicOutboxDispatcher", () => {
     expect(await store.next(new Date(time.now()))).toBeUndefined();
     time.advance(1_000);
     expect((await store.next(new Date(time.now())))?.dedupeKey).toBe("m-1");
+  });
+});
+
+// UN RESULTADO TRABADO TIENE QUE VERSE antes de que un jugador reclame su premio. Cada fallo deja un
+// `warn` —un broker que se reinicia es normal—; pasado el umbral, cada fallo es un `error`, que es lo
+// que una alerta mira.
+describe("TopicOutboxDispatcher: lo que no sale", () => {
+  it("avisa con un error cuando la entrada lleva más que el umbral sin salir", async () => {
+    const { time, store, delivery, dispatcher, log } = fixture(1, 600_000);
+    await store.enqueue("m-1", "domino.match.finished", { n: 1 });
+    delivery.fails();
+
+    await dispatcher.drain();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.error).not.toHaveBeenCalled();
+
+    time.advance(600_000);
+    await dispatcher.drain();
+    expect(log.error).toHaveBeenCalledWith(
+      "el resultado de partida lleva demasiado sin salir",
+      expect.objectContaining({ id: expect.any(String), pendingMs: 600_000 }),
+    );
   });
 });
 

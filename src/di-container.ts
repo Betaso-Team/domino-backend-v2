@@ -296,7 +296,10 @@ export const betasoGamesAmqp = env.betasoGamesRabbitmqUrl
   ? new AmqpPublisher(env.betasoGamesRabbitmqUrl, logger)
   : undefined;
 const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
-  ? new MongoOutboxStore(mongo, "match_result_outbox", clock)
+  ? new MongoOutboxStore(mongo, "match_result_outbox", clock, {
+      // SIETE DÍAS: lo enviado se borra solo, y mientras tanto es la red si el broker pierde su disco.
+      sentRetentionSeconds: 7 * 24 * 3600,
+    })
   : new MemoryOutboxStore(clock);
 export const matchResultDispatcher = betasoGamesAmqp
   ? new TopicOutboxDispatcher({
@@ -311,6 +314,8 @@ export const matchResultDispatcher = betasoGamesAmqp
       label: "resultado de partida",
       // LAS PARTIDAS TERMINAN EN RÁFAGAS: una por segundo no alcanza para un servidor lleno.
       perTick: 20,
+      // DIEZ MINUTOS sin salir es un error en el log, que es lo que una alerta mira.
+      stuckAfterMs: 10 * 60_000,
       publishOptions: (entry) => ({ mandatory: true, messageId: entry.dedupeKey }),
     })
   : undefined;

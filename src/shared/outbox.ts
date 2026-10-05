@@ -106,6 +106,10 @@ export interface TopicOutboxDispatcherOptions<K extends string, P> {
   // Cuántas entradas publica un tick como máximo, cada una con su propio lease. El catálogo publica
   // una; los resultados de partida, que llegan en ráfagas, más.
   readonly perTick?: number;
+  // Desde cuánto sin salir una entrada deja de ser un `warn` y pasa a ser un `error` en cada fallo: un
+  // broker que se reinicia es normal, un resultado que lleva diez minutos sin salir es un premio que
+  // un jugador va a reclamar. Sin él, todo fallo es un `warn`.
+  readonly stuckAfterMs?: number;
 }
 
 // EL DESPACHADOR. Un tick = hasta `perTick` vueltas de un lease, el trabajo previo y UNA entrada.
@@ -198,12 +202,20 @@ export class TopicOutboxDispatcher<K extends string, P> {
       // EL BACKOFF SE CALCULA CON LOS INTENTOS **YA ACUMULADOS**: el primer fallo espera un segundo.
       const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** entry.attempts);
       await queue.retry(entry.id, String(error), new Date(clock.now() + delay));
-      log.warn(`no se pudo publicar el ${label}`, {
+      const pendingMs = clock.now() - entry.createdAt.getTime();
+      const detail = {
         id: entry.id,
         routingKey: entry.routingKey,
         attempts: entry.attempts + 1,
+        pendingMs,
         error: String(error),
-      });
+      };
+      const stuck = this.options.stuckAfterMs;
+      if (stuck !== undefined && pendingMs >= stuck) {
+        log.error(`el ${label} lleva demasiado sin salir`, detail);
+      } else {
+        log.warn(`no se pudo publicar el ${label}`, detail);
+      }
       return false;
     }
     // SE MARCA DESPUÉS DEL CONFIRM DEL BROKER: marcar antes daría por entregado un mensaje que el

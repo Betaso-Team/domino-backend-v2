@@ -13,13 +13,17 @@ import type { OutboxClock, OutboxEntry, OutboxRecord, OutboxStore } from "./outb
 // `mongo-lease.ts`): el mensaje cambia entre versiones del servidor y está pensado para un humano.
 const DUPLICATE_KEY = 11000;
 
-// LOS DOS ÍNDICES, Y NINGÚN TTL.
+// LOS DOS ÍNDICES, y el TTL solo si el uso lo pide.
 //
 // `dedupeKey` único es LA idempotencia: no es una consulta previa, es la base rechazando el segundo
 // insert. `{status, _id}` es la consulta de `next()`, que corre una vez por segundo para siempre.
 //
-// **NO HAY TTL NI BORRADO**: los `SENT` son lo que hace que una clave ya entregada no se vuelva a
-// encolar (la reconciliación del catálogo, el resultado de una partida que se cierra dos veces).
+// **EL CATÁLOGO NO VENCE NADA**: sus `SENT` son lo que impide que la reconciliación vuelva a emitir
+// toda revisión ya publicada. Los RESULTADOS sí (`sentRetentionSeconds`): nadie los reconcilia, y una
+// partida no se cierra dos veces con días de diferencia. El TTL va sobre `sentAt`, que una entrada
+// pendiente no tiene, y Mongo no vence un documento sin el campo: **lo que no salió no vence nunca**.
+// Mientras dura, un resultado enviado sigue acá entero, y volverlo a `PENDING` lo publica otra vez:
+// es la red si el broker pierde su disco antes de que el orquestador lo consuma.
 const OUTBOX_INDEXES: IndexDescription[] = [
   { key: { dedupeKey: 1 }, name: "dedupeKey_1", unique: true },
   { key: { status: 1, _id: 1 }, name: "status_1__id_1" },
@@ -39,6 +43,7 @@ export class MongoOutboxStore<K extends string = string, P = unknown> implements
     private readonly source: CollectionSource,
     private readonly collectionName: string,
     private readonly clock: OutboxClock,
+    private readonly options: { readonly sentRetentionSeconds?: number } = {},
   ) {}
 
   async enqueue(dedupeKey: string, routingKey: K, payload: P): Promise<boolean> {
@@ -115,7 +120,15 @@ export class MongoOutboxStore<K extends string = string, P = unknown> implements
 
   private async prepare(): Promise<Collection<OutboxDocument<K, P>>> {
     const collection = await this.source.collection<OutboxDocument<K, P>>(this.collectionName);
-    await collection.createIndexes(OUTBOX_INDEXES);
+    const retention = this.options.sentRetentionSeconds;
+    await collection.createIndexes(
+      retention === undefined
+        ? OUTBOX_INDEXES
+        : [
+            ...OUTBOX_INDEXES,
+            { key: { sentAt: 1 }, name: "sentAt_1", expireAfterSeconds: retention },
+          ],
+    );
     return collection;
   }
 }
