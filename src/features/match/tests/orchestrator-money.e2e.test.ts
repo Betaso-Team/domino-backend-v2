@@ -1,5 +1,8 @@
 import { matchResults, rootContainer } from "@/di-container";
 import type { Logger } from "@/shared/logger";
+import { joinAs } from "@/tests/e2e";
+import { fakeOrchestrator } from "@/tests/fake-orchestrator";
+import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DominoMatchConfig } from "../core/config";
 import { BetCharger } from "../network";
@@ -141,6 +144,62 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     await waitUntil(() => chargeBet.mock.calls.length === 1);
     await new Promise((resume) => setTimeout(resume, 20));
     expect(match.serverState.acceptedBetLevel).toBe(2);
+  });
+
+  it("con la mesa completa pide el cobro de la entrada, y no arranca hasta el sí", async () => {
+    let release!: () => void;
+    fakeOrchestrator.failEntryWith(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    try {
+      const match = await seatPair(server, ["e1", "e2"]);
+      await waitUntil(() => fakeOrchestrator.entries.includes(match.config.matchId));
+      await new Promise((resume) => setTimeout(resume, 20));
+      expect(match.serverState.phase).toBe("NOT_STARTED");
+
+      release();
+      await waitUntil(() => match.serverState.phase === "PLAYING");
+      expect(fakeOrchestrator.entries.filter((id) => id === match.config.matchId)).toHaveLength(1);
+    } finally {
+      fakeOrchestrator.failEntryWith(undefined);
+    }
+  });
+
+  it("si el orquestador no cobra la entrada, la mesa se cierra sin arrancar y sale abortada", async () => {
+    fakeOrchestrator.failEntryWith(async () =>
+      Promise.reject(new ChargeRejectedError("INSUFFICIENT_FUNDS")),
+    );
+    try {
+      const match = await seatPair(server, ["x1", "x2"]);
+      const key = `${match.config.matchId}:aborted`;
+      await waitUntil(async () => (await matchResults.present([key])).has(key), 3_000);
+      expect(match.serverState.phase).toBe("NOT_STARTED");
+      expect(server.getRoomById(match.roomId)).toBeUndefined();
+    } finally {
+      fakeOrchestrator.failEntryWith(undefined);
+    }
+  });
+
+  it("con la mesa incompleta no se cobra nada", async () => {
+    const before = fakeOrchestrator.entries.length;
+    const room = await server.createRoom("domino", {
+      mode: "CASUAL",
+      matchId: "m-solo",
+      gameModeId: CASUAL_2P.uuid,
+      participants: [
+        { userId: "s1", displayName: "s1", currency: "VES" },
+        { userId: "s2", displayName: "s2", currency: "VES" },
+      ],
+      seed: "seed",
+      teamAssignment: "SEAT_ORDER",
+      rateId: "rate-1",
+    });
+    await joinAs(server, room.roomId, "s1");
+    await new Promise((resume) => setTimeout(resume, 20));
+    expect(fakeOrchestrator.entries.length).toBe(before);
   });
 
   it("al resolverse, publica el resultado y no reporta ranking ni liga a Betaso", async () => {

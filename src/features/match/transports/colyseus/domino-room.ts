@@ -36,7 +36,11 @@ import {
 } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
 import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
-import { OrchestratorBetCharger } from "../../network/orchestrator-charges";
+import {
+  OrchestratorBetCharger,
+  type OrchestratorCharges,
+  OrchestratorUnavailableError,
+} from "../../network/orchestrator-charges";
 import {
   type DominoRoomOptions,
   type MatchSinks,
@@ -80,6 +84,11 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // EL MOTIVO QUE SOLO LA SALA SABE de por qué una mesa del orquestador se cerró sin veredicto: el
   // orquestador no pudo cobrar la entrada. Lo lee el resultado al publicarse.
   private orchestratorAbortReason: MatchAbortReason | undefined;
+  // EL COBRO DE LA ENTRADA de una mesa del orquestador: se pide UNA vez, con la mesa completa, y la
+  // partida arranca recién con el sí. `charged` es lo que deja que una reconexión posterior vuelva a
+  // llamar a `startIfSeated` sin volver a cobrar.
+  private entryCharge: "idle" | "charging" | "charged" = "idle";
+  private disposed = false;
   // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
   // El default reutiliza el global: si algún día `onDrop` corriera antes de que
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
@@ -544,6 +553,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   }
 
   override async onDispose(): Promise<void> {
+    this.disposed = true;
     // PRIMERO SE CORTA EL LATIDO: lo que sigue es limpieza, y un latido posterior volvería a
     // escribir justo lo que estamos por borrar — dejando la sala anunciada dos minutos más.
     this.heartbeat?.clear();
@@ -653,6 +663,47 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     if (this.seated.size < this.seats.length) return;
     this.seating?.clear();
     this.seating = undefined;
+    // LA MESA DEL LOBBY PROPIO ya cobró a cada uno al entrar (`platform.admit`).
+    if (this.roomOptions || this.entryCharge === "charged") {
+      this.startMatch();
+      return;
+    }
+    if (this.entryCharge === "charging") return;
+    this.entryCharge = "charging";
+    void this.chargeEntry();
+  }
+
+  // LA MESA DEL ORQUESTADOR ARRANCA SOLO SI EL ORQUESTADOR COBRÓ LA ENTRADA A TODOS. Dominó no mueve
+  // dinero: pide el cobro y espera. Un rechazo, un orquestador caído o un silencio cierran la mesa
+  // sin arrancar —"no sé si pagaron" no es "pagaron"— y el resultado sale como abortado con motivo
+  // `CHARGE_REJECTED`; el orquestador devuelve lo que haya llegado a cobrar.
+  //
+  // El puerto se resuelve AL COBRAR y no al nacer la sala: es del proceso, y la suite lo reemplaza.
+  private async chargeEntry(): Promise<void> {
+    try {
+      if (!rootContainer.isRegistered("OrchestratorCharges")) {
+        throw new OrchestratorUnavailableError("esta instancia no tiene orquestador configurado");
+      }
+      await rootContainer
+        .resolve<OrchestratorCharges>("OrchestratorCharges")
+        .chargeEntry(this.config.matchId);
+    } catch (error: unknown) {
+      this.log.warn("el orquestador no cobró la entrada; la mesa no arranca", {
+        error: String(error),
+      });
+      this.orchestratorAbortReason = "CHARGE_REJECTED";
+      if (!this.disposed) {
+        for (const client of this.clients)
+          client.send("matchCancelled", { reason: "CHARGE_REJECTED" });
+        void this.disconnect().catch(() => undefined);
+      }
+      return;
+    }
+    this.entryCharge = "charged";
+    // SI TODOS SE FUERON MIENTRAS SE COBRABA, la sala ya se dispuso y salió como abortada: el
+    // orquestador reembolsa por su ficha. Arrancar el motor de una sala muerta dejaría plazos
+    // corriendo sin dueño.
+    if (this.disposed) return;
     this.startMatch();
   }
 

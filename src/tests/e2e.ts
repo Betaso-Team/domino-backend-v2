@@ -1,9 +1,10 @@
 import { testConfig } from "@/app.config";
-import { startServices } from "@/di-container";
+import { rootContainer, startServices } from "@/di-container";
 import { env } from "@/env";
 import type { CreateMatchRequest, MatchParticipant } from "@/features/match";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import jwt from "jsonwebtoken";
+import { fakeOrchestrator } from "./fake-orchestrator";
 import { CASUAL_2P } from "./game-mode-catalog";
 
 // Scaffolding de la app ensamblada. Vive en la raíz porque lobby y match lo consumen; dejar una
@@ -33,6 +34,10 @@ export async function bootTestServer(port: number): Promise<ColyseusTestServer> 
   // idempotente —sale temprano si ya hay intervalo— y los cuatro van `unref`eados, así que ni
   // se duplican entre archivos ni sostienen el proceso al terminar.
   startServices();
+  // EL ORQUESTADOR QUE COBRA, por lo mismo que los servicios de arriba: sin él cada mesa por request
+  // se cerraría esperando un cobro que nadie contesta, y el que escriba el E2E número veinte no tiene
+  // por qué saberlo.
+  rootContainer.register("OrchestratorCharges", { useValue: fakeOrchestrator });
   return server;
 }
 
