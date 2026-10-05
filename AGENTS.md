@@ -2016,9 +2016,12 @@ del orquestador está mockeado** (registro contable y wallet falsos); de este la
 - Smoke real con Docker verde (`RUN_ENGINE_SMOKE=1 npm run test:deploy`): la partida pidió el cobro al
   stub, arrancó y cerró con 120 entradas de historial.
 
-**Pendiente, deliberado:** una mesa del orquestador sigue abriendo la ventana de revancha (con
-`eligible: false`) y su sala vive hasta que los clientes se van, así que `player_match:<userId>` apunta a
-una mesa terminada durante ese rato. Cerrarlo cambia el golden y varios e2e; queda para un incremento.
+**Una mesa terminada ya no retiene a nadie** (portado de truco): el registro suelta en cada latido a
+quien dejó de jugar, y la sala late además después de cada hecho. Se suelta al tener VEREDICTO —no en
+`FINISHED` como truco— salvo durante una ventana de revancha ELEGIBLE, así que una mesa del orquestador
+(`eligible: false`) suelta a los dos en el acto aunque la ventana siga abierta. El reemplazado por un bot
+también se suelta. Lo mide `orchestrator-tables.e2e.test.ts`, rojo sin el cambio de la sala. La ventana
+en sí sigue abriéndose en esas mesas: quitarla cambia el golden y ya no hace falta para esto.
 
 ## Cómo se ejecuta una tarea
 

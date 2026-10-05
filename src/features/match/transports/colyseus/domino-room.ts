@@ -339,6 +339,11 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         ...betChargeSinks,
         ...externalSinks,
         ...orchestratorSinks,
+        // EL LATIDO POR HECHO, portado de truco, y va ÚLTIMO: los demás sinks ya vieron el hecho y
+        // el árbol ya está mutado. Quién sigue jugando cambia con la partida —un retiro, un
+        // veredicto— y el que quedó afuera tiene que poder sentarse en otra mesa YA, no al
+        // próximo latido del reloj.
+        () => this.beat(),
       ],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
@@ -405,10 +410,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // una mesa esperando a que levanten las fichas no produce un solo evento durante todo el
     // `dealingTimeoutMs`, y sus asientos siguen ocupados igual.
     //
-    // Y NO HAY, ADEMÁS, UN LATIDO POR HECHO como el de truco. Allá cada evento es una oportunidad
-    // de SOLTAR al que el motor retiró, porque su registro guarda quién sigue jugando; acá lo
-    // anotado son los ASIENTOS DE LA MESA, que salen del config y no cambian en toda la partida.
-    // Un latido por hecho escribiría exactamente lo mismo que el anterior.
+    // Y ADEMÁS HAY UN LATIDO POR HECHO (el último sink del notificador), como en truco: este
+    // reloj renueva, aquél suelta en el acto al que dejó de jugar.
     this.heartbeat = this.clock.setInterval(() => this.beat(), HEARTBEAT_MS);
 
     this.seating = this.clock.setTimeout(() => {
@@ -580,13 +583,41 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // registra y no tumba nada: si el almacén se cae, lo que se pierde es que esta mesa figure en
   // el clúster durante dos minutos, no la partida que se está jugando adentro.
   private beat(): void {
+    // Un hecho emitido durante el cierre —el `MATCH_ABORTED` de `onDispose`— no puede volver a
+    // anunciar la sala que se está por borrar; y uno emitido antes de anotarla no tiene registro.
+    if (this.disposed || !this.matches) return;
+    const active = this.activeSeats();
     this.beats = this.beats
-      .then(() => this.matches.keepAlive(this.roomId))
+      .then(() => this.matches.keepAlive(this.roomId, active))
       .catch((error: unknown) =>
         this.log.error("no se pudo mantener el registro de la partida", {
           message: error instanceof Error ? error.message : String(error),
         }),
       );
+  }
+
+  // LOS userId QUE ESTA MESA TODAVÍA RETIENE, para que el registro suelte al resto. Portado de
+  // truco, con dos diferencias del dominó:
+  //
+  //   · SE SUELTA AL TENER VEREDICTO, no en `FINISHED`. Truco espera a `FINISHED`, que llega
+  //     después de la revancha; acá una mesa sin revancha posible —todas las del orquestador
+  //     (`eligible: false`)— pasaría treinta segundos de ventana mandando al jugador de vuelta a
+  //     una partida terminada. Solo una ventana ELEGIBLE retiene los asientos, porque ahí la
+  //     revancha todavía puede salir. Aceptada ya no: la mesa nueva anotó a los dos, y un latido
+  //     de ésta los pisaría.
+  //   · EL REEMPLAZADO POR UN BOT TAMBIÉN SE SUELTA. El asiento sigue jugando —lo juega la
+  //     máquina— pero la persona se fue, y `hasAbandoned` no lo dice a propósito.
+  private activeSeats(): readonly string[] {
+    const phase = this.state.phase;
+    if (this.hasOutcome()) {
+      const rematchOpen =
+        (phase === "REMATCH_WINDOW" || phase === "REMATCH_NEGOTIATION") &&
+        this.state.rematch?.eligible === true;
+      if (!rematchOpen) return [];
+    }
+    return this.config.seats
+      .filter(({ playerId }) => this.isStillPlaying(playerId) && !this.player(playerId).isBot)
+      .map(({ userId }) => userId);
   }
 
   override onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
