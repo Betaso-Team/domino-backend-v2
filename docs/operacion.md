@@ -185,7 +185,10 @@ niegan a arrancar mientras el otro medio esté sirviendo, porque usan el mismo p
      `BILLING_AUTH_PUBLIC_KEY`;
    - `MONGO_URI` (el Mongo del VPS escucha en `:27018`);
    - `REDIS_URL`, con un índice propio;
-   - `RABBITMQ_URL`.
+   - `RABBITMQ_URL`;
+   - para las mesas del orquestador, `ORCHESTRATOR_URL` (la base del orquestador),
+     `ORCHESTRATOR_CALLBACK_API_KEY` (= `DOMINO_CALLBACK_API_KEY` del orquestador) y
+     `BETASO_GAMES_RABBITMQ_URL` (el vhost `betaso_games`, donde salen los resultados).
 2. Crear el vhost del dominio hacia `127.0.0.1:PORT`, con el `RewriteRule … ws://` del upgrade de
    WebSocket.
 3. Cargar en GitHub las variables y los secretos de arriba, y sumar el entorno a `DEPLOY_ENVIRONMENTS`.
