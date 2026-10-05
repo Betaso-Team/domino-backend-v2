@@ -50,9 +50,20 @@ import {
 } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
 import type { HistoryPort, HistoryReader } from "@/features/match/network/history";
+import {
+  MATCH_RESULT_EXCHANGE,
+  type MatchResultKey,
+  type MatchResultPayload,
+  MatchResultRecorder,
+} from "@/features/match/network/match-results";
+import {
+  OrchestratorBetCharger,
+  type OrchestratorCharges,
+} from "@/features/match/network/orchestrator-charges";
 import type { StandingsFeeds } from "@/features/match/network/standings";
 import { AmqpRankingFeed } from "@/features/match/network/transports/amqp-ranking";
 import { HttpLeagueFeed } from "@/features/match/network/transports/http-leagues";
+import { HttpOrchestratorCharges } from "@/features/match/network/transports/http-orchestrator";
 import { MemoryHistory } from "@/features/match/network/transports/memory-history";
 import { MongoHistory } from "@/features/match/network/transports/mongo-history";
 import {
@@ -103,6 +114,8 @@ import { HttpClient } from "@/shared/http";
 import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
 import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
+import { MongoOutboxStore } from "@/shared/mongo-outbox";
+import { MemoryOutboxStore, type OutboxStore, TopicOutboxDispatcher } from "@/shared/outbox";
 import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
 import { container } from "tsyringe";
 import { env } from "./env";
@@ -269,6 +282,77 @@ export const outboxDispatcher =
     ? new OutboxDispatcher(gameModeRepository, gameModeOutbox, amqp, catalogLease, clock, logger)
     : undefined;
 outboxDispatcher?.start();
+
+// ── LAS MESAS DEL ORQUESTADOR: el resultado y los cobros ────────────────────────────────────────
+//
+// EL RESULTADO VA POR SU PROPIO BROKER (`BETASO_GAMES_RABBITMQ_URL`, vhost `betaso_games`), que no es
+// el de Betaso: otro publicador, otra conexión. El outbox elige por `MONGO_URI` como el del catálogo,
+// y el despachador existe con el broker aunque no haya Mongo —sin Mongo, lo encolado se pierde con
+// el proceso, pero lo que alcance a salir sale—. Sin broker, el outbox acumula.
+//
+// `mandatory` es lo que hace que un resultado publicado antes de que el orquestador declare su cola
+// cuente como fallo y se reintente (ver `shared/amqp.ts`).
+export const betasoGamesAmqp = env.betasoGamesRabbitmqUrl
+  ? new AmqpPublisher(env.betasoGamesRabbitmqUrl, logger)
+  : undefined;
+const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
+  ? new MongoOutboxStore(mongo, "match_result_outbox", clock, {
+      // SIETE DÍAS: lo enviado se borra solo, y mientras tanto es la red si el broker pierde su disco.
+      sentRetentionSeconds: 7 * 24 * 3600,
+    })
+  : new MemoryOutboxStore(clock);
+export const matchResultDispatcher = betasoGamesAmqp
+  ? new TopicOutboxDispatcher({
+      exchange: MATCH_RESULT_EXCHANGE,
+      // OTRO LEASE que el del catálogo: comparten colección, no nombre, así que no se bloquean.
+      leaseName: "match-result-publisher",
+      queue: matchResultOutbox,
+      delivery: betasoGamesAmqp,
+      lease: catalogLease,
+      clock,
+      log: logger,
+      label: "resultado de partida",
+      // LAS PARTIDAS TERMINAN EN RÁFAGAS: una por segundo no alcanza para un servidor lleno.
+      perTick: 20,
+      // DIEZ MINUTOS sin salir es un error en el log, que es lo que una alerta mira.
+      stuckAfterMs: 10 * 60_000,
+      publishOptions: (entry) => ({ mandatory: true, messageId: entry.dedupeKey }),
+    })
+  : undefined;
+matchResultDispatcher?.start();
+rootContainer.register(MatchResultRecorder, {
+  useValue: new MatchResultRecorder({
+    outbox: matchResultOutbox,
+    wake: () => matchResultDispatcher?.wake(),
+    now: () => clock.now(),
+    log: logger,
+  }),
+});
+// Para la suite: lo encolado, sin broker. Se exporta como el catálogo exporta `gameModes`.
+export const matchResults = matchResultOutbox;
+
+// A QUIÉN LE PIDEN LOS COBROS. Existe si y solo si esta instancia atiende al orquestador: `parseEnv`
+// exige la URL y la llave junto con `ORCHESTRATOR_API_KEY`.
+const orchestratorCharges: OrchestratorCharges | undefined = env.orchestratorCallback
+  ? new HttpOrchestratorCharges(
+      new HttpClient({ baseUrl: env.orchestratorCallback.url, timeoutMs: 10_000 }),
+      env.orchestratorCallback.apiKey,
+    )
+  : undefined;
+if (orchestratorCharges) {
+  rootContainer.register<OrchestratorCharges>("OrchestratorCharges", {
+    useValue: orchestratorCharges,
+  });
+  rootContainer.register(OrchestratorBetCharger, {
+    useValue: new OrchestratorBetCharger({
+      orchestrator: orchestratorCharges,
+      // EL MISMO TECHO QUE EL COBRO DEL AUMENTO EN EL LOBBY PROPIO: el trato espera, con la mesa
+      // diciendo x2, a lo sumo esto.
+      timeoutMs: 15_000,
+      log: logger,
+    }),
+  });
+}
 
 // Se registra SOLO el puerto de LECTURA aunque el adaptador sepa escribir: quien crea y edita es
 // la API administrativa del catálogo, que recibe su propio servicio. Un token de escritura acá
@@ -643,11 +727,13 @@ export async function shutdown(): Promise<void> {
   //    un evento entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
   //    duplicado que el consumidor ya deduplica, pero el costo de esperar son milisegundos.
   await outboxDispatcher?.close();
+  await matchResultDispatcher?.close();
   await history.drain();
   // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
   //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`
   //    tolera una conexión ya cerrada, así que no hay nada que proteger acá.
   await amqp?.close();
+  await betasoGamesAmqp?.close();
   // 3. CERRAR MONGO ÚLTIMO. Los tres pasos de arriba escriben ahí: el despachador marca `SENT`, el
   //    historial drena su último lote. Al revés se pierde exactamente lo que se acaba de esperar.
   await mongo?.close();

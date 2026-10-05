@@ -97,6 +97,18 @@ function checkTableShape(
   });
 }
 
+// UN NIVEL DE AUMENTO. Lo valida el snapshot y lo valida el request del orquestador, con la misma
+// forma: si divergen, una mesa que la ruta acepta la sala la rechaza después de crearla.
+const betLevel = z.strictObject({
+  level: z.number().int().positive().safe(),
+  extra: z.number().nonnegative().safe(),
+  // LOS MONTOS NO ESTÁN, y la ausencia es la corrección: el catálogo del backend principal devuelve
+  // `{ level, extra, additionalPoints }` y la plata se deriva de la mesa (`betAmountsOf`). Guardarlos
+  // acá era pedirle al snapshot un dato que nadie produce — y un cobro cableado contra ellos habría
+  // cobrado cero, en silencio.
+  additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+
 // EL REQUEST VIVO. No trae `pointsToWin`, ni `entryFee`, ni `prize`: los tres salen del catálogo,
 // y el `strictObject` los RECHAZA en vez de ignorarlos. La diferencia importa — ignorarlos dejaría
 // a un llamador creyendo que fijó la economía de la mesa mientras el modo la pisa en silencio.
@@ -114,6 +126,11 @@ const createRequest = z
     teamAssignment,
     // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
     rateId: nonBlank,
+    // LOS NIVELES DE AUMENTO QUE OFRECE LA MESA, y los decide el ORQUESTADOR: él es quien cobra el
+    // aumento, así que él dice cuáles hay. Opcional y sin default de catálogo: ausente es "esta mesa
+    // no ofrece aumentar", que es el reposo y lo que hacen las mesas del orquestador hasta que el
+    // orquestador mande niveles.
+    betLevels: z.array(betLevel).max(16).optional(),
   })
   .superRefine(({ participants }, context) =>
     checkTableShape(participants, context, "participants"),
@@ -151,19 +168,7 @@ const matchSnapshot = z
     // partida vieja con peso 1 y volver a reportarla al ranking le daría menos puntos de los que
     // le dio. No pasa —el replay NO reporta nada afuera, solo reconstruye el árbol— pero el día
     // que alguien quiera re-liquidar desde el historial, esto es lo que tiene que mirar primero.
-    betLevels: z
-      .array(
-        z.strictObject({
-          level: z.number().int().positive().safe(),
-          extra: z.number().nonnegative().safe(),
-          // LOS MONTOS NO ESTÁN, y la ausencia es la corrección: el catálogo del backend
-          // principal devuelve `{ level, extra, additionalPoints }` y la plata se deriva de la
-          // mesa (`betAmountsOf`). Guardarlos acá era pedirle al snapshot un dato que nadie
-          // produce — y un cobro cableado contra ellos habría cobrado cero, en silencio.
-          additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
-        }),
-      )
-      .default([]),
+    betLevels: z.array(betLevel).default([]),
     isFreeRoom: z.boolean().default(false),
     // CUARTO campo con default en el schema del replay, por lo mismo que los otros tres: toda la
     // historia grabada antes de la mesa de cuatro tiene que seguir rebobinando. El default es el

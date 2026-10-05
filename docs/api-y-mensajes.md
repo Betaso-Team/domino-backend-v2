@@ -107,10 +107,26 @@ Betaso).
 | `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
 | `500` | | La sala existe pero está bloqueada por reservas sin consumir: el orquestador lo trata como desconocido y nunca abre una segunda mesa |
 
-**Estas mesas no mueven dinero ni reportan resultados.** Una sala creada por este camino no tiene
-`roomOptions`: no ofrece niveles de apuesta, no cobra aumentos, no toca la billetera ni el ledger,
-y al resolverse no publica `ranking.won` ni llama a la liga de Betaso. El dinero lo mueve el
-orquestador, y qué se reporta de estas mesas lo decide el Plan 3.
+`CreateMatchRequest` acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
+los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
+
+**Estas mesas no mueven dinero: piden que se cobre y dicen qué pasó.** No tocan el ledger ni la
+billetera de Betaso, ni reportan ranking ni liga. En cambio:
+
+- **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}internal/matches/:matchId/charges`
+  (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
+  cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
+  `CHARGE_REJECTED`.
+- **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
+  anula (`MULTIPLIER_REVOKED`).
+- **El resultado** sale por un outbox durable al exchange `betaso_games` (broker y vhost de
+  `BETASO_GAMES_RABBITMQ_URL`), con `mandatory` y publisher confirm: `domino.match.finished` al
+  dictaminarse (participantes, apuesta de la mesa y el premio de `settlementOf`, ya con el aumento) y
+  `domino.match.aborted` al cerrarse sin veredicto (sin montos: el orquestador devuelve lo que cobró).
+  `messageId = <matchId>:finished|aborted`.
+
+El contrato completo vive en el monorepo del orquestador:
+`docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`.
 
 ## Eventos y salidas
 

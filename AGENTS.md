@@ -1988,6 +1988,46 @@ Se reemplazó por el estilo de billing-auth y el orquestador (`games-orchestrato
   (procesos reales con su cwd, y pm2, docker, curl y npm falsos). Que el rollback saltea un `FAILED`
   se verificó por mutación.
 
+## Incremento en curso — las mesas del orquestador cobran por él y publican su resultado
+
+Rama `feat/orquestador-cobro-y-resultados`. Contrato (en el monorepo del orquestador):
+`docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`. **El dinero del lado
+del orquestador está mockeado** (registro contable y wallet falsos); de este lado no cambia nada por eso.
+
+- **`shared/outbox.ts` + `shared/mongo-outbox.ts`**: el outbox durable salió del catálogo cuando apareció
+  el segundo usuario. El catálogo es una capa fina con sus claves y su reconciliación; sus tests no
+  cambiaron. El despachador ganó `perTick` (los resultados llegan en ráfagas) y `publishOptions`.
+- **`publishTopic(…, { mandatory, messageId, headers })`**: con `mandatory` un `basic.return` hace fallar
+  la entrega aunque llegue el ack. Es lo que impide que un resultado publicado antes de que el
+  orquestador declare su cola se marque `SENT` y se pierda.
+- **El resultado** (`network/match-results.ts`) sale SOLO de mesas por request, al exchange
+  `betaso_games` en su propio broker (`BETASO_GAMES_RABBITMQ_URL`), con outbox
+  `match_result_outbox` y lease `match-result-publisher`. El premio viaja calculado por `settlementOf`;
+  los reembolsos no viajan.
+- ⚠ **`settlementOf` liquidaba sin el aumento aceptado** (`8e6522c`): la config se congela al nacer y
+  el nivel vive en el estado. El comentario del `switch` afirmaba lo contrario.
+- **El cobro de la entrada** (`domino-room.ts`, `chargeEntry`): con la mesa completa, la sala pide el
+  cobro y arranca recién con el sí. Falla CERRADO también sin orquestador configurado, así que la suite
+  registra `src/tests/fake-orchestrator.ts` en `bootTestServer`, y el smoke apunta los cobros a su nginx.
+- **El aumento** (`network/orchestrator-charges.ts`): los niveles llegan en el request (`betLevels`) y el
+  cobro se le pide al orquestador; un rechazo, un silencio o un orquestador caído lo anulan.
+- `ORCHESTRATOR_API_KEY` exige ahora `ORCHESTRATOR_URL` y `ORCHESTRATOR_CALLBACK_API_KEY` (y en
+  producción `BETASO_GAMES_RABBITMQ_URL`). `vitest.setup.ts` borra `BETASO_GAMES_RABBITMQ_URL`.
+- Smoke real con Docker verde (`RUN_ENGINE_SMOKE=1 npm run test:deploy`): la partida pidió el cobro al
+  stub, arrancó y cerró con 120 entradas de historial.
+- **`match_result_outbox` vence lo ENVIADO a los 7 días** (TTL sobre `sentAt`, opción
+  `sentRetentionSeconds` de `MongoOutboxStore`); lo pendiente no tiene `sentAt` y no vence nunca. El
+  catálogo NO lleva TTL: su reconciliador necesita los `SENT`. Mientras duran, son la red si el broker
+  pierde su disco (procedimiento en `docs/operacion.md`). Un resultado con más de 10 minutos sin salir
+  loguea `error` en cada fallo (`stuckAfterMs`).
+
+**Una mesa terminada ya no retiene a nadie** (portado de truco): el registro suelta en cada latido a
+quien dejó de jugar, y la sala late además después de cada hecho. Se suelta al tener VEREDICTO —no en
+`FINISHED` como truco— salvo durante una ventana de revancha ELEGIBLE, así que una mesa del orquestador
+(`eligible: false`) suelta a los dos en el acto aunque la ventana siga abierta. El reemplazado por un bot
+también se suelta. Lo mide `orchestrator-tables.e2e.test.ts`, rojo sin el cambio de la sala. La ventana
+en sí sigue abriéndose en esas mesas: quitarla cambia el golden y ya no hace falta para esto.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.

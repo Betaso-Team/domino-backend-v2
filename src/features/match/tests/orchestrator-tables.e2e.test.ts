@@ -1,5 +1,5 @@
 import { env } from "@/env";
-import { bootTestServer, casualTable, mintToken } from "@/tests/e2e";
+import { bootTestServer, casualTable, mintToken, waitUntil } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -61,6 +61,29 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     server.sdk.auth.token = mintToken("o-c");
     const back = await server.sdk.consumeSeatReservation(body.data.reservation as never);
     expect(back.roomId).toBe(opened.data.roomId);
+  });
+
+  // UNA MESA TERMINADA NO RETIENE A NADIE, aunque la sala siga viva. Antes el registro anotaba los
+  // asientos del config hasta que la sala se disponía, así que el orquestador le devolvía al
+  // jugador una mesa donde `onJoin` lo rechaza (`PlayerAlreadyOutError`) y no le abría otra.
+  it("suelta a los dos apenas la partida tiene veredicto, con la sala todavía abierta", async () => {
+    const opened = (await (
+      await post("/internal/matches", casualTable(["o-r1", "o-r2"]))
+    ).json()) as Opened;
+    const rooms = [];
+    for (const seat of opened.data.seats) {
+      server.sdk.auth.token = mintToken(seat.userId);
+      rooms.push(await server.sdk.consumeSeatReservation(seat.reservation as never));
+    }
+    const [quitter, stayer] = rooms;
+    const state = () => stayer?.state as { phase?: string } | undefined;
+    await waitUntil(() => state()?.phase !== undefined && state()?.phase !== "NOT_STARTED");
+
+    quitter?.send("ABANDON", {});
+
+    await waitUntil(async () => (await post("/internal/players/o-r2/seat")).status === 404);
+    expect((await post("/internal/players/o-r1/seat")).status).toBe(404);
+    expect(stayer?.connection.isOpen).toBe(true);
   });
 
   // UNA SALA BLOQUEADA NO ES UNA SALA AUSENTE: cada vuelta sin consumir es una reserva y cuenta

@@ -150,8 +150,10 @@ export async function seatPair(
   server: ColyseusTestServer,
   seats: readonly [ParticipantInput, ParticipantInput],
   seed?: string,
+  // LO QUE EL ORQUESTADOR PUEDE AGREGARLE AL PEDIDO, hoy los niveles de aumento.
+  extra: Pick<CreateMatchRequest, "betLevels"> = {},
 ): Promise<SeatedMatch> {
-  const options = casualTable(seats, seed);
+  const options = { ...casualTable(seats, seed), ...extra };
   // EL MISMO PAR QUE LA SALA: el request validado y el modo sembrado. Si acá se armara el config a
   // mano, el arnés describiría una mesa distinta de la que el servidor creó y los `seat-N` con los
   // que los tests hablan podrían no ser los suyos.

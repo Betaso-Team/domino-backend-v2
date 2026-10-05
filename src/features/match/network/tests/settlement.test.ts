@@ -163,6 +163,37 @@ describe("settlementOf", () => {
 // LA MESA DE CUATRO PAGA, y hasta este incremento no podía: la guarda pedía EXACTAMENTE un
 // ganador, que era lo que mantenía inerte la falta de una regla de reparto. La regla existía y
 // estaba en v1.
+describe("settlementOf — el aumento de apuesta aceptado", () => {
+  // EL AUMENTO MULTIPLICA LA MESA ENTERA (`betAmountsOf`, la regla de v1): aceptado el nivel N, la
+  // entrada vale `entryFee × N` y el premio `prize × N`. La config está CONGELADA al nacer, así que
+  // el nivel se lee del ESTADO; sin eso, el que ganó una mesa a x3 cobraba el premio de x1.
+  const withBet = (level: number) => {
+    const match = matchOf();
+    match.acceptedBetLevel = level;
+    match.acceptedBetExtra = 1;
+    return match;
+  };
+
+  it("paga el premio con el nivel aceptado", () => {
+    const match = withBet(3);
+    const winnerTeamId = match.players[0]?.teamId as "A" | "B";
+    expect(
+      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, config)
+        ?.entries,
+    ).toEqual([{ userId: "ada", currency: "VES", amount: 750, idempotencyKey: rewardKey }]);
+  });
+
+  it("reembolsa la entrada con el nivel aceptado", () => {
+    expect(
+      settlementOf(
+        { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
+        withBet(2),
+        config,
+      )?.entries.map(({ amount }) => amount),
+    ).toEqual([250, 250]);
+  });
+});
+
 describe("settlementOf — el premio de la pareja", () => {
   const fourSeatConfig = replayConfigOf(fourSeatOptions);
   const fourSeatMatch = () => createMatchState(fourSeatConfig);

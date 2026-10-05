@@ -1,5 +1,6 @@
 import type { DominoMatchConfig, MatchSeat } from "../core/config";
 import { InvariantViolationError } from "../core/engine/errors";
+import { betAmountsOf } from "../core/rules/config";
 import type { MatchState } from "../core/state";
 import type { NetworkMatchEvent } from "./events";
 
@@ -102,6 +103,19 @@ const assertSameTable = (match: MatchState, config: DominoMatchConfig): void => 
   }
 };
 
+// LO QUE VALE LA MESA AL CERRAR, con el aumento aceptado adentro. La config está CONGELADA al nacer
+// y el aumento se acuerda a mitad de partida, así que el nivel sale del ESTADO: el que ganó una mesa a
+// x3 cobra `prize × 3`, y una mesa abortada después de un aumento devuelve `entryFee × 3`. Es la regla
+// de v1 (`betAmountsOf`): la mesa entera se multiplica por el nivel. Nivel 0 es "ninguno aceptado".
+function stakesOf(match: MatchState, config: DominoMatchConfig) {
+  if (match.acceptedBetLevel <= 0) return { entryFee: config.entryFee, prize: config.prize };
+  const extra = betAmountsOf(match.acceptedBetLevel, config.entryFee, config.prize);
+  return {
+    entryFee: config.entryFee + extra.additionalEntryFee,
+    prize: config.prize + extra.additionalPrize,
+  };
+}
+
 function rewardOf(
   winnerTeamId: string,
   match: MatchState,
@@ -149,7 +163,9 @@ function rewardOf(
     matchId: config.matchId,
     rateId: config.rateId,
     kind: "REWARD",
-    entries: winners.map((seat) => entryOf(config.matchId, "REWARD", config.prize, seat)),
+    entries: winners.map((seat) =>
+      entryOf(config.matchId, "REWARD", stakesOf(match, config).prize, seat),
+    ),
   };
 }
 
@@ -186,7 +202,7 @@ export function settlementOf(
         rateId: config.rateId,
         kind: "REFUND",
         entries: config.seats.map((seat) =>
-          entryOf(config.matchId, "REFUND", config.entryFee, seat),
+          entryOf(config.matchId, "REFUND", stakesOf(match, config).entryFee, seat),
         ),
       };
     }
@@ -218,8 +234,8 @@ export function settlementOf(
     // `MULTIPLIER_AGREED` la mueve, pero NO por acá: lo cobra su propio listener contra la
     // billetera, con su razón (`BET_MULTIPLIER`) y su clave de idempotencia, en el instante en
     // que se acepta. `settlementOf` proyecta el DESENLACE de la mesa —premio o reembolso— y el
-    // aumento ya está adentro de ese número: sube `entryFee` y `prize` antes de que la partida
-    // termine. Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
+    // aumento ya está adentro de ese número: `stakesOf` lo lee del estado (`acceptedBetLevel`) al
+    // proyectar el desenlace. Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
     //
     // `MULTIPLIER_REVOKED` es el mismo caso al revés: el reembolso de lo que sí se cobró lo hace
     // el que compensa, que es quien sabe a quién alcanzó a cobrarle.

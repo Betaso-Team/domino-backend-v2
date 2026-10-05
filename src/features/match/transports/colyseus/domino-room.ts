@@ -35,6 +35,12 @@ import {
   RematchCoordinator,
 } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
+import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
+import {
+  OrchestratorBetCharger,
+  type OrchestratorCharges,
+  OrchestratorUnavailableError,
+} from "../../network/orchestrator-charges";
 import {
   type DominoRoomOptions,
   type MatchSinks,
@@ -75,6 +81,14 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private roomOptions?: DominoRoomOptions;
   private platform?: MatchPlatform;
   private closeRematch: RematchCloser = () => [];
+  // EL MOTIVO QUE SOLO LA SALA SABE de por qué una mesa del orquestador se cerró sin veredicto: el
+  // orquestador no pudo cobrar la entrada. Lo lee el resultado al publicarse.
+  private orchestratorAbortReason: MatchAbortReason | undefined;
+  // EL COBRO DE LA ENTRADA de una mesa del orquestador: se pide UNA vez, con la mesa completa, y la
+  // partida arranca recién con el sí. `charged` es lo que deja que una reconexión posterior vuelva a
+  // llamar a `startIfSeated` sin volver a cobrar.
+  private entryCharge: "idle" | "charging" | "charged" = "idle";
+  private disposed = false;
   // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
   // El default reutiliza el global: si algún día `onDrop` corriera antes de que
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
@@ -179,14 +193,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // TORNEO, y dejar que dos jugadores la suban entre ellos cambiaría lo que vale esa partida en
     // una tabla que no es de ellos. Es la misma frontera que la revancha.
     //
-    // ⚠ UNA MESA DEL ORQUESTADOR (POR REQUEST) NO PREGUNTA TAMPOCO: el modo que nombra es de
-    // billing-auth y el libro le pregunta al backend de Betaso, que no lo conoce. Con niveles, la
-    // mesa ofrecería aumentos que dominó cobraría solo —"un juego nunca mueve dinero"—. Quién
-    // cobra un aumento en esas mesas lo decide el Plan 3; hasta entonces la lista es vacía.
+    // ⚠ UNA MESA DEL ORQUESTADOR (POR REQUEST) NO PREGUNTA TAMPOCO: los niveles los trae el
+    // request, porque el que cobra el aumento es el orquestador y es él quien decide cuáles se
+    // ofrecen. Sin `betLevels` en el request la mesa no ofrece aumentar.
     const gameModeId = roomOptions?.mode === "CASUAL" ? roomOptions.gameModeId : undefined;
     const betLevels = gameModeId
       ? await rootContainer.resolve<BetLevelBook>("BetLevelBook").levelsOf(gameModeId)
-      : [];
+      : (request?.betLevels ?? []);
     const config = roomOptions
       ? configFromRoomOptions(roomOptions, this.roomId, betLevels)
       : configOf(
@@ -292,6 +305,26 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
           )
         : undefined;
     const betChargeSinks = betChargeSink ? [betChargeSink] : [];
+    // LAS MESAS DEL ORQUESTADOR (POR REQUEST) tienen sus propios dos sinks, y son el reflejo exacto
+    // de los de arriba: el aumento se le pide cobrar al ORQUESTADOR y el resultado se le PUBLICA, en
+    // vez de cobrar y liquidar contra Betaso. Dominó no mueve dinero en estas mesas: dice qué pasó y
+    // pide que se cobre.
+    const orchestratorSinks = roomOptions
+      ? []
+      : [
+          rootContainer
+            .resolve(MatchResultRecorder)
+            .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason),
+          ...(rootContainer.isRegistered(OrchestratorBetCharger)
+            ? [
+                rootContainer.resolve(OrchestratorBetCharger).sinkFor(
+                  config.matchId,
+                  (events) => this.notifier.notify(events),
+                  () => revokeMultiplier(),
+                ),
+              ]
+            : []),
+        ];
     const externalSinks =
       roomOptions && rootContainer.isRegistered("MatchSinks")
         ? rootContainer.resolve<MatchSinks>("MatchSinks")(roomOptions)
@@ -299,7 +332,19 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
       (events) => this.broadcast("events", events),
-      [...pieces.sinks, ...platformSinks, ...rematchSinks, ...betChargeSinks, ...externalSinks],
+      [
+        ...pieces.sinks,
+        ...platformSinks,
+        ...rematchSinks,
+        ...betChargeSinks,
+        ...externalSinks,
+        ...orchestratorSinks,
+        // EL LATIDO POR HECHO, portado de truco, y va ÚLTIMO: los demás sinks ya vieron el hecho y
+        // el árbol ya está mutado. Quién sigue jugando cambia con la partida —un retiro, un
+        // veredicto— y el que quedó afuera tiene que poder sentarse en otra mesa YA, no al
+        // próximo latido del reloj.
+        () => this.beat(),
+      ],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
@@ -365,10 +410,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // una mesa esperando a que levanten las fichas no produce un solo evento durante todo el
     // `dealingTimeoutMs`, y sus asientos siguen ocupados igual.
     //
-    // Y NO HAY, ADEMÁS, UN LATIDO POR HECHO como el de truco. Allá cada evento es una oportunidad
-    // de SOLTAR al que el motor retiró, porque su registro guarda quién sigue jugando; acá lo
-    // anotado son los ASIENTOS DE LA MESA, que salen del config y no cambian en toda la partida.
-    // Un latido por hecho escribiría exactamente lo mismo que el anterior.
+    // Y ADEMÁS HAY UN LATIDO POR HECHO (el último sink del notificador), como en truco: este
+    // reloj renueva, aquél suelta en el acto al que dejó de jugar.
     this.heartbeat = this.clock.setInterval(() => this.beat(), HEARTBEAT_MS);
 
     this.seating = this.clock.setTimeout(() => {
@@ -513,6 +556,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   }
 
   override async onDispose(): Promise<void> {
+    this.disposed = true;
     // PRIMERO SE CORTA EL LATIDO: lo que sigue es limpieza, y un latido posterior volvería a
     // escribir justo lo que estamos por borrar — dejando la sala anunciada dos minutos más.
     this.heartbeat?.clear();
@@ -539,13 +583,41 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // registra y no tumba nada: si el almacén se cae, lo que se pierde es que esta mesa figure en
   // el clúster durante dos minutos, no la partida que se está jugando adentro.
   private beat(): void {
+    // Un hecho emitido durante el cierre —el `MATCH_ABORTED` de `onDispose`— no puede volver a
+    // anunciar la sala que se está por borrar; y uno emitido antes de anotarla no tiene registro.
+    if (this.disposed || !this.matches) return;
+    const active = this.activeSeats();
     this.beats = this.beats
-      .then(() => this.matches.keepAlive(this.roomId))
+      .then(() => this.matches.keepAlive(this.roomId, active))
       .catch((error: unknown) =>
         this.log.error("no se pudo mantener el registro de la partida", {
           message: error instanceof Error ? error.message : String(error),
         }),
       );
+  }
+
+  // LOS userId QUE ESTA MESA TODAVÍA RETIENE, para que el registro suelte al resto. Portado de
+  // truco, con dos diferencias del dominó:
+  //
+  //   · SE SUELTA AL TENER VEREDICTO, no en `FINISHED`. Truco espera a `FINISHED`, que llega
+  //     después de la revancha; acá una mesa sin revancha posible —todas las del orquestador
+  //     (`eligible: false`)— pasaría treinta segundos de ventana mandando al jugador de vuelta a
+  //     una partida terminada. Solo una ventana ELEGIBLE retiene los asientos, porque ahí la
+  //     revancha todavía puede salir. Aceptada ya no: la mesa nueva anotó a los dos, y un latido
+  //     de ésta los pisaría.
+  //   · EL REEMPLAZADO POR UN BOT TAMBIÉN SE SUELTA. El asiento sigue jugando —lo juega la
+  //     máquina— pero la persona se fue, y `hasAbandoned` no lo dice a propósito.
+  private activeSeats(): readonly string[] {
+    const phase = this.state.phase;
+    if (this.hasOutcome()) {
+      const rematchOpen =
+        (phase === "REMATCH_WINDOW" || phase === "REMATCH_NEGOTIATION") &&
+        this.state.rematch?.eligible === true;
+      if (!rematchOpen) return [];
+    }
+    return this.config.seats
+      .filter(({ playerId }) => this.isStillPlaying(playerId) && !this.player(playerId).isBot)
+      .map(({ userId }) => userId);
   }
 
   override onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
@@ -622,6 +694,47 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     if (this.seated.size < this.seats.length) return;
     this.seating?.clear();
     this.seating = undefined;
+    // LA MESA DEL LOBBY PROPIO ya cobró a cada uno al entrar (`platform.admit`).
+    if (this.roomOptions || this.entryCharge === "charged") {
+      this.startMatch();
+      return;
+    }
+    if (this.entryCharge === "charging") return;
+    this.entryCharge = "charging";
+    void this.chargeEntry();
+  }
+
+  // LA MESA DEL ORQUESTADOR ARRANCA SOLO SI EL ORQUESTADOR COBRÓ LA ENTRADA A TODOS. Dominó no mueve
+  // dinero: pide el cobro y espera. Un rechazo, un orquestador caído o un silencio cierran la mesa
+  // sin arrancar —"no sé si pagaron" no es "pagaron"— y el resultado sale como abortado con motivo
+  // `CHARGE_REJECTED`; el orquestador devuelve lo que haya llegado a cobrar.
+  //
+  // El puerto se resuelve AL COBRAR y no al nacer la sala: es del proceso, y la suite lo reemplaza.
+  private async chargeEntry(): Promise<void> {
+    try {
+      if (!rootContainer.isRegistered("OrchestratorCharges")) {
+        throw new OrchestratorUnavailableError("esta instancia no tiene orquestador configurado");
+      }
+      await rootContainer
+        .resolve<OrchestratorCharges>("OrchestratorCharges")
+        .chargeEntry(this.config.matchId);
+    } catch (error: unknown) {
+      this.log.warn("el orquestador no cobró la entrada; la mesa no arranca", {
+        error: String(error),
+      });
+      this.orchestratorAbortReason = "CHARGE_REJECTED";
+      if (!this.disposed) {
+        for (const client of this.clients)
+          client.send("matchCancelled", { reason: "CHARGE_REJECTED" });
+        void this.disconnect().catch(() => undefined);
+      }
+      return;
+    }
+    this.entryCharge = "charged";
+    // SI TODOS SE FUERON MIENTRAS SE COBRABA, la sala ya se dispuso y salió como abortada: el
+    // orquestador reembolsa por su ficha. Arrancar el motor de una sala muerta dejaría plazos
+    // corriendo sin dueño.
+    if (this.disposed) return;
     this.startMatch();
   }
 

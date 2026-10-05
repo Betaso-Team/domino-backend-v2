@@ -45,6 +45,21 @@ services:
       # exige las cinco (ver `src/env.ts`): sin esta línea el servidor muere al arrancar con
       # «en producción faltan: BETASO_BACKEND_URL» y el smoke entero se cae antes de la primera fase.
       BETASO_BACKEND_URL: http://nginx:8080/
+      # EL ORQUESTADOR DEL SMOKE ES EL NGINX DEL STACK, y por lo mismo que la liga: el smoke juega una
+      # mesa por request, y una mesa así arranca solo si el orquestador cobra la entrada. El nginx
+      # aprueba todo cobro (`smoke/nginx.conf`); no certifica el cobro, certifica que la mesa lo pide
+      # y arranca con el sí. La clave pública es de una pareja descartada: sin su privada nadie firma.
+      ORCHESTRATOR_API_KEY: smoke-orchestrator-key-with-more-than-16-chars
+      ORCHESTRATOR_URL: http://nginx:8080/orchestrator/
+      ORCHESTRATOR_CALLBACK_API_KEY: smoke-orchestrator-callback-key-16-chars
+      BILLING_AUTH_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnpVjFKuYBinMCnni8vQ4l/wIXBT2
+        DWHI8xJiZB4hkq03kKlM4CgUPXorft7NivWaSdO3QlXzebJYZ+Y1zKu6EQ==
+        -----END PUBLIC KEY-----
+      # El resultado sale al vhost por defecto del broker del smoke, donde nadie lo consume: con
+      # `mandatory`, el outbox lo reintenta sin perderlo y sin molestar a la partida.
+      BETASO_GAMES_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       TURN_TIMEOUT_MS: 5000
       EXTRA_TIME_RESERVE_MS: 1000
       DEALING_TIMEOUT_MS: 5000

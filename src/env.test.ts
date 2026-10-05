@@ -330,13 +330,66 @@ describe("parseEnv", () => {
       );
     });
 
-    it("con las dos definidas arranca", () => {
-      const pem = "pem-cualquiera";
-      expect(
-        parseEnv({ ...base, ORCHESTRATOR_API_KEY: orq, BILLING_AUTH_PUBLIC_KEY: pem })
-          .orchestratorApiKey,
-      ).toBe(orq);
+    const callback = {
+      ORCHESTRATOR_URL: "http://127.0.0.1:2570",
+      ORCHESTRATOR_CALLBACK_API_KEY: "c".repeat(16),
+    };
+
+    it("con la llave, la clave pública y a quién pedirle los cobros, arranca", () => {
+      const env = parseEnv({
+        ...base,
+        ...callback,
+        ORCHESTRATOR_API_KEY: orq,
+        BILLING_AUTH_PUBLIC_KEY: "pem-cualquiera",
+      });
+      expect(env.orchestratorApiKey).toBe(orq);
+      // CON BARRA FINAL: el cliente concatena el path.
+      expect(env.orchestratorCallback).toEqual({
+        url: "http://127.0.0.1:2570/",
+        apiKey: "c".repeat(16),
+      });
     });
+
+    // SIN A QUIÉN PEDIRLE LOS COBROS, una mesa del orquestador se abre y no puede arrancar nunca.
+    it("con ORCHESTRATOR_API_KEY exige la URL y la llave de los cobros, y las nombra juntas", () => {
+      expect(() =>
+        parseEnv({ ...base, ORCHESTRATOR_API_KEY: orq, BILLING_AUTH_PUBLIC_KEY: "pem" }),
+      ).toThrow(/ORCHESTRATOR_URL, ORCHESTRATOR_CALLBACK_API_KEY/);
+    });
+
+    it("en producción exige además el broker de los resultados", () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          ...callback,
+          NODE_ENV: "production",
+          MONGO_URI: "mongodb://mongo:27017/domino",
+          RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+          BETASO_ADMIN_PANEL_API_KEY: "k".repeat(16),
+          BETASO_BACKEND_API_KEY: "b".repeat(16),
+          BETASO_BACKEND_URL: "https://api.elbetaso.com/api/",
+          ORCHESTRATOR_API_KEY: orq,
+          BILLING_AUTH_PUBLIC_KEY: "pem",
+        }),
+      ).toThrow(/BETASO_GAMES_RABBITMQ_URL/);
+    });
+
+    it.each(["ORCHESTRATOR_API_KEY", "BETASO_ADMIN_PANEL_API_KEY", "BETASO_BACKEND_API_KEY"])(
+      "rechaza una ORCHESTRATOR_CALLBACK_API_KEY igual a %s",
+      (otra) => {
+        const repetida = "r".repeat(16);
+        expect(() =>
+          parseEnv({
+            ...base,
+            ...callback,
+            BILLING_AUTH_PUBLIC_KEY: "pem",
+            ORCHESTRATOR_API_KEY: orq,
+            [otra]: repetida,
+            ORCHESTRATOR_CALLBACK_API_KEY: repetida,
+          }),
+        ).toThrow(/ORCHESTRATOR_CALLBACK_API_KEY no puede ser igual/);
+      },
+    );
 
     it.each(["BETASO_ADMIN_PANEL_API_KEY", "BETASO_BACKEND_API_KEY"])(
       "rechaza una ORCHESTRATOR_API_KEY igual a %s: cada llave abre lo suyo",

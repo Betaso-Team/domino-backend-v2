@@ -41,6 +41,10 @@ process.env.BETASO_BACKEND_JWT_SECRET ??= "test-secret-do-not-use-in-production"
 // ruta contra la cual medir. El caso "sin llave" se prueba aparte, sin servidor.
 process.env.BETASO_ADMIN_PANEL_API_KEY ??= "test-admin-panel-key-do-not-use-in-production";
 process.env.ORCHESTRATOR_API_KEY ??= "test-orchestrator-key-do-not-use-in-production";
+// A QUIÉN LE PIDEN LOS COBROS LAS MESAS DEL ORQUESTADOR. Nadie escucha ahí: un test que necesite
+// que el cobro conteste levanta su propio orquestador de mentira (`src/tests/fake-orchestrator.ts`).
+process.env.ORCHESTRATOR_URL ??= "http://127.0.0.1:9/";
+process.env.ORCHESTRATOR_CALLBACK_API_KEY ??= "test-orchestrator-callback-key-not-for-production";
 // `parseEnv` exige la clave pública de billing-auth cuando hay llave del orquestador (sin ella las
 // mesas abren y nadie entra). Una P-256 recién generada: es PÚBLICA y sin su privada nadie firma nada.
 process.env.BILLING_AUTH_PUBLIC_KEY ??= generateKeyPairSync("ec", { namedCurve: "P-256" })
@@ -84,6 +88,9 @@ delete process.env.REDIS_URL;
 // cuando el broker no está —cuelga, ver `src/shared/amqp.ts`—, así que el modo de falla del
 // olvido no sería un rojo sino una suite que se queda esperando.
 delete process.env.RABBITMQ_URL;
+// Y EL DE LA PLATAFORMA DE JUEGOS, por lo mismo y con el mismo daño: publicaría resultados de
+// partidas inventadas a la cola del orquestador, que los liquidaría.
+delete process.env.BETASO_GAMES_RABBITMQ_URL;
 process.env.PORT ??= "2567";
 // LOS PLAZOS SE DIVIDEN EN LOS QUE VENCEN Y LOS QUE SE CANCELAN (truco `9d543c6`), no en cortos
 // y largos. Los que VENCEN —las pausas de presentación— los espera el flujo entero en cada mano,

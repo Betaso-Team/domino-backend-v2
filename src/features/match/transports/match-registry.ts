@@ -156,19 +156,36 @@ export class MatchRegistry {
   // EL LATIDO: vuelve a estampar todo lo de esta sala con el plazo entero. Solo late por lo que
   // este proceso anotó — una sala ajena no está en el `Map` y la llamada no hace nada, que es lo
   // que impide que una instancia mantenga viva la sala muerta de otra.
-  async keepAlive(roomId: string): Promise<void> {
+  //
+  // Y SUELTA A QUIEN YA NO JUEGA, portado de truco. `activeUserIds` son los asientos que la
+  // partida todavía retiene: el que se retiró o el de una mesa que ya terminó deja de estar, y su
+  // clave se borra en el acto en vez de seguir apuntando acá hasta que la sala se disponga. Sin
+  // eso, una mesa terminada que sigue viva —la ventana de revancha, los clientes que no se
+  // fueron— mandaba al jugador de vuelta a una partida donde `onJoin` lo rechaza.
+  //
+  // Soltar es PARA SIEMPRE: lo soltado sale de la lista de esta sala, así que omitir el parámetro
+  // —el latido de `rememberPlayer`— renueva a los que quedaban y no revive a nadie. Retirarse y
+  // terminar son irreversibles en el juego, y el registro no puede ser menos.
+  async keepAlive(roomId: string, activeUserIds?: readonly string[]): Promise<void> {
     const config = this.byRoomId.get(roomId);
     const seats = this.seatsByRoomId.get(roomId);
     if (!config || !seats) return;
+    const active = activeUserIds ? seats.filter((userId) => activeUserIds.includes(userId)) : seats;
 
     await this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS);
-    for (const userId of seats) {
+    for (const userId of active) {
       await this.store.setex(playerKey(userId), roomId, TTL_SECONDS);
     }
+    for (const userId of seats) {
+      if (!active.includes(userId)) await this.release(userId, roomId);
+    }
+    this.seatsByRoomId.set(roomId, active);
+    // El censo cuenta ASIENTOS QUE SIGUEN JUGANDO, como truco: el que perdió la señal sigue
+    // contando —su reloj corre—, el que se retiró o terminó ya no está en ninguna partida.
     await this.store.hset(
       CENSUS_KEY,
       roomId,
-      JSON.stringify({ seats: config.seats.length, gameModeId: config.gameModeId, at: this.now() }),
+      JSON.stringify({ seats: active.length, gameModeId: config.gameModeId, at: this.now() }),
     );
     const options = this.optionsByRoomId.get(roomId);
     if (options?.mode === "TOURNAMENT") {
