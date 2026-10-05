@@ -204,6 +204,77 @@ describe("AmqpPublisher: la entrega sólo cuenta si el broker la confirma", () =
   });
 });
 
+describe("AmqpPublisher: mandatory, para que un mensaje sin cola no cuente como entregado", () => {
+  // EL CASO QUE ESTO EXISTE PARA CERRAR: un topic exchange DESCARTA lo que no matchea ninguna
+  // binding, y el broker manda el `basic.ack` igual —confirma que lo ACEPTÓ, no que alguien lo
+  // guardó—. Con `mandatory`, ese mensaje vuelve como `basic.return` ANTES del ack, en el mismo
+  // canal. Sin escucharlo, el outbox marcaría `SENT` un resultado de partida que nadie va a leer.
+  const returnOf = (channel: FakeChannel | undefined, messageId: unknown) =>
+    channel?.emit("return", { properties: { messageId }, fields: { replyText: "NO_ROUTE" } });
+
+  it("pide mandatory al broker y usa el messageId del que publica", async () => {
+    const { publisher, channels } = harness();
+
+    await publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+      mandatory: true,
+      messageId: "m-1:finished",
+    });
+
+    expect(optionsOf(channels[0]?.publish.mock.calls[0] ?? [])).toEqual({
+      persistent: true,
+      contentType: "application/json",
+      messageId: "m-1:finished",
+      mandatory: true,
+    });
+  });
+
+  it("un mensaje devuelto por el broker es un fallo, aunque después llegue el confirm", async () => {
+    const { publisher, channels } = harness();
+    channels[0]?.publish.mockImplementation((...args: unknown[]) => {
+      const options = args[3] as { messageId: string };
+      returnOf(channels[0], options.messageId);
+      (args.at(-1) as (err: unknown) => void)(null);
+      return true;
+    });
+
+    await expect(
+      publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+        mandatory: true,
+        messageId: "m-2:finished",
+      }),
+    ).rejects.toBeInstanceOf(AmqpDeliveryError);
+  });
+
+  it("el return de OTRO mensaje no tumba al que sí se enrutó", async () => {
+    const { publisher, channels } = harness();
+    channels[0]?.publish.mockImplementation((...args: unknown[]) => {
+      returnOf(channels[0], "otro:finished");
+      (args.at(-1) as (err: unknown) => void)(null);
+      return true;
+    });
+
+    await expect(
+      publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+        mandatory: true,
+        messageId: "m-3:finished",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("escucha return UNA vez por canal, no una por publicación", async () => {
+    const { publisher, channels } = harness();
+
+    for (const id of ["a", "b", "c"]) {
+      await publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+        mandatory: true,
+        messageId: id,
+      });
+    }
+
+    expect(channels[0]?.listenerCount("return")).toBe(1);
+  });
+});
+
 describe("AmqpPublisher: la conexión y el canal", () => {
   // LANZADAS EN EL MISMO TURNO, sin esperar a que la primera termine, y ése es el punto entero: si se
   // esperara, la segunda encontraría el canal ya guardado y hasta un publicador sin memoización

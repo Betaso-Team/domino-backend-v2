@@ -64,13 +64,43 @@ export class AmqpDeliveryError extends Error {
 // nadie llama.
 export interface AmqpDelivery {
   publishPattern(queue: string, pattern: string, data: unknown): Promise<void>;
-  publishTopic(exchange: string, routingKey: string, body: unknown): Promise<void>;
+  publishTopic(
+    exchange: string,
+    routingKey: string,
+    body: unknown,
+    options?: TopicPublishOptions,
+  ): Promise<void>;
+}
+
+/**
+ * LO QUE UN PUBLICADOR DE TOPIC PUEDE PEDIR ADEMÁS DEL CUERPO, y los tres son opt-in: el catálogo
+ * publica sin ninguno y su contrato con v1 no cambia ni en una opción.
+ */
+export interface TopicPublishOptions {
+  /**
+   * QUE UN MENSAJE SIN COLA SEA UN FALLO. Un topic exchange descarta lo que no matchea ninguna
+   * binding y el broker confirma igual; con `mandatory` lo devuelve (`basic.return`) antes del ack,
+   * y esta entrega rechaza. Lo pide quien no puede perder el mensaje aunque el consumidor todavía
+   * no haya declarado su cola: el resultado de una partida.
+   */
+  readonly mandatory?: boolean;
+  /**
+   * EL `messageId` DEL QUE PUBLICA, cuando el consumidor deduplica por él (`<matchId>:finished`).
+   * Sin él, uno nuevo por mensaje. Con `mandatory` es además lo que cruza un `return` con su
+   * entrega, así que dos entregas EN VUELO no pueden compartirlo.
+   */
+  readonly messageId?: string;
+  /** Headers AMQP, para la causa (`traceparent`). */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export class AmqpPublisher implements AmqpDelivery {
   private connection?: RecoveringChannelModel;
   private channel?: ConfirmChannel;
   private opening?: Promise<ConfirmChannel>;
+  // LAS ENTREGAS `mandatory` EN VUELO, por `messageId`: el `return` llega antes que el ack en el
+  // mismo canal, así que cuando el callback del confirm corre, este mapa ya dice si volvió.
+  private readonly returned = new Map<string, boolean>();
 
   constructor(
     private readonly url: string,
@@ -102,25 +132,50 @@ export class AmqpPublisher implements AmqpDelivery {
   // A UN EXCHANGE TOPIC, con el cuerpo CRUDO. Es el contrato que v1 ya publica en `betaso`
   // (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts:49-68`) y este incremento lo conserva
   // entero: `persistent`, `contentType` y un `messageId` propio de cada mensaje.
-  async publishTopic(exchange: string, routingKey: string, body: unknown): Promise<void> {
+  async publishTopic(
+    exchange: string,
+    routingKey: string,
+    body: unknown,
+    options: TopicPublishOptions = {},
+  ): Promise<void> {
     const channel = await this.ready();
     // EL EXCHANGE SE DECLARA ANTES DE CADA PUBLICACIÓN, como hace v1: si el consumidor todavía no
     // arrancó, publicar contra un exchange inexistente MATA el canal —y se lleva puestos los
     // confirms pendientes—. Es idempotente y barato; el precio de no hacerlo es un evento perdido.
     await channel.assertExchange(exchange, "topic", { durable: true });
-    // EL `messageId` SE NOMBRA acá y es uno por mensaje. La entrega de este incremento es AL MENOS
-    // UNA VEZ, así que es lo único que le permite deduplicar al consumidor; y es también lo que
-    // permite cruzar las dos mitades de una entrega cuando hay que auditarla.
-    const messageId = randomUUID();
-    await this.confirm((done) =>
-      channel.publish(
-        exchange,
-        routingKey,
-        Buffer.from(JSON.stringify(body)),
-        { persistent: true, contentType: "application/json", messageId },
-        done,
-      ),
-    );
+    // EL `messageId` SE NOMBRA acá y es uno por mensaje, salvo que el que publica traiga el suyo.
+    // La entrega es AL MENOS UNA VEZ, así que es lo único que le permite deduplicar al consumidor;
+    // y es también lo que permite cruzar las dos mitades de una entrega cuando hay que auditarla.
+    const messageId = options.messageId ?? randomUUID();
+    const { mandatory } = options;
+    if (mandatory) this.returned.set(messageId, false);
+    try {
+      await this.confirm(
+        (done) =>
+          channel.publish(
+            exchange,
+            routingKey,
+            Buffer.from(JSON.stringify(body)),
+            {
+              persistent: true,
+              contentType: "application/json",
+              messageId,
+              ...(options.headers && { headers: { ...options.headers } }),
+              // SÓLO SI SE PIDE: el catálogo publica con las tres opciones de v1 y ninguna más.
+              ...(mandatory && { mandatory: true }),
+            },
+            done,
+          ),
+        () =>
+          mandatory && this.returned.get(messageId)
+            ? new AmqpDeliveryError(
+                `el broker devolvió el mensaje: ningún consumidor enlazado a ${exchange} con ${routingKey}`,
+              )
+            : undefined,
+      );
+    } finally {
+      if (mandatory) this.returned.delete(messageId);
+    }
     this.log.debug("publicado al exchange", { messageId, exchange, routingKey });
   }
 
@@ -156,13 +211,23 @@ export class AmqpPublisher implements AmqpDelivery {
   // nadie se entere. Acá el dispatcher del outbox marca `SENT` cuando esta promesa resuelve:
   // resolver con el `publish()` —que sólo dice "lo puse en el buffer de salida"— sería marcar como
   // entregado algo que el broker nunca tomó.
-  private confirm(publish: (done: (err: unknown) => void) => boolean): Promise<void> {
+  //
+  // `afterAck` decide si un ack es de verdad una entrega: hoy sólo lo usa `mandatory`, porque un
+  // mensaje devuelto también recibe su ack.
+  private confirm(
+    publish: (done: (err: unknown) => void) => boolean,
+    afterAck: () => Error | undefined = () => undefined,
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const written = publish((err) =>
-        err
-          ? reject(new AmqpDeliveryError(`el broker rechazó el mensaje: ${String(err)}`))
-          : resolve(),
-      );
+      const written = publish((err) => {
+        if (err) {
+          reject(new AmqpDeliveryError(`el broker rechazó el mensaje: ${String(err)}`));
+          return;
+        }
+        const failure = afterAck();
+        if (failure) reject(failure);
+        else resolve();
+      });
       // `false` ES CONTRAPRESIÓN —el buffer de salida está lleno—, no un fallo, y AUN ASÍ se rechaza.
       // El mensaje puede terminar saliendo, pero quien espera no tiene cómo enterarse, así que darlo
       // por bueno es el mismo evento perdido que resolver antes del confirm. El outbox reintenta, y
@@ -200,6 +265,12 @@ export class AmqpPublisher implements AmqpDelivery {
       };
       channel.on("close", drop);
       channel.on("error", drop);
+      // UN OYENTE POR CANAL, no uno por publicación: se cruza por `messageId` con las entregas en
+      // vuelo. Un `return` de un mensaje que nadie espera (un `mandatory` ya resuelto) se ignora.
+      channel.on("return", (message: { properties?: { messageId?: unknown } }) => {
+        const id = message.properties?.messageId;
+        if (typeof id === "string" && this.returned.has(id)) this.returned.set(id, true);
+      });
       this.channel = channel;
       return channel;
     } catch (error) {
