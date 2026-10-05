@@ -35,6 +35,8 @@ import {
   RematchCoordinator,
 } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
+import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
+import { OrchestratorBetCharger } from "../../network/orchestrator-charges";
 import {
   type DominoRoomOptions,
   type MatchSinks,
@@ -75,6 +77,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private roomOptions?: DominoRoomOptions;
   private platform?: MatchPlatform;
   private closeRematch: RematchCloser = () => [];
+  // EL MOTIVO QUE SOLO LA SALA SABE de por qué una mesa del orquestador se cerró sin veredicto: el
+  // orquestador no pudo cobrar la entrada. Lo lee el resultado al publicarse.
+  private orchestratorAbortReason: MatchAbortReason | undefined;
   // LA VENTANA DE RECONEXIÓN, en segundos porque esa es la unidad de `allowReconnection`.
   // El default reutiliza el global: si algún día `onDrop` corriera antes de que
   // `onCreate` termine de resolver la config, la ventana valdría cero y el que se cayó
@@ -179,14 +184,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // TORNEO, y dejar que dos jugadores la suban entre ellos cambiaría lo que vale esa partida en
     // una tabla que no es de ellos. Es la misma frontera que la revancha.
     //
-    // ⚠ UNA MESA DEL ORQUESTADOR (POR REQUEST) NO PREGUNTA TAMPOCO: el modo que nombra es de
-    // billing-auth y el libro le pregunta al backend de Betaso, que no lo conoce. Con niveles, la
-    // mesa ofrecería aumentos que dominó cobraría solo —"un juego nunca mueve dinero"—. Quién
-    // cobra un aumento en esas mesas lo decide el Plan 3; hasta entonces la lista es vacía.
+    // ⚠ UNA MESA DEL ORQUESTADOR (POR REQUEST) NO PREGUNTA TAMPOCO: los niveles los trae el
+    // request, porque el que cobra el aumento es el orquestador y es él quien decide cuáles se
+    // ofrecen. Sin `betLevels` en el request la mesa no ofrece aumentar.
     const gameModeId = roomOptions?.mode === "CASUAL" ? roomOptions.gameModeId : undefined;
     const betLevels = gameModeId
       ? await rootContainer.resolve<BetLevelBook>("BetLevelBook").levelsOf(gameModeId)
-      : [];
+      : (request?.betLevels ?? []);
     const config = roomOptions
       ? configFromRoomOptions(roomOptions, this.roomId, betLevels)
       : configOf(
@@ -292,6 +296,26 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
           )
         : undefined;
     const betChargeSinks = betChargeSink ? [betChargeSink] : [];
+    // LAS MESAS DEL ORQUESTADOR (POR REQUEST) tienen sus propios dos sinks, y son el reflejo exacto
+    // de los de arriba: el aumento se le pide cobrar al ORQUESTADOR y el resultado se le PUBLICA, en
+    // vez de cobrar y liquidar contra Betaso. Dominó no mueve dinero en estas mesas: dice qué pasó y
+    // pide que se cobre.
+    const orchestratorSinks = roomOptions
+      ? []
+      : [
+          rootContainer
+            .resolve(MatchResultRecorder)
+            .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason),
+          ...(rootContainer.isRegistered(OrchestratorBetCharger)
+            ? [
+                rootContainer.resolve(OrchestratorBetCharger).sinkFor(
+                  config.matchId,
+                  (events) => this.notifier.notify(events),
+                  () => revokeMultiplier(),
+                ),
+              ]
+            : []),
+        ];
     const externalSinks =
       roomOptions && rootContainer.isRegistered("MatchSinks")
         ? rootContainer.resolve<MatchSinks>("MatchSinks")(roomOptions)
@@ -299,7 +323,14 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
       (events) => this.broadcast("events", events),
-      [...pieces.sinks, ...platformSinks, ...rematchSinks, ...betChargeSinks, ...externalSinks],
+      [
+        ...pieces.sinks,
+        ...platformSinks,
+        ...rematchSinks,
+        ...betChargeSinks,
+        ...externalSinks,
+        ...orchestratorSinks,
+      ],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo

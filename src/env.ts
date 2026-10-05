@@ -193,6 +193,31 @@ const schema = z.object({
     .min(16, "ORCHESTRATOR_API_KEY debe tener al menos 16 caracteres")
     .optional(),
   /**
+   * LA BASE DEL ORQUESTADOR (`https://.../`), a la que dominó le PIDE los cobros de sus mesas: la
+   * entrada con la mesa completa y cada aumento acordado. Dominó no mueve dinero; le pide al
+   * orquestador que lo mueva y espera la respuesta.
+   */
+  ORCHESTRATOR_URL: z.string().url().optional(),
+  /**
+   * DE SALIDA, la que dominó PRESENTA al orquestador al pedirle un cobro (`x-internal-api-key`).
+   * Otra llave que `ORCHESTRATOR_API_KEY`, que es la que el orquestador presenta acá: cada llave
+   * abre una dirección, y la que se filtra de un lado no abre el otro.
+   */
+  ORCHESTRATOR_CALLBACK_API_KEY: z
+    .string()
+    .min(16, "ORCHESTRATOR_CALLBACK_API_KEY debe tener al menos 16 caracteres")
+    .optional(),
+  /**
+   * EL BROKER Y VHOST DE LA PLATAFORMA DE JUEGOS (`amqp://usuario:clave@host:puerto/betaso_games`),
+   * por donde sale el resultado de cada mesa del orquestador hacia el exchange `betaso_games`. Es
+   * OTRO que `RABBITMQ_URL`, que es el del exchange `betaso` de Betaso: el vhost aísla exchanges,
+   * colas y permisos, y en producción puede ser otro broker.
+   *
+   * Su presencia elige, como `RABBITMQ_URL`: sin ella el outbox de resultados acumula y nadie lo
+   * publica. Obligatoria en producción si esta instancia atiende al orquestador.
+   */
+  BETASO_GAMES_RABBITMQ_URL: z.string().min(1).optional(),
+  /**
    * La URI de Mongo, donde queda escrito el historial de cada partida
    * (`mongodb://host:puerto/nombre` — la base viaja en la URI, como en truco y como en v1,
    * para que apuntar a otra sea cambiar UN valor).
@@ -373,6 +398,13 @@ export interface Env {
   readonly adminPanelApiKey: string | undefined;
   /** DE ENTRADA. `undefined` ⇒ el orquestador no puede abrir mesas acá. Ver ORCHESTRATOR_API_KEY. */
   readonly orchestratorApiKey: string | undefined;
+  /**
+   * A dónde y con qué llave dominó le pide los cobros al orquestador. Presente siempre que haya
+   * `orchestratorApiKey`: una mesa del orquestador sin a quién pedirle el cobro no puede arrancar.
+   */
+  readonly orchestratorCallback: { readonly url: string; readonly apiKey: string } | undefined;
+  /** `undefined` ⇒ el resultado de las mesas del orquestador se acumula sin publicar. */
+  readonly betasoGamesRabbitmqUrl: string | undefined;
   /** `undefined` ⇒ el historial es el de memoria y muere con el proceso. Ver MONGO_URI. */
   readonly mongoUri: string | undefined;
   /** `undefined` ⇒ este proceso es un clúster de uno: driver, presence y registro locales. */
@@ -456,6 +488,35 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
           `Entorno inválido — ORCHESTRATOR_API_KEY no puede ser igual a ${nombre}: cada llave abre lo suyo`,
         );
     }
+    // A QUIÉN PEDIRLE LOS COBROS. Sin esto, una mesa del orquestador se abre y no puede cobrar nada:
+    // ni la entrada —la mesa no arrancaría nunca— ni un aumento. Igual que arriba, una sola falla
+    // que las nombra a todas.
+    const faltan = (
+      [
+        ["ORCHESTRATOR_URL", parsed.ORCHESTRATOR_URL],
+        ["ORCHESTRATOR_CALLBACK_API_KEY", parsed.ORCHESTRATOR_CALLBACK_API_KEY],
+        // En producción, además, el broker de los resultados: sin él nadie le paga a nadie.
+        ...(parsed.NODE_ENV === "production"
+          ? ([["BETASO_GAMES_RABBITMQ_URL", parsed.BETASO_GAMES_RABBITMQ_URL]] as const)
+          : []),
+      ] as const
+    )
+      .filter(([, valor]) => valor === undefined)
+      .map(([nombre]) => nombre);
+    if (faltan.length > 0)
+      throw new Error(
+        `Entorno inválido — ORCHESTRATOR_API_KEY requiere también: ${faltan.join(", ")}`,
+      );
+    for (const [nombre, valor] of [
+      ["ORCHESTRATOR_API_KEY", parsed.ORCHESTRATOR_API_KEY],
+      ["BETASO_ADMIN_PANEL_API_KEY", parsed.BETASO_ADMIN_PANEL_API_KEY],
+      ["BETASO_BACKEND_API_KEY", parsed.BETASO_BACKEND_API_KEY],
+    ] as const) {
+      if (valor === parsed.ORCHESTRATOR_CALLBACK_API_KEY)
+        throw new Error(
+          `Entorno inválido — ORCHESTRATOR_CALLBACK_API_KEY no puede ser igual a ${nombre}: cada llave abre lo suyo`,
+        );
+    }
   }
   const instanceIndex = parsed.NODE_APP_INSTANCE;
   const listeningPort = parsed.PORT + (instanceIndex ?? 0);
@@ -476,6 +537,20 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     backendApiKey: parsed.BETASO_BACKEND_API_KEY,
     adminPanelApiKey: parsed.BETASO_ADMIN_PANEL_API_KEY,
     orchestratorApiKey: parsed.ORCHESTRATOR_API_KEY,
+    orchestratorCallback:
+      parsed.ORCHESTRATOR_API_KEY !== undefined &&
+      parsed.ORCHESTRATOR_URL !== undefined &&
+      parsed.ORCHESTRATOR_CALLBACK_API_KEY !== undefined
+        ? {
+            // CON BARRA FINAL: el cliente HTTP concatena el path, y sin ella `…/orq` + `internal/…`
+            // es `…/orqinternal/…`.
+            url: parsed.ORCHESTRATOR_URL.endsWith("/")
+              ? parsed.ORCHESTRATOR_URL
+              : `${parsed.ORCHESTRATOR_URL}/`,
+            apiKey: parsed.ORCHESTRATOR_CALLBACK_API_KEY,
+          }
+        : undefined,
+    betasoGamesRabbitmqUrl: parsed.BETASO_GAMES_RABBITMQ_URL,
     mongoUri: parsed.MONGO_URI,
     redisUrl: parsed.REDIS_URL,
     rabbitmqUrl: parsed.RABBITMQ_URL,

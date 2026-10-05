@@ -29,6 +29,7 @@ import {
 import express, { type Application } from "express";
 import {
   amqp,
+  betasoGamesAmqp,
   census,
   driver,
   maintenanceSignal,
@@ -134,10 +135,14 @@ const rooms = {
 const mongoConnection = mongo;
 const sharedStore = presence;
 const broker = amqp;
+// EL BROKER DE LA PLATAFORMA DE JUEGOS, con su nombre propio en el mapa: un 503 que dice `rabbit`
+// cuando el caído es el vhost `betaso_games` manda a mirar el broker de Betaso, que está sano.
+const gamesBroker = betasoGamesAmqp;
 const hardDependencies: DependencyChecks = {
   ...(mongoConnection ? { mongo: () => mongoConnection.ping() } : {}),
   ...(sharedStore ? { redis: () => sharedStore.get("readiness") } : {}),
   ...(broker ? { rabbit: () => broker.ping() } : {}),
+  ...(gamesBroker ? { betaso_games: () => gamesBroker.ping() } : {}),
 };
 
 // LAS DOS HERRAMIENTAS DE COLYSEUS PARA PROBAR A MANO, sólo donde se prueba a mano: el playground y
