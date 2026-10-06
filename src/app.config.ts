@@ -16,7 +16,9 @@ import { settingsHttp } from "@/features/settings";
 import { type StrikeBook, tournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, healthRoutes } from "@/shared/http/health";
+import { requestLog } from "@/shared/http/request-log";
 import { exposeServerTime } from "@/shared/http/server-time";
+import { traceScope } from "@/shared/http/trace-scope";
 import config from "@colyseus/tools";
 import {
   type ServerOptions,
@@ -61,8 +63,12 @@ const rooms = {
 // ninguna de las dos cosas existe (Regla 3). Es el mismo lugar que `src/index.ts` ocupa en
 // truco; en domino el `app.config` es el que arma las dos superficies, la de test y la real.
 //
-// EL ORDEN DE LAS TRES LÍNEAS ES EL CONTRATO, y no es estilo:
-//   1. `express.json()` primero, o las rutas leen un `req.body` que nadie parseó;
+// EL ORDEN ES EL CONTRATO, y no es estilo:
+//   0. `traceScope()` antes que nada, o lo que corra afuera de su alcance —la línea que cierra la
+//      request incluida— sale sin `traceId`;
+//   1. `express.json()`, o las rutas leen un `req.body` que nadie parseó;
+//   1b. `requestLog()` después del parser y antes de las rutas, el único lugar desde donde las ve
+//      a todas;
 //   2. las rutas;
 //   3. el manejador de errores ÚLTIMO. Express lo reconoce por la ARIDAD de cuatro
 //      parámetros y solo alcanza lo que se registró ANTES que él.
@@ -170,6 +176,7 @@ const devTools = isDevEnvironment(env.appEnv)
 
 const registerHttp = (app: Application) => {
   const logger = rootContainer.resolve<Logger>("Logger");
+  app.use(traceScope());
   // PRIMERAS, como en truco: son SPAs con router propio (better-call) y no tienen nada que hacer
   // con el parser de cuerpo ni con las rutas del juego.
   if (devTools) {
@@ -177,6 +184,7 @@ const registerHttp = (app: Application) => {
     app.use("/monitor", devTools.monitor);
   }
   app.use(express.json());
+  app.use(requestLog(logger));
   // PRIMERO DE TODOS, porque es de la costura y no de una ruta: así la cabecera sale también
   // en las respuestas de los chequeos y en las de error, que son las que el cliente tiene a
   // mano cuando algo va mal.
