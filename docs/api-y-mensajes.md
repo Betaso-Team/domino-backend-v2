@@ -78,7 +78,7 @@ tres intervalos que el emparejador lee al arrancar (`tickIntervalMs`, `maintenan
 
 ### API del orquestador
 
-Dos rutas que sólo usa el orquestador de Betaso Juegos. Van con `x-internal-api-key` igual a
+Tres rutas que sólo usa el orquestador de Betaso Juegos. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (la del panel no las abre); sin esa variable no se registran y responden 404.
 Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
 cuerpo.
@@ -106,6 +106,14 @@ Betaso).
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
 | `500` | | La sala existe pero está bloqueada por reservas sin consumir: el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+
+**`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
+orquestador lo muestra en los números de su lobby.
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }] } }` | Siempre; un modo sin nadie jugando no aparece |
+| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 
 `CreateMatchRequest` acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
