@@ -104,6 +104,14 @@ const schema = z.object({
    * de paso es lo que hace que los dos casos se puedan testear sin tocar el entorno real.
    */
   NODE_APP_INSTANCE: z.coerce.number().int().nonnegative().optional(),
+  // QUÉ RELEASE ES ÉSTE, para que cada línea de log lo diga. Lo exporta el deploy (el nombre de la
+  // carpeta del release) y `ecosystem.config.cjs` lo pasa al proceso. Corriendo a mano no hay.
+  RELEASE: z.string().optional(),
+  // EL UMBRAL DEL LOG, y es OPCIONAL a propósito: sin valor lo deriva el entorno (`defaultLogLevel`),
+  // que es lo que se quiere casi siempre. Explícito gana, y para eso está: prender `debug` en prod
+  // una hora para mirar una partida, sin tocar código ni el default de nadie. No hay `trace` ni
+  // `fatal`: la fachada del log no tiene esos verbos.
+  LOG_LEVEL: z.enum(["error", "warn", "info", "debug", "silent"]).optional(),
   TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   EXTRA_TIME_RESERVE_MS: z.coerce.number().int().positive().default(30_000),
   DEALING_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
@@ -328,6 +336,21 @@ const schema = z.object({
 });
 
 export type AppEnv = NonNullable<z.infer<typeof schema>["APP_ENV"]>;
+export type LogLevel = NonNullable<z.infer<typeof schema>["LOG_LEVEL"]>;
+
+/**
+ * CUÁNTO SE ESCRIBE EN CADA ENTORNO cuando nadie lo dijo. Una regla: **cuanto más cerca de quien
+ * programa, más verboso**, porque ahí el volumen no cuesta y la respuesta hace falta ya.
+ *
+ *   local, dev   `debug`   la traza del juego prendida — dev existe para mirar partidas que salieron mal
+ *   stage, prod  `info`    los hechos, sin los cientos de líneas por partida
+ *
+ * Por `APP_ENV` y NO por `NODE_ENV`: dev corre con `NODE_ENV=production` igual que prod, así que la
+ * regla vieja le apagaba a dev justo lo que dev existe para mirar. Truco `b22ce07`.
+ */
+export function defaultLogLevel(appEnv: AppEnv): LogLevel {
+  return appEnv === "local" || appEnv === "dev" ? "debug" : "info";
+}
 
 /** Donde se prueba a mano: la máquina de quien escribe el código y el servidor de dev. */
 export function isDevEnvironment(appEnv: AppEnv): boolean {
@@ -386,7 +409,9 @@ export interface Env {
   readonly rematchHandoffMs: number;
   readonly seatingTimeoutMs: number;
   readonly reconnectionWindowSeconds: number;
-  readonly logLevel: "debug" | "info";
+  readonly logLevel: LogLevel;
+  /** El release que corre, o `undefined` si esto no lo levantó un deploy. */
+  readonly release: string | undefined;
   readonly writeGolden: boolean;
   readonly runEngineSmoke: boolean;
 }
@@ -453,9 +478,10 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   }
   const instanceIndex = parsed.NODE_APP_INSTANCE;
   const listeningPort = parsed.PORT + (instanceIndex ?? 0);
+  const appEnv: AppEnv = parsed.APP_ENV ?? (parsed.NODE_ENV === "production" ? "prod" : "local");
   return {
     nodeEnv: parsed.NODE_ENV,
-    appEnv: parsed.APP_ENV ?? (parsed.NODE_ENV === "production" ? "prod" : "local"),
+    appEnv,
     port: parsed.PORT,
     instanceIndex,
     listeningPort,
@@ -493,7 +519,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     rematchHandoffMs: parsed.REMATCH_HANDOFF_MS,
     seatingTimeoutMs: parsed.SEATING_TIMEOUT_MS,
     reconnectionWindowSeconds: parsed.RECONNECTION_WINDOW_SECONDS,
-    logLevel: parsed.NODE_ENV === "production" ? "info" : "debug",
+    logLevel: parsed.LOG_LEVEL ?? defaultLogLevel(appEnv),
+    release: parsed.RELEASE,
     writeGolden: parsed.WRITE_GOLDEN === "1",
     runEngineSmoke: parsed.RUN_ENGINE_SMOKE === "1",
   };

@@ -99,6 +99,11 @@ module.exports = {
       // (§`src/env.ts`). No se configura acá: sale del `.env`.
       env: {
         NODE_ENV: "production",
+        // QUÉ RELEASE ES ÉSTE, para que cada línea de log lo diga. Lo exporta el script de
+        // despliegue a partir del nombre de la carpeta; arrancando a mano no hay release que nombrar
+        // y el campo simplemente no sale. `APP_ENV` NO va acá: vive en el `.env` de cada servidor,
+        // que es lo único que un rollback relee.
+        ...(process.env.RELEASE ? { RELEASE: process.env.RELEASE } : {}),
       },
     },
   ],

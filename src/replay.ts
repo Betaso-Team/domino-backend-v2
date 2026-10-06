@@ -19,7 +19,7 @@ import { replayConfigOf } from "@/features/match/transports/match-contract";
 // opcional que nadie escribe es peor que no tenerlo: hace creer que el replay puede
 // autoverificarse contra producción cuando no puede.
 import { mongo, rootContainer } from "./di-container";
-import { logger } from "./logger";
+import { flushLogs, logger } from "./logger";
 
 const USAGE =
   "uso: npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER> <asiento...>";
@@ -77,6 +77,7 @@ if (seats.length < 2) invalidos.push(`asientos: se esperaban al menos 2, llegaro
 // vacío—, es lo que permite que el config de abajo se arme sin un solo cast.
 if (invalidos.length > 0 || !matchId || !seed || !isTeamAssignment(teamAssignment)) {
   logger.error(USAGE, { invalidos });
+  flushLogs();
   process.exit(1);
 }
 
@@ -94,6 +95,7 @@ const entries: readonly HistoryEntry[] = await rootContainer
 
 if (entries.length === 0) {
   logger.error("no hay historial para esa partida", { matchId });
+  flushLogs();
   process.exit(1);
 }
 

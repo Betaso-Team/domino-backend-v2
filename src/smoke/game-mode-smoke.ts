@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { env } from "@/env";
-import { logger } from "@/logger";
+import { flushLogs, logger } from "@/logger";
 import { connect } from "amqplib";
 import { MongoClient } from "mongodb";
 
@@ -410,4 +410,7 @@ run()
   // SE SALE EXPLÍCITAMENTE, por lo mismo que `engine-smoke.ts`: una conexión de Mongo o de AMQP
   // que quedó abierta por un camino de error sostiene el event loop, y una fase colgada es un
   // runner colgado — en verde y sin decir nada. Ver el comentario largo en el otro archivo.
-  .finally(() => process.exit(process.exitCode ?? 0));
+  .finally(() => {
+    flushLogs();
+    process.exit(process.exitCode ?? 0);
+  });

@@ -65,6 +65,36 @@ describe("parseEnv", () => {
     expect(env.logLevel).toBe("info");
   });
 
+  // CUÁNTO SE CUENTA LO DECIDE EL ENTORNO, no `NODE_ENV`: dev corre con `NODE_ENV=production`
+  // igual que prod, así que con la regla vieja dev perdía la traza del juego, que es justo para lo
+  // que existe dev. Truco `b22ce07`.
+  it("dev cuenta la traza del juego aunque corra con NODE_ENV=production", () => {
+    const env = parseEnv({
+      NODE_ENV: "production",
+      APP_ENV: "dev",
+      BETASO_BACKEND_JWT_SECRET: "s".repeat(16),
+      MONGO_URI: "mongodb://mongo:27017/domino",
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+      BETASO_ADMIN_PANEL_API_KEY: "k".repeat(16),
+      BETASO_BACKEND_API_KEY: "b".repeat(16),
+      BETASO_BACKEND_URL: "https://api.elbetaso.com/api/",
+    });
+    expect(env.logLevel).toBe("debug");
+  });
+
+  // Y UN LOG_LEVEL EXPLÍCITO SIEMPRE GANA: es para prender `debug` en prod una hora, mirando una
+  // partida, sin tocar código ni el default de nadie.
+  it("un LOG_LEVEL explícito le gana al entorno", () => {
+    const env = parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16), LOG_LEVEL: "warn" });
+    expect(env.logLevel).toBe("warn");
+  });
+
+  it("RELEASE viaja tal cual, y sin él no hay release", () => {
+    const secret = { BETASO_BACKEND_JWT_SECRET: "s".repeat(16) };
+    expect(parseEnv({ ...secret, RELEASE: "20261006-abc" }).release).toBe("20261006-abc");
+    expect(parseEnv(secret).release).toBeUndefined();
+  });
+
   it("sin BILLING_AUTH_PUBLIC_KEY no confía en los tokens de billing-auth", () => {
     expect(parseEnv({ BETASO_BACKEND_JWT_SECRET: "s".repeat(16) }).billingAuth).toBeUndefined();
   });
