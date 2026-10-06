@@ -599,6 +599,12 @@ rootContainer.register(MatchPlatform, {
     summaries: history,
     now: clock.now,
     log: logger,
+    // EL RAKE PERDONADO AL PAGAR. Tres segundos como el cliente de v1 (`core-loop.service.ts`): esta
+    // llamada está en el camino del pago, y es mejor cobrar rake normal que dejar a un ganador
+    // mirando una mesa sin pagar. Sin backend no se pregunta: premio normal.
+    coreLoop: coreLoopClient
+      ? { client: coreLoopClient, softWindow: softWindowBook, timeoutMs: 3_000 }
+      : undefined,
   }),
 });
 rootContainer.register("MatchSinks", {

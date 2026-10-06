@@ -18,8 +18,9 @@ import {
 import type { Logger } from "@/shared/logger";
 import type { MatchState } from "../core/state";
 import type { DominoRoomOptions } from "../transports/match-contract";
-import { payWinner } from "./casual/pay-winner";
+import { type CoreLoopPayout, payWinner } from "./casual/pay-winner";
 import { refundOnAbort } from "./casual/refund-on-abort";
+import type { NetworkMatchEvent } from "./events";
 import type { MatchEventSink, MatchMessenger } from "./listeners";
 import type { MatchSummaryPort } from "./player-log";
 import { recordSummary } from "./summary";
@@ -49,6 +50,8 @@ export interface MatchPlatformDeps {
   readonly summaries: MatchSummaryPort;
   readonly now: () => number;
   readonly log: Logger;
+  // Ausente: esta instancia no tiene backend principal, y se paga el premio normal sin preguntar.
+  readonly coreLoop?: CoreLoopPayout;
 }
 
 /**
@@ -102,6 +105,9 @@ export class MatchPlatform {
     matchId: string,
     match: MatchState,
     send: MatchMessenger,
+    // Lo que un sink produce DESPUÉS de que el comando volvió —el veto de la ventana blanda, que
+    // espera la respuesta de core-loop—. Vuelve a entrar por el notificador de la mesa.
+    emit: (events: readonly NetworkMatchEvent[]) => void,
   ): MatchEventSink {
     const { deps } = this;
     const sinks: MatchEventSink[] = [
@@ -110,7 +116,15 @@ export class MatchPlatform {
     if (options.mode === "CASUAL") {
       sinks.push(
         refundOnAbort({ matchId, match, wallet: deps.wallet, log: deps.log }),
-        payWinner({ matchId, match, table: options, outbox: deps.outbox }),
+        payWinner({
+          matchId,
+          match,
+          table: options,
+          outbox: deps.outbox,
+          coreLoop: deps.coreLoop,
+          emit,
+          log: deps.log,
+        }),
       );
     } else {
       sinks.push(

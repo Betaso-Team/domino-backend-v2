@@ -1,9 +1,15 @@
+import {
+  type CoreLoopSettle,
+  type CoreLoopSettleInput,
+  type CoreLoopSettleResult,
+  SoftWindowBook,
+} from "@/features/core-loop";
 import { MemoryLedger, Outbox } from "@/features/economy";
 import { DEFAULT_TOURNAMENT_CONFIG, StrikeBook } from "@/features/tournament";
 import { MemoryKeyValueStore } from "@/shared/kv";
 import { MemoryLogger } from "@/shared/tests/memory-logger";
 import { FakeWallet } from "@/tests/fake-wallet";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
 import { matchConfig } from "../../core/engine/tests/match-config-fixture";
 import { RoundState } from "../../core/state";
@@ -39,11 +45,16 @@ const TOURNAMENT: TournamentRoomOptions = {
 
 const unused = {} as never;
 
-function build(options: DominoRoomOptions = CASUAL, seats: readonly string[] = ["u1", "u2"]) {
+function build(
+  options: DominoRoomOptions = CASUAL,
+  seats: readonly string[] = ["u1", "u2"],
+  coreLoop?: CoreLoopSettle,
+) {
   const wallet = new FakeWallet();
   const ledger = new MemoryLedger();
   const log = new MemoryLogger();
   const kv = new MemoryKeyValueStore(() => 0);
+  const softWindow = new SoftWindowBook(kv, 60_000);
   const outbox = new Outbox(wallet, ledger, log);
   const summaries: MatchSummary[] = [];
   const platform = new MatchPlatform({
@@ -57,9 +68,11 @@ function build(options: DominoRoomOptions = CASUAL, seats: readonly string[] = [
     summaries: { summarize: (summary) => summaries.push(summary) },
     now: () => 0,
     log,
+    ...(coreLoop ? { coreLoop: { client: coreLoop, softWindow, timeoutMs: 50 } } : {}),
   });
   const match = createMatchState(matchConfig([...seats]));
   const sent: { playerId: string; type: string }[] = [];
+  const emitted: NetworkMatchEvent[] = [];
   // UNO por mesa, como en la sala: lo que el sink recuerda entre lotes —a quién retiró el
   // sistema— vive en su cierre.
   const sink: (events: readonly NetworkMatchEvent[]) => void = platform.sinkFor(
@@ -67,6 +80,7 @@ function build(options: DominoRoomOptions = CASUAL, seats: readonly string[] = [
     "match-1",
     match,
     (playerId, type) => sent.push({ playerId, type }),
+    (events) => emitted.push(...events),
   );
   const penalized = () =>
     sent.filter(({ type }) => type === "TOURNAMENT_PENALTY").map(({ playerId }) => playerId);
@@ -74,7 +88,7 @@ function build(options: DominoRoomOptions = CASUAL, seats: readonly string[] = [
     await outbox.drain();
     return wallet.credited.map(({ playerId, amount }) => ({ playerId, amount }));
   };
-  return { wallet, match, sink, penalized, paid, summaries };
+  return { wallet, match, sink, penalized, paid, summaries, emitted, softWindow, log };
 }
 
 // Deja correr las promesas que el sink dispara: es síncrono a propósito —el motor lo es— y lo
@@ -229,5 +243,168 @@ describe("el premio", () => {
     sink([resolvedFor("A")]);
 
     expect(summaries[0]).toMatchObject({ entryFee: 30, prize: 54 });
+  });
+});
+
+// UN core-loop DE MENTIRA: anota lo que se le pidió y contesta lo que el test le diga. `hang` es el
+// backend mudo, que es el caso que el plazo existe para cubrir.
+class FakeCoreLoop implements CoreLoopSettle {
+  readonly calls: CoreLoopSettleInput[] = [];
+  constructor(
+    private readonly answer: (
+      input: CoreLoopSettleInput,
+    ) => readonly Partial<CoreLoopSettleResult>[] | "hang" | "fail" = () => [],
+  ) {}
+
+  async settle(input: CoreLoopSettleInput) {
+    this.calls.push(input);
+    const answer = this.answer(input);
+    if (answer === "hang") return new Promise<never>(() => {});
+    if (answer === "fail") throw new Error("core-loop caído");
+    return {
+      enabled: true,
+      results: answer.map((result) => ({
+        userId: "",
+        rakeWaived: false,
+        rake0Remaining: 0,
+        softWindowRemaining: 0,
+        alreadySettled: false,
+        ...result,
+      })),
+    };
+  }
+}
+
+const waived = (userId: string) => () => [{ userId, rakeWaived: true }];
+
+// CORE-LOOP AL PAGAR: el backend principal decide si esta partida va sin comisión para el ganador, y
+// la misma llamada consume el beneficio. Es el v1 del dominó (`two-players/domino-room-state.ts:
+// 527-560`, `four-players/:652-700`) con la forma de truco (`pay-winner.ts`, `fa246ad`).
+describe("el rake perdonado", () => {
+  const resolvedFor = (winnerTeamId: "A" | "B") =>
+    ({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }) as const;
+
+  it("al ganador con el rake perdonado le paga el pozo completo", async () => {
+    const { sink, paid } = build(CASUAL, ["u1", "u2"], new FakeCoreLoop(waived("u1")));
+
+    sink([resolvedFor("A")]);
+
+    // Pozo = inscripción 10 × 2 jugadores, contra el premio normal de 18.
+    await vi.waitFor(async () => expect(await paid()).toEqual([{ playerId: "u1", amount: 20 }]));
+  });
+
+  it("el pozo completo lleva el aumento aceptado adentro", async () => {
+    const { match, sink, paid } = build(CASUAL, ["u1", "u2"], new FakeCoreLoop(waived("u1")));
+    match.acceptedBetLevel = 3;
+
+    sink([resolvedFor("A")]);
+
+    await vi.waitFor(async () => expect(await paid()).toEqual([{ playerId: "u1", amount: 60 }]));
+  });
+
+  // ⚠ EL DIVISOR ES NOMINAL (v1, `four-players/domino-room-state.ts:662-666`): la pareja reparte el
+  // pozo entre DOS aunque uno se haya ido. Con el divisor real, el que queda cobraría el pozo entero.
+  it("en mesa de cuatro reparte el pozo entre los dos de la pareja, aunque uno se haya ido", async () => {
+    const seats = ["u1", "u2", "u3", "u4"];
+    const { match, sink, paid } = build(
+      { ...CASUAL, seats },
+      seats,
+      new FakeCoreLoop(waived("u1")),
+    );
+    Object.assign(match.players[2] ?? {}, { hasAbandoned: true });
+
+    sink([resolvedFor("A")]);
+
+    // Pozo = 10 × 4 = 40, entre los 2 nominales: 20 para u1. u3 se fue y no cobra.
+    await vi.waitFor(async () => expect(await paid()).toEqual([{ playerId: "u1", amount: 20 }]));
+  });
+
+  it("sin perdón de rake paga el premio normal", async () => {
+    const { sink, paid } = build(CASUAL, ["u1", "u2"], new FakeCoreLoop());
+
+    sink([resolvedFor("A")]);
+
+    await vi.waitFor(async () => expect(await paid()).toEqual([{ playerId: "u1", amount: 18 }]));
+  });
+
+  // FALLA CERRADO: el beneficio es accesorio, el pago no. Un core-loop caído o mudo cuesta el rake
+  // normal, nunca dejar al ganador sin cobrar.
+  it.each(["fail", "hang"] as const)(
+    "si core-loop no contesta (%s), paga el premio normal",
+    async (mode) => {
+      const { sink, paid } = build(CASUAL, ["u1", "u2"], new FakeCoreLoop(() => mode));
+
+      sink([resolvedFor("A")]);
+
+      await vi.waitFor(async () => expect(await paid()).toEqual([{ playerId: "u1", amount: 18 }]));
+    },
+  );
+
+  // SE LLAMA SIEMPRE y sin máquinas: también en mesas gratis, porque la ventana blanda cuenta todas
+  // las partidas; cada uno con su `won`, y agrupados por la moneda CONGELADA de cada asiento, que el
+  // contrato pide de a una por llamada.
+  it("liquida a todos los humanos, por moneda, diciendo si la mesa era paga", async () => {
+    const seats = ["u1", "u2", "u3", "u4"];
+    const coreLoop = new FakeCoreLoop();
+    const { match, sink } = build({ ...CASUAL, seats, isFreeRoom: true }, seats, coreLoop);
+    Object.assign(match.players[0] ?? {}, { currency: "VES" });
+    Object.assign(match.players[1] ?? {}, { currency: "USD" });
+    Object.assign(match.players[2] ?? {}, { currency: "VES" });
+    Object.assign(match.players[3] ?? {}, { isBot: true });
+
+    sink([resolvedFor("A")]);
+
+    await vi.waitFor(() => expect(coreLoop.calls).toHaveLength(2));
+    const usd = coreLoop.calls.find((call) => call.currency === "USD");
+    const ves = coreLoop.calls.find((call) => call.currency === "VES");
+    expect(usd).toMatchObject({ matchId: "match-1", paid: false });
+    expect(usd?.participants).toEqual([{ userId: "u2", won: false }]);
+    expect(ves?.participants).toEqual([
+      { userId: "u1", won: true },
+      { userId: "u3", won: true },
+    ]);
+  });
+
+  it("anota la ventana blanda de cada uno con lo que contestó core-loop", async () => {
+    const { sink, softWindow } = build(
+      CASUAL,
+      ["u1", "u2"],
+      new FakeCoreLoop(() => [
+        { userId: "u1", softWindowRemaining: 3 },
+        { userId: "u2", softWindowRemaining: 0 },
+      ]),
+    );
+
+    sink([resolvedFor("A")]);
+
+    await vi.waitFor(async () => expect(await softWindow.remainingFor("u1")).toBe(3));
+    expect(await softWindow.remainingFor("u2")).toBe(0);
+  });
+
+  // v1: si alguno de los dos sigue en su ventana de novato, la pareja se veta un rato
+  // (`PairVetoService.registerVetoIfSoftWindow`): el beneficio no puede ser la forma de que dos
+  // cuentas se crucen una y otra vez mientras una de ellas no paga comisión.
+  it("si alguno sigue en la ventana blanda, la pareja queda vetada", async () => {
+    const { sink, emitted } = build(
+      CASUAL,
+      ["u1", "u2"],
+      new FakeCoreLoop(() => [{ userId: "u2", softWindowRemaining: 4 }]),
+    );
+
+    sink([resolvedFor("A")]);
+
+    await vi.waitFor(() =>
+      expect(emitted).toContainEqual({ type: "CASUAL_PAIR_VETOED", playerIds: ["u1", "u2"] }),
+    );
+  });
+
+  it("si nadie está en la ventana, no veta", async () => {
+    const coreLoop = new FakeCoreLoop(() => [{ userId: "u1" }, { userId: "u2" }]);
+    const { sink, emitted, paid } = build(CASUAL, ["u1", "u2"], coreLoop);
+
+    sink([resolvedFor("A")]);
+
+    await vi.waitFor(async () => expect(await paid()).toHaveLength(1));
+    expect(emitted).toEqual([]);
   });
 });

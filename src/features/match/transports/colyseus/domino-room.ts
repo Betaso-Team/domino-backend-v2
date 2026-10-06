@@ -252,8 +252,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       : undefined;
     const platformSink =
       roomOptions && this.platform
-        ? this.platform.sinkFor(roomOptions, this.roomId, match, (playerId, type, payload) =>
-            this.clientOf(playerId)?.send(type, payload),
+        ? this.platform.sinkFor(
+            roomOptions,
+            this.roomId,
+            match,
+            (playerId, type, payload) => this.clientOf(playerId)?.send(type, payload),
+            (events) => this.notifier.notify(events),
           )
         : undefined;
     const platformSinks = platformSink ? [platformSink] : [];
