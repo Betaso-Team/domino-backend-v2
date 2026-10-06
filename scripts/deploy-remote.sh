@@ -15,11 +15,16 @@
 # Se conservan DOS releases: la que corre y la anterior, que es exactamente lo que hace falta para
 # poder volver. Guardar más es ocupar disco por si acaso.
 #
-# DOS MODOS:
+# TRES MODOS:
 #   deploy-remote.sh              despliega el release que contiene a este script
 #   deploy-remote.sh --rollback   vuelve al OTRO release que haya en disco, sin construir ni bajar
 #                                 nada. Es la vuelta atrás de emergencia: tarda lo que tarda pm2 en
 #                                 reiniciar, contra los minutos de rehacer el pipeline entero.
+#   deploy-remote.sh --restart    recrea la app SIN cambiar de versión, para lo que un reload no
+#                                 aplica (todo lo de `ecosystem.config.cjs` fuera de su `env:`).
+#
+# Y DEJA TRES ATAJOS en la raíz, que es lo que uno tiene a mano al entrar al servidor a las tres de
+# la mañana: `./logs`, `./restart` y `./rollback`, los dos últimos sin argumentos.
 #
 # ES ESPECÍFICO DE LINUX Y NO DISIMULA SERLO: `/proc/<pid>/cwd` (el chequeo del medio, que es el
 # corazón de este archivo), `mv -Tf` y `readlink -f` son de GNU/Linux. En un servidor BSD o macOS
@@ -27,7 +32,9 @@
 #
 # Variables esperadas: PM2_APP_NAME (obligatoria), PM2_INSTANCES (por defecto 1), NODE_BIN
 # (opcional: dónde están node y pm2, si no están en el PATH de una sesión ssh no interactiva) y
-# NODE_INTERPRETER (opcional: con qué node corre la app, que no tiene por qué ser el de pm2).
+# NODE_INTERPRETER (opcional: con qué node corre la app, que no tiene por qué ser el de pm2). Las
+# trae el workflow; el último despliegue las anota en `shared/deploy.env`, así que un rollback o un
+# restart pedidos a mano desde el servidor no necesitan ninguna.
 set -euo pipefail
 
 # `pwd -P` Y NO `pwd`: invocado a través de `current` —que es como se pide un rollback— la ruta
@@ -37,6 +44,17 @@ RELEASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 ROOT=$(cd "$RELEASE_DIR/../.." && pwd -P)
 SHARED_ENV="$ROOT/shared/.env"
 CURRENT="$ROOT/current"
+
+# CÓMO SE DESPLEGÓ LA ÚLTIMA VEZ, que es lo que hace que volver atrás sea UN comando. Sólo completa lo
+# que no vino: una variable explícita —la del workflow— siempre gana. Se lee línea por línea y no con
+# `source`, para que un valor nunca se ejecute.
+DEPLOY_ENV="$ROOT/shared/deploy.env"
+if [ -f "$DEPLOY_ENV" ]; then
+  while IFS='=' read -r clave valor; do
+    case "$clave" in '' | '#'*) continue ;; esac
+    [ -n "${!clave:-}" ] || export "$clave=$valor"
+  done <"$DEPLOY_ENV"
+fi
 
 # `NODE_BIN` solo si hace falta, y vacío por defecto: el pm2 que importa es el que levantó al
 # DEMONIO —invocar el de otra instalación es cómo se termina con dos demonios y una lista de
@@ -93,8 +111,12 @@ PORT="${PORT:-2567}"
 # symlink ya movido —y re-aplicar el archivo de configuración, que era la mitigación planeada,
 # tampoco ayuda—. Con una ruta que no cambia nunca, recargar vuelve a leerla y el symlink es lo que
 # decide qué versión hay del otro lado (§`ecosystem.config.cjs`).
+# QUÉ RELEASE CORRE, por nombre de carpeta: viaja al proceso como `RELEASE` (§`ecosystem.config.cjs`)
+# para que cada línea de log diga de qué versión salió.
+running_release() { basename "$(readlink -f "$CURRENT")"; }
+
 start_release() {
-  (cd "$CURRENT" && PM2_CWD="$CURRENT" pm2 startOrReload ecosystem.config.cjs --update-env)
+  (cd "$CURRENT" && PM2_CWD="$CURRENT" RELEASE="$(running_release)" pm2 startOrReload ecosystem.config.cjs --update-env)
 }
 
 # Y CUANDO NI ESO ALCANZA —la primera vez que se cambia el esquema, por ejemplo, porque pm2 ya tiene
@@ -102,7 +124,7 @@ start_release() {
 # de corte; el reload de arriba no corta nada, así que se intenta ése primero.
 restart_release() {
   pm2 delete "$PM2_APP_NAME" >/dev/null 2>&1 || true
-  (cd "$CURRENT" && PM2_CWD="$CURRENT" pm2 start ecosystem.config.cjs --update-env)
+  (cd "$CURRENT" && PM2_CWD="$CURRENT" RELEASE="$(running_release)" pm2 start ecosystem.config.cjs --update-env)
 }
 
 # ¿ESTÁ CORRIENDO LO QUE CREEMOS? La pregunta NO ES RETÓRICA: es exactamente lo que pm2 contestó mal
@@ -150,6 +172,21 @@ healthy() {
     echo "  ✓ :$port listo"
   done
 }
+
+# RECREAR SIN CAMBIAR DE VERSIÓN. Un reload aplica las variables de entorno y nada más; el resto de
+# `ecosystem.config.cjs` —instancias, intérprete, logs— queda fijado al arrancar el proceso.
+if [ "${1:-}" = "--restart" ]; then
+  TARGET=$(readlink -f "$CURRENT")
+  echo "▸ recreando $PM2_APP_NAME desde $(basename "$TARGET")"
+  restart_release || true
+  if running_from "$TARGET" && healthy; then
+    pm2 save >/dev/null
+    echo "✓ sirviendo $(basename "$TARGET")"
+    exit 0
+  fi
+  echo "✗ no quedó sano: hay que mirar el servidor" >&2
+  exit 1
+fi
 
 # VOLVER ATRÁS A MANO. El release anterior sigue entero en disco —con sus `node_modules`—, así que
 # es mover el symlink y reiniciar. No se rehace nada: es justamente para cuando no hay tiempo.
@@ -264,5 +301,50 @@ for dir in "$ROOT"/releases/*; do
   echo "  - $(basename "$dir")"
   rm -rf "$dir"
 done
+
+# QUEDA ANOTADO CÓMO SE DESPLEGÓ, que es lo que hace que el rollback no necesite argumentos. `APP_ENV`
+# no va: vive en el `.env` de cada servidor, que es lo único que un rollback relee. Sólo variables:
+# estos heredocs expanden, así que nada de comillas invertidas adentro — ejecutarían lo que citan.
+cat >"$DEPLOY_ENV" <<FIN
+PM2_APP_NAME=$PM2_APP_NAME
+PM2_INSTANCES=$PM2_INSTANCES
+NODE_BIN=${NODE_BIN:-}
+NODE_INTERPRETER=${NODE_INTERPRETER:-}
+FIN
+
+# LOS LOGS, LEGIBLES DE UNA. Sin esto había que acordarse de `--raw` —sin él, el prefijo de pm2 rompe
+# el JSON y pino-pretty no parsea nada— y de pipear a mano, y una molestia chica repetida termina en
+# que nadie mira los logs. Corre desde `current` porque pino-pretty busca su configuración desde el
+# directorio actual hacia arriba, y la del release es la que viaja con esta versión.
+cat >"$ROOT/logs" <<FIN
+#!/usr/bin/env bash
+# Los logs de esta app, con color. Argumentos extra van a pm2:
+#   ./logs                 seguir en vivo
+#   ./logs --lines 200     doscientas para atrás
+#   ./logs --err           solo el stream de error
+cd "$CURRENT" || exit 1
+# El sed le saca el timestamp que pm2 antepone cuando se lo deja estampar: con él la línea deja de
+# ser JSON. La -u no es un detalle: sin ella sed almacena y el seguimiento en vivo deja de serlo.
+pm2 logs "$PM2_APP_NAME" --raw "\$@" \\
+  | sed -uE 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}: //' \\
+  | ./node_modules/.bin/pino-pretty
+FIN
+chmod +x "$ROOT/logs"
+
+# Los otros dos, por lo mismo: tres comandos tecleados de memoria a las tres de la mañana es
+# exactamente lo que este archivo viene a evitar. Siempre el script del release QUE CORRE.
+cat >"$ROOT/restart" <<FIN
+#!/usr/bin/env bash
+# Recrea la app SIN cambiar de versión: para lo que un reload no aplica.
+exec bash "$CURRENT/scripts/deploy-remote.sh" --restart
+FIN
+chmod +x "$ROOT/restart"
+
+cat >"$ROOT/rollback" <<FIN
+#!/usr/bin/env bash
+# Vuelve al otro release en disco. Sin argumentos: lo que necesita lo anotó el último despliegue.
+exec bash "$CURRENT/scripts/deploy-remote.sh" --rollback
+FIN
+chmod +x "$ROOT/rollback"
 
 echo "✓ desplegado: $(basename "$RELEASE_DIR")"

@@ -53,7 +53,7 @@ export default defineConfig({
       },
       {
         extends: true,
-        test: { name: "int", include: ["src/**/*.int.test.ts"] },
+        test: { name: "int", include: ["src/**/*.int.test.ts", "scripts/**/*.int.test.ts"] },
       },
       {
         extends: true,

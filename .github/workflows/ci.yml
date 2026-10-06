@@ -90,10 +90,14 @@ jobs:
       #
       # Sin `.npmrc`: truco empaqueta el suyo, el dominó no tiene ninguno, y `tar` con un archivo
       # inexistente falla (la misma razón por la que el `Dockerfile` tampoco lo copia).
+      #
+      # `pino-pretty.config.cjs` viaja porque el atajo `./logs` del servidor corre desde `current`, y
+      # pino-pretty busca su configuración desde el directorio actual hacia arriba.
       - name: Empaquetar el release
         run: >-
           tar -czf domino-v2.tgz
           dist package.json package-lock.json ecosystem.config.cjs scripts/deploy-remote.sh
+          pino-pretty.config.cjs
 
       - uses: actions/upload-artifact@v4
         with:
