@@ -47,13 +47,16 @@ describe("ciclo de vida de una partida", () => {
 
   it("abandonar cierra la partida por forfeit, y el historial queda intercalado", async () => {
     const match = await seatPair(server, ["a1", "a2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    // Destapadas primero: irse con la ventana de reparto abierta ANULA, no da forfeit.
+    await revealHands(match);
 
     await act(match, "a1", "ABANDON");
     expect(match.serverState.phase).toBe("PRESENTING_MATCH");
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
     expect(await linesOf("m-a1-a2")).toEqual([
+      "PLAYER REVEAL_TILES",
+      "PLAYER REVEAL_TILES",
       "PLAYER ABANDON",
       "SYSTEM MATCH_RESOLVED",
       "SYSTEM DEADLINE_EXPIRED",
@@ -64,6 +67,7 @@ describe("ciclo de vida de una partida", () => {
 
   it("el seq no tiene huecos y es estrictamente creciente", async () => {
     const match = await seatPair(server, ["s1", "s2"]);
+    await revealHands(match);
     await act(match, "s1", "ABANDON");
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 

@@ -103,6 +103,9 @@ describe("concurrencia — no hay ventana para saltarse una validación", () => 
       // test, así que un poll cada 10 ms puede llegar tarde y esperar para siempre una fase
       // que ya pasó a FINISHED.
       try {
+        // Destapadas ANTES: con la ventana de reparto abierta el abandono anula la partida y
+        // no se llega a PRESENTING_MATCH.
+        await revealHands(match);
         await act(match, "concurrency-k1", "ABANDON");
 
         tilesBefore = match.serverState.currentRound?.board.tiles.length ?? 0;

@@ -138,7 +138,11 @@ describe("flujo de la ronda", () => {
     expect(e.round().phase).toBe("PLAYING");
   });
 
-  it("al vencer la ventana retira al que no levantó sus fichas", () => {
+  // ⚠ IRSE CON LA VENTANA ABIERTA ANULA LA PARTIDA, y no la gana el que se quedó. Es la regla
+  // de v1 (`isGameValid()`: todos tienen que haber levantado sus fichas para que la partida
+  // cuente) y la que cambia de bolsillo la plata: con el forfeit, el que levantó cobraba el
+  // premio de una partida que nunca empezó; anulada, se reembolsa.
+  const dealWindow = () => {
     const e = engineWithHands(
       {
         u1: [
@@ -154,18 +158,32 @@ describe("flujo de la ronda", () => {
       { isDealWindowEnabled: true },
     );
     e.start();
+    return e;
+  };
+
+  it("al vencer la ventana retira al que no levantó y ANULA la partida: nadie gana", () => {
+    const e = dealWindow();
     e.revealTiles("u1");
     const events = e.fireTimeout();
     expect(events).toContainEqual({ type: "DEADLINE_EXPIRED", kind: "DEALING" });
     expect(events).toContainEqual({ type: "ABANDON", playerId: "u2" });
-    expect(events).toContainEqual({
-      type: "MATCH_RESOLVED",
-      winnerTeamId: "A",
-      reason: "ABANDONMENT",
-    });
+    expect(events.some((event) => event.type === "MATCH_RESOLVED")).toBe(false);
+    expect(e.match.phase).toBe("PRESENTING_ABORT");
+    // La ronda se queda en el reparto y las manos TAPADAS: destaparlas marcaría como vistas
+    // las fichas que nadie miró.
+    expect(e.round().phase).toBe("DEALING");
+    expect(e.hand("u2").isRevealed).toBe(false);
   });
 
-  it("si nadie levanta sus fichas apaga el plazo sin inventar ganador", () => {
+  it("irse por su cuenta con la ventana abierta también la anula, aunque ya haya levantado", () => {
+    const e = dealWindow();
+    e.revealTiles("u1");
+    const events = e.abandon("u1");
+    expect(events.some((event) => event.type === "MATCH_RESOLVED")).toBe(false);
+    expect(e.match.phase).toBe("PRESENTING_ABORT");
+  });
+
+  it("la pausa del aborto dura lo que la de la partida y termina en FINISHED, sin revancha", () => {
     const e = engineWithHands(
       {
         u1: [
@@ -178,14 +196,27 @@ describe("flujo de la ronda", () => {
         ],
       },
       [],
-      { isDealWindowEnabled: true },
+      { isDealWindowEnabled: true, isRematchEnabled: true },
     );
     e.start();
+    e.revealTiles("u1");
+    e.fireTimeout();
+    expect(e.match.activeDeadline).toBe(e.clockBox.now + 120);
+
+    const events = e.fireTimeout();
+    expect(events).toContainEqual({ type: "DEADLINE_EXPIRED", kind: "PRESENTING_ABORT" });
+    expect(e.match.phase).toBe("FINISHED");
+    expect(e.match.activeDeadline).toBe(0);
+  });
+
+  it("si nadie levanta sus fichas también se anula, sin inventar ganador", () => {
+    const e = dealWindow();
     const events = e.fireTimeout();
     expect(events.filter((event) => event.type === "ABANDON")).toHaveLength(2);
     expect(events.some((event) => event.type === "MATCH_RESOLVED")).toBe(false);
-    expect(e.match.activeDeadline).toBe(0);
-    expect(() => e.fireTimeout()).toThrow("no hay timeout programado");
+    expect(e.match.phase).toBe("PRESENTING_ABORT");
+    e.fireTimeout();
+    expect(e.match.phase).toBe("FINISHED");
   });
 
   it("el primer vencimiento consume la reserva y el segundo retira", () => {

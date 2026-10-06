@@ -23,6 +23,7 @@ import {
 import { RuleViolationError } from "../../core/engine/errors";
 import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
+import { wasAbortedAtDeal } from "../../core/rules";
 import type { MatchState } from "../../core/state";
 import {
   AdmissionRefusedError,
@@ -652,6 +653,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
   private abortReason(): AbortReason {
     if (this.state.startedAt === 0) return "NEVER_STARTED";
+    // Antes que NEVER_PLAYED: que nadie haya levantado no lo distingue de que alguien se haya
+    // ido con la ventana abierta, y sólo lo segundo deja a alguien sin reembolso.
+    if (wasAbortedAtDeal(this.state)) return "TILES_NOT_SEEN";
     if (this.state.players.every((player) => !player.hasSeenTiles)) return "NEVER_PLAYED";
     return "INTERRUPTED";
   }

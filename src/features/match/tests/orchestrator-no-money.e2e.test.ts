@@ -4,7 +4,14 @@ import type { DominoMatchConfig } from "../core/config";
 import { BetCharger } from "../network";
 import type { BetLevelBook } from "../network";
 import type { StandingsFeeds } from "../network/standings";
-import { act, bootServer, seatPair, seatPairAsMatchmaking, waitUntil } from "./e2e-harness";
+import {
+  act,
+  bootServer,
+  revealHands,
+  seatPair,
+  seatPairAsMatchmaking,
+  waitUntil,
+} from "./e2e-harness";
 
 const PORT = 2607;
 
@@ -71,8 +78,11 @@ describe("las mesas del orquestador no mueven plata ni reportan resultados", () 
 
   it("al resolverse, una mesa por request no publica el ranking ni llama a la liga", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    // Destapadas primero: con la ventana abierta el abandono ANULA, y este test daría verde sin
+    // haber resuelto nada.
+    await revealHands(match);
     await act(match, "r1", "ABANDON");
+    expect(match.serverState.phase).toBe("PRESENTING_MATCH");
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
     expect(won).not.toHaveBeenCalled();
     expect(record).not.toHaveBeenCalled();
@@ -84,7 +94,7 @@ describe("las mesas del orquestador no mueven plata ni reportan resultados", () 
       prize: 0,
       isFreeRoom: true,
     });
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await act(match, "l1", "ABANDON");
     await waitUntil(() => record.mock.calls.length === 1, 3_000);
   });

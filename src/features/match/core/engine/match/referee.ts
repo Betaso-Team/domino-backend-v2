@@ -1,5 +1,5 @@
 import type { PlayerId, TeamId } from "../../ids";
-import { canAct } from "../../rules/legality";
+import { canAct, wasAbortedAtDeal } from "../../rules/legality";
 import type { MatchView } from "../../rules/view";
 import type { MatchState } from "../../state";
 import { SchemaMatchView } from "../../state/view";
@@ -36,6 +36,11 @@ export class MatchReferee {
   }
 
   outcome(): MatchOutcome | undefined {
+    // ANULADA EN EL REPARTO: no gana nadie, quede quien quede. Va ANTES que cualquier forfeit,
+    // porque es lo que la sala pregunta al cerrarse para decidir si reembolsa — contestar «ganó
+    // el rival» dejaría la mesa sin premio (nunca pasó por `MATCH_RESOLVED`) y sin reembolso.
+    if (wasAbortedAtDeal(this.match)) return undefined;
+
     // SI SE FUERON LOS DOS, NO GANÓ NADIE — y hay que decirlo ANTES que nada. Preguntando
     // por un equipo primero, el orden de evaluación coronaría al otro, y esa partida
     // —que nadie jugó— **pagaría premio**. En un juego con dinero eso no es un detalle
