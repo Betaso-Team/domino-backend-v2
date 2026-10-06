@@ -1900,10 +1900,10 @@ en verde.
 | `dfc6603` suite en paralelo en el CI | **PORTADO** (`0c6566d`) con una corrección que acá era obligatoria — abajo |
 | `32d83de` caché de `node_modules`, docs fuera del deploy, reuso de dependencias en el servidor | **PORTADO** (`cc233c9`, `ff6488b`). El backtick del heredoc no existe acá |
 | `ad1ccdd` sondear las bases una vez | **NO APLICA**: el CI del dominó no tiene servicios |
-| `fa246ad` core-loop: rake perdonado a nuevos + ventana blanda del emparejador | **NO PORTADO, y es regresión contra v1**: `Betaso-Domino-Backend/src/core-loop/` existe (`full-pot.ts`, `core-loop.service.ts`) y el lobby de v1 lo usa. Es negocio con plata; va en un incremento propio |
-| `cfb0393` abortar si alguien se va en la ventana de reparto | **NO PORTADO**: ciclo de vida de la partida y reembolso, no infraestructura. Revisar contra v1 antes de decidir |
-| `b0d7e4c` strike de torneo al que abandona por su cuenta | **NO PORTADO**: negocio de torneo |
-| `d6e3219` fijar el reparto desde `/settings/deal` en local/dev | **NO PORTADO**: herramienta de prueba, pero el preset (vira, flor) es de cartas; el gemelo del dominó sería fijar fichas |
+| `fa246ad` core-loop: rake perdonado a nuevos + ventana blanda del emparejador | ~~NO PORTADO~~ **PORTADO** después — ver «la tanda del 06/10» |
+| `cfb0393` abortar si alguien se va en la ventana de reparto | ~~NO PORTADO~~ **PORTADO** después, y v1 decía lo mismo — ver «la tanda del 06/10» |
+| `b0d7e4c` strike de torneo al que abandona por su cuenta | ~~NO PORTADO~~ **PORTADO** después — ver «la tanda del 06/10» |
+| `d6e3219` fijar el reparto desde `/settings/deal` en local/dev | ~~NO PORTADO~~ **PORTADO** después, con fichas — ver «la tanda del 06/10» |
 | `4a0873e`, `9068b10`, `133290a`, `7947c95`, `f109e86`, `d655a28`, `735ff75`, `07d5e20` | reglas y pausas de truco |
 
 - **`APP_ENV` vive en el `.env` de cada servidor y NO viaja con el deploy.** Truco lo manda el
@@ -1926,6 +1926,91 @@ en verde.
 - **Sin verificar**: `actionlint`, `shellcheck` y el despliegue de verdad — Docker estaba apagado.
   El reuso de dependencias se ensayó en seco con Git Bash (reusa con el mismo lockfile, reinstala
   con otro). Este repo sigue sin el arnés de `deploy-remote.test.ts` que truco tiene.
+
+## Port de truco — la tanda del 06/10 (rama `feat/port-truco-cierres`)
+
+Salió de comparar truco contra dominó en todas las capas y leer v1 donde el juego difiere. Truco tenía
+sólo tres commits de código nuevos desde la tanda anterior; lo grande eran las deudas que esa tanda
+había dejado como «NO PORTADO». Baseline **1090 unit / 268 int (+32 saltados) / 115 e2e, 149
+archivos**, con `typecheck`, lint, `depcruise` (**444 módulos / 1820 dependencias**) y `docs:build` en
+verde.
+
+### Cuatro defectos con plata, y los cuatro los decía v1
+
+1. **Irse con la ventana de reparto abierta ANULA la partida** (`990fc2a`, `1c64fbc`). Antes el que
+   levantó ganaba por forfeit y cobraba el premio de una partida que nunca empezó; v1 la cancela
+   (`isGameValid()`). `wasAbortedAtDeal` es una regla derivada (ronda 1 en `DEALING` y alguien
+   retirado), el juez no da veredicto, la mesa pasa por **`PRESENTING_ABORT`** —fase nueva del
+   wire— y la sala aborta con **`TILES_NOT_SEEN`**. Se reembolsa a todos menos al que se fue
+   habiendo levantado (`isRefundable`, la usan la billetera y `settlementOf`), la revancha anulada
+   veta y en torneo no hay cooldown. ⚠ **Seis e2e usaban el forfeit en la ventana como atajo**, y
+   dos quedaban VERDES sin resolver nada: un e2e que quiera un veredicto por abandono tiene que
+   llamar `revealHands` antes del `ABANDON`.
+2. **La meta alcanzada le gana al forfeit** (`674bdae`). En la pausa de la mano decisiva `ABANDON`
+   es legal y el juez preguntaba primero por el retiro: el ganador que apretaba «salir» le regalaba
+   la partida al rival. Truco `6da7372`.
+3. **El aumento aceptado se cobraba y no se pagaba** (`2290f37`). `PRIZE` salía con el premio BASE
+   mientras cada uno había pagado la diferencia de un x3. v1 paga `newPrize`. `stakesOf` es la regla
+   única (el nivel ES el multiplicador). De paso: la billetera de Betaso le pagaba al equipo entero,
+   máquina y retirados incluidos; `prizeWinnersOf` es la regla de `settlementOf`, ahora compartida.
+4. **El abandono voluntario en torneo no costaba strike** (`3d76d26`). Sólo el `ABANDON` del sistema
+   lo cobraba, y el verbo no emite evento. v1 lo cobra (`on-leave.ts:33`); se lee del estado al
+   cerrar. No levantar a tiempo sigue sin costar nada.
+
+### `platform.ts` se partió, y encima entró el core-loop
+
+`MatchPlatform.sinkFor` compone un sink por hecho (`casual/pay-winner.ts`, `casual/refund-on-abort.ts`,
+`tournament/add-strike.ts`, `tournament/report-participation.ts`, `summary.ts`) — la partición de truco
+con funciones en vez de clases (`39d80b9`). Y gana un `emit` para lo que un sink produce después de
+que el comando volvió.
+
+**`features/core-loop`** (`6110505`, `0ecdcca`) era una regresión contra v1. Dos mitades:
+
+- **El emparejador evita sentar a un novato en su ventana contra un shark**, como preferencia MÁS
+  DÉBIL que el veto del antifraude: cede primero, al vencer `softTimeoutSeconds`.
+- **El ganador con el rake perdonado cobra el pozo completo**, con el aumento adentro y el **divisor
+  NOMINAL** de v1 (en 4P la pareja reparte entre dos aunque uno se haya ido; medido por mutación).
+  Se liquida SIEMPRE, también en mesa gratis, por moneda congelada y sin máquinas; la respuesta anota
+  la ventana blanda y, si alguno sigue adentro, veta a la pareja (`registerVetoIfSoftWindow` de v1).
+
+Los dos lados seguros son opuestos a propósito: las perillas fallan APAGADAS y el winrate falla
+ABIERTO, como en v1. El perfil lee el winrate por una interfaz ESTRUCTURAL: si `core-loop` importara
+el `PlayerLog` de `match`, las dos features quedaban en un ciclo.
+
+### Infraestructura
+
+- **El log** (`9c21c27`, `72c21b0`): redacción de `token`/`authorization` (no había ninguna),
+  `traceId` en cada línea, `traceScope` + `requestLog` en la entrada HTTP (verificado con el
+  servidor real), buffer de 4 KB con `flushLogs()` antes de cada `process.exit`, `instance`/
+  `release`/`hostname`/`pid` en la base, y el nivel por `APP_ENV` con `LOG_LEVEL` explícito ganando
+  — **dev corre con `NODE_ENV=production` y perdía la traza del juego**.
+- **El deploy** (`cdfa158`): `pino-pretty` pasa a dependencia de runtime, `./logs`, `./restart` y
+  `./rollback` sin argumentos (`shared/deploy.env`), `--restart`, y `RELEASE` hasta el proceso.
+  **`scripts/deploy-remote.int.test.ts`** es el arnés de truco: se saltea fuera de Linux. Corrido en
+  `node:22-bookworm`: 11/11, y contra el script de HEAD los cuatro comportamientos nuevos dan rojo.
+- **Herramientas de dev** (`88609b2`): secciones `deal` y `starting-score` de `/internal/settings`,
+  sólo en local y dev y **detrás de la llave del panel** (truco las sirve públicas). Entran por
+  `EngineDeps`: el replay no las ve, así que una partida jugada con preset no se rebobina igual.
+- `.claude/skills/tests/SKILL.md` y el test de contrato del `HttpClient` (`c4dea29`).
+
+### ⚠ Rompe para el front
+
+`PRESENTING_ABORT` es un valor nuevo de `phase` y `TILES_NOT_SEEN` un motivo nuevo de
+`MATCH_ABORTED`. El front tiene que pintar la anulación; hasta entonces ve una fase que no conoce.
+
+### Deudas de ESTA tanda — NO CUMPLIDAS
+
+1. **El reembolso no espera al cobro del aumento en vuelo.** Truco encadena `RefundOnAbort` detrás
+   del `charge.settled()` del multiplicador; acá los dos sinks son independientes y un aborto justo
+   después de aceptar puede reembolsar antes de que el cobro termine. El reembolso de Betaso
+   reconstruye lo cobrado del otro lado, así que el riesgo es un cobro que llega DESPUÉS del
+   reembolso y queda sin devolver. No se tocó: pide coordinar dos sinks.
+2. **El smoke real no corrió.** Docker estaba disponible y sólo se usó para el arnés del deploy,
+   shellcheck y actionlint.
+3. **Nada de core-loop está certificado contra el backend de verdad**: contrato medido contra un
+   servidor HTTP de prueba, igual que el antifraude.
+4. **`settlementOf` (orquestador) no lleva el aumento** porque esas mesas no ofrecen niveles; el día
+   que lo hagan, `stakesOf` es la regla.
 
 ## Incremento en curso — API para el orquestador
 

@@ -11,6 +11,15 @@ npm run dev
 `BETASO_BACKEND_JWT_SECRET` es obligatorio. `BETASO_ADMIN_PANEL_API_KEY` (la que nos presenta el panel) habilita las rutas internas; `BETASO_BACKEND_API_KEY` (la que presentamos al backend) habilita torneo, antifraude y niveles de apuesta. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches` y `POST /internal/players/:userId/seat`; sin ella esas rutas responden 404, y si está el arranque exige `BILLING_AUTH_PUBLIC_KEY` y que no repita ninguna de las otras dos llaves. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor `JWT_ISSUER` (default `betaso-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; los HS256 del backend principal siguen valiendo. Mongo, Redis, RabbitMQ
 y el backend principal son capacidades opcionales elegidas por la presencia de sus URLs.
 
+`npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
+siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local y dev, `info` en stage y
+prod) salvo un `LOG_LEVEL` explícito. Cada línea lleva `instance`, `release` y el `traceId` de la
+causa en curso, y nunca un `token` ni un `authorization` (salen `[oculto]`).
+
+En local y dev existen además dos secciones de `/internal/settings`, detrás de la llave del panel,
+para probar a mano: `deal` fija las fichas de cada asiento (`{"hands": [[[6,6]], [[0,0]]]}`) y
+`starting-score` el marcador con el que nace la próxima mesa. Se borran con `DELETE`.
+
 Con el stack local completo:
 
 ```bash
@@ -108,7 +117,12 @@ release anterior y conserva el fallo como resultado del pipeline.
 En el servidor:
 
 ```bash
-bash /var/www/Betaso/domino-backend-v2/current/scripts/deploy-remote.sh --rollback
+cd /var/www/Betaso/domino-backend-v2
+./rollback   # vuelve al otro release en disco, sin argumentos
+./restart    # recrea la app sin cambiar de versión (lo que un reload no aplica)
+./logs       # los logs en vivo, legibles; --lines 200, --err
 ```
 
-Los releases marcados `FAILED` no son candidatos al rollback.
+Los tres atajos los deja cada despliegue, y lo que necesitan lo anota en `shared/deploy.env`. Los
+releases marcados `FAILED` no son candidatos al rollback. El arnés del script vive en
+`scripts/deploy-remote.int.test.ts` y corre sólo en Linux.

@@ -144,9 +144,16 @@ stateDiagram-v2
   [*] --> NOT_STARTED
   NOT_STARTED --> PLAYING: asientos listos
   PLAYING --> PRESENTING_MATCH: puntaje objetivo o abandono
+  PLAYING --> PRESENTING_ABORT: alguien se fue con la ventana de reparto abierta
   PRESENTING_MATCH --> FINISHED: vence presentación
+  PRESENTING_ABORT --> FINISHED: vence presentación, sin revancha
   FINISHED --> [*]
 ```
+
+Irse con la ventana de reparto abierta **anula** la partida, como en v1 (`isGameValid()`): no gana
+nadie, la sala aborta con `TILES_NOT_SEEN` y se reembolsa a todos menos al que se fue habiendo
+levantado sus fichas. La meta alcanzada le gana a cualquier forfeit: el ganador que se retira en la
+pausa de la mano decisiva no pierde la partida.
 
 ### Ronda
 
