@@ -110,7 +110,7 @@ export class MatchPlatform {
     if (options.mode === "CASUAL") {
       sinks.push(
         refundOnAbort({ matchId, match, wallet: deps.wallet, log: deps.log }),
-        payWinner({ matchId, match, prize: options.prize, outbox: deps.outbox }),
+        payWinner({ matchId, match, table: options, outbox: deps.outbox }),
       );
     } else {
       sinks.push(

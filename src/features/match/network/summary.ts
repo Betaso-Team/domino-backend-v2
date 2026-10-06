@@ -2,6 +2,7 @@ import type { MatchState } from "../core/state";
 import type { DominoRoomOptions } from "../transports/match-contract";
 import type { MatchEventSink } from "./listeners";
 import type { MatchSummaryPort } from "./player-log";
+import { stakesOf } from "./settlement";
 
 /**
  * LA PARTIDA TERMINÓ, así que se escribe UNA FILA que diga qué fue: quién ganó, qué costó y con qué
@@ -26,6 +27,10 @@ export function recordSummary(deps: {
       if (event.type !== "MATCH_RESOLVED" && event.type !== "MATCH_ABORTED") continue;
       if (summarized) return;
       summarized = true;
+      // Con el aumento adentro: la fila se lee como "lo que puse y lo que me llevé", y la tarifa de
+      // la mesa dejó de ser cualquiera de las dos en cuanto los dos aceptaron subirla.
+      const stakes =
+        options.mode === "CASUAL" ? stakesOf(options, match) : { entryFee: 0, prize: 0 };
       const scoreOf = (teamId: string) =>
         teamId === "A" ? (match.scoreboard?.teamA ?? 0) : (match.scoreboard?.teamB ?? 0);
       const playerOf = (player: MatchState["players"][number]) => ({
@@ -42,8 +47,8 @@ export function recordSummary(deps: {
                 .filter(({ teamId }) => teamId === event.winnerTeamId)
                 .map(({ playerId }) => playerId)
             : [],
-        entryFee: options.mode === "CASUAL" ? options.entryFee : 0,
-        prize: options.mode === "CASUAL" ? options.prize : 0,
+        entryFee: stakes.entryFee,
+        prize: stakes.prize,
         isFreeRoom: options.mode === "CASUAL" ? options.isFreeRoom : false,
         gameModeId: options.mode === "CASUAL" ? options.gameModeId : options.tournamentId,
         players: match.players.filter(({ hasAbandoned }) => !hasAbandoned).map(playerOf),

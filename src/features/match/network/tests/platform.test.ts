@@ -1,4 +1,4 @@
-import { MemoryLedger } from "@/features/economy";
+import { MemoryLedger, Outbox } from "@/features/economy";
 import { DEFAULT_TOURNAMENT_CONFIG, StrikeBook } from "@/features/tournament";
 import { MemoryKeyValueStore } from "@/shared/kv";
 import { MemoryLogger } from "@/shared/tests/memory-logger";
@@ -14,6 +14,7 @@ import type {
 } from "../../transports/match-contract";
 import type { NetworkMatchEvent } from "../events";
 import { MatchPlatform } from "../platform";
+import type { MatchSummary } from "../player-log";
 
 const CASUAL: CasualRoomOptions = {
   mode: "CASUAL",
@@ -38,21 +39,26 @@ const TOURNAMENT: TournamentRoomOptions = {
 
 const unused = {} as never;
 
-function build(options: DominoRoomOptions = CASUAL) {
+function build(options: DominoRoomOptions = CASUAL, seats: readonly string[] = ["u1", "u2"]) {
   const wallet = new FakeWallet();
+  const ledger = new MemoryLedger();
+  const log = new MemoryLogger();
   const kv = new MemoryKeyValueStore(() => 0);
+  const outbox = new Outbox(wallet, ledger, log);
+  const summaries: MatchSummary[] = [];
   const platform = new MatchPlatform({
     wallet,
-    ledger: new MemoryLedger(),
+    ledger,
     accounts: unused,
     matchAccounts: unused,
+    outbox,
     strikes: new StrikeBook(kv, DEFAULT_TOURNAMENT_CONFIG, () => 0),
     tournamentConfig: DEFAULT_TOURNAMENT_CONFIG,
-    summaries: { summarize: () => {} },
+    summaries: { summarize: (summary) => summaries.push(summary) },
     now: () => 0,
-    log: new MemoryLogger(),
+    log,
   });
-  const match = createMatchState(matchConfig(["u1", "u2"]));
+  const match = createMatchState(matchConfig([...seats]));
   const sent: { playerId: string; type: string }[] = [];
   // UNO por mesa, como en la sala: lo que el sink recuerda entre lotes —a quién retiró el
   // sistema— vive en su cierre.
@@ -64,7 +70,11 @@ function build(options: DominoRoomOptions = CASUAL) {
   );
   const penalized = () =>
     sent.filter(({ type }) => type === "TOURNAMENT_PENALTY").map(({ playerId }) => playerId);
-  return { wallet, match, sink, penalized };
+  const paid = async () => {
+    await outbox.drain();
+    return wallet.credited.map(({ playerId, amount }) => ({ playerId, amount }));
+  };
+  return { wallet, match, sink, penalized, paid, summaries };
 }
 
 // Deja correr las promesas que el sink dispara: es síncrono a propósito —el motor lo es— y lo
@@ -166,5 +176,58 @@ describe("los strikes de torneo", () => {
     await settle();
 
     expect(penalized()).toEqual([]);
+  });
+});
+
+describe("el premio", () => {
+  const resolvedFor = (winnerTeamId: "A" | "B") =>
+    ({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }) as const;
+
+  it("sin aumento paga el premio de la mesa", async () => {
+    const { sink, paid } = build();
+
+    sink([resolvedFor("A")]);
+
+    expect(await paid()).toEqual([{ playerId: "u1", amount: 18 }]);
+  });
+
+  // ⚠ EL AUMENTO SE COBRA Y TAMBIÉN SE PAGA. Al aceptar un x3 cada uno pagó dos inscripciones más
+  // (`betAmountsOf`); el premio que respaldan es el de la mesa por tres. v1 lo escribe al aceptar
+  // (`state.prize = proposal.newPrize`, on-respond-bet-multiplier.ts) y paga ése. Pagar el premio
+  // base es quedarse con la diferencia que los dos pusieron.
+  it("con un aumento aceptado paga el premio por el nivel", async () => {
+    const { match, sink, paid } = build();
+    match.acceptedBetLevel = 3;
+
+    sink([resolvedFor("A")]);
+
+    expect(await paid()).toEqual([{ playerId: "u1", amount: 54 }]);
+  });
+
+  // LOS BOTS Y LOS RETIRADOS NO COBRAN, la misma regla que `settlementOf`: el asiento que juega la
+  // máquina es el del que se fue, y pagarle sería premiar el abandono.
+  it("en una mesa de cuatro no le paga a la máquina ni al que se fue", async () => {
+    const { match, sink, paid } = build({ ...CASUAL, seats: ["u1", "u2", "u3", "u4"] }, [
+      "u1",
+      "u2",
+      "u3",
+      "u4",
+    ]);
+    Object.assign(match.players[2] ?? {}, { isBot: true });
+
+    sink([resolvedFor("A")]);
+
+    expect(await paid()).toEqual([{ playerId: "u1", amount: 18 }]);
+  });
+
+  // LA FILA DICE LO QUE SE PUSO Y LO QUE SE LLEVÓ, así que lleva el aumento: con el base, el
+  // historial del jugador mostraría una inscripción que no es la que pagó.
+  it("la fila de la partida lleva la inscripción y el premio del aumento", () => {
+    const { match, sink, summaries } = build();
+    match.acceptedBetLevel = 3;
+
+    sink([resolvedFor("A")]);
+
+    expect(summaries[0]).toMatchObject({ entryFee: 30, prize: 54 });
   });
 });

@@ -124,12 +124,7 @@ function rewardOf(
   // pagarle sería premiar el abandono con el premio de la mesa. Es el
   // `filter(player => !player.isBot)` de v1 (`:605`), más los que quedaron en `quitPlayers` —que
   // acá son los `hasAbandoned`—.
-  const winnerIds = new Set(
-    match.players
-      .filter(({ teamId }) => teamId === winnerTeamId)
-      .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
-      .map(({ playerId }) => playerId),
-  );
+  const winnerIds = new Set(prizeWinnersOf(match, winnerTeamId));
   const winners = config.seats.filter(({ playerId }) => winnerIds.has(playerId));
   // PLATA DE POR MEDIO: ante la duda, rechazar. **Cero ganadores** sigue siendo un invariante
   // roto —un veredicto sobre un equipo donde no queda nadie a quien pagarle—, y cierra la partida
@@ -152,6 +147,32 @@ function rewardOf(
     entries: winners.map((seat) => entryOf(config.matchId, "REWARD", config.prize, seat)),
   };
 }
+
+/**
+ * QUIÉNES COBRAN EL PREMIO: los asientos del equipo ganador que todavía son de una PERSONA — ni la
+ * máquina ni el que se fue (ver `rewardOf`). Lo usan los DOS que pagan, esta proyección y la
+ * billetera de Betaso: dos reglas para la misma mesa le pagarían a uno según quién pague.
+ */
+export const prizeWinnersOf = (match: MatchState, winnerTeamId: string): readonly string[] =>
+  match.players
+    .filter(({ teamId }) => teamId === winnerTeamId)
+    .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
+    .map(({ playerId }) => playerId);
+
+/**
+ * LO QUE SE JUEGA LA MESA, con el aumento aceptado adentro. El `level` del aumento ES el
+ * multiplicador de la mesa (2, 3, 5), y al aceptarlo cada uno pagó la diferencia de la inscripción
+ * (`betAmountsOf`); el premio que esa plata respalda es el de la mesa por el mismo nivel. v1 lo
+ * escribe al aceptar (`state.prize = proposal.newPrize`) y paga ése. Sin aumento el nivel es 0 y la
+ * mesa vale lo de siempre.
+ */
+export const stakesOf = (
+  table: { readonly entryFee: number; readonly prize: number },
+  match: Pick<MatchState, "acceptedBetLevel">,
+): { readonly entryFee: number; readonly prize: number } => {
+  const level = match.acceptedBetLevel > 0 ? match.acceptedBetLevel : 1;
+  return { entryFee: table.entryFee * level, prize: table.prize * level };
+};
 
 /**
  * A QUIÉN SE LE DEVUELVE LA INSCRIPCIÓN DE UNA MESA SIN VEREDICTO: a todos menos al que se fue
