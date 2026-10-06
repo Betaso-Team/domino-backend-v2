@@ -18,6 +18,16 @@ export type { DominoMatchConfig } from "./core/config";
 // composition root lo empareja con un nombre de sección; la feature `settings` no conoce ninguna
 // config.
 export { MATCH_EDITABLE, MATCH_NOT_EDITABLE, matchConfigPatch } from "./config-schema";
+export {
+  DEAL_PRESET_EDITABLE,
+  STARTING_SCORE_EDITABLE,
+  dealPresetPatch,
+  startingScoreBelow,
+  startingScorePatch,
+} from "./dev-presets";
+export { type DealPreset, NO_DEAL_PRESET } from "./core/engine/dealer";
+export { NO_STARTING_SCORE, type StartingScore } from "./core/engine/genesis";
+export type { DevPresetSource } from "./transports/colyseus/commands/di-wiring";
 export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
 export type { HistoryReader } from "./network/history";

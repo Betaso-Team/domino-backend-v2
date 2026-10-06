@@ -42,13 +42,23 @@ import {
   type BetLevelBook,
   CachedBetLevelBook,
   ColyseusMatchGateway,
+  DEAL_PRESET_EDITABLE,
+  type DealPreset,
+  type DevPresetSource,
   HttpBetLevelBook,
   MATCH_EDITABLE,
   MatchPlatform,
   MatchRegistry,
   NO_BET_LEVELS,
+  NO_DEAL_PRESET,
+  NO_STARTING_SCORE,
   RematchCoordinator,
+  STARTING_SCORE_EDITABLE,
+  type StartingScore,
+  dealPresetPatch,
   matchConfigPatch,
+  startingScoreBelow,
+  startingScorePatch,
 } from "@/features/match";
 import {
   type GlobalConfigSource,
@@ -112,7 +122,7 @@ import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
 import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
 import { container } from "tsyringe";
-import { env } from "./env";
+import { env, isDevEnvironment } from "./env";
 import { type Logger, logger } from "./logger";
 
 // Acá viven solo dependencias globales y sin estado de partida. Los actores del motor
@@ -419,6 +429,26 @@ export const settingsSections: readonly SettingsSection[] = [
     editable: MATCHMAKING_EDITABLE,
     defaults: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig"),
   },
+  // LAS DOS DE PRUEBA A MANO, y SÓLO donde existen: fijan las fichas y el marcador, que es lo que
+  // probar a mano necesita y lo que ningún jugador en ningún otro lado puede poder hacer. Detrás de
+  // la misma llave del panel que las demás —truco las sirve sin llave; acá no hay por qué abrir una
+  // puerta que dev ya tiene—. Portadas de truco (`d6e3219`, `6da7372`).
+  ...(isDevEnvironment(env.appEnv)
+    ? [
+        {
+          name: "deal",
+          schema: dealPresetPatch,
+          editable: DEAL_PRESET_EDITABLE,
+          defaults: () => NO_DEAL_PRESET,
+        },
+        {
+          name: "starting-score",
+          schema: startingScorePatch,
+          editable: STARTING_SCORE_EDITABLE,
+          defaults: () => NO_STARTING_SCORE,
+        },
+      ]
+    : []),
 ];
 export const settingsSignal = new PolledSettingsSignal({
   book: settingsStore,
@@ -433,6 +463,24 @@ export const settingsWriter: SettingsWriter = settingsStore;
 rootContainer.register<GlobalConfigSource>("GlobalConfigSource", {
   useValue: () => settingsSignal.effective<GlobalDominoConfig>("match"),
 });
+// Leídas UNA vez por mesa, como la config de arriba: una edición a mitad de partida espera a la
+// siguiente. El aviso es para el que lea una partida donde las fichas no fueron suerte y se olvidó
+// de que el preset estaba puesto.
+if (isDevEnvironment(env.appEnv)) {
+  rootContainer.register<DevPresetSource>("DevPresetSource", {
+    useValue: (pointsToWin) => {
+      const dealPreset = settingsSignal.effective<DealPreset>("deal");
+      const startingScore = startingScoreBelow(
+        settingsSignal.effective<StartingScore>("starting-score"),
+        pointsToWin,
+      );
+      if (dealPreset.hands.length > 0) logger.warn("reparto preparado", { dealPreset });
+      if (startingScore.teamA > 0 || startingScore.teamB > 0)
+        logger.warn("marcador inicial preparado", { startingScore });
+      return { dealPreset, startingScore };
+    },
+  });
+}
 // El emparejamiento lee la suya POR USO y no por mesa: los números se preguntan cuando alguien entra
 // a la cola, no cuando arrancó el proceso.
 const matchmakingConfig = (): MatchmakingConfig =>

@@ -106,3 +106,21 @@ describe("createMatchState", () => {
     for (const privateValue of ["betaso", "VES"]) expect(wire).not.toContain(privateValue);
   });
 });
+
+// EL MARCADOR INICIAL, sólo para probar a mano el final de una partida sin jugarla entera (truco
+// `6da7372`). Se toma tal cual: mantenerlo por debajo de la meta es de quien llama, porque un equipo
+// que naciera en ella habría ganado una partida que nadie jugó.
+describe("createMatchState con marcador inicial", () => {
+  it("nace con el marcador pedido", () => {
+    const match = createMatchState(config(["u1", "u2"]), { teamA: 90, teamB: 15 });
+
+    expect(scoreboardOf(match)).toMatchObject({ teamA: 90, teamB: 15 });
+  });
+
+  it("sin pedirlo nace en cero", () => {
+    expect(scoreboardOf(createMatchState(config(["u1", "u2"])))).toMatchObject({
+      teamA: 0,
+      teamB: 0,
+    });
+  });
+});

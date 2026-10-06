@@ -13,8 +13,8 @@ import { RespondRematchCommand } from "../core/commands/respond-rematch";
 import { type DominoMatchConfig, type GlobalDominoConfig, playerIdsOf } from "../core/config";
 import { BetNegotiation, BetReferee } from "../core/engine/bet";
 import type { Clock } from "../core/engine/clock";
-import { Dealer } from "../core/engine/dealer";
-import { createMatchState } from "../core/engine/genesis";
+import { type DealPreset, Dealer } from "../core/engine/dealer";
+import { type StartingScore, createMatchState } from "../core/engine/genesis";
 import { MatchDriver } from "../core/engine/match/driver";
 import { MatchPlayer } from "../core/engine/match/player";
 import { MatchReferee } from "../core/engine/match/referee";
@@ -87,6 +87,10 @@ export interface EngineDeps {
   readonly clock: Clock;
   readonly scheduler: TimeoutScheduler;
   readonly visibility: SchemaVisibilityController;
+  // LAS DOS DE PRUEBA A MANO, sólo en local y dev (`dev-presets.ts`). Las pasa la sala; el replay
+  // nunca: rebobina con la semilla, que es lo único grabado.
+  readonly dealPreset?: DealPreset;
+  readonly startingScore?: StartingScore;
 }
 
 // EN ORDEN DE DEPENDENCIA: jueces, servicios, conductores, players, facades, comandos.
@@ -101,11 +105,11 @@ export function buildEngineGraph(
   globalConfig: GlobalDominoConfig,
   deps: EngineDeps,
 ): EngineGraph {
-  const match = createMatchState(config);
+  const match = createMatchState(config, deps.startingScore);
   const matchReferee = new MatchReferee(match);
   const roundReferee = new RoundReferee(match);
   const scorer = new Scorer(match);
-  const dealer = new Dealer(match, config, globalConfig);
+  const dealer = new Dealer(match, config, globalConfig, deps.dealPreset);
   const repository = new PlayerRepository(
     playerIdsOf(config),
     (playerId) => new MatchPlayer(playerId, match),
