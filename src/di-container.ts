@@ -575,6 +575,7 @@ rootContainer.register("MatchSinks", {
         {
           poolId: casual ? options.gameModeId : options.tournamentId,
           playerIds: options.seats,
+          mode: options.mode,
         },
       ),
     ];

@@ -21,6 +21,7 @@ import type { MatchState } from "../core/state";
 import type { DominoRoomOptions } from "../transports/match-contract";
 import type { MatchEventSink } from "./listeners";
 import type { MatchSummaryPort } from "./player-log";
+import { isRefundable } from "./settlement";
 
 export class AdmissionRefusedError extends Error {
   constructor(
@@ -95,7 +96,10 @@ export class MatchPlatform {
         if (options.mode === "CASUAL") {
           if (event.type === "MATCH_ABORTED") {
             void this.deps.wallet
-              .refundMatch(matchId, options.seats)
+              .refundMatch(
+                matchId,
+                match.players.filter(isRefundable).map(({ playerId }) => playerId),
+              )
               .catch((err) => this.deps.log.error("falló el reembolso de sala", { err, matchId }));
           }
           if (event.type === "MATCH_RESOLVED") {

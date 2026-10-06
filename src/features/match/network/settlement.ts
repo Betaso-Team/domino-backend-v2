@@ -154,6 +154,19 @@ function rewardOf(
 }
 
 /**
+ * A QUIÉN SE LE DEVUELVE LA INSCRIPCIÓN DE UNA MESA SIN VEREDICTO: a todos menos al que se fue
+ * habiendo levantado sus fichas. Es la regla de v1 (`two-players/domino-room-state.ts:467-475`
+ * filtra de `quitPlayers` a los `isValid`), y es UNA sola para todos los motivos: sólo una mesa
+ * anulada en el reparto puede dejar a alguien afuera, porque el que se va a mitad de partida le
+ * da el veredicto al rival y esa mesa no se aborta.
+ *
+ * Vive acá y la usan los DOS que reembolsan —esta proyección y la billetera de Betaso—, porque
+ * dos reglas para la misma mesa le devolverían a uno según quién pague.
+ */
+export const isRefundable = (player: { hasAbandoned: boolean; hasSeenTiles: boolean }) =>
+  !(player.hasAbandoned && player.hasSeenTiles);
+
+/**
  * El desenlace de la mesa como instrucción monetaria, o `undefined` si el evento no es un
  * desenlace. La mayoría de los eventos no lo son —una desconexión no es plata— y devolver
  * `undefined` es lo que deja al que llame filtrar sin conocer el catálogo entero.
@@ -181,13 +194,16 @@ export function settlementOf(
   switch (event.type) {
     case "MATCH_ABORTED": {
       assertSameTable(match, config);
+      const refundable = new Set(
+        match.players.filter(isRefundable).map(({ playerId }) => playerId),
+      );
       return {
         matchId: config.matchId,
         rateId: config.rateId,
         kind: "REFUND",
-        entries: config.seats.map((seat) =>
-          entryOf(config.matchId, "REFUND", config.entryFee, seat),
-        ),
+        entries: config.seats
+          .filter(({ playerId }) => refundable.has(playerId))
+          .map((seat) => entryOf(config.matchId, "REFUND", config.entryFee, seat)),
       };
     }
     case "MATCH_RESOLVED": {

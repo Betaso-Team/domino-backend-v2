@@ -35,7 +35,12 @@ export function registerCasualVeto(
   match: MatchState,
 ): MatchEventListener {
   return (event) => {
-    if (event.type !== "MATCH_RESOLVED") return [];
+    // La revancha ANULADA EN EL REPARTO también veta: irse de ella con la ventana abierta es la
+    // misma repetición con un paso menos. Una sala que se murió, no.
+    const closed =
+      event.type === "MATCH_RESOLVED" ||
+      (event.type === "MATCH_ABORTED" && event.reason === "TILES_NOT_SEEN");
+    if (!closed) return [];
     if ((options.rematchCount ?? 0) <= 0) return [];
     return [{ type: "CASUAL_PAIR_VETOED", playerIds: match.players.map((p) => p.playerId) }];
   };

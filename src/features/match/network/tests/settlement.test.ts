@@ -68,7 +68,12 @@ const refundOfMoney1 = {
   ],
 };
 
-const abortReasons: readonly AbortReason[] = ["NEVER_STARTED", "NEVER_PLAYED", "INTERRUPTED"];
+const abortReasons: readonly AbortReason[] = [
+  "NEVER_STARTED",
+  "TILES_NOT_SEEN",
+  "NEVER_PLAYED",
+  "INTERRUPTED",
+];
 
 describe("settlementOf", () => {
   it("premia al ganador con su identidad y la moneda cobrada", () => {
@@ -99,6 +104,26 @@ describe("settlementOf", () => {
       );
     },
   );
+
+  // ⚠ SALVO AL QUE SE FUE HABIENDO LEVANTADO SUS FICHAS, que pierde la inscripción como en v1
+  // (`two-players/domino-room-state.ts:467-475`). Es la misma regla que la billetera de Betaso
+  // (`refundableSeats`), y tiene que serlo: dos reglas de reembolso para la misma mesa le
+  // devuelven a uno según quién pague.
+  it("no le devuelve la inscripción al que se fue habiendo levantado sus fichas", () => {
+    const match = matchOf();
+    Object.assign(match.players[0] ?? {}, { hasAbandoned: true, hasSeenTiles: true });
+    expect(
+      settlementOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config),
+    ).toEqual({ ...refundOfMoney1, entries: [refundOfMoney1.entries[1]] });
+  });
+
+  it("el que se fue SIN levantar sí recupera la inscripción", () => {
+    const match = matchOf();
+    Object.assign(match.players[0] ?? {}, { hasAbandoned: true, hasSeenTiles: false });
+    expect(
+      settlementOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config),
+    ).toEqual(refundOfMoney1);
+  });
 
   it("reembolsa las cuatro entradas de una mesa de cuatro, cada una en su moneda", () => {
     const fourSeatConfig = replayConfigOf(fourSeatOptions);
