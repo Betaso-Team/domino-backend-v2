@@ -91,6 +91,8 @@ const ticket = (playerId: string): Ticket => ({
   request: { kind: "CASUAL", gameModeId: "x" },
   enqueuedAt: 0,
   avoid: [],
+  softWindow: false,
+  shark: false,
 });
 
 const reasonOf = async (run: () => Promise<unknown>): Promise<string> => {

@@ -2,6 +2,10 @@ export interface GroupingTicket {
   readonly playerId: string;
   readonly enqueuedAt: number;
   readonly avoid: readonly string[];
+  /** core-loop: ¿prefiere ahora rivales de winrate bajo? */
+  readonly softWindow: boolean;
+  /** core-loop: ¿ES el rival fuerte que los de esa ventana prefieren evitar? */
+  readonly shark: boolean;
 }
 
 // WHO PLAYS TOGETHER, and in what order. The pure matchmaking rule: it knows neither the transport,
@@ -20,6 +24,9 @@ export interface GroupingOptions {
   readonly seats: number;
   readonly now: number;
   readonly vetoBypassMs: number;
+  // El plazo de gracia PROPIO de core-loop, sólo para el filtro de sharks: es una preferencia MÁS
+  // DÉBIL que el veto del antifraude, así que cede primero. Ver el paso del medio de `formGroup`.
+  readonly softTimeoutMs: number;
   readonly candidates: number;
 }
 
@@ -40,13 +47,22 @@ export function formGroup<T extends GroupingTicket>(
   const byArrival = [...waiting].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
   const pool = byArrival.slice(0, Math.max(seats, options.candidates));
 
-  const clean = firstCombination(pool, seats, (group) => !hasVeto(group));
+  const longestWait = options.now - (byArrival[0]?.enqueuedAt ?? options.now);
+
+  const clean = firstCombination(pool, seats, (group) => !hasVeto(group) && !hasShark(group));
   if (clean) return seatOrderOf(clean);
 
-  // No clean group exists. The veto is broken only once whoever waited longest is past their grace
-  // period: that is the guarantee that nobody is left hanging by the antifraude. Until then it keeps
-  // waiting — with a healthy pool, someone vetoed with nobody turns up within seconds.
-  const longestWait = options.now - (byArrival[0]?.enqueuedAt ?? options.now);
+  // No clean group exists. core-loop's preference gives way FIRST — it is weaker than the antifraude
+  // veto, which keeps applying below — so a novice can still end up against a shark before the veto's
+  // own grace period runs out, if that is the only way to avoid leaving them waiting.
+  if (longestWait >= options.softTimeoutMs) {
+    const withoutVeto = firstCombination(pool, seats, (group) => !hasVeto(group));
+    if (withoutVeto) return seatOrderOf(withoutVeto);
+  }
+
+  // The veto is broken only once whoever waited longest is past their grace period: that is the
+  // guarantee that nobody is left hanging by the antifraude. Until then it keeps waiting — with a
+  // healthy pool, someone vetoed with nobody turns up within seconds.
   if (longestWait < options.vetoBypassMs) return undefined;
   return seatOrderOf(pool.slice(0, seats));
 }
@@ -60,6 +76,20 @@ function hasVeto(group: readonly GroupingTicket[]): boolean {
       const a = group[i] as GroupingTicket;
       const b = group[j] as GroupingTicket;
       if (a.avoid.includes(b.playerId) || b.avoid.includes(a.playerId)) return true;
+    }
+  return false;
+}
+
+// Does the group put someone in the soft window against a shark? Only RIVAL pairs count — a shark
+// landing as a PARTNER is not the pattern the benefit protects against — and the team split is by
+// seat parity (`seatOrderOf` below), so `i % 2` already says which side each seat is on.
+function hasShark(group: readonly GroupingTicket[]): boolean {
+  for (let i = 0; i < group.length; i++)
+    for (let j = i + 1; j < group.length; j++) {
+      if (i % 2 === j % 2) continue;
+      const a = group[i] as GroupingTicket;
+      const b = group[j] as GroupingTicket;
+      if ((a.softWindow && b.shark) || (b.softWindow && a.shark)) return true;
     }
   return false;
 }

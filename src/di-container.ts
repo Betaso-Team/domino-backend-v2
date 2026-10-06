@@ -2,6 +2,13 @@ import "reflect-metadata";
 import { randomUUID } from "node:crypto";
 import { JwtVerifier } from "@/features/auth";
 import {
+  CachedCoreLoopSettings,
+  HttpCoreLoopClient,
+  NEUTRAL_CORE_LOOP_SETTINGS,
+  SoftProfileResolver,
+  SoftWindowBook,
+} from "@/features/core-loop";
+import {
   type AccountDirectory,
   AccountUnavailableError,
   AmqpWallet,
@@ -468,6 +475,37 @@ const poolDirectory = new ScopedPoolDirectory(
     avoid: (tournamentId, playerId) => tournamentVeto.vetoedFor(tournamentId, playerId),
   },
 );
+// CORE-LOOP, la retención de jugadores nuevos del backend principal: rake perdonado al pagar y una
+// ventana de emparejamiento blando para quien sigue adentro. Mismo criterio que el antifraude: hace
+// falta el backend Y la llave interna. Sin alguno de los dos las perillas son las de la feature
+// APAGADA y nadie entra a la ventana — el comportamiento de siempre.
+const coreLoopClient =
+  http && env.backendApiKey
+    ? new HttpCoreLoopClient(http, { value: env.backendApiKey })
+    : undefined;
+// Cacheadas como el antifraude pero con el lado seguro dado vuelta: una fuente que no contesta deja
+// la ventana blanda APAGADA, nunca filtrando con números inventados.
+const coreLoopSettings = new CachedCoreLoopSettings(
+  coreLoopClient ?? { settings: async () => NEUTRAL_CORE_LOOP_SETTINGS },
+  5_000,
+  clock.now,
+  logger,
+);
+// La nota local de la ventana blanda, en el MISMO almacén que los libros del antifraude. Una semana y
+// no las horas del antifraude: tiene que sobrevivir el tiempo entre dos partidas de un novato, y uno
+// que vuelve después de días no debería haber salido de ella en silencio.
+const softWindowBook = new SoftWindowBook(store, 7 * 24 * 60 * 60 * 1000);
+// Las tres juntas: ¿está prendida, ESTE jugador sigue en la ventana, ESTE candidato supera el techo
+// de winrate? El winrate sale del historial de dominó (`PlayerLog`), con su propia cache corta.
+const softProfile = new SoftProfileResolver(
+  coreLoopSettings,
+  softWindowBook,
+  history,
+  30_000,
+  clock.now,
+  logger,
+);
+
 const gateway = new ColyseusMatchGateway();
 // El MISMO gateway que usa el emparejador, registrado para la API del orquestador.
 rootContainer.register(ColyseusMatchGateway, { useValue: gateway });
@@ -481,6 +519,8 @@ export const matchmaker = new Matchmaker({
   maintenance: maintenanceSignal,
   now: clock.now,
   seedOf: randomUUID,
+  softProfile: (playerId) => softProfile.profileOf(playerId),
+  softTimeoutMs: async () => (await coreLoopSettings.settings()).softTimeoutSeconds * 1000,
   log: logger,
 });
 // EL COORDINADOR DE LA REVANCHA, con las tres piezas que ya existían y una que es nueva sólo

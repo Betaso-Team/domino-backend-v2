@@ -26,6 +26,10 @@ export interface Ticket {
   readonly enqueuedAt: number;
   /** Who they would rather not cross. A preference, never a permanent block. */
   readonly avoid: readonly string[];
+  /** core-loop: do they prefer rivals with a low winrate right now. */
+  readonly softWindow: boolean;
+  /** core-loop: ARE they the strong rival others in that window prefer to avoid. */
+  readonly shark: boolean;
 }
 
 /**

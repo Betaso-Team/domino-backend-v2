@@ -1,3 +1,4 @@
+import type { SoftProfile } from "@/features/core-loop";
 import type { Logger } from "@/shared/logger";
 import { sleep } from "@/shared/sleep";
 import { newTrace, withTrace } from "@/shared/trace";
@@ -55,6 +56,12 @@ export interface MatchmakerDeps {
   // The match seed, which goes into the room options. Injected so the suite can fix it: the deal
   // depends on it.
   readonly seedOf: () => string;
+  // core-loop's preference: resolved ONCE per request, next to `avoid`, and not per tick — the same
+  // reasoning as the scope's own restrictions, paid once and not on every pass.
+  readonly softProfile: (playerId: string) => Promise<SoftProfile>;
+  // Its own grace period, read at use time like `config()`: it lives in the main backend, moves
+  // without a deploy, and every pass should see the current value.
+  readonly softTimeoutMs: () => Promise<number>;
   readonly log: Logger;
 }
 
@@ -184,6 +191,7 @@ export class Matchmaker {
     if (signal.aborted) throw new MatchmakingError("CANCELLED");
 
     const avoid = await spec.avoid(playerId);
+    const { inSoftWindow, isShark } = await this.deps.softProfile(playerId);
 
     const seat = new Promise<Seat>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -212,6 +220,8 @@ export class Matchmaker {
       request,
       enqueuedAt: this.deps.now(),
       avoid,
+      softWindow: inSoftWindow,
+      shark: isShark,
     };
     await this.deps.pool.enqueue(ticket);
     // Enqueueing and cancelling are TWO steps, and the abort can land right in the gap — or even
@@ -267,6 +277,7 @@ export class Matchmaker {
       seats: spec.seats,
       now: this.deps.now(),
       vetoBypassMs: this.deps.config().vetoBypassMs,
+      softTimeoutMs: await this.deps.softTimeoutMs(),
       candidates: this.deps.config().groupingCandidates,
     });
     if (!group) return false;
