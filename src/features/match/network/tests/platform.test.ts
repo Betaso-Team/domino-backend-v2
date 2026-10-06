@@ -6,7 +6,12 @@ import { FakeWallet } from "@/tests/fake-wallet";
 import { describe, expect, it } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
 import { matchConfig } from "../../core/engine/tests/match-config-fixture";
-import type { CasualRoomOptions } from "../../transports/match-contract";
+import { RoundState } from "../../core/state";
+import type {
+  CasualRoomOptions,
+  DominoRoomOptions,
+  TournamentRoomOptions,
+} from "../../transports/match-contract";
 import type { NetworkMatchEvent } from "../events";
 import { MatchPlatform } from "../platform";
 
@@ -22,9 +27,18 @@ const CASUAL: CasualRoomOptions = {
   isFreeRoom: false,
 };
 
+const TOURNAMENT: TournamentRoomOptions = {
+  mode: "TOURNAMENT",
+  tournamentId: "t1",
+  seats: ["u1", "u2"],
+  seed: "s",
+  pointsToWin: 100,
+  pointsPerLoss: 1,
+};
+
 const unused = {} as never;
 
-function build() {
+function build(options: DominoRoomOptions = CASUAL) {
   const wallet = new FakeWallet();
   const kv = new MemoryKeyValueStore(() => 0);
   const platform = new MatchPlatform({
@@ -39,9 +53,18 @@ function build() {
     log: new MemoryLogger(),
   });
   const match = createMatchState(matchConfig(["u1", "u2"]));
-  const sink = (events: readonly NetworkMatchEvent[]) =>
-    platform.sinkFor(CASUAL, "match-1", match, () => {})(events);
-  return { wallet, match, sink };
+  const sent: { playerId: string; type: string }[] = [];
+  // UNO por mesa, como en la sala: lo que el sink recuerda entre lotes —a quién retiró el
+  // sistema— vive en su cierre.
+  const sink: (events: readonly NetworkMatchEvent[]) => void = platform.sinkFor(
+    options,
+    "match-1",
+    match,
+    (playerId, type) => sent.push({ playerId, type }),
+  );
+  const penalized = () =>
+    sent.filter(({ type }) => type === "TOURNAMENT_PENALTY").map(({ playerId }) => playerId);
+  return { wallet, match, sink, penalized };
 }
 
 // Deja correr las promesas que el sink dispara: es síncrono a propósito —el motor lo es— y lo
@@ -72,4 +95,76 @@ describe("el reembolso de una mesa sin veredicto", () => {
       expect(wallet.refunded).toEqual([{ matchId: "match-1", playerIds: refunded }]);
     },
   );
+});
+
+// IRSE DE UNA PARTIDA DE TORNEO CUESTA UN STRIKE, y se distingue QUIÉN dijo el abandono:
+//
+//   · el SISTEMA, que retira al que se quedó sin tiempo. Su `ABANDON` existe sólo cuando lo dijo
+//     el sistema, así que se cobra en el acto — salvo que haya sido la ventana de reparto, que no
+//     cuesta nada (v1 no anota strike en `on-timeout-reveal.ts`).
+//   · el JUGADOR, con el verbo. Un comando no emite evento, así que se lee del estado al cerrarse
+//     la partida: el que abandonó y no fue retirado por el sistema se fue a propósito. Es el
+//     `consented` de v1 (`tournaments/game/commands/on-leave.ts:33`).
+describe("los strikes de torneo", () => {
+  it("el que se va POR SU CUENTA se lleva un strike al cerrarse la partida", async () => {
+    const { match, sink, penalized } = build(TOURNAMENT);
+    Object.assign(match.players[0] ?? {}, { hasAbandoned: true });
+
+    sink([{ type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" }]);
+    await settle();
+
+    expect(penalized()).toEqual(["u1"]);
+  });
+
+  it("el retirado por el reloj se lleva UN strike en el acto, y no otro al cerrarse", async () => {
+    const { match, sink, penalized } = build(TOURNAMENT);
+    Object.assign(match.players[0] ?? {}, { hasAbandoned: true });
+
+    sink([{ type: "ABANDON", playerId: "u1" }]);
+    sink([{ type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" }]);
+    await settle();
+
+    expect(penalized()).toEqual(["u1"]);
+  });
+
+  describe("con la partida anulada en el reparto", () => {
+    const abortedAtDeal = () => {
+      const built = build(TOURNAMENT);
+      built.match.currentRound = new RoundState();
+      built.match.currentRound.roundNumber = 1;
+      built.match.currentRound.phase = "DEALING";
+      return built;
+    };
+
+    it("no levantar a tiempo NO cuesta un strike", async () => {
+      const { match, sink, penalized } = abortedAtDeal();
+      Object.assign(match.players[0] ?? {}, { hasAbandoned: true });
+
+      sink([{ type: "ABANDON", playerId: "u1" }]);
+      sink([{ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }]);
+      await settle();
+
+      expect(penalized()).toEqual([]);
+    });
+
+    it("irse por su cuenta con la ventana abierta SÍ cuesta", async () => {
+      const { match, sink, penalized } = abortedAtDeal();
+      Object.assign(match.players[1] ?? {}, { hasAbandoned: true });
+
+      sink([{ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }]);
+      await settle();
+
+      expect(penalized()).toEqual(["u2"]);
+    });
+  });
+
+  it("en casual no hay strikes: irse ya cuesta la inscripción", async () => {
+    const { match, sink, penalized } = build(CASUAL);
+    Object.assign(match.players[0] ?? {}, { hasAbandoned: true });
+
+    sink([{ type: "MATCH_RESOLVED", winnerTeamId: "B", reason: "ABANDONMENT" }]);
+    await settle();
+
+    expect(penalized()).toEqual([]);
+  });
 });
