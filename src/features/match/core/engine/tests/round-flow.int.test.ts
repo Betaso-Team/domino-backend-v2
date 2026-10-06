@@ -391,6 +391,22 @@ describe("flujo de la ronda", () => {
     expect(e.match.phase).toBe("FINISHED");
     expect(closingEvents).toEqual([{ type: "DEADLINE_EXPIRED", kind: "PRESENTING_MATCH" }]);
   });
+
+  // ⚠ LA META ALCANZADA LE GANA AL FORFEIT. Los puntos de la mano que decide se acreditan al
+  // CERRARLA, pero el veredicto de la partida recién sale cuando vence la pausa de la mano, y en
+  // esa pausa la partida sigue en juego: `ABANDON` es legal. Con el forfeit preguntado primero, el
+  // que acababa de ganar y apretaba «salir» le regalaba la partida —y el premio— al rival.
+  // Truco lo cerró en `6da7372`.
+  it("el ganador que se retira en la pausa de la mano decisiva NO pierde la partida", () => {
+    const e = engineWithHands({ u1: [[6, 6]], u2: [[6, 3]] });
+    e.match.pointsToWin = 9;
+    e.start();
+    e.playTile("u1", { left: 6, right: 6 }, "RIGHT");
+    expect(e.round().phase).toBe("PRESENTING_ROUND");
+
+    const events = e.abandon("u1");
+    expect(events).toContainEqual({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" });
+  });
 });
 
 // LA MESA DE CUATRO. El arnés arma los equipos por asiento (`SEAT_ORDER`), así que las parejas

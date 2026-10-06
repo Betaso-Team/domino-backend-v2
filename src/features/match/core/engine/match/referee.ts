@@ -41,15 +41,25 @@ export class MatchReferee {
     // el rival» dejaría la mesa sin premio (nunca pasó por `MATCH_RESOLVED`) y sin reembolso.
     if (wasAbortedAtDeal(this.match)) return undefined;
 
-    // SI SE FUERON LOS DOS, NO GANÓ NADIE — y hay que decirlo ANTES que nada. Preguntando
+    // LA META ALCANZADA LE GANA A CUALQUIER FORFEIT, y va antes que los abandonos. Los puntos de
+    // la mano decisiva se acreditan al CERRARLA, pero el veredicto sale recién al vencer su pausa,
+    // y en esa pausa `ABANDON` sigue siendo legal: preguntando primero por el retiro, el que
+    // acababa de ganar y apretaba «salir» le regalaba la partida —y el premio— al rival. La meta
+    // sólo se alcanza al cerrar una mano, así que acá no hay forfeit que pueda haber llegado antes.
+    const { teamA, teamB } = scoreboardOf(this.match);
+    const target = this.match.pointsToWin;
+    if (teamA >= target) return { winnerTeamId: "A", reason: "SCORE" };
+    if (teamB >= target) return { winnerTeamId: "B", reason: "SCORE" };
+
+    // SI SE FUERON LOS DOS, NO GANÓ NADIE — y hay que decirlo ANTES que el forfeit. Preguntando
     // por un equipo primero, el orden de evaluación coronaría al otro, y esa partida
     // —que nadie jugó— **pagaría premio**. En un juego con dinero eso no es un detalle
     // de estilo: es plata que sale por un `for` que no miró el caso.
     //
-    // Era inalcanzable hasta la ventana de reparto (reglas §3.1): el primer forfeit
-    // resolvía la partida y ya no quedaba a quién retirar. El vencimiento de la ventana
-    // puede retirar a varios de una, así que ahora se alcanza. Truco lo descubrió al
-    // implementar la ventana; acá nace cubierto.
+    // El único camino que retira a varios de una —el vencimiento de la ventana de reparto— ya
+    // contestó arriba (`wasAbortedAtDeal`), así que hoy es una red: el primer forfeit resuelve la
+    // partida y ya no queda a quién retirar. Se queda porque es la pregunta que sale plata si
+    // alguna vez aparece otro camino.
     if (hasTeamAbandoned("A", this.match) && hasTeamAbandoned("B", this.match)) {
       return undefined;
     }
@@ -59,10 +69,6 @@ export class MatchReferee {
         return { winnerTeamId: opponentTeam(teamId), reason: "ABANDONMENT" };
       }
     }
-    const { teamA, teamB } = scoreboardOf(this.match);
-    const target = this.match.pointsToWin;
-    if (teamA >= target) return { winnerTeamId: "A", reason: "SCORE" };
-    if (teamB >= target) return { winnerTeamId: "B", reason: "SCORE" };
     return undefined;
   }
 }
