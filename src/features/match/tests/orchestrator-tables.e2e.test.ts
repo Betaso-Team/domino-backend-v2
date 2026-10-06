@@ -76,14 +76,41 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
       rooms.push(await server.sdk.consumeSeatReservation(seat.reservation as never));
     }
     const [quitter, stayer] = rooms;
-    const state = () => stayer?.state as { phase?: string } | undefined;
+    const state = () =>
+      stayer?.state as { phase?: string; currentRound?: { phase?: string } } | undefined;
     await waitUntil(() => state()?.phase !== undefined && state()?.phase !== "NOT_STARTED");
+    // Destapadas primero: con la ventana de reparto abierta, irse ANULA la partida (el caso de abajo).
+    for (const room of rooms) room.send("REVEAL_TILES", {});
+    await waitUntil(() => state()?.currentRound?.phase === "PLAYING");
 
     quitter?.send("ABANDON", {});
 
     await waitUntil(async () => (await post("/internal/players/o-r2/seat")).status === 404);
     expect((await post("/internal/players/o-r1/seat")).status).toBe(404);
     expect(stayer?.connection.isOpen).toBe(true);
+  });
+
+  // Y TAMBIÉN LA ANULADA EN EL REPARTO, que no tiene veredicto: no hay revancha posible ni partida
+  // que volver a jugar, así que retener al que se quedó lo mandaría de vuelta a una mesa muerta —y
+  // el orquestador no podría abrirle otra hasta que la sala se disponga—.
+  it("suelta a los dos cuando la partida se anula en el reparto", async () => {
+    const opened = (await (
+      await post("/internal/matches", casualTable(["o-z1", "o-z2"]))
+    ).json()) as Opened;
+    const rooms = [];
+    for (const seat of opened.data.seats) {
+      server.sdk.auth.token = mintToken(seat.userId);
+      rooms.push(await server.sdk.consumeSeatReservation(seat.reservation as never));
+    }
+    const [quitter, stayer] = rooms;
+    const state = () => stayer?.state as { phase?: string } | undefined;
+    await waitUntil(() => state()?.phase !== undefined && state()?.phase !== "NOT_STARTED");
+
+    quitter?.send("ABANDON", {});
+
+    await waitUntil(async () => (await post("/internal/players/o-z2/seat")).status === 404);
+    expect((await post("/internal/players/o-z1/seat")).status).toBe(404);
+    expect(state()?.phase).not.toBe("PLAYING");
   });
 
   // UNA SALA BLOQUEADA NO ES UNA SALA AUSENTE: cada vuelta sin consumir es una reserva y cuenta

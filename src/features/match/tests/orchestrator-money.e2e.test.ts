@@ -204,7 +204,8 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
 
   it("al resolverse, publica el resultado y no reporta ranking ni liga a Betaso", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    // Destapadas primero: irse con la ventana de reparto abierta ANULA, no resuelve.
+    await revealHands(match);
     await act(match, "r1", "ABANDON");
     const key = `${match.config.matchId}:finished`;
     await waitUntil(async () => (await matchResults.present([key])).has(key), 3_000);
@@ -218,7 +219,7 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
       prize: 0,
       isFreeRoom: true,
     });
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    await revealHands(match);
     await act(match, "l1", "ABANDON");
     await waitUntil(() => record.mock.calls.length === 1, 3_000);
     const key = `${match.config.matchId}:finished`;

@@ -37,16 +37,21 @@ export interface MatchOrigin {
   // The pool they came out of: the table in casual, the tournament in a tournament.
   readonly poolId: string;
   readonly playerIds: readonly string[];
+  readonly mode: "CASUAL" | "TOURNAMENT";
 }
 
-// BOTH endings. The cooldown is handed out alike in either: all it does is keep them from returning
-// to the queue at the same instant, which holds whether the match ended well or fell over.
-const CLOSED = new Set(["MATCH_RESOLVED", "MATCH_ABORTED"]);
+// Which endings hand out the cooldown. In casual BOTH: all it does is keep them from returning to the
+// queue at the same instant, which holds whether the match ended well or fell over. In a tournament
+// only a verdict does — a match with none counts for nothing there, the queue included.
+const CLOSED = {
+  CASUAL: new Set(["MATCH_RESOLVED", "MATCH_ABORTED"]),
+  TOURNAMENT: new Set(["MATCH_RESOLVED"]),
+} as const;
 
 export function matchmakingSink(deps: MatchmakingFeedbackDeps, match: MatchOrigin) {
   return (events: readonly AnyEvent[]): void => {
     for (const event of events) {
-      if (CLOSED.has(event.type)) {
+      if (CLOSED[match.mode].has(event.type)) {
         // The books live in Redis, so writing is asynchronous and this sink is not — the notifier
         // that calls it is synchronous by contract. It is released with its own `.catch()`: in Node
         // an unhandled rejection terminates the process, and this runs when EVERY match closes.

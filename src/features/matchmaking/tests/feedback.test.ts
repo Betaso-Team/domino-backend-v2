@@ -10,7 +10,7 @@ import { CASUAL_SCOPE, VetoBook, casualVetoKey } from "../veto";
 // THE BRIDGE between a match and matchmaking. What is tested is that the facts the scope decides end
 // up written in the books matchmaking reads — with neither feature importing the other.
 
-function setup(enabled = true) {
+function setup(enabled = true, mode: "CASUAL" | "TOURNAMENT" = "CASUAL") {
   const clock = { now: 1000 };
   const kv = new MemoryKeyValueStore(() => clock.now);
   const cooldown = new CooldownBook(
@@ -22,7 +22,7 @@ function setup(enabled = true) {
   const veto = new VetoBook(kv, casualVetoKey, { ttlMs: 30 * 60_000 });
   const sink = matchmakingSink(
     { cooldown, veto, isCasualVetoEnabled: async () => enabled, log: new MemoryLogger() },
-    { poolId: "mesa", playerIds: ["u1", "u2"] },
+    { poolId: "mesa", playerIds: ["u1", "u2"], mode },
   );
   return { sink, cooldown, veto, clock };
 }
@@ -53,6 +53,19 @@ describe("El sink del emparejamiento", () => {
     await settle();
 
     expect(await s.cooldown.consume("mesa", "u1")).toBe(2_000);
+  });
+
+  // EN TORNEO, SÓLO UN VEREDICTO. Una partida sin veredicto no cuenta para nada allá —ni la
+  // tabla ni la cola—, así que darle cooldown sería demorar al que se quedó por la mesa que el
+  // otro anuló.
+  it("en torneo, una partida abortada NO reparte cooldown", async () => {
+    const s = setup(true, "TOURNAMENT");
+
+    s.sink([{ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }]);
+
+    await settle();
+
+    expect(await s.cooldown.consume("mesa", "u1")).toBe(0);
   });
 
   it("anota el veto de torneo que decidió el ámbito, en SU torneo", async () => {

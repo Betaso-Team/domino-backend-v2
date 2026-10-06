@@ -38,10 +38,17 @@
 //
 // NINGUNA de las tres es terminal: de las tres se sale a `FINISHED`, que sigue siendo el único.
 // Una revancha que no prospera no es un final distinto, es el mismo final más tarde.
+//
+// `PRESENTING_ABORT` TAMPOCO ES UN `ABORTED`, y no rompe lo de arriba: es la PAUSA antes del
+// mismo terminal, para la partida que el juego anula porque alguien se fue con la ventana de
+// reparto abierta (`wasAbortedAtDeal`). Es el único final sin veredicto que decide el JUEGO y no
+// la sala, y por eso es el único con fase: los jugadores tienen que ver que no contó antes de que
+// la mesa se cierre. Si hubo veredicto se le pregunta al JUEZ, nunca a la fase sola.
 export type MatchPhase =
   | "NOT_STARTED"
   | "PLAYING"
   | "PRESENTING_MATCH"
+  | "PRESENTING_ABORT"
   | "REMATCH_WINDOW"
   | "REMATCH_NEGOTIATION"
   | "REMATCH_ACCEPTED"

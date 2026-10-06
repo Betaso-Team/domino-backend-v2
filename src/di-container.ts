@@ -2,6 +2,13 @@ import "reflect-metadata";
 import { randomUUID } from "node:crypto";
 import { JwtVerifier } from "@/features/auth";
 import {
+  CachedCoreLoopSettings,
+  HttpCoreLoopClient,
+  NEUTRAL_CORE_LOOP_SETTINGS,
+  SoftProfileResolver,
+  SoftWindowBook,
+} from "@/features/core-loop";
+import {
   type AccountDirectory,
   AccountUnavailableError,
   AmqpWallet,
@@ -35,13 +42,23 @@ import {
   type BetLevelBook,
   CachedBetLevelBook,
   ColyseusMatchGateway,
+  DEAL_PRESET_EDITABLE,
+  type DealPreset,
+  type DevPresetSource,
   HttpBetLevelBook,
   MATCH_EDITABLE,
   MatchPlatform,
   MatchRegistry,
   NO_BET_LEVELS,
+  NO_DEAL_PRESET,
+  NO_STARTING_SCORE,
   RematchCoordinator,
+  STARTING_SCORE_EDITABLE,
+  type StartingScore,
+  dealPresetPatch,
   matchConfigPatch,
+  startingScoreBelow,
+  startingScorePatch,
 } from "@/features/match";
 import {
   type GlobalConfigSource,
@@ -118,7 +135,7 @@ import { MongoOutboxStore } from "@/shared/mongo-outbox";
 import { MemoryOutboxStore, type OutboxStore, TopicOutboxDispatcher } from "@/shared/outbox";
 import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
 import { container } from "tsyringe";
-import { env } from "./env";
+import { env, isDevEnvironment } from "./env";
 import { type Logger, logger } from "./logger";
 
 // Acá viven solo dependencias globales y sin estado de partida. Los actores del motor
@@ -496,6 +513,26 @@ export const settingsSections: readonly SettingsSection[] = [
     editable: MATCHMAKING_EDITABLE,
     defaults: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig"),
   },
+  // LAS DOS DE PRUEBA A MANO, y SÓLO donde existen: fijan las fichas y el marcador, que es lo que
+  // probar a mano necesita y lo que ningún jugador en ningún otro lado puede poder hacer. Detrás de
+  // la misma llave del panel que las demás —truco las sirve sin llave; acá no hay por qué abrir una
+  // puerta que dev ya tiene—. Portadas de truco (`d6e3219`, `6da7372`).
+  ...(isDevEnvironment(env.appEnv)
+    ? [
+        {
+          name: "deal",
+          schema: dealPresetPatch,
+          editable: DEAL_PRESET_EDITABLE,
+          defaults: () => NO_DEAL_PRESET,
+        },
+        {
+          name: "starting-score",
+          schema: startingScorePatch,
+          editable: STARTING_SCORE_EDITABLE,
+          defaults: () => NO_STARTING_SCORE,
+        },
+      ]
+    : []),
 ];
 export const settingsSignal = new PolledSettingsSignal({
   book: settingsStore,
@@ -510,6 +547,24 @@ export const settingsWriter: SettingsWriter = settingsStore;
 rootContainer.register<GlobalConfigSource>("GlobalConfigSource", {
   useValue: () => settingsSignal.effective<GlobalDominoConfig>("match"),
 });
+// Leídas UNA vez por mesa, como la config de arriba: una edición a mitad de partida espera a la
+// siguiente. El aviso es para el que lea una partida donde las fichas no fueron suerte y se olvidó
+// de que el preset estaba puesto.
+if (isDevEnvironment(env.appEnv)) {
+  rootContainer.register<DevPresetSource>("DevPresetSource", {
+    useValue: (pointsToWin) => {
+      const dealPreset = settingsSignal.effective<DealPreset>("deal");
+      const startingScore = startingScoreBelow(
+        settingsSignal.effective<StartingScore>("starting-score"),
+        pointsToWin,
+      );
+      if (dealPreset.hands.length > 0) logger.warn("reparto preparado", { dealPreset });
+      if (startingScore.teamA > 0 || startingScore.teamB > 0)
+        logger.warn("marcador inicial preparado", { startingScore });
+      return { dealPreset, startingScore };
+    },
+  });
+}
 // El emparejamiento lee la suya POR USO y no por mesa: los números se preguntan cuando alguien entra
 // a la cola, no cuando arrancó el proceso.
 const matchmakingConfig = (): MatchmakingConfig =>
@@ -552,6 +607,37 @@ const poolDirectory = new ScopedPoolDirectory(
     avoid: (tournamentId, playerId) => tournamentVeto.vetoedFor(tournamentId, playerId),
   },
 );
+// CORE-LOOP, la retención de jugadores nuevos del backend principal: rake perdonado al pagar y una
+// ventana de emparejamiento blando para quien sigue adentro. Mismo criterio que el antifraude: hace
+// falta el backend Y la llave interna. Sin alguno de los dos las perillas son las de la feature
+// APAGADA y nadie entra a la ventana — el comportamiento de siempre.
+const coreLoopClient =
+  http && env.backendApiKey
+    ? new HttpCoreLoopClient(http, { value: env.backendApiKey })
+    : undefined;
+// Cacheadas como el antifraude pero con el lado seguro dado vuelta: una fuente que no contesta deja
+// la ventana blanda APAGADA, nunca filtrando con números inventados.
+const coreLoopSettings = new CachedCoreLoopSettings(
+  coreLoopClient ?? { settings: async () => NEUTRAL_CORE_LOOP_SETTINGS },
+  5_000,
+  clock.now,
+  logger,
+);
+// La nota local de la ventana blanda, en el MISMO almacén que los libros del antifraude. Una semana y
+// no las horas del antifraude: tiene que sobrevivir el tiempo entre dos partidas de un novato, y uno
+// que vuelve después de días no debería haber salido de ella en silencio.
+const softWindowBook = new SoftWindowBook(store, 7 * 24 * 60 * 60 * 1000);
+// Las tres juntas: ¿está prendida, ESTE jugador sigue en la ventana, ESTE candidato supera el techo
+// de winrate? El winrate sale del historial de dominó (`PlayerLog`), con su propia cache corta.
+const softProfile = new SoftProfileResolver(
+  coreLoopSettings,
+  softWindowBook,
+  history,
+  30_000,
+  clock.now,
+  logger,
+);
+
 const gateway = new ColyseusMatchGateway();
 // El MISMO gateway que usa el emparejador, registrado para la API del orquestador.
 rootContainer.register(ColyseusMatchGateway, { useValue: gateway });
@@ -565,6 +651,8 @@ export const matchmaker = new Matchmaker({
   maintenance: maintenanceSignal,
   now: clock.now,
   seedOf: randomUUID,
+  softProfile: (playerId) => softProfile.profileOf(playerId),
+  softTimeoutMs: async () => (await coreLoopSettings.settings()).softTimeoutSeconds * 1000,
   log: logger,
 });
 // EL COORDINADOR DE LA REVANCHA, con las tres piezas que ya existían y una que es nueva sólo
@@ -643,6 +731,12 @@ rootContainer.register(MatchPlatform, {
     summaries: history,
     now: clock.now,
     log: logger,
+    // EL RAKE PERDONADO AL PAGAR. Tres segundos como el cliente de v1 (`core-loop.service.ts`): esta
+    // llamada está en el camino del pago, y es mejor cobrar rake normal que dejar a un ganador
+    // mirando una mesa sin pagar. Sin backend no se pregunta: premio normal.
+    coreLoop: coreLoopClient
+      ? { client: coreLoopClient, softWindow: softWindowBook, timeoutMs: 3_000 }
+      : undefined,
   }),
 });
 rootContainer.register("MatchSinks", {
@@ -659,6 +753,7 @@ rootContainer.register("MatchSinks", {
         {
           poolId: casual ? options.gameModeId : options.tournamentId,
           playerIds: options.seats,
+          mode: options.mode,
         },
       ),
     ];

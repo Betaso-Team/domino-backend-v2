@@ -9,9 +9,27 @@ import { assignTeams } from "./team-assignment";
 //
 // La génesis NO decide los equipos: se los pide a la política (spec §4.3), que es
 // lo que permite cambiar de sorteo a parejas por asiento sin tocar el motor.
-export function createMatchState(config: DominoMatchConfig): MatchState {
+/** El marcador con el que nace una partida. */
+export interface StartingScore {
+  readonly teamA: number;
+  readonly teamB: number;
+}
+
+export const NO_STARTING_SCORE: StartingScore = { teamA: 0, teamB: 0 };
+
+/**
+ * `startingScore` existe sólo para probar a mano el final de una partida en local y dev, y se toma
+ * tal cual: mantenerlo por debajo de la meta es de quien llama, porque un equipo que naciera en ella
+ * habría ganado una partida que nadie jugó.
+ */
+export function createMatchState(
+  config: DominoMatchConfig,
+  startingScore: StartingScore = NO_STARTING_SCORE,
+): MatchState {
   const match = new MatchState();
   match.scoreboard = new Scoreboard();
+  match.scoreboard.teamA = startingScore.teamA;
+  match.scoreboard.teamB = startingScore.teamB;
   match.pointsToWin = config.pointsToWin;
 
   const playerIds = playerIdsOf(config);

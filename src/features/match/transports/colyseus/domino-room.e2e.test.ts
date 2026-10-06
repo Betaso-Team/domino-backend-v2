@@ -95,6 +95,10 @@ describe("DominoRoom", () => {
     const a = await connect(testServer, room, "a");
     const b = await connect(testServer, room, "b");
 
+    // Destapadas primero: irse con la ventana de reparto abierta ANULA la partida.
+    a.send("REVEAL_TILES", {});
+    b.send("REVEAL_TILES", {});
+    await waitUntil(() => room.state.currentRound?.phase === "PLAYING");
     a.send("ABANDON", {});
     await waitUntil(() => room.state.phase === "PRESENTING_MATCH");
     await room.disconnect();

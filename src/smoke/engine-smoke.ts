@@ -15,7 +15,7 @@ import {
   configOf,
   requestOf,
 } from "@/features/match/transports/match-contract";
-import { logger } from "@/logger";
+import { flushLogs, logger } from "@/logger";
 import { ColyseusSDK, type Room } from "@colyseus/sdk";
 import jwt from "jsonwebtoken";
 
@@ -374,5 +374,8 @@ if (isMain) {
     //
     // Un CLI que terminó su trabajo tiene que salir. Los logs de pino van a stdout de forma
     // síncrona, así que no hay nada en vuelo que truncar.
-    .finally(() => process.exit(process.exitCode ?? 0));
+    .finally(() => {
+      flushLogs();
+      process.exit(process.exitCode ?? 0);
+    });
 }

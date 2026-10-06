@@ -7,7 +7,7 @@ import { CooldownBook, DEFAULT_COOLDOWN } from "../core/cooldown";
 import { MatchmakingError } from "../errors";
 import type { MatchGateway, Seat } from "../gateway";
 import { type Maintenance, type MaintenanceSignal, OPEN } from "../maintenance";
-import { Matchmaker } from "../matchmaker";
+import { Matchmaker, type MatchmakerDeps } from "../matchmaker";
 import type { Ticket } from "../pool";
 import type { PoolDirectory, PoolRequest, PoolSpec, Requester } from "../pool-spec";
 import { MemoryMatchPool } from "../transports/memory-pool";
@@ -100,7 +100,11 @@ function spec(over: Partial<PoolSpec> = {}): PoolSpec {
   };
 }
 
-function build(specOver: Partial<PoolSpec> = {}, now = () => 1000) {
+function build(
+  specOver: Partial<PoolSpec> = {},
+  now = () => 1000,
+  depsOver: Partial<MatchmakerDeps> = {},
+) {
   const gateway = new FakeGateway();
   const pool = new MemoryMatchPool();
   // No shuffling: the tests about the cooldown need to know who got which.
@@ -129,9 +133,34 @@ function build(specOver: Partial<PoolSpec> = {}, now = () => 1000) {
     maintenance,
     now,
     seedOf: () => "seed-fijo",
+    softProfile: async () => ({ inSoftWindow: false, isShark: false }),
+    softTimeoutMs: async () => 30_000,
+    ...depsOver,
   });
   return { matchmaker, gateway, pool, cooldown, live, maintenance };
 }
+
+describe("Matchmaker: el perfil de core-loop viaja en el ticket", () => {
+  // UNA VEZ, al encolar, junto a `avoid`, y no en cada tick: lo mismo que las restricciones del
+  // ámbito, pagado una vez y no en cada pasada de 250 ms.
+  it("se resuelve al encolar y queda en el ticket", async () => {
+    const { matchmaker, pool } = build({}, undefined, {
+      softProfile: async (playerId) =>
+        playerId === "novato"
+          ? { inSoftWindow: true, isShark: false }
+          : { inSoftWindow: false, isShark: true },
+    });
+
+    void matchmaker
+      .request(CASUAL, requester("novato"), new AbortController().signal)
+      .catch(() => {});
+    await enqueued();
+
+    expect(await pool.waiting("mesa")).toEqual([
+      expect.objectContaining({ playerId: "novato", softWindow: true, shark: false }),
+    ]);
+  });
+});
 
 describe("Matchmaker: una petición, una respuesta", () => {
   it("el primero espera y el segundo los junta a los dos", async () => {

@@ -45,6 +45,7 @@ export {
   canRevealTiles,
   hasPlayable,
   playersWithoutTilesSeen,
+  wasAbortedAtDeal,
 } from "./legality";
 export type { MatchPhase, RoundEndReason, RoundPhase } from "./phases";
 export {

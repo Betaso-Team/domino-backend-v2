@@ -103,19 +103,6 @@ const assertSameTable = (match: MatchState, config: DominoMatchConfig): void => 
   }
 };
 
-// LO QUE VALE LA MESA AL CERRAR, con el aumento aceptado adentro. La config está CONGELADA al nacer
-// y el aumento se acuerda a mitad de partida, así que el nivel sale del ESTADO: el que ganó una mesa a
-// x3 cobra `prize × 3`, y una mesa abortada después de un aumento devuelve `entryFee × 3`. Es la regla
-// de v1 (`betAmountsOf`): la mesa entera se multiplica por el nivel. Nivel 0 es "ninguno aceptado".
-function stakesOf(match: MatchState, config: DominoMatchConfig) {
-  if (match.acceptedBetLevel <= 0) return { entryFee: config.entryFee, prize: config.prize };
-  const extra = betAmountsOf(match.acceptedBetLevel, config.entryFee, config.prize);
-  return {
-    entryFee: config.entryFee + extra.additionalEntryFee,
-    prize: config.prize + extra.additionalPrize,
-  };
-}
-
 function rewardOf(
   winnerTeamId: string,
   match: MatchState,
@@ -138,12 +125,7 @@ function rewardOf(
   // pagarle sería premiar el abandono con el premio de la mesa. Es el
   // `filter(player => !player.isBot)` de v1 (`:605`), más los que quedaron en `quitPlayers` —que
   // acá son los `hasAbandoned`—.
-  const winnerIds = new Set(
-    match.players
-      .filter(({ teamId }) => teamId === winnerTeamId)
-      .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
-      .map(({ playerId }) => playerId),
-  );
+  const winnerIds = new Set(prizeWinnersOf(match, winnerTeamId));
   const winners = config.seats.filter(({ playerId }) => winnerIds.has(playerId));
   // PLATA DE POR MEDIO: ante la duda, rechazar. **Cero ganadores** sigue siendo un invariante
   // roto —un veredicto sobre un equipo donde no queda nadie a quien pagarle—, y cierra la partida
@@ -164,10 +146,57 @@ function rewardOf(
     rateId: config.rateId,
     kind: "REWARD",
     entries: winners.map((seat) =>
-      entryOf(config.matchId, "REWARD", stakesOf(match, config).prize, seat),
+      entryOf(config.matchId, "REWARD", stakesOf(config, match).prize, seat),
     ),
   };
 }
+
+/**
+ * QUIÉNES COBRAN EL PREMIO: los asientos del equipo ganador que todavía son de una PERSONA — ni la
+ * máquina ni el que se fue (ver `rewardOf`). Lo usan los DOS que pagan, esta proyección y la
+ * billetera de Betaso: dos reglas para la misma mesa le pagarían a uno según quién pague.
+ */
+export const prizeWinnersOf = (match: MatchState, winnerTeamId: string): readonly string[] =>
+  match.players
+    .filter(({ teamId }) => teamId === winnerTeamId)
+    .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
+    .map(({ playerId }) => playerId);
+
+/**
+ * LO QUE VALE LA MESA AL CERRAR, con el aumento aceptado adentro. La config está CONGELADA al nacer
+ * y el aumento se acuerda a mitad de partida, así que el nivel sale del ESTADO: el que ganó una mesa
+ * a x3 cobra `prize × 3`, y una mesa abortada después de un aumento devuelve `entryFee × 3`. Es la
+ * regla de v1 (`betAmountsOf`; al aceptar escribe `state.prize = proposal.newPrize` y paga ése): la
+ * mesa entera se multiplica por el nivel. Nivel 0 es "ninguno aceptado".
+ *
+ * UNA SOLA y exportada: la usan los tres que mueven plata con el aumento adentro —esta proyección,
+ * el pago de la billetera de Betaso y la fila del historial—. Las dos ramas que se juntaron acá la
+ * habían escrito cada una por su lado.
+ */
+export const stakesOf = (
+  table: { readonly entryFee: number; readonly prize: number },
+  match: Pick<MatchState, "acceptedBetLevel">,
+): { readonly entryFee: number; readonly prize: number } => {
+  if (match.acceptedBetLevel <= 0) return { entryFee: table.entryFee, prize: table.prize };
+  const extra = betAmountsOf(match.acceptedBetLevel, table.entryFee, table.prize);
+  return {
+    entryFee: table.entryFee + extra.additionalEntryFee,
+    prize: table.prize + extra.additionalPrize,
+  };
+};
+
+/**
+ * A QUIÉN SE LE DEVUELVE LA INSCRIPCIÓN DE UNA MESA SIN VEREDICTO: a todos menos al que se fue
+ * habiendo levantado sus fichas. Es la regla de v1 (`two-players/domino-room-state.ts:467-475`
+ * filtra de `quitPlayers` a los `isValid`), y es UNA sola para todos los motivos: sólo una mesa
+ * anulada en el reparto puede dejar a alguien afuera, porque el que se va a mitad de partida le
+ * da el veredicto al rival y esa mesa no se aborta.
+ *
+ * Vive acá y la usan los DOS que reembolsan —esta proyección y la billetera de Betaso—, porque
+ * dos reglas para la misma mesa le devolverían a uno según quién pague.
+ */
+export const isRefundable = (player: { hasAbandoned: boolean; hasSeenTiles: boolean }) =>
+  !(player.hasAbandoned && player.hasSeenTiles);
 
 /**
  * El desenlace de la mesa como instrucción monetaria, o `undefined` si el evento no es un
@@ -197,13 +226,16 @@ export function settlementOf(
   switch (event.type) {
     case "MATCH_ABORTED": {
       assertSameTable(match, config);
+      const refundable = new Set(
+        match.players.filter(isRefundable).map(({ playerId }) => playerId),
+      );
       return {
         matchId: config.matchId,
         rateId: config.rateId,
         kind: "REFUND",
-        entries: config.seats.map((seat) =>
-          entryOf(config.matchId, "REFUND", stakesOf(match, config).entryFee, seat),
-        ),
+        entries: config.seats
+          .filter(({ playerId }) => refundable.has(playerId))
+          .map((seat) => entryOf(config.matchId, "REFUND", stakesOf(config, match).entryFee, seat)),
       };
     }
     case "MATCH_RESOLVED": {

@@ -23,6 +23,7 @@ import {
 import { RuleViolationError } from "../../core/engine/errors";
 import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
+import { wasAbortedAtDeal } from "../../core/rules";
 import type { MatchState } from "../../core/state";
 import {
   AdmissionRefusedError,
@@ -264,8 +265,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       : undefined;
     const platformSink =
       roomOptions && this.platform
-        ? this.platform.sinkFor(roomOptions, this.roomId, match, (playerId, type, payload) =>
-            this.clientOf(playerId)?.send(type, payload),
+        ? this.platform.sinkFor(
+            roomOptions,
+            this.roomId,
+            match,
+            (playerId, type, payload) => this.clientOf(playerId)?.send(type, payload),
+            (events) => this.notifier.notify(events),
           )
         : undefined;
     const platformSinks = platformSink ? [platformSink] : [];
@@ -607,8 +612,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   //     de ésta los pisaría.
   //   · EL REEMPLAZADO POR UN BOT TAMBIÉN SE SUELTA. El asiento sigue jugando —lo juega la
   //     máquina— pero la persona se fue, y `hasAbandoned` no lo dice a propósito.
+  //
+  // Y LA ANULADA EN EL REPARTO SUELTA A TODOS, aunque no tenga veredicto: no hay revancha ni partida
+  // que volver a jugar, y el que se quedó no está retirado, así que sin esta línea la mesa lo retenía
+  // hasta disponerse y el orquestador no podía abrirle otra.
   private activeSeats(): readonly string[] {
     const phase = this.state.phase;
+    if (wasAbortedAtDeal(this.state)) return [];
     if (this.hasOutcome()) {
       const rematchOpen =
         (phase === "REMATCH_WINDOW" || phase === "REMATCH_NEGOTIATION") &&
@@ -765,6 +775,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
   private abortReason(): AbortReason {
     if (this.state.startedAt === 0) return "NEVER_STARTED";
+    // Antes que NEVER_PLAYED: que nadie haya levantado no lo distingue de que alguien se haya
+    // ido con la ventana abierta, y sólo lo segundo deja a alguien sin reembolso.
+    if (wasAbortedAtDeal(this.state)) return "TILES_NOT_SEEN";
     if (this.state.players.every((player) => !player.hasSeenTiles)) return "NEVER_PLAYED";
     return "INTERRUPTED";
   }

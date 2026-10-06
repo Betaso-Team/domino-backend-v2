@@ -11,6 +11,7 @@
 // una sola vez. Sin este test, la guarda queda verde-y-muerta: se puede mover DESPUÉS
 // del `for` —dead code— y los 63 tests de todos modos pasan.
 import { describe, expect, it } from "vitest";
+import { RoundState } from "../../state";
 import { createMatchState } from "../genesis";
 import { MatchReferee } from "../match/referee";
 import { playerOf } from "../state-projections";
@@ -32,6 +33,20 @@ describe("MatchReferee.outcome — abandono", () => {
 
   // El espejo del caso anterior: pin de la DISTINCIÓN, no solo de la guarda. Un
   // outcome() que devolviera siempre undefined pasaría el test de arriba igual.
+  // LA SALA PREGUNTA ESTO AL CERRARSE para decidir si reembolsa (`hasOutcome`). Una partida
+  // anulada en el reparto que contestara «ganó el rival» no emitiría `MATCH_ABORTED` nunca: ni
+  // premio —no pasó por `MATCH_RESOLVED`— ni reembolso. Plata trabada.
+  it("si alguien se fue con la ventana de reparto abierta, no hay veredicto", () => {
+    const match = createMatchState(config);
+    match.phase = "PRESENTING_ABORT";
+    match.currentRound = new RoundState();
+    match.currentRound.roundNumber = 1;
+    match.currentRound.phase = "DEALING";
+    playerOf("u1", match).hasAbandoned = true;
+
+    expect(new MatchReferee(match).outcome()).toBeUndefined();
+  });
+
   it("si abandonó UN equipo, gana el rival por ABANDONMENT", () => {
     const match = createMatchState(config);
     playerOf("u1", match).hasAbandoned = true;

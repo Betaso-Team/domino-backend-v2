@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type GroupingTicket, formGroup } from "./grouping";
 
 const NOW = 10_000;
-const OPTIONS = { seats: 2, now: NOW, vetoBypassMs: 20_000, candidates: 12 };
+const OPTIONS = { seats: 2, now: NOW, vetoBypassMs: 20_000, softTimeoutMs: 30_000, candidates: 12 };
 
 // The tickets are declared by how long they have been waiting, which reads better than an epoch.
 interface TestTicket extends GroupingTicket {
@@ -10,13 +10,20 @@ interface TestTicket extends GroupingTicket {
   readonly request: { readonly kind: "CASUAL"; readonly gameModeId: string };
 }
 
-function waiting(playerId: string, waitedMs = 0, avoid: string[] = []): TestTicket {
+function waiting(
+  playerId: string,
+  waitedMs = 0,
+  avoid: string[] = [],
+  soft: { softWindow?: boolean; shark?: boolean } = {},
+): TestTicket {
   return {
     playerId,
     poolId: "mesa",
     request: { kind: "CASUAL", gameModeId: "mesa" },
     enqueuedAt: NOW - waitedMs,
     avoid,
+    softWindow: soft.softWindow ?? false,
+    shark: soft.shark ?? false,
   };
 }
 
@@ -107,5 +114,62 @@ describe("formGroup: el veto es una preferencia, nunca un bloqueo", () => {
     const group = formGroup(cola, { ...OPTIONS, seats: 4 });
 
     expect(ids(group)).toEqual(["u1", "u2", "u4", "u5"]);
+  });
+});
+
+// CORE-LOOP: el que está en su ventana de novato prefiere no cruzarse con un shark. Es una
+// preferencia MÁS DÉBIL que el veto del antifraude, así que cede primero (truco `fa246ad`; en v1 es
+// `roomsWithoutSharks` del lobby).
+describe("formGroup: la ventana blanda es una preferencia más débil que el veto", () => {
+  it("prefiere emparejar a quien está en ventana contra alguien que no es shark", () => {
+    const cola = [
+      waiting("novato", 500, [], { softWindow: true }),
+      waiting("shark", 400, [], { shark: true }),
+      waiting("parejo", 10),
+    ];
+
+    expect(ids(formGroup(cola, OPTIONS))).toEqual(["novato", "parejo"]);
+  });
+
+  it("si el shark es la única opción y el plazo no venció, se sigue esperando", () => {
+    const cola = [
+      waiting("novato", 5_000, [], { softWindow: true }),
+      waiting("shark", 4_000, [], { shark: true }),
+    ];
+
+    expect(formGroup(cola, OPTIONS)).toBeUndefined();
+  });
+
+  it("agotado softTimeoutMs (pero no vetoBypassMs), empareja igual contra el shark", () => {
+    const cola = [
+      waiting("novato", 31_000, [], { softWindow: true }),
+      waiting("shark", 30_500, [], { shark: true }),
+    ];
+
+    expect(ids(formGroup(cola, OPTIONS))).toEqual(["novato", "shark"]);
+  });
+
+  // En 4P sólo cuentan los pares RIVALES: un shark de COMPAÑERO no es el patrón que se evita.
+  it("en mesa de cuatro, un shark de COMPAÑERO no bloquea", () => {
+    const cola = [
+      waiting("novato", 500, [], { softWindow: true }),
+      waiting("x", 400),
+      waiting("shark", 300, [], { shark: true }),
+      waiting("y", 200),
+    ];
+
+    // Asientos por llegada: novato (0) y shark (2) caen en el MISMO equipo.
+    expect(ids(formGroup(cola, { ...OPTIONS, seats: 4 }))).toEqual(["novato", "x", "shark", "y"]);
+  });
+
+  // EL VETO SIGUE VIGENTE debajo: relajar el filtro blando nunca relaja el antifraude. Con sólo estos
+  // dos esperando, el ÚNICO grupo posible está vetado y además es novato contra shark.
+  it("el veto sigue vigente aunque el filtro blando ya se haya relajado", () => {
+    const cola = [
+      waiting("novato", 31_000, ["shark"], { softWindow: true }),
+      waiting("shark", 30_500, [], { shark: true }),
+    ];
+
+    expect(formGroup(cola, { ...OPTIONS, vetoBypassMs: 60_000 })).toBeUndefined();
   });
 });

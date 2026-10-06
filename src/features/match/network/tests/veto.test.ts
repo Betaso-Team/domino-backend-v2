@@ -63,6 +63,16 @@ describe("el veto casual", () => {
 
     expect(listener({ type: "MATCH_ABORTED", reason: "INTERRUPTED" })).toEqual([]);
   });
+
+  // LA REVANCHA ANULADA EN EL REPARTO SÍ VETA: irse de ella con la ventana abierta es la misma
+  // repetición, con un paso menos. Una sala que se murió, no.
+  it("veta la revancha anulada en el reparto", () => {
+    const listener = registerCasualVeto({ ...CASUAL, rematchCount: 1 }, stateOf());
+
+    expect(listener({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" })).toEqual([
+      { type: "CASUAL_PAIR_VETOED", playerIds: ["seat-1", "seat-2"] },
+    ]);
+  });
 });
 
 describe("el veto de torneo", () => {

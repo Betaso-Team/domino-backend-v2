@@ -4,6 +4,8 @@ import type { DependencyContainer } from "tsyringe";
 import type { CommandName } from "../../../core/command";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config";
 import type { Clock } from "../../../core/engine/clock";
+import type { DealPreset } from "../../../core/engine/dealer";
+import type { StartingScore } from "../../../core/engine/genesis";
 import type { TimeoutScheduler } from "../../../core/engine/timeout-scheduler";
 import type { SchemaVisibilityController } from "../../../core/engine/visibility";
 import type { MatchEvent } from "../../../core/events";
@@ -40,6 +42,12 @@ export type RematchCloser = () => readonly NetworkMatchEvent[];
 // y por el mismo motivo que las otras dos: cobrar es RED y el motor asentó el trato sin poder
 // esperarla.
 export type MultiplierRevoker = () => readonly NetworkMatchEvent[];
+// LAS DOS DE PRUEBA A MANO, preguntadas UNA vez por mesa con su meta. Sólo existen donde el
+// composition root las registró —local y dev—; en cualquier otro lado la mesa nace como siempre.
+export type DevPresetSource = (pointsToWin: number) => {
+  readonly dealPreset: DealPreset;
+  readonly startingScore: StartingScore;
+};
 
 // Este archivo ya NO arma el grafo: lo pide a `buildEngineGraph` y solo decide qué queda
 // alcanzable desde el container. La génesis y el orden de construcción viven en UN solo
@@ -52,7 +60,16 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   const scheduler = child.resolve<TimeoutScheduler>("TimeoutScheduler");
   const visibility = child.resolve<SchemaVisibilityController>("SchemaVisibilityController");
 
-  const graph = buildEngineGraph(config, globalConfig, { clock, scheduler, visibility });
+  const presets = child.isRegistered("DevPresetSource", true)
+    ? child.resolve<DevPresetSource>("DevPresetSource")(config.pointsToWin)
+    : {};
+
+  const graph = buildEngineGraph(config, globalConfig, {
+    clock,
+    scheduler,
+    visibility,
+    ...presets,
+  });
 
   // El árbol lo crea la fábrica, no la sala: la génesis es una regla del juego y tenerla
   // de los dos lados era la duplicación que este refactor cierra.

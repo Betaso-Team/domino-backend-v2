@@ -22,6 +22,9 @@ export function deadlineKindOf(match: MatchState): DeadlineKind {
   if (phase === "REMATCH_NEGOTIATION") return "REMATCH_NEGOTIATION";
   if (phase === "REMATCH_ACCEPTED") return "REMATCH_ACCEPTED";
   if (phase === "PRESENTING_MATCH") return "PRESENTING_MATCH";
+  // ANTES de mirar la ronda: una ronda 1 anulada se queda en `DEALING` para siempre, y
+  // contestaría por ella.
+  if (phase === "PRESENTING_ABORT") return "PRESENTING_ABORT";
   if (match.currentRound && roundPhaseOf(match.currentRound) === "PRESENTING_ROUND") {
     return "PRESENTING_ROUND";
   }
