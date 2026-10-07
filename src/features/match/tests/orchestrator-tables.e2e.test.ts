@@ -23,9 +23,13 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
   beforeAll(async () => {
     server = await bootTestServer(PORT);
   });
+  // UN PLAZO MAYOR QUE LA RESERVA DE ASIENTO DE COLYSEUS (15 s). Los casos que esperan el 404 del
+  // asiento de vuelta lo piden en un bucle, y cada 200 en el camino RESERVA un asiento que nadie
+  // consume: como la mesa suelta a sus jugadores apenas tiene veredicto, con la sala todavía viva,
+  // esas reservas la retienen hasta vencer y el cierre del servidor espera con ellas.
   afterAll(async () => {
     await server.shutdown();
-  });
+  }, 30_000);
 
   const sitEveryone = async ({ data }: Opened) => {
     for (const seat of data.seats) {

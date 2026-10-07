@@ -41,6 +41,13 @@ const deps = (over: Partial<TablesDeps> = {}): TablesDeps => ({
   registry: {
     matchOf: async (userId) => (userId === "p-a" ? "room-1" : undefined),
     publicConfigOf: async () => ({ matchId: "m-1" }) as PublicConfig,
+    census: async () => ({
+      playersInMatch: 6,
+      byGameMode: new Map([
+        ["mode-2p", 4],
+        ["mode-4p", 2],
+      ]),
+    }),
   },
   logger: fakeLogger(),
   orchestratorApiKey: KEY,
@@ -75,7 +82,7 @@ const post = (url: string, body: unknown = {}, key: string | null = KEY) =>
 
 describe("tablesRoutes", () => {
   // FAIL CLOSED, como el historial: sin llave las rutas no existen, y el aviso las nombra.
-  it("sin llave del orquestador no registra nada y avisa nombrando las dos rutas", () => {
+  it("sin llave del orquestador no registra nada y avisa nombrando las rutas", () => {
     const logger = fakeLogger();
     const router = tablesRoutes(deps({ logger, orchestratorApiKey: undefined }));
     expect(router.stack).toEqual([]);
@@ -83,6 +90,24 @@ describe("tablesRoutes", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("/internal/players/:userId/seat"),
     );
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("/internal/census"));
+  });
+
+  it("cuenta quién juega, en total y por modo, solo con la llave", async () => {
+    const base = await serve();
+    const res = await fetch(`${base}/internal/census`, { headers: { "x-internal-api-key": KEY } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      status: "success",
+      data: {
+        playersInMatch: 6,
+        byGameMode: [
+          { gameModeId: "mode-2p", playersInMatch: 4 },
+          { gameModeId: "mode-4p", playersInMatch: 2 },
+        ],
+      },
+    });
+    expect((await fetch(`${base}/internal/census`)).status).toBe(401);
   });
 
   it("abre la mesa y devuelve un asiento por participante", async () => {
