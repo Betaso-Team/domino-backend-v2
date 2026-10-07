@@ -2,9 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
 
 // SON TRES LLAVES DE SERVIDOR, y cruzan esta frontera en las dos direcciones. Las dos de ENTRADA: la
-// del PANEL DE ADMINISTRACIÓN de Betaso (`BETASO_ADMIN_PANEL_API_KEY`) y la del ORQUESTADOR de Betaso
-// Juegos (`ORCHESTRATOR_API_KEY`), que abre mesas y pide el asiento de vuelta. La de SALIDA es la que
-// el dominó PRESENTA al backend de Betaso (`features/auth/api-key.ts`). Son secretos distintos a
+// de ADMINISTRACIÓN (`ADMIN_API_KEY`) y la del ORQUESTADOR de Betaso Juegos
+// (`ORCHESTRATOR_API_KEY`), que abre mesas y pide el asiento de vuelta. La de SALIDA es la que el
+// dominó PRESENTA al orquestador para pedir cobros (`ORCHESTRATOR_CALLBACK_API_KEY`). Son secretos distintos a
 // propósito —compartirlos dejaría que el que tiene una, para preguntar un saldo, también abra mesas y
 // mueva todos los plazos del juego; `parseEnv` rechaza que la del orquestador repita otra— y el
 // header es uno solo porque NO es nuestro: es el que el backend de Betaso exige en sus rutas internas
@@ -26,7 +26,7 @@ const sameKey = (provided: string, expected: string): boolean => {
 // LA PUERTA DE ENTRADA DEL PANEL. La llave autoriza pero no identifica: dice que habla el panel, no
 // qué administrador apretó el botón. El orquestador entra por el mismo guardia con SU llave
 // (`requireApiKey`): cada llave abre las rutas que se le montaron y ninguna otra.
-export const requireAdminPanelKey =
+export const requireAdminKey =
   (expected: string): RequestHandler =>
   (request, response, next) => {
     const provided = request.get(API_KEY_HEADER);
@@ -39,4 +39,4 @@ export const requireAdminPanelKey =
 
 // EL MISMO GUARDIA para cualquier llave de entrada: entre el panel y el orquestador cambia la
 // llave, no el chequeo.
-export const requireApiKey = requireAdminPanelKey;
+export const requireApiKey = requireAdminKey;

@@ -29,12 +29,12 @@ se pudra aparte del código.
 
 ```bash
 cp .env.example .env
-# editá el .env: BETASO_BACKEND_JWT_SECRET y BETASO_ADMIN_PANEL_API_KEY, mínimo 16 caracteres cada una
+# editá el .env: BILLING_AUTH_PUBLIC_KEY (la pública de billing-auth) y ADMIN_API_KEY (mínimo 16)
 docker compose up --build
 ```
 
-`BETASO_BACKEND_JWT_SECRET` es **obligatoria**: sin ella el proceso no arranca, a propósito.
-`BETASO_ADMIN_PANEL_API_KEY` no lo es, pero sin ella las rutas internas del catálogo, del historial y
+`BILLING_AUTH_PUBLIC_KEY` es **obligatoria**: sin ella el proceso no arranca, a propósito.
+`ADMIN_API_KEY` no lo es, pero sin ella las rutas internas del catálogo, del historial y
 de la configuración en caliente **no se registran** y responden 404 — es fail closed, y es el 404 que más se investiga al pedo.
 
 `MONGO_URI` y `REDIS_URL` **no las pongas en el `.env`**: las fija el compose apuntando a los
@@ -79,7 +79,7 @@ Para mirar lo que quedó grabado:
 
 ```bash
 docker compose exec mongo mongosh domino --eval 'db.match_history.find().limit(1)'
-curl -H "x-internal-api-key: <BETASO_ADMIN_PANEL_API_KEY del .env>" http://localhost:2567/internal/matches/<matchId>/history
+curl -H "x-internal-api-key: <ADMIN_API_KEY del .env>" http://localhost:2567/internal/matches/<matchId>/history
 ```
 
 ## Levantar N instancias con pm2

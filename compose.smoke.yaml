@@ -30,22 +30,22 @@ services:
       PORT: 2567
       PM2_INSTANCES: 2
       SERVER_ADDRESS: nginx:8080
-      BETASO_BACKEND_JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
-      BETASO_ADMIN_PANEL_API_KEY: smoke-admin-panel-key-with-more-than-16-chars
+      ADMIN_API_KEY: smoke-admin-key-with-more-than-16-chars-ok
       REDIS_URL: redis://redis:6379/1
       MONGO_URI: mongodb://mongo:27017/domino-smoke
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       # EL ORQUESTADOR DEL SMOKE ES EL NGINX DEL STACK: el smoke juega una mesa, y una mesa arranca
       # solo si el orquestador cobra la entrada. El nginx
       # aprueba todo cobro (`smoke/nginx.conf`); no certifica el cobro, certifica que la mesa lo pide
-      # y arranca con el sí. La clave pública es de una pareja descartada: sin su privada nadie firma.
+      # y arranca con el sí. La clave pública es la de la pareja fija de `src/tests/billing-auth-keys.ts`,
+      # con cuya privada el cliente del smoke firma los tokens de sus jugadores.
       ORCHESTRATOR_API_KEY: smoke-orchestrator-key-with-more-than-16-chars
       ORCHESTRATOR_URL: http://nginx:8080/orchestrator/
       ORCHESTRATOR_CALLBACK_API_KEY: smoke-orchestrator-callback-key-16-chars
       BILLING_AUTH_PUBLIC_KEY: |
         -----BEGIN PUBLIC KEY-----
-        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnpVjFKuYBinMCnni8vQ4l/wIXBT2
-        DWHI8xJiZB4hkq03kKlM4CgUPXorft7NivWaSdO3QlXzebJYZ+Y1zKu6EQ==
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAECA+1agnfjWJeneGON5dirYjnShiD
+        MG7S65FJUbx3H9OWgE79m9n1e27UMWVhrNNk+fLAoaBoqRG6RtbdZuhtEw==
         -----END PUBLIC KEY-----
       # El resultado sale al vhost por defecto del broker del smoke, donde nadie lo consume: con
       # `mandatory`, el outbox lo reintenta sin perderlo y sin molestar a la partida.
@@ -89,8 +89,13 @@ services:
       target: smoke-client
     environment:
       NODE_ENV: test
-      BETASO_BACKEND_JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
-      BETASO_ADMIN_PANEL_API_KEY: smoke-admin-panel-key-with-more-than-16-chars
+      # `env.ts` la exige al importarse; el cliente no verifica nada con ella.
+      BILLING_AUTH_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAECA+1agnfjWJeneGON5dirYjnShiD
+        MG7S65FJUbx3H9OWgE79m9n1e27UMWVhrNNk+fLAoaBoqRG6RtbdZuhtEw==
+        -----END PUBLIC KEY-----
+      ADMIN_API_KEY: smoke-admin-key-with-more-than-16-chars-ok
       MONGO_URI: mongodb://mongo:27017/domino-smoke
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       RUN_ENGINE_SMOKE: 1

@@ -56,7 +56,7 @@ cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 
 ## HTTP interno
 
-Estas rutas requieren el header `x-internal-api-key` con la llave del panel de administración. Si `BETASO_ADMIN_PANEL_API_KEY` no existe, no se registran y responden
+Estas rutas requieren el header `x-internal-api-key` con la llave de administración. Si `ADMIN_API_KEY` no existe, no se registran y responden
 404: fallan cerradas.
 
 | Método y ruta | Uso |
@@ -81,7 +81,7 @@ con 400 en vez de aceptarse e ignorarse.
 
 Tres rutas que sólo usa el orquestador de Betaso Juegos, y son la única puerta de entrada a una
 partida. Van con `x-internal-api-key` igual a
-`ORCHESTRATOR_API_KEY` (la del panel no las abre); sin esa variable no se registran y responden 404.
+`ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
 cuerpo.
 

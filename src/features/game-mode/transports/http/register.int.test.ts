@@ -62,7 +62,7 @@ afterEach(() => {
 
 function harness(
   over: {
-    adminPanelApiKey?: string | undefined;
+    adminApiKey?: string | undefined;
     lease?: Lease;
     repository?: GameModeRepository;
   } = {},
@@ -90,7 +90,7 @@ function harness(
     gameModeHttp({
       service,
       logger,
-      adminPanelApiKey: "adminPanelApiKey" in over ? over.adminPanelApiKey : KEY,
+      adminApiKey: "adminApiKey" in over ? over.adminApiKey : KEY,
     }),
   );
   app.use(httpErrorHandler(logger));
@@ -174,7 +174,7 @@ async function drain(outbox: MemoryGameModeOutbox): Promise<string[]> {
 // EL REGISTRO, MEDIDO SIN SERVIDOR. Lo que se mide acá es una decisión de wiring —qué rutas llegan a
 // existir y EN QUÉ ORDEN—, y eso un servidor no lo muestra: dos órdenes distintos pueden responder
 // igual hoy y dejar de hacerlo con la ruta que se agregue mañana.
-function routesRegisteredWith(adminPanelApiKey: string | undefined): string[] {
+function routesRegisteredWith(adminApiKey: string | undefined): string[] {
   const clock = mutableClock();
   return routesOf(
     gameModeHttp({
@@ -189,7 +189,7 @@ function routesRegisteredWith(adminPanelApiKey: string | undefined): string[] {
         vi.fn(),
       ),
       logger: fakeLogger(),
-      adminPanelApiKey,
+      adminApiKey,
     }),
   );
 }
@@ -236,7 +236,7 @@ describe("gameModeHttp: las siete rutas", () => {
         vi.fn(),
       ),
       logger,
-      adminPanelApiKey: undefined,
+      adminApiKey: undefined,
     });
 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("/game-modes"));
@@ -249,7 +249,7 @@ describe("gameModeHttp: las siete rutas", () => {
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
   ])("sin llave interna %s %s no existe", async (method, path) => {
-    const app = harness({ adminPanelApiKey: undefined });
+    const app = harness({ adminApiKey: undefined });
 
     const response =
       method === "GET"

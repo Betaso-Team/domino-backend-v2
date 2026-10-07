@@ -16,8 +16,8 @@ import {
   requestOf,
 } from "@/features/match/transports/match-contract";
 import { flushLogs, logger } from "@/logger";
+import { mintBillingToken } from "@/tests/billing-auth-keys";
 import { ColyseusSDK, type Room } from "@colyseus/sdk";
-import jwt from "jsonwebtoken";
 
 const WS_URL = "ws://nginx:8080";
 const HTTP_URL = "http://nginx:8080";
@@ -116,11 +116,9 @@ async function waitUntil(
   throw new Error(`${label}: se agotó el plazo${detail}`);
 }
 
-const tokenOf = (userId: string) =>
-  jwt.sign({ sub: userId }, env.jwtSecret, {
-    algorithm: "HS256",
-    expiresIn: "10m",
-  });
+// Como los firma billing-auth, con la pareja fija del smoke: `compose.smoke.yaml` le da al dominó
+// la pública de esa misma pareja.
+const tokenOf = (userId: string) => mintBillingToken(userId, "10m");
 
 const signatureOf = (state: MatchState) =>
   JSON.stringify([
@@ -145,9 +143,9 @@ interface HistoryLine {
 }
 
 async function historyOf(matchId: string): Promise<readonly HistoryLine[]> {
-  assert.ok(env.adminPanelApiKey, "falta BETASO_ADMIN_PANEL_API_KEY en el cliente smoke");
+  assert.ok(env.adminApiKey, "falta ADMIN_API_KEY en el cliente smoke");
   const response = await fetch(`${HTTP_URL}/internal/matches/${matchId}/history`, {
-    headers: { "x-internal-api-key": env.adminPanelApiKey },
+    headers: { "x-internal-api-key": env.adminApiKey },
   });
   if (response.status !== 200) return [];
   const body = (await response.json()) as { entries?: readonly HistoryLine[] };
@@ -257,7 +255,7 @@ async function createGameMode(): Promise<GameMode> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-internal-api-key": env.adminPanelApiKey ?? "",
+      "x-internal-api-key": env.adminApiKey ?? "",
     },
     body: JSON.stringify(MODE_INPUT),
   });

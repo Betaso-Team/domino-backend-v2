@@ -19,7 +19,7 @@ import { tablesRoutes } from "./tables";
 // history, key)` deja tres parámetros de tipos estructuralmente compatibles seguidos
 // —`Clock`, `Logger` y `HistoryReader` son interfaces de un puñado de métodos—, así que
 // dos argumentos cambiados de orden pueden compilar. Nombrados, un cruce es un error en la
-// propiedad. De paso el `adminPanelApiKey` sigue leyéndose por su nombre en el call site,
+// propiedad. De paso el `adminApiKey` sigue leyéndose por su nombre en el call site,
 // que es donde importa que se vea la decisión de fail-closed.
 export interface MatchHttpDeps {
   readonly registry: MatchRegistry;
@@ -27,7 +27,7 @@ export interface MatchHttpDeps {
   readonly logger: Logger;
   readonly history: HistoryReader;
   /** `undefined` ⇒ la ruta interna NO se registra. Ver `historyRoutes`. */
-  readonly adminPanelApiKey: string | undefined;
+  readonly adminApiKey: string | undefined;
   readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack">;
   /** `undefined` ⇒ la API del orquestador NO se registra. Ver `tablesRoutes`. */
   readonly orchestratorApiKey: string | undefined;

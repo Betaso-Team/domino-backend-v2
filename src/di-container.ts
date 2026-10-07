@@ -87,7 +87,7 @@ const clock: Clock = { now: () => Date.now() };
 rootContainer.register<Clock>("Clock", { useValue: clock });
 rootContainer.register<Logger>("Logger", { useValue: logger });
 rootContainer.register("TokenVerifier", {
-  useValue: new JwtVerifier(env.jwtSecret, env.billingAuth),
+  useValue: new JwtVerifier(env.billingAuth),
 });
 
 // EL PRESENCE Y EL DRIVER DE COLYSEUS, que son infraestructura del SERVIDOR y no de una feature:
@@ -137,7 +137,7 @@ rootContainer.register(MatchRegistry, { useValue: matchRegistry });
 // un interruptor que NOMBRA la implementación es deuda, no configuración —deja escribir
 // "mongo" sin URI y "memory" con una base andando al lado—, y truco ya borró el suyo por
 // esa razón. Acá el dato y la decisión son lo mismo, así que la combinación incoherente no
-// se puede escribir. Es el mismo fail-closed que la API interna usa con `BETASO_ADMIN_PANEL_API_KEY`:
+// se puede escribir. Es el mismo fail-closed que la API interna usa con `ADMIN_API_KEY`:
 // la variable ausente es una decisión, no un error.
 //
 // Sin `MONGO_URI` queda `MemoryHistory`, que NO es un doble: es la implementación de

@@ -2,7 +2,7 @@
 // por constructor o por el container. Enforced por src/env-single-reader.test.ts.
 //
 // Efecto secundario a nivel de módulo: importar este archivo ejecuta `parseEnv(process.env)`
-// y lanza de inmediato si el entorno es inválido (p.ej. falta BETASO_BACKEND_JWT_SECRET) — antes de que
+// y lanza de inmediato si el entorno es inválido (p.ej. falta BILLING_AUTH_PUBLIC_KEY) — antes de que
 // corra cualquier código propio del importador. En test, vitest.setup.ts pone defaults para
 // que esto nunca truene solo por faltar configuración de entorno.
 import { z } from "zod";
@@ -136,39 +136,24 @@ const schema = z.object({
   RECONNECTION_WINDOW_SECONDS: z.coerce.number().positive().default(120),
   // ── Lo que hay del otro lado, y en qué dirección ─────────────────────────────────────────────
   //
-  // Las variables `BETASO_*` llevan el nombre del INTERLOCUTOR y no de lo que son, porque del otro
-  // lado de esta frontera hay varios servidores de Betaso —su backend, su panel de administración,
-  // el broker de la plataforma de juegos— y sus credenciales no son intercambiables. Lo que el nombre
-  // no puede decir es la DIRECCIÓN, y por eso lo dice cada una acá. Portado de truco (`ebf22dd`).
+  // Lo que el nombre de una llave no puede decir es la DIRECCIÓN, y por eso lo dice cada una acá.
+  // Portado de truco (`ebf22dd`).
 
-  // Compartido con el BACKEND de Betaso, que es quien firma los tokens de los jugadores. Nadie se lo
-  // presenta a nadie: es el secreto con el que las dos puntas verifican. El dominó NUNCA firma.
-  //
-  // SIN MÍNIMO DE LARGO, como truco: el valor lo DICTA el backend de Betaso (`JWT_SECRET`), y el de dev
-  // mide 9 caracteres. Un mínimo acá no lo alarga: solo deja al dominó sin arrancar. Las llaves que
-  // son NUESTRAS (`BETASO_ADMIN_PANEL_API_KEY`, `ORCHESTRATOR_API_KEY`) sí lo conservan.
-  BETASO_BACKEND_JWT_SECRET: z
-    .string()
-    .min(
-      1,
-      "BETASO_BACKEND_JWT_SECRET: obligatorio, es el secreto que comparte el backend de Betaso",
-    ),
   /**
-   * LA CLAVE PÚBLICA ES256 DE BILLING-AUTH, que firma los tokens de los jugadores que llegan por el
-   * orquestador. OPCIONAL: ausente, dominó acepta solo los HS256 del backend principal, como antes.
-   * Presente, acepta los dos (ver `JwtVerifier`). Un `.env` necesita el PEM en una línea con `\n`
-   * literales, y acá se vuelven saltos.
+   * LA CLAVE PÚBLICA ES256 DE BILLING-AUTH, el único que firma los tokens de los jugadores (todos
+   * llegan por el orquestador). OBLIGATORIA: sin ella nadie puede entrar a una mesa. El dominó solo
+   * verifica, nunca firma. Un `.env` necesita el PEM en una línea con `\n` literales, y acá se
+   * vuelven saltos. Que sea una pública EC P-256 lo valida `JwtVerifier` al armar el container.
    */
   BILLING_AUTH_PUBLIC_KEY: z
-    .string()
-    .min(1)
-    .transform((pem) => pem.replace(/\\n/g, "\n"))
-    .optional(),
+    .string("BILLING_AUTH_PUBLIC_KEY: obligatoria, es la clave pública de billing-auth")
+    .min(1, "BILLING_AUTH_PUBLIC_KEY: obligatoria, es la clave pública de billing-auth")
+    .transform((pem) => pem.replace(/\\n/g, "\n")),
   JWT_ISSUER: z.string().min(1).default("betaso-auth"),
   JWT_AUDIENCE: z.string().min(1).default("domino"),
   /**
-   * DE ENTRADA: lo que el PANEL DE ADMINISTRACIÓN de Betaso le presenta al dominó para tocar el
-   * catálogo de modos, el historial de soporte y la configuración en caliente (`/internal/settings`,
+   * DE ENTRADA: lo que presenta NUESTRA administración (panel o soporte; no la de un cliente) para
+   * tocar el catálogo de modos, el historial de soporte y la configuración en caliente (`/internal/settings`,
    * que mueve todos los plazos del juego). A propósito NO es la del orquestador: compartirlas dejaría
    * que el que administra el catálogo también abra mesas.
    *
@@ -176,13 +161,10 @@ const schema = z.object({
    * se administra" y esas rutas directamente NO se registran. Es fail closed: una ruta interna viva
    * con la llave vacía es PEOR que no tenerla, porque parece protegida.
    */
-  BETASO_ADMIN_PANEL_API_KEY: z
-    .string()
-    .min(16, "BETASO_ADMIN_PANEL_API_KEY debe tener al menos 16 caracteres")
-    .optional(),
+  ADMIN_API_KEY: z.string().min(16, "ADMIN_API_KEY debe tener al menos 16 caracteres").optional(),
   /**
    * DE ENTRADA, la que presenta el ORQUESTADOR para abrir mesas y devolver asientos. Otra llave y
-   * no la del panel, por la misma regla que separó las demás: quien administra el catálogo no abre
+   * no la de administración, por la misma regla que separó las demás: quien administra el catálogo no abre
    * mesas, y quien abre mesas no administra. Ausente ⇒ esas rutas no existen (fail closed).
    */
   ORCHESTRATOR_API_KEY: z
@@ -388,11 +370,10 @@ export interface Env {
    * loguear; el que se le PASA a `listen()` es `port`.
    */
   readonly listeningPort: number;
-  readonly jwtSecret: string;
-  /** `undefined` ⇒ solo se aceptan los HS256 del backend principal. Ver BILLING_AUTH_PUBLIC_KEY. */
-  readonly billingAuth: BillingAuthTrust | undefined;
-  /** DE ENTRADA. `undefined` ⇒ esta instancia no se administra. Ver BETASO_ADMIN_PANEL_API_KEY. */
-  readonly adminPanelApiKey: string | undefined;
+  /** Cómo se verifica el token de un jugador. Ver BILLING_AUTH_PUBLIC_KEY. */
+  readonly billingAuth: BillingAuthTrust;
+  /** DE ENTRADA. `undefined` ⇒ esta instancia no se administra. Ver ADMIN_API_KEY. */
+  readonly adminApiKey: string | undefined;
   /** DE ENTRADA. `undefined` ⇒ el orquestador no puede abrir mesas acá. Ver ORCHESTRATOR_API_KEY. */
   readonly orchestratorApiKey: string | undefined;
   /**
@@ -442,7 +423,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   // Adentro de producción esas ausencias fallan en SILENCIO, que es lo que las hace caras:
   // sin `MONGO_URI` el proceso arranca creyendo que persiste y el catálogo entero muere con él;
   // sin `RABBITMQ_URL` el outbox acumula eventos que nadie va a publicar nunca, y el consumidor
-  // se queda con un catálogo viejo sin que falle nada de los dos lados; sin `BETASO_ADMIN_PANEL_API_KEY`
+  // se queda con un catálogo viejo sin que falle nada de los dos lados; sin `ADMIN_API_KEY`
   // las mutaciones no se registran y el panel recibe 404 donde espera administrar.
   //
   // UN SOLO ERROR QUE LAS ENUMERA, no el primero que aparece: corregir de a una es un despliegue
@@ -453,7 +434,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       [
         ["MONGO_URI", parsed.MONGO_URI],
         ["RABBITMQ_URL", parsed.RABBITMQ_URL],
-        ["BETASO_ADMIN_PANEL_API_KEY", parsed.BETASO_ADMIN_PANEL_API_KEY],
+        ["ADMIN_API_KEY", parsed.ADMIN_API_KEY],
       ] as const
     )
       .filter(([, valor]) => valor === undefined)
@@ -462,17 +443,12 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       throw new Error(`Entorno inválido — en producción faltan: ${faltan.join(", ")}`);
   }
   // LAS LLAVES DEL ORQUESTADOR SE VALIDAN ENTRE SÍ, y falla al arrancar porque el modo de falla es mudo:
-  // sin `BILLING_AUTH_PUBLIC_KEY` las mesas del orquestador se abren pero nadie puede entrar a ellas
-  // (sus jugadores traen ES256), y una llave repetida con la del panel deja que una llave abra lo de
-  // otra — "cada llave abre lo suyo".
+  // una llave repetida con la de administración deja que una llave abra lo de otra — "cada llave
+  // abre lo suyo".
   if (parsed.ORCHESTRATOR_API_KEY !== undefined) {
-    if (parsed.BILLING_AUTH_PUBLIC_KEY === undefined)
+    if (parsed.ADMIN_API_KEY === parsed.ORCHESTRATOR_API_KEY)
       throw new Error(
-        "Entorno inválido — ORCHESTRATOR_API_KEY requiere BILLING_AUTH_PUBLIC_KEY: sin ella las mesas del orquestador abren y nadie puede entrar",
-      );
-    if (parsed.BETASO_ADMIN_PANEL_API_KEY === parsed.ORCHESTRATOR_API_KEY)
-      throw new Error(
-        "Entorno inválido — ORCHESTRATOR_API_KEY no puede ser igual a BETASO_ADMIN_PANEL_API_KEY: cada llave abre lo suyo",
+        "Entorno inválido — ORCHESTRATOR_API_KEY no puede ser igual a ADMIN_API_KEY: cada llave abre lo suyo",
       );
     // A QUIÉN PEDIRLE LOS COBROS. Sin esto, una mesa del orquestador se abre y no puede cobrar nada:
     // ni la entrada —la mesa no arrancaría nunca— ni un aumento. Igual que arriba, una sola falla
@@ -495,7 +471,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       );
     for (const [nombre, valor] of [
       ["ORCHESTRATOR_API_KEY", parsed.ORCHESTRATOR_API_KEY],
-      ["BETASO_ADMIN_PANEL_API_KEY", parsed.BETASO_ADMIN_PANEL_API_KEY],
+      ["ADMIN_API_KEY", parsed.ADMIN_API_KEY],
     ] as const) {
       if (valor === parsed.ORCHESTRATOR_CALLBACK_API_KEY)
         throw new Error(
@@ -512,15 +488,12 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     port: parsed.PORT,
     instanceIndex,
     listeningPort,
-    jwtSecret: parsed.BETASO_BACKEND_JWT_SECRET,
-    billingAuth: parsed.BILLING_AUTH_PUBLIC_KEY
-      ? {
-          publicKeyPem: parsed.BILLING_AUTH_PUBLIC_KEY,
-          issuer: parsed.JWT_ISSUER,
-          audience: parsed.JWT_AUDIENCE,
-        }
-      : undefined,
-    adminPanelApiKey: parsed.BETASO_ADMIN_PANEL_API_KEY,
+    billingAuth: {
+      publicKeyPem: parsed.BILLING_AUTH_PUBLIC_KEY,
+      issuer: parsed.JWT_ISSUER,
+      audience: parsed.JWT_AUDIENCE,
+    },
+    adminApiKey: parsed.ADMIN_API_KEY,
     orchestratorApiKey: parsed.ORCHESTRATOR_API_KEY,
     orchestratorCallback:
       parsed.ORCHESTRATOR_API_KEY !== undefined &&

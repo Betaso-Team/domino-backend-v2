@@ -21,6 +21,10 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
   le pide al orquestador que cobre la entrada (`chargeEntry`) y cada aumento
   (`OrchestratorBetCharger`), y le publica el resultado por el outbox de `betaso_games`
   (`MatchResultRecorder`). Tampoco reporta ranking ni liga, ni sirve `/me/matches` o `/me/metrics`.
+- **Un solo emisor de tokens: billing-auth.** El `JwtVerifier` acepta solo ES256 contra
+  `BILLING_AUTH_PUBLIC_KEY` (obligatoria); no hay HS256 ni secreto compartido con el backend de
+  Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
+  llave nuestra, no la de un cliente.
 - **La revancha**: el motor abre la ventana (`isRematchEnabled: true` en `configOf`), pero nadie abre
   la compuerta, así que sale siempre con `eligible: false`. Revancha de verdad pide que el orquestador
   vuelva a cobrar.
@@ -2191,9 +2195,22 @@ abiertas por el dominó mismo (las creadas CON `roomOptions`):
 
 1. **Los torneos esperan a que el orquestador abra mesas de torneo.** Hasta entonces
    `features/tournament` no se usa.
-2. **`BETASO_BACKEND_JWT_SECRET` sigue obligatoria** aunque los jugadores del orquestador traen ES256
-   de billing-auth: el `JwtVerifier` todavía acepta HS256 y la suite firma así. Sacarla es decisión
-   aparte.
+2. ~~**`BETASO_BACKEND_JWT_SECRET` sigue obligatoria**~~ Resuelta en `feat/sin-credenciales-de-betaso`
+   (ver abajo).
+
+## Incremento completo — sin credenciales de Betaso (rama `feat/sin-credenciales-de-betaso`)
+
+- **Fuera el HS256:** `BETASO_BACKEND_JWT_SECRET` ya no existe. `JwtVerifier` verifica solo ES256 de
+  billing-auth (`algorithms: ["ES256"]`, emisor, audiencia, `exp` y `game: "domino"`), y
+  `BILLING_AUTH_PUBLIC_KEY` pasó de opcional a **obligatoria**: sin ella el proceso no arranca.
+- **`BETASO_ADMIN_PANEL_API_KEY` → `ADMIN_API_KEY`** (y `adminPanelApiKey` → `adminApiKey`,
+  `requireAdminPanelKey` → `requireAdminKey`). Mismo header (`x-internal-api-key`) y mismas rutas: al
+  desplegar se renombra la variable en el `.env` y quien la presente sigue usando el mismo valor.
+- **La suite firma como billing-auth**: `src/tests/billing-auth-keys.ts` tiene una pareja P-256 fija y
+  publicada a propósito (`mintBillingToken`); `vitest.setup.ts` y `compose.smoke.yaml` usan su pública.
+  Ningún entorno de verdad confía en ella.
+- **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume), y
+  `JWT_ISSUER` vale `betaso-auth`.
 
 ## Cómo se ejecuta una tarea
 

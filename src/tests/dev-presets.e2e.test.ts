@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 const PORT = 2614;
 const admin = {
   "Content-Type": "application/json",
-  "x-internal-api-key": env.adminPanelApiKey ?? "",
+  "x-internal-api-key": env.adminApiKey ?? "",
 };
 const section = (name: string, init: RequestInit) =>
   fetch(`http://127.0.0.1:${PORT}${SETTINGS_ROUTE}/${name}`, { headers: admin, ...init });

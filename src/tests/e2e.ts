@@ -1,9 +1,8 @@
 import { testConfig } from "@/app.config";
 import { rootContainer, startServices } from "@/di-container";
-import { env } from "@/env";
 import type { CreateMatchRequest, MatchParticipant } from "@/features/match";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
-import jwt from "jsonwebtoken";
+import { mintBillingToken } from "./billing-auth-keys";
 import { fakeOrchestrator } from "./fake-orchestrator";
 import { CASUAL_2P } from "./game-mode-catalog";
 
@@ -45,15 +44,12 @@ export const participantOf = (input: ParticipantInput): MatchParticipant =>
       }
     : input;
 
-// EMITIR tokens es del backend principal y no del dominó, que solo los verifica, así que
-// emitirlos para la suite es trabajo del scaffolding. Acepta el `userId` pelado además del
-// participante entero: lo único que se firma es el `sub`, y hay llamadores —las rutas HTTP con
-// token— que no tienen un participante que pasar.
+// EMITIR tokens es de billing-auth y no del dominó, que solo los verifica, así que emitirlos para
+// la suite es trabajo del scaffolding. Acepta el `userId` pelado además del participante entero:
+// lo único que importa es el `sub`, y hay llamadores —las rutas HTTP con token— que no tienen un
+// participante que pasar.
 export function mintToken(player: string | { readonly userId: string }): string {
-  return jwt.sign({ sub: typeof player === "string" ? player : player.userId }, env.jwtSecret, {
-    algorithm: "HS256",
-    expiresIn: "1h",
-  });
+  return mintBillingToken(typeof player === "string" ? player : player.userId);
 }
 
 export function casualTable(

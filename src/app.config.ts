@@ -195,7 +195,7 @@ const registerHttp = (app: Application) => {
       clock: rootContainer.resolve<Clock>("Clock"),
       logger,
       history: rootContainer.resolve<HistoryReader>("HistoryReader"),
-      adminPanelApiKey: env.adminPanelApiKey,
+      adminApiKey: env.adminApiKey,
       tables: rootContainer.resolve(ColyseusMatchGateway),
       orchestratorApiKey: env.orchestratorApiKey,
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
@@ -205,14 +205,14 @@ const registerHttp = (app: Application) => {
   // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta
   // puesta después queda con el HTML por defecto de Express, con el stack adentro.
   //
-  // Los GET son públicos y las cinco mutaciones viven detrás de `adminPanelApiKey`; sin llave no se
+  // Los GET son públicos y las cinco mutaciones viven detrás de `adminApiKey`; sin llave no se
   // registran (fail closed, §`features/game-mode/transports/http/admin.ts`). Quien autentica
   // al administrador es el orquestador, no el dominó.
   app.use(
     gameModeHttp({
       service: rootContainer.resolve(GameModeService),
       logger,
-      adminPanelApiKey: env.adminPanelApiKey,
+      adminApiKey: env.adminApiKey,
     }),
   );
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
@@ -222,7 +222,7 @@ const registerHttp = (app: Application) => {
       sections: settingsSections,
       signal: settingsSignal,
       writer: settingsWriter,
-      adminPanelApiKey: env.adminPanelApiKey,
+      adminApiKey: env.adminApiKey,
       log: logger,
     }),
   );
