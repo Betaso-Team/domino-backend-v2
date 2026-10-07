@@ -2211,6 +2211,20 @@ abiertas por el dominó mismo (las creadas CON `roomOptions`):
   Ningún entorno de verdad confía en ella.
 - **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume), y
   `JWT_ISSUER` vale `betaso-auth`.
+- **Los niveles de aumento son parte del modo** (`43d89a0`): `betLevels: [{ level, extra,
+  additionalPoints }]`, la misma forma del `CreateMatchRequest`. Vacío = no ofrece aumentar. Se
+  validan niveles únicos (≥ 2) y el `extra` creciente; el `PUT` reemplaza la lista. El `GET` público
+  los devuelve; los eventos `game_mode.*` no. `additionalPoints` se guarda tal cual (depende del
+  ranking de cada cliente, que dominó no conoce).
+
+### Deudas abiertas de este incremento
+
+1. **El orquestador todavía no lee `betLevels`**: sigue con `BET_LEVELS_URL`, que no responde, así
+   que ninguna mesa ofrece aumentar hasta que lo haga.
+2. **Quién carga los niveles** y la migración desde `bet_increase_configs` de Betaso (su
+   `gameModeExternalId` es nuestro `uuid`).
+3. **El exchange `betaso`** sigue publicándose: Betaso lo consume. Cortarlo depende de quién
+   administre el catálogo.
 
 ## Cómo se ejecuta una tarea
 
