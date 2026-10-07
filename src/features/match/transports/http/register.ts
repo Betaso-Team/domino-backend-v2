@@ -3,12 +3,10 @@ import type { Logger } from "@/logger";
 import { Router } from "express";
 import type { Clock } from "../../core/engine/clock";
 import type { HistoryReader } from "../../network/history";
-import type { PlayerLog } from "../../network/player-log";
 import type { ColyseusMatchGateway } from "../colyseus/gateway";
 import type { MatchRegistry } from "../match-registry";
 import { historyRoutes } from "./history";
 import { matchRoutes } from "./match";
-import { playerLogRoutes } from "./player-log";
 import { tablesRoutes } from "./tables";
 
 // TODAS las dependencias entran por PARÁMETRO OBLIGATORIO, ninguna con default y ninguna
@@ -34,11 +32,10 @@ export interface MatchHttpDeps {
   /** `undefined` ⇒ la API del orquestador NO se registra. Ver `tablesRoutes`. */
   readonly orchestratorApiKey: string | undefined;
   readonly verifier?: TokenVerifier;
-  readonly playerLog?: PlayerLog;
 }
 
-// EL HTTP DE LA PARTIDA, en tres responsabilidades y un solo router: UNA partida (`match.ts`), lo que
-// jugó UNA cuenta (`player-log.ts`) y el historial de soporte (`history.ts`). Los paths son
+// EL HTTP DE LA PARTIDA, en tres responsabilidades y un solo router: UNA partida (`match.ts`), el
+// historial de soporte (`history.ts`) y la API interna del orquestador (`tables.ts`). Los paths son
 // absolutos, así que se monta en la raíz; las guardas van por ruta. Portado de truco (`0b0a467`).
 //
 // RECIBE sus dependencias en vez de resolverlas del container: resolver es una operación de
@@ -47,9 +44,5 @@ export interface MatchHttpDeps {
 // seguiría dependiendo de tsyringe, escondiendo qué necesita, y sin poder testearse sin
 // armar un container—. Lo que un transporte no puede saber es que el container existe.
 export function matchHttp(deps: MatchHttpDeps): Router {
-  return Router()
-    .use(matchRoutes(deps))
-    .use(playerLogRoutes(deps))
-    .use(historyRoutes(deps))
-    .use(tablesRoutes(deps));
+  return Router().use(matchRoutes(deps)).use(historyRoutes(deps)).use(tablesRoutes(deps));
 }

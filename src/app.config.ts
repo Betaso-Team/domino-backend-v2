@@ -1,19 +1,15 @@
 import type { TokenVerifier } from "@/features/auth";
 import { GameModeService, gameModeHttp } from "@/features/game-mode";
-import { LobbySettings, lobbyHttp } from "@/features/lobby";
 import {
   type Clock,
   ColyseusMatchGateway,
   type HistoryReader,
   MatchRegistry,
-  type PlayerLog,
   matchHttp,
   selectProcessIdToCreateRoom,
 } from "@/features/match";
 import { matchRooms } from "@/features/match/transports/colyseus/register";
-import { type MatchmakingConfig, matchmakingHttp, matchmakingRooms } from "@/features/matchmaking";
 import { settingsHttp } from "@/features/settings";
-import { type StrikeBook, tournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, healthRoutes } from "@/shared/http/health";
 import { requestLog } from "@/shared/http/request-log";
@@ -32,10 +28,7 @@ import express, { type Application } from "express";
 import {
   amqp,
   betasoGamesAmqp,
-  census,
   driver,
-  maintenanceSignal,
-  matchmaker,
   mongo,
   presence,
   rootContainer,
@@ -47,15 +40,9 @@ import { env, isDevEnvironment } from "./env";
 import type { Logger } from "./logger";
 
 // CADA FEATURE TRAE SU PEDAZO DEL MAPA DE SALAS (`transports/colyseus/register.ts`), como trae su
-// router HTTP.
+// router HTTP. La única sala es la mesa (`domino`): no hay lobby, porque quien admite y empareja es el
+// orquestador, que abre cada mesa por la API interna.
 const rooms = {
-  ...matchmakingRooms({
-    matchmaker,
-    verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-    maintenance: maintenanceSignal,
-    census,
-    pulseMs: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig").censusPollMs,
-  }),
   ...matchRooms(),
 };
 
@@ -203,19 +190,6 @@ const registerHttp = (app: Application) => {
   // ruta y no por prefijo, y las dependencias entran ya resueltas (truco `0b0a467`). El orden de
   // montaje es el de registro, y sólo importa DENTRO de una feature —el catálogo lo pinea—.
   app.use(
-    lobbyHttp({
-      settings: rootContainer.resolve(LobbySettings),
-      adminPanelApiKey: env.adminPanelApiKey,
-    }),
-  );
-  app.use(matchmakingHttp({ maintenance: maintenanceSignal, census }));
-  app.use(
-    tournamentHttp({
-      strikes: rootContainer.resolve<StrikeBook>("StrikeBook"),
-      verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-    }),
-  );
-  app.use(
     matchHttp({
       registry: rootContainer.resolve(MatchRegistry),
       clock: rootContainer.resolve<Clock>("Clock"),
@@ -225,7 +199,6 @@ const registerHttp = (app: Application) => {
       tables: rootContainer.resolve(ColyseusMatchGateway),
       orchestratorApiKey: env.orchestratorApiKey,
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-      playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
     }),
   );
   // EL CATÁLOGO, y va ANTES del manejador de errores como todas las demás: Express reconoce ese

@@ -4,53 +4,61 @@ Dominó v2 es un port de la arquitectura de truco, no una copia del juego. Conse
 del motor y la forma de operar un clúster Colyseus, pero las reglas, los comandos y la economía son
 los del dominó v1.
 
+Es un **game backend**: juega las mesas que le abre el orquestador de Betaso Juegos
+(`betaso-games-orchestrator`, `apps/domino-orchestrator`). El orquestador es la única puerta de
+entrada —admite, empareja, tiene el único interruptor de mantenimiento y decide qué se cobra— y el
+dominó no mueve dinero: le pide al orquestador que cobre la entrada y cada aumento, y le publica el
+resultado de cada partida.
+
 ## Mapa del sistema
 
 ```mermaid
 flowchart LR
   Client["Cliente de juego"]
+  Orch["Orquestador\n(domino-orchestrator)"]
   Panel["Panel / operador"]
   Proxy["Nginx\nWebSocket + HTTP"]
 
   subgraph Process["Proceso Node + Colyseus"]
-    Lobby["LobbyRoom\ncenso y mantenimiento"]
     Room["DominoRoom\nautenticación y transporte"]
     Router["MessageRouter\ndecoder + handler"]
     Engine["Motor síncrono\nreglas + estado"]
-    HTTP["Express\nconfig, catálogo y sondas"]
+    HTTP["Express\nAPI interna, config, catálogo y sondas"]
     Registry["MatchRegistry"]
     Catalog["GameModeService"]
     History["MatchHistory"]
+    Results["MatchResultRecorder\noutbox de resultados"]
   end
 
   Redis[("Redis\ndriver, presence, registro")]
-  Mongo[("MongoDB\nhistorial, catálogo, outbox")]
-  Rabbit[("RabbitMQ\neventos de catálogo y ranking")]
-  Backend["Backend principal\nligas"]
+  Mongo[("MongoDB\nhistorial, catálogo, outboxes")]
+  Rabbit[("RabbitMQ betaso\neventos de catálogo")]
+  Games[("RabbitMQ betaso_games\nresultados de partida")]
 
   Client --> Proxy
   Panel --> Proxy
-  Proxy --> Lobby
+  Orch -->|"abrir mesa, reasentar, censo"| HTTP
   Proxy --> Room
   Proxy --> HTTP
   Room --> Router --> Engine
   Room --> Registry
-  Lobby --> Registry
   Room --> History
+  Room -->|"cobro de entrada y aumentos"| Orch
+  Room --> Results
   HTTP --> Catalog
   HTTP --> Registry
   Registry <--> Redis
-  Lobby <--> Redis
   History <--> Mongo
   Catalog <--> Mongo
+  Results <--> Mongo
   Catalog --> Rabbit
-  Engine --> Rabbit
-  Engine --> Backend
+  Results --> Games
+  Games --> Orch
 ```
 
 Los procesos no se hablan directamente. Redis hace que sus salas, reservas y registros formen un
-solo clúster. Mongo guarda lo que debe sobrevivir a un reinicio. RabbitMQ y el backend principal son
-salidas: una partida puede seguir jugando si están temporalmente caídos.
+solo clúster. Mongo guarda lo que debe sobrevivir a un reinicio. Los dos brokers son salidas con
+outbox: una partida puede seguir jugando si están temporalmente caídos.
 
 ## Las capas
 
@@ -59,7 +67,7 @@ salidas: una partida puede seguir jugando si están temporalmente caídos.
 | `core/rules/` | Consultar legalidad, extremos, puntaje y acciones disponibles | Devuelve datos (`Ruling`); no muta ni lanza |
 | `core/engine/` | Ejecutar comandos y mutar el árbol de partida | Síncrono; no espera red |
 | `core/state/` | Árbol Colyseus y visibilidad por jugador | Identidad externa y moneda no se sincronizan |
-| `network/` | Historial, eventos, standings y proyecciones económicas | Traduce desenlaces; no decide reglas |
+| `network/` | Historial, eventos, cobros al orquestador, resultado y proyección económica | Traduce desenlaces; no decide reglas |
 | `transports/` | Colyseus, HTTP, Mongo, AMQP | Valida entradas y adapta infraestructura |
 | `app.config.ts` / `di-container.ts` | Ensamblar servidor y dependencias del proceso | Las features no resuelven infraestructura por su cuenta |
 | `main.ts` | Escuchar y apagar ordenadamente | Salas primero; persistencia después |
@@ -72,7 +80,7 @@ explícita del jugador.
 
 ```mermaid
 sequenceDiagram
-  actor Platform as Plataforma
+  actor Orch as Orquestador
   participant Room as DominoRoom
   participant Modes as GameModeReader
   participant Registry as MatchRegistry
@@ -80,15 +88,18 @@ sequenceDiagram
   participant Engine as Motor
   participant History as Historial
 
-  Platform->>Room: crear sala con participantes y gameModeId
+  Orch->>Room: POST /internal/matches (participantes, gameModeId, niveles)
   Room->>Modes: resolver modo activo
-  Modes-->>Room: puntos, apuesta, premio y niveles
+  Modes-->>Room: puntos, apuesta y premio
   Room->>Room: validar config y crear génesis
   Room->>Registry: registrar config, asientos y censo
+  Room-->>Orch: roomId y una reserva por jugador
 
-  Player->>Room: conectar con JWT
-  Room->>Room: cruzar platformId + userUuid con asiento
+  Player->>Room: conectar con la reserva y el JWT
+  Room->>Room: cruzar el userId del token con el asiento
   Room-->>Player: estado filtrado por StateView
+  Room->>Orch: con la mesa completa, cobrar la entrada
+  Orch-->>Room: 200: la partida arranca
 
   Player->>Room: mensaje + payload
   Room->>Engine: comando validado y síncrono
@@ -102,20 +113,27 @@ sequenceDiagram
 
   Engine-->>Room: MATCH_RESOLVED o MATCH_ABORTED
   Room->>History: grabar desenlace
+  Room->>Orch: resultado por outbox (betaso_games)
   Room->>Registry: retirar sala y asientos
 ```
 
 ### Creación
 
-`DominoRoom.onCreate` rechaza mantenimiento, resuelve el modo del catálogo y convierte opciones no
-confiables en un `DominoMatchConfig` congelado. La identidad externa se transforma una sola vez en
-asientos opacos (`seat-1`, `seat-2`, …); el motor no conoce plataformas ni UUIDs.
+La única forma de abrir una mesa es `POST /internal/matches`, que llama el orquestador. Si hay
+mantenimiento, el orquestador no abre mesas: el dominó no tiene interruptor propio.
+`DominoRoom.onCreate` valida el pedido (`requestOf`), resuelve el modo del catálogo y lo convierte en
+un `DominoMatchConfig` congelado. La identidad externa se transforma una sola vez en asientos opacos
+(`seat-1`, `seat-2`, …); el motor no conoce plataformas ni UUIDs.
+
+La partida arranca recién cuando el orquestador confirma el cobro de la entrada a todos. Si no lo
+confirma, la mesa se cierra sin arrancar y sale abortada con `CHARGE_REJECTED`.
 
 ### Conexión y reconexión
 
-El JWT aporta `{ platformId, userUuid }`. Esa pareja debe coincidir con la reserva de la mesa. Un
-corte de red marca al jugador desconectado, pero conserva su asiento y su reloj durante la ventana
-de reconexión. El censo del lobby cuenta asientos vivos, no sockets momentáneamente conectados.
+El `sub` del JWT es el `userId` y debe coincidir con un asiento de la mesa. Un corte de red marca al
+jugador desconectado, pero conserva su asiento y su reloj durante la ventana de reconexión; si el
+cliente perdió la reserva, el orquestador le pide una nueva (`POST /internal/players/:userId/seat`).
+El censo (`GET /internal/census`) cuenta asientos vivos, no sockets momentáneamente conectados.
 
 ### Comandos
 
@@ -177,25 +195,33 @@ son fases distintas: cada una espera una clase diferente de input o timeout.
 | Componente | Con la dependencia | Sin la dependencia |
 |---|---|---|
 | Registro de salas y presence | Redis compartido entre procesos | Implementación local de Colyseus; clúster de un proceso |
-| `MatchRegistry` y lobby | Redis, TTL y censo compartido | `MemoryKeyValueStore`; válido para una sola instancia |
+| `MatchRegistry` | Redis, TTL y censo compartido | `MemoryKeyValueStore`; válido para una sola instancia |
 | Historial | MongoDB, persiste reinicios | `MemoryHistory`, limitado al proceso |
 | Catálogo y outbox | MongoDB, escritura durable | Repositorio y outbox de memoria |
-| Publicación del outbox | RabbitMQ con confirmaciones | El outbox conserva pendientes si Mongo existe |
-| Ranking | RabbitMQ | La partida termina igual; no publica |
-| Liga | Backend HTTP | La partida termina igual; no reporta liga |
+| Publicación del catálogo | RabbitMQ `betaso` con confirmaciones | El outbox conserva pendientes si Mongo existe |
+| Resultado de partida | RabbitMQ `betaso_games` con confirmaciones | El outbox de resultados acumula; sin Mongo, muere con el proceso |
+| Cobros de entrada y aumento | Orquestador por HTTP | La mesa no arranca, o el aumento se anula |
 
-La presencia de `MONGO_URI`, `REDIS_URL`, `RABBITMQ_URL` y `BETASO_BACKEND_URL` elige cada capacidad. No
-hay variables que nombren drivers.
+La presencia de `MONGO_URI`, `REDIS_URL`, `RABBITMQ_URL` y `BETASO_GAMES_RABBITMQ_URL` elige cada
+capacidad. No hay variables que nombren drivers.
 
 ## Dinero: qué hace y qué no hace
 
-- El modo congela `entryFee`, `prize`, `currency` y `rateId` en el snapshot de la mesa.
-- `settlementOf` proyecta instrucciones idempotentes de reembolso o premio; no mueve dinero.
-- El aumento de apuesta se negocia en el motor, pero no se cobra todavía.
-- Una mesa 4P no se liquida: falta una regla de producto para repartir el premio entre compañeros.
-- El orquestador que entregue instrucciones al wallet está diseñado, pero no vive en este backend.
+Un juego nunca mueve dinero: el dominó no tiene billetera, ni ledger, ni credenciales de ninguna.
 
-El orquestador vive en `betaso-games-orchestrator` (`apps/domino-orchestrator`), y la API que le expone este backend está en `docs/api-y-mensajes.md` y en `AGENTS.md`, «API para el orquestador».
+- El modo congela `entryFee`, `prize`, `currency` y `rateId` en el snapshot de la mesa.
+- Con la mesa completa, la sala le pide al orquestador que cobre la entrada, y no arranca sin el sí.
+- El aumento de apuesta se negocia en el motor y se le pide cobrar al orquestador; si no cobra, el
+  aumento se anula (`MULTIPLIER_REVOKED`).
+- `settlementOf` proyecta el premio, y el resultado viaja al orquestador por el outbox de
+  `betaso_games`. Quien paga es el orquestador, a través de billing-auth.
+- La ventana de revancha se abre con la compuerta cerrada (`eligible: false`): una revancha
+  necesitaría que el orquestador vuelva a cobrar, y eso no existe todavía.
+- Los torneos no se juegan: `src/features/tournament` está en el repo pero sin cablear, hasta que
+  el orquestador abra mesas de torneo.
+
+La API que este backend le expone al orquestador está en `docs/api-y-mensajes.md` y en `AGENTS.md`,
+«API para el orquestador».
 
 ## Dónde empezar a leer código
 

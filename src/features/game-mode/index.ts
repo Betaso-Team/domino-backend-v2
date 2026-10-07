@@ -26,21 +26,18 @@
 // distinguirlos, salen; exportarlos antes es superficie que nadie puede podar después.
 //
 // `gameModeHttp` sale con su tipo de dependencias, igual que las otras dos superficies HTTP
-// del repo (`features/match/index.ts`, `features/lobby/index.ts`): el composition root es el único
+// del repo (`features/match/index.ts`, `features/settings/index.ts`): el composition root es el único
 // que puede llamarla porque es el único que tiene el servicio armado y el único que lee
 // `env.adminPanelApiKey`. Los CUATRO ERRORES siguen sin salir: quien los traduce a 404/409/503 es esa
 // misma función, acá adentro.
 export type { GameModeReader } from "./core/catalog";
 export type { GameMode } from "./core/game-mode";
-// `CachedGameModeReader` sale como VALOR para el composition root, que es quien decide que el
-// emparejador sondee a través de él y la sala no.
 export { OutboxDispatcher } from "./outbox";
 export { GameModeService } from "./service";
 export {
   type GameModeHttpDeps,
   gameModeHttp,
 } from "./transports/http/register";
-export { CachedGameModeReader } from "./transports/cached-reader";
 export { MemoryGameModeOutbox } from "./transports/memory-outbox";
 export { MemoryGameModeRepository } from "./transports/memory-repository";
 export { MongoGameModeOutbox } from "./transports/mongo-outbox";

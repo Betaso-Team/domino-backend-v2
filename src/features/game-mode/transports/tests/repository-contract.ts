@@ -156,8 +156,8 @@ export function describeGameModeRepositoryContract(
   describe(`${label}: listados`, () => {
     // El orden es RECIENTES PRIMERO, igual que el `sort({ createdAt: -1 })` de v1
     // (`game-mode.service.ts:25` y `:36`). Es una propiedad de la consulta y por eso la fija el
-    // adaptador, pero los dos adaptadores tienen que fijar la misma: el lobby de una instancia sin
-    // Mongo mostraría el catálogo al revés.
+    // adaptador, pero los dos adaptadores tienen que fijar la misma: una instancia sin Mongo
+    // listaría el catálogo al revés.
     it("active() devuelve sólo los activos, recientes primero", async () => {
       const { repository, clock } = harnessOf();
       const viejo = await repository.create(clasica({ name: "Vieja" }));

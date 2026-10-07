@@ -13,8 +13,7 @@ import { settlementOf } from "./settlement";
 // cobra y cuánto es del juego (`settlementOf`)—, y los reembolsos NO: el orquestador devuelve lo que
 // su ficha dice que cobró, que es lo único que sabe con certeza quién pagó.
 //
-// SOLO LAS MESAS POR REQUEST lo publican. Las del lobby propio de dominó liquidan contra Betaso por
-// su propio camino (`network/platform.ts`), y publicar las dos cosas sería pagar dos veces.
+// TODA MESA lo publica: el orquestador es la única puerta de entrada, así que toda mesa es suya.
 
 export const MATCH_RESULT_EXCHANGE = "betaso_games";
 export const MATCH_FINISHED_KEY = "domino.match.finished";

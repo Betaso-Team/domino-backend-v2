@@ -4,7 +4,7 @@ import { NO_OVERRIDES, type SectionOverrides, type SettingsOverrides } from "../
 import type { SettingsBook, SettingsWriter } from "../store";
 
 // LOS OVERRIDES, en la colección donde v1 ya guarda los ajustes globales del dominó —`domino_settings`,
-// la misma de donde se lee el interruptor de mantenimiento— y en un DOCUMENTO PROPIO.
+// la de su interruptor de mantenimiento— y en un DOCUMENTO PROPIO.
 //
 // La colección se comparte porque ahí viven «los ajustes del dominó». El documento no: el de v1 lo
 // escribe su propio servicio, y sus tres plazos (`playerTurnTimeout`, `playerExtraTimeout`,

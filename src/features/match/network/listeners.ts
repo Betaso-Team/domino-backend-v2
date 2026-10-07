@@ -8,11 +8,6 @@ export type MatchEventListener = (event: NetworkMatchEvent) => readonly NetworkM
 // Consume y no produce: difundir, persistir el historial.
 export type MatchEventSink = (events: readonly NetworkMatchEvent[]) => void;
 
-// HABLARLE A UN JUGADOR. Una partida difunde, así que este tipo existe para lo único que no puede:
-// una penalidad de torneo o los puntos que sumó son asunto de quien los recibe, y difundirlos le
-// daría al rival una cuenta que no es suya. Opaco de este lado: no dice "cliente" ni "socket".
-export type MatchMessenger = (playerId: string, type: string, payload: unknown) => void;
-
 export class MatchEventNotifier {
   // Superarlo no es "quedó corto", es un ciclo.
   private static readonly MAX_CASCADE = 10;

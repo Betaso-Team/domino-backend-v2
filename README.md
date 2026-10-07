@@ -1,8 +1,13 @@
 # domino-backend-v2
 
-Backend de dominó multijugador sobre Colyseus 0.18. Las salas se reparten entre los procesos
-del clúster, que se ven entre sí por Redis; lo único que persiste es el historial de cada
-partida, en Mongo, para la consola de soporte.
+Backend de dominó multijugador sobre Colyseus 0.18. Juega las mesas que abre el **orquestador**
+de Betaso Juegos (`games-orchestrator/apps/domino-orchestrator`), que es la única puerta de
+entrada: admite a los jugadores, los empareja, tiene el interruptor de mantenimiento y abre cada
+mesa por la API interna de este servidor. El dominó no mueve dinero: le pide al orquestador que
+cobre y le publica el resultado de cada partida.
+
+Las salas se reparten entre los procesos del clúster, que se ven entre sí por Redis; lo que
+persiste es el historial de cada partida y el catálogo de modos, en Mongo.
 
 Si venís a trabajar sobre el código, lo que tenés que leer es `AGENTS.md`.
 
@@ -29,8 +34,8 @@ docker compose up --build
 ```
 
 `BETASO_BACKEND_JWT_SECRET` es **obligatoria**: sin ella el proceso no arranca, a propósito.
-`BETASO_ADMIN_PANEL_API_KEY` no lo es, pero sin ella las rutas internas de historial y mantenimiento
-**no se registran** y responden 404 — es fail closed, y es el 404 que más se investiga al pedo.
+`BETASO_ADMIN_PANEL_API_KEY` no lo es, pero sin ella las rutas internas del catálogo, del historial y
+de la configuración en caliente **no se registran** y responden 404 — es fail closed, y es el 404 que más se investiga al pedo.
 
 `MONGO_URI` y `REDIS_URL` **no las pongas en el `.env`**: las fija el compose apuntando a los
 servicios (`mongodb://mongo:27017/domino` y `redis://redis:6379/1` — el `/1` es el índice de
@@ -42,21 +47,11 @@ lado.
 
 ## Contrato para el front
 
-La sala `lobby` exige el mismo JWT que una mesa y sincroniza el contrato histórico del dominó:
-`totalPlayers`, `playersInLobby`, `gameModesCount[]`, `isUnderMaintenance` y
-`maintenanceMessage`. Los jugadores se cuentan en todas las salas `domino` visibles por el driver
-compartido y se agrupan por `gameModeId` en `gameModesCount[].gameModeName`.
-
-El operador cambia mantenimiento sin desplegar con:
-
-```bash
-curl -X POST -H "x-internal-api-key: <BETASO_ADMIN_PANEL_API_KEY del .env>" -H "Content-Type: application/json" \
-  -d '{"isUnderMaintenance":true,"message":"Actualizando mesas"}' \
-  http://localhost:2567/internal/lobby/maintenance
-```
-
-El cambio llega a los lobbies y bloquea únicamente mesas nuevas; las partidas abiertas continúan.
-Con Redis lo comparten todos los procesos y sobrevive a sus reinicios; sin Redis vive en memoria.
+El front no elige mesa ni entra a un lobby de este servidor: el orquestador lo empareja, abre la
+mesa (`POST /internal/matches`) y le entrega su reserva de asiento. Con esa reserva y su token el
+cliente se conecta a la sala `domino`. Si se cae y vuelve, el orquestador le pide al dominó una
+reserva nueva en la misma mesa (`POST /internal/players/:userId/seat`). El detalle está en
+`docs/api-y-mensajes.md`.
 
 `GET /config/:roomId` publica los montos con los nombres usados por dominó y truco: `entryFee` y
 `prize`. Ambos son UC completas, iguales a las del catálogo de v1 (`entryFee: 125` son 125 UC) y
@@ -131,7 +126,7 @@ eligió no tener (sin `MONGO_URI`, sin `REDIS_URL`) no cuenta como faltante.
 ### El apagado
 
 `pm2 reload` manda un **mensaje** `shutdown` —no una señal— y da `kill_timeout` (5 s) para drenar.
-En ese rato el servidor corta el emparejamiento, cierra las salas, espera a que el historial en
+En ese rato el servidor deja de releer la configuración en caliente, cierra las salas, espera a que el historial en
 vuelo termine de escribirse y recién ahí cierra Mongo. Redis lo cierra Colyseus dentro del mismo
 paso.
 
@@ -166,8 +161,8 @@ Nginx, con Redis y Mongo efímeros:
 $env:RUN_ENGINE_SMOKE='1'; npm run test:deploy; Remove-Item Env:RUN_ENGINE_SMOKE
 ```
 
-Sin la flag el comando se niega a correr. Esta prueba no llama wallets ni valida el Nginx de
-producción; valida el contrato `/2567` y `/2568` que ese proxy debe implementar.
+Sin la flag el comando se niega a correr. El orquestador del smoke es el mismo Nginx, que aprueba
+todo cobro; la prueba no valida el Nginx de producción; valida el contrato `/2567` y `/2568` que ese proxy debe implementar.
 
 ## Los tests
 

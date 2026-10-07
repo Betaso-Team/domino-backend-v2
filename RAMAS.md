@@ -36,6 +36,10 @@ La línea que vale. Tiene el plan completo (Tareas 0–23), el catálogo de modo
 RabbitMQ, el matchmaking, el torneo y la economía portados de truco, la revancha, el aumento
 de apuesta que cobra, y la mesa de cuatro con bot. **1200 tests / 122 archivos.**
 
+> Hoy el dominó no tiene lobby, emparejador, mantenimiento ni economía propios: la única entrada es
+> el orquestador de Betaso Juegos, y el torneo está en el repo sin cablear. Las ramas de abajo que
+> hablan de matchmaking o de lobby describen alternativas que ya no aplican (ver `AGENTS.md`).
+
 ---
 
 ## `refactor/port-truco-integracion-front` · +12, fast-forward

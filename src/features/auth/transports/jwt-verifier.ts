@@ -25,8 +25,8 @@ export interface BillingAuthTrust {
  * EL `alg` DEL HEADER ELIGE LA CLAVE, NO EL ALGORITMO. Cada rama fija el suyo: un token que dice
  * ES256 se verifica solo como ES256 contra la clave pública, y cualquier otro solo como HS256
  * contra el secreto. Así un token no puede hacer que su firma se compruebe con la clave que no le
- * corresponde. Conviven mientras el lobby propio de dominó siga recibiendo tokens del backend
- * principal.
+ * corresponde. Los jugadores que abre el orquestador traen ES256; la rama HS256 queda para los
+ * tokens del backend principal.
  */
 export class JwtVerifier implements TokenVerifier {
   // La clave ya parseada y validada: se arma UNA vez, al construir, no en cada verificación.

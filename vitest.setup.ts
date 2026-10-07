@@ -52,7 +52,6 @@ process.env.BILLING_AUTH_PUBLIC_KEY ??= generateKeyPairSync("ec", { namedCurve: 
   .toString();
 // La de SALIDA, DISTINTA a propósito: con el mismo valor, un test que confundiera las dos llaves
 // daría verde.
-process.env.BETASO_BACKEND_API_KEY ??= "test-backend-key-do-not-use-in-production";
 // SE BORRA, no se ignora, y es la única variable que este archivo saca en vez de poner.
 // La presencia de `MONGO_URI` es lo que elige la implementación del historial en el
 // composition root (ver src/di-container.ts), así que un desarrollador que la tenga
