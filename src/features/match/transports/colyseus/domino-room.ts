@@ -1,7 +1,6 @@
 import { rootContainer } from "@/di-container";
 import { InvalidTokenError, type TokenVerifier } from "@/features/auth";
 import type { GameModeReader } from "@/features/game-mode";
-import { LobbySettings, MaintenanceModeError } from "@/features/lobby";
 import type { Logger } from "@/logger";
 import { StateView } from "@colyseus/schema";
 import {
@@ -25,16 +24,7 @@ import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
 import { wasAbortedAtDeal } from "../../core/rules";
 import type { MatchState } from "../../core/state";
-import {
-  AdmissionRefusedError,
-  BetCharger,
-  type BetLevelBook,
-  BotTurnTaker,
-  MatchEventNotifier,
-  type MatchHistory,
-  MatchPlatform,
-  RematchCoordinator,
-} from "../../network";
+import { BotTurnTaker, MatchEventNotifier, type MatchHistory } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
 import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
 import {
@@ -42,15 +32,7 @@ import {
   type OrchestratorCharges,
   OrchestratorUnavailableError,
 } from "../../network/orchestrator-charges";
-import {
-  type DominoRoomOptions,
-  type MatchSinks,
-  type SeatCredentials,
-  UnknownGameModeError,
-  configFromRoomOptions,
-  configOf,
-  requestOf,
-} from "../match-contract";
+import { type SeatCredentials, UnknownGameModeError, configOf, requestOf } from "../match-contract";
 import { HEARTBEAT_MS, MatchRegistry } from "../match-registry";
 import {
   type MatchHasOutcome,
@@ -79,8 +61,6 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // al asiento opaco necesita la identidad externa, que el estado no sincroniza y el
   // registro no guarda. Se asigna en `onCreate`, antes de que la sala pueda recibir a nadie.
   private config!: DominoMatchConfig;
-  private roomOptions?: DominoRoomOptions;
-  private platform?: MatchPlatform;
   private closeRematch: RematchCloser = () => [];
   // EL MOTIVO QUE SOLO LA SALA SABE de por qué una mesa del orquestador se cerró sin veredicto: el
   // orquestador no pudo cobrar la entrada. Lo lee el resultado al publicarse.
@@ -171,48 +151,18 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     //
     // `activeByUuid` y no `byUuid`: un modo dado de baja NO EXISTE desde afuera, y el panel lo da
     // de baja justamente para que deje de sentar mesas.
-    const roomOptions = isRoomOptions(options) ? options : undefined;
-    this.roomOptions = roomOptions;
-    const request = roomOptions ? undefined : requestOf(options);
-    const mode = request
-      ? await rootContainer
-          .resolve<GameModeReader>("GameModeReader")
-          .activeByUuid(request.gameModeId)
-      : undefined;
-    if (request && !mode) throw new UnknownGameModeError(request.gameModeId);
-    // Acá adentro se rechaza el 4P (`UNSUPPORTED_GAME_MODE`) y la cantidad que no coincide, y las
-    // dos cosas pasan ANTES de la génesis: el árbol de la partida nace unas líneas más abajo, en
-    // el `child.resolve("MatchState")`.
-    // LOS NIVELES DE AUMENTO, del backend principal y por el MODO de esta mesa. Se resuelven acá
-    // —que es async— porque `configOf` es síncrona y pura; se congelan en el snapshot como el
-    // resto de la economía, así que editar los niveles de un modo con partidas en curso no le
-    // cambia el precio a nadie que ya se sentó.
+    const request = requestOf(options);
+    const mode = await rootContainer
+      .resolve<GameModeReader>("GameModeReader")
+      .activeByUuid(request.gameModeId);
+    if (!mode) throw new UnknownGameModeError(request.gameModeId);
+    // Acá adentro se rechaza el modo que no es de 2 ni de 4 (`UNSUPPORTED_GAME_MODE`) y la cantidad
+    // que no coincide, y las dos cosas pasan ANTES de la génesis: el árbol de la partida nace unas
+    // líneas más abajo, en el `child.resolve("MatchState")`.
     //
-    // Falla CERRADO adentro del libro: sin backend, sin llave o con el endpoint caído la lista
-    // sale vacía y la mesa simplemente no ofrece aumentar.
-    // EL TORNEO NO PREGUNTA, y no es un ahorro de red: la apuesta de una mesa de torneo es del
-    // TORNEO, y dejar que dos jugadores la suban entre ellos cambiaría lo que vale esa partida en
-    // una tabla que no es de ellos. Es la misma frontera que la revancha.
-    //
-    // ⚠ UNA MESA DEL ORQUESTADOR (POR REQUEST) NO PREGUNTA TAMPOCO: los niveles los trae el
-    // request, porque el que cobra el aumento es el orquestador y es él quien decide cuáles se
-    // ofrecen. Sin `betLevels` en el request la mesa no ofrece aumentar.
-    const gameModeId = roomOptions?.mode === "CASUAL" ? roomOptions.gameModeId : undefined;
-    const betLevels = gameModeId
-      ? await rootContainer.resolve<BetLevelBook>("BetLevelBook").levelsOf(gameModeId)
-      : (request?.betLevels ?? []);
-    const config = roomOptions
-      ? configFromRoomOptions(roomOptions, this.roomId, betLevels)
-      : configOf(
-          request as NonNullable<typeof request>,
-          mode as NonNullable<typeof mode>,
-          betLevels,
-        );
-    if (!roomOptions) {
-      const maintenance = await rootContainer.resolve(LobbySettings).get();
-      if (maintenance.isUnderMaintenance)
-        throw new MaintenanceModeError(maintenance.maintenanceMessage);
-    }
+    // LOS NIVELES DE AUMENTO LOS TRAE EL REQUEST: el que cobra el aumento es el orquestador, y es él
+    // quien decide cuáles se ofrecen. Sin `betLevels` la mesa no ofrece aumentar.
+    const config = configOf(request, mode, request.betLevels ?? []);
     this.config = config;
     this.seats = playerIdsOf(config);
     // Colyseus cuenta las reservas de reconexión aunque unlock() abra el listing. Dos
@@ -227,7 +177,6 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // BASE sin las ediciones en caliente —o sea que el motor se armaría con otros números que los
     // que esta sala leyó arriba—.
     child.register("GlobalDominoConfig", { useValue: global });
-    if (roomOptions) child.register("RoomOptions", { useValue: roomOptions });
 
     // La vista es del asiento, no del socket: existe antes de que el dueño se conecte y
     // conserva las revelaciones privadas si el socket se reemplaza o se reconecta.
@@ -260,89 +209,32 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       this.notifier.notify(events),
     );
     this.history = pieces.history;
-    this.platform = rootContainer.isRegistered(MatchPlatform)
-      ? rootContainer.resolve(MatchPlatform)
-      : undefined;
-    const platformSink =
-      roomOptions && this.platform
-        ? this.platform.sinkFor(
-            roomOptions,
-            this.roomId,
-            match,
-            (playerId, type, payload) => this.clientOf(playerId)?.send(type, payload),
-            (events) => this.notifier.notify(events),
-          )
-        : undefined;
-    const platformSinks = platformSink ? [platformSink] : [];
-    // EL COORDINADOR DE LA REVANCHA, y entra por el mismo camino que la plataforma: un sink.
-    // Contesta la compuerta durante la pausa de presentación y abre la mesa nueva cuando todos
-    // aceptaron. Si el container no lo registró —un despliegue sin billetera— no hay revancha
-    // y la compuerta se queda en su default, que es cerrada.
+    // LA REVANCHA: la sala solo la cierra cuando alguien se va (`onLeave`). La compuerta nadie la
+    // abre, así que la ventana sale siempre con `eligible: false` (ver `configOf`).
     this.closeRematch = child.resolve<RematchCloser>("RematchCloser");
-    const rematchSink =
-      roomOptions && rootContainer.isRegistered(RematchCoordinator)
-        ? rootContainer.resolve(RematchCoordinator).sinkFor(
-            roomOptions,
-            config.matchId,
-            child.resolve("RematchDoor"),
-            // POR CLIENTE Y NUNCA POR BROADCAST: una reserva de asiento es un secreto de su
-            // dueño, y quien tenga la ajena puede consumirla y dejarlo afuera de la partida.
-            (playerId, type, payload) => this.clientOf(playerId)?.send(type, payload),
-            () => this.notifier.notify(this.closeRematch()),
-          )
-        : undefined;
-    const rematchSinks = rematchSink ? [rematchSink] : [];
-    // EL COBRO DEL AUMENTO, por el mismo camino que los otros dos: un sink. Se arma sólo si el
-    // container lo registró —un despliegue sin billetera no cobra— y en ese caso la mesa
-    // tampoco ofrece niveles, porque el libro de niveles depende del mismo backend.
     const revokeMultiplier = child.resolve<MultiplierRevoker>("MultiplierRevoker");
-    //
-    // ⚠ SOLO CON `roomOptions`, como los sinks de plataforma, revancha y externos: una mesa por
-    // request es del orquestador y ese cobro escribiría `BET_MULTIPLIER` en el ledger de dominó y
-    // llamaría a la billetera de Betaso. Sin niveles nadie llega a aumentar, pero el sink no se
-    // engancha igual: la frontera no depende de que otra línea siga vacía.
-    const betChargeSink =
-      roomOptions && rootContainer.isRegistered(BetCharger)
-        ? rootContainer.resolve(BetCharger).sinkFor(
-            config.matchId,
-            (events) => this.notifier.notify(events),
-            () => revokeMultiplier(),
-          )
-        : undefined;
-    const betChargeSinks = betChargeSink ? [betChargeSink] : [];
-    // LAS MESAS DEL ORQUESTADOR (POR REQUEST) tienen sus propios dos sinks, y son el reflejo exacto
-    // de los de arriba: el aumento se le pide cobrar al ORQUESTADOR y el resultado se le PUBLICA, en
-    // vez de cobrar y liquidar contra Betaso. Dominó no mueve dinero en estas mesas: dice qué pasó y
-    // pide que se cobre.
-    const orchestratorSinks = roomOptions
-      ? []
-      : [
-          rootContainer
-            .resolve(MatchResultRecorder)
-            .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason),
-          ...(rootContainer.isRegistered(OrchestratorBetCharger)
-            ? [
-                rootContainer.resolve(OrchestratorBetCharger).sinkFor(
-                  config.matchId,
-                  (events) => this.notifier.notify(events),
-                  () => revokeMultiplier(),
-                ),
-              ]
-            : []),
-        ];
-    const externalSinks =
-      roomOptions && rootContainer.isRegistered("MatchSinks")
-        ? rootContainer.resolve<MatchSinks>("MatchSinks")(roomOptions)
-        : [];
+    // LOS DOS SINKS DE LA PLATA, y ninguno la mueve: el aumento se le pide cobrar al ORQUESTADOR y
+    // el resultado se le PUBLICA. Dominó dice qué pasó y pide que se cobre; un juego nunca mueve
+    // dinero.
+    const orchestratorSinks = [
+      rootContainer
+        .resolve(MatchResultRecorder)
+        .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason),
+      ...(rootContainer.isRegistered(OrchestratorBetCharger)
+        ? [
+            rootContainer.resolve(OrchestratorBetCharger).sinkFor(
+              config.matchId,
+              (events) => this.notifier.notify(events),
+              () => revokeMultiplier(),
+            ),
+          ]
+        : []),
+    ];
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
       (events) => this.broadcast("events", events),
       [
         ...pieces.sinks,
-        ...platformSinks,
-        ...rematchSinks,
-        ...betChargeSinks,
-        ...externalSinks,
         ...orchestratorSinks,
         // EL LATIDO POR HECHO, portado de truco, y va ÚLTIMO: los demás sinks ya vieron el hecho y
         // el árbol ya está mutado. Quién sigue jugando cambia con la partida —un retiro, un
@@ -399,8 +291,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       gameModeId: config.gameModeId,
     });
     this.setState(match);
-    // El lobby cuenta por modo desde el listing compartido de Colyseus, igual que v1. La
-    // metadata lleva solo el identificador público; perfil, moneda, tasa y seed no salen.
+    // El modo queda en el listing compartido de Colyseus (lo muestra el monitor). La metadata lleva
+    // solo el identificador público; perfil, moneda, tasa y seed no salen.
     await this.setMetadata({ gameModeId: config.gameModeId });
 
     // SE ANOTA ENTRE LAS PARTIDAS VIVAS DEL CLÚSTER, y SE ESPERA. A partir de que `onCreate`
@@ -408,7 +300,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // un `GET /config/:roomId` que llegue antes de que la clave esté escrita —y que caiga en otro
     // proceso, que es todo el punto de esto— responde 404 por una sala que existe.
     this.matches = rootContainer.resolve(MatchRegistry);
-    await this.matches.register(this.roomId, config, roomOptions);
+    await this.matches.register(this.roomId, config);
 
     // EL LATIDO que renueva ese plazo. Va POR EL RELOJ DE LA SALA —el mismo que vence los
     // turnos— y no colgado de los hechos del juego, porque tiene que darse aunque no pase nada:
@@ -457,26 +349,6 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       throw new SeatNotReservedError(identity.userId);
     }
     if (!this.isStillPlaying(playerId)) throw new PlayerAlreadyOutError(playerId);
-    if (this.roomOptions && this.platform) {
-      const profile = await this.platform.admit(
-        this.roomOptions,
-        this.roomId,
-        playerId,
-        identity.token,
-      );
-      if (profile) {
-        const player = this.player(playerId);
-        player.displayName = profile.username || playerId;
-        player.username = profile.username || undefined;
-        player.profilePicture = profile.profilePicture || undefined;
-        player.currency = profile.currency;
-        await this.matches.rememberPlayer(this.roomId, {
-          playerId,
-          username: profile.username,
-          profilePicture: profile.profilePicture,
-        });
-      }
-    }
     this.cancelPendingReconnection(playerId);
 
     client.userData = { playerId };
@@ -637,9 +509,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       cause instanceof PlayerAlreadyOutError ||
       cause instanceof ValidationError ||
       cause instanceof UnknownCommandError ||
-      cause instanceof InvalidTokenError ||
-      cause instanceof MaintenanceModeError ||
-      cause instanceof AdmissionRefusedError
+      cause instanceof InvalidTokenError
     ) {
       this.log.warn("rechazo esperado", { method: methodName, reason: cause.message });
       return;
@@ -704,8 +574,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     if (this.seated.size < this.seats.length) return;
     this.seating?.clear();
     this.seating = undefined;
-    // LA MESA DEL LOBBY PROPIO ya cobró a cada uno al entrar (`platform.admit`).
-    if (this.roomOptions || this.entryCharge === "charged") {
+    if (this.entryCharge === "charged") {
       this.startMatch();
       return;
     }
@@ -800,14 +669,3 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     void this.disconnect(CloseCode.WITH_ERROR);
   }
 }
-
-const isRoomOptions = (value: unknown): value is DominoRoomOptions => {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<DominoRoomOptions>;
-  return (
-    (candidate.mode === "CASUAL" || candidate.mode === "TOURNAMENT") &&
-    Array.isArray(candidate.seats) &&
-    typeof candidate.seed === "string" &&
-    typeof candidate.pointsToWin === "number"
-  );
-};

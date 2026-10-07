@@ -10,11 +10,10 @@ import type { HistoryReader } from "../../network/history";
 export const HISTORY_ROUTE = "/internal/matches/:matchId/history";
 
 // EL `matchId` NO TIENE FORMA GARANTIZADA, y el schema lo dice en vez de inventarla.
-// `DominoRoomOptions.matchId` es `string` pelado (`../match-contract.ts`) y lo elige quien
-// crea la sala; hoy el único productor es el arnés de tests (`m-${seats.join("-")}` en
-// `../../tests/e2e-harness.ts`) y el matchmaking que va a ser el productor real todavía no
-// existe. Un regex adivinado acá rechazaría partidas legítimas el día que ese productor
-// aparezca con otro formato, así que se elige lo MÁS PERMISIVO que igual atrape lo absurdo:
+// `CreateMatchRequest.matchId` es `string` pelado (`../match-contract.ts`) y lo elige quien
+// crea la sala: el orquestador, y en la suite el arnés de tests (`m-${seats.join("-")}` en
+// `../../tests/e2e-harness.ts`). Un regex adivinado acá rechazaría partidas legítimas el día que
+// el productor cambie de formato, así que se elige lo MÁS PERMISIVO que igual atrape lo absurdo:
 // largo acotado y sin caracteres de control.
 //
 // `\P{Cc}` y no una clase con los códigos escritos: es la categoría Unicode "Control", así

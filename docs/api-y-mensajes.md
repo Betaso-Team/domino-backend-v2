@@ -1,17 +1,19 @@
 # API HTTP y mensajes
 
-El juego usa WebSocket/Colyseus para la partida y HTTP para configuración, operación y catálogo. No
-hay Swagger: los mensajes de sala no son HTTP y los contratos se mantienen tipados en el código.
+El juego usa WebSocket/Colyseus para la partida y HTTP para configuración, operación, catálogo y la
+API del orquestador. No hay Swagger: los mensajes de sala no son HTTP y los contratos se mantienen
+tipados en el código.
 
 ## Salas Colyseus
 
 | Sala | Quién entra | Estado principal |
 |---|---|---|
 | `domino` | Participante reservado con JWT válido | Partida, ronda, jugadores, tablero, pozo, turnos y deadlines |
-| `lobby` | Cualquier identidad con JWT válido | Contadores, mantenimiento y jugadores conectados al lobby |
 
-El JWT usa `sub` como `userUuid` y lleva `platformId`. La pareja se normaliza con `trim()` y se
-compara completa; el UUID solo no identifica un asiento entre plataformas.
+Es la única sala. No hay lobby ni emparejamiento en este servidor: los hace el orquestador, que abre
+cada mesa por `POST /internal/matches` y le entrega a cada jugador su reserva de asiento. El jugador
+se conecta con esa reserva y su JWT; el `sub` del token es el `userId` con el que el orquestador lo
+sentó, normalizado con `trim()`.
 
 ## Mensajes de la sala `domino`
 
@@ -45,6 +47,7 @@ decoder estricto antes de alcanzar el comando.
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
 | `GET /config/:roomId` | Config pública de una mesa y `serverNow`; nunca devuelve el seed |
+| `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
 | `GET /game-modes` | Modos activos del catálogo |
 | `GET /game-modes/:uuid` | Un modo activo; un modo dado de baja responde 404 |
 
@@ -59,26 +62,25 @@ Estas rutas requieren el header `x-internal-api-key` con la llave del panel de a
 | Método y ruta | Uso |
 |---|---|
 | `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte |
-| `POST /internal/lobby/maintenance` | Activa o desactiva mantenimiento para mesas nuevas |
 | `POST /game-modes` | Crea un modo |
 | `PUT /game-modes/:uuid` | Aplica un patch al modo |
 | `DELETE /game-modes/:uuid` | Baja lógica |
 | `GET /game-modes/reactive/:uuid` | Reactiva; conserva el verbo de v1 por compatibilidad |
 | `POST /game-modes/sync` | Encola una republicación completa del catálogo |
-| `GET /internal/settings` | Las secciones de config en caliente (`match`, `matchmaking`): en vigor, overrides y editables |
+| `GET /internal/settings` | Las secciones de config en caliente (`match`; en local y dev también `deal` y `starting-score`): en vigor, overrides y editables |
 | `GET /internal/settings/:section` | Una sección |
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
 | `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
 
 **Config en caliente.** Una edición llega a las mesas que nacen DESPUÉS; una mesa ya abierta conserva
 los plazos con los que nació. El proceso que atiende el `PATCH` se refresca en el acto y el resto
-del clúster converge en 5 s. Fuera de lo editable quedan `tilesPerPlayer` (regla de juego) y los
-tres intervalos que el emparejador lee al arrancar (`tickIntervalMs`, `maintenancePollMs`,
-`censusPollMs`): se rechazan con 400 en vez de aceptarse e ignorarse.
+del clúster converge en 5 s. Fuera de lo editable queda `tilesPerPlayer` (regla de juego): se rechaza
+con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Tres rutas que sólo usa el orquestador de Betaso Juegos. Van con `x-internal-api-key` igual a
+Tres rutas que sólo usa el orquestador de Betaso Juegos, y son la única puerta de entrada a una
+partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (la del panel no las abre); sin esa variable no se registran y responden 404.
 Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
 cuerpo.
@@ -95,7 +97,7 @@ Betaso).
 | `400` | `{ code: "MALFORMED", detail }` | El cuerpo no cumple la forma |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `422` | `{ error: "UNKNOWN_GAME_MODE" }`, `"UNSUPPORTED_GAME_MODE"` o `"SEAT_COUNT_MISMATCH"` | La sala rechazó la mesa: modo inexistente o dado de baja, 4P, o cantidad que no coincide con el modo |
-| `500` | | Cualquier otra falla es nuestra, incluido el mantenimiento |
+| `500` | | Cualquier otra falla es nuestra |
 
 **`POST /internal/players/:userId/seat`** devuelve el asiento de quien sigue jugando (sin cuerpo).
 
@@ -118,8 +120,8 @@ orquestador lo muestra en los números de su lobby.
 `CreateMatchRequest` acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
 
-**Estas mesas no mueven dinero: piden que se cobre y dicen qué pasó.** No tocan el ledger ni la
-billetera de Betaso, ni reportan ranking ni liga. En cambio:
+**Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
+ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
 
 - **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}internal/matches/:matchId/charges`
   (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
@@ -146,8 +148,8 @@ flowchart LR
   Domain --> History["Historial de soporte"]
   Platform --> History
   Domain --> Clients["Clientes de la sala"]
-  Domain --> Standing["Ranking y liga"]
   Domain --> Settlement["settlementOf\nproyección de dinero"]
+  Settlement --> Result["Resultado al orquestador\n(outbox → betaso_games)"]
 ```
 
 Los eventos de dominio describen consecuencias (`ROUND_RESOLVED`, `MATCH_RESOLVED`, expiraciones).

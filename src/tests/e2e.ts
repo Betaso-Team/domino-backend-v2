@@ -7,8 +7,8 @@ import jwt from "jsonwebtoken";
 import { fakeOrchestrator } from "./fake-orchestrator";
 import { CASUAL_2P } from "./game-mode-catalog";
 
-// Scaffolding de la app ensamblada. Vive en la raíz porque lobby y match lo consumen; dejar una
-// copia en cada feature fue exactamente lo que hizo divergir sus tokens y opciones de sala.
+// Scaffolding de la app ensamblada. Vive en la raíz porque lo consumen varias features (match,
+// settings); dejar una copia en cada una es exactamente lo que hace divergir sus tokens y mesas.
 export type ParticipantInput = string | MatchParticipant;
 
 // EL PUERTO LO ELIGE CADA ARCHIVO, y no sale del índice del worker aunque sería más cómodo:
@@ -19,20 +19,15 @@ export type ParticipantInput = string | MatchParticipant;
 // escribirla: es la misma trampa que ya pagó `src/deploy-smoke.test.ts`.
 export async function bootTestServer(port: number): Promise<ColyseusTestServer> {
   const server = await boot(testConfig, port);
-  // SE ARRANCAN LOS SERVICIOS DE FONDO, y sin esta línea la mitad del servidor está apagada en
-  // toda la suite. `startServices()` —el tick del emparejador, la pasada del mantenimiento, el
-  // censo y el vigilante de torneos— lo llama `src/main.ts`, que es el que CORRE; los tests
-  // importan `app.config.ts`, que es el que se IMPORTA, y esa división existe justamente para
-  // que ningún test arrastre lo que main registra.
-  //
-  // El precio de olvidarlo no es un rojo sino un CUELGUE: dos jugadores encolados nunca se
-  // emparejan porque nadie tickea, y el vaciado por mantenimiento no sale porque el emparejador
-  // se suscribe al interruptor DENTRO de `start()`. Los dos esperan hasta que vence el test.
+  // SE ARRANCAN LOS SERVICIOS DE FONDO. `startServices()` —la pasada de la configuración en
+  // caliente— lo llama `src/main.ts`, que es el que CORRE; los tests importan `app.config.ts`, que es
+  // el que se IMPORTA, y esa división existe justamente para que ningún test arrastre lo que main
+  // registra.
   //
   // Va acá y no en cada archivo por lo mismo que el modo del catálogo se siembra en un solo
   // lugar: el que escriba el E2E número veinte no tiene por qué saber esto. `start()` es
-  // idempotente —sale temprano si ya hay intervalo— y los cuatro van `unref`eados, así que ni
-  // se duplican entre archivos ni sostienen el proceso al terminar.
+  // idempotente —sale temprano si ya hay intervalo— y va `unref`eado, así que ni se duplica entre
+  // archivos ni sostiene el proceso al terminar.
   startServices();
   // EL ORQUESTADOR QUE COBRA, por lo mismo que los servicios de arriba: sin él cada mesa por request
   // se cerraría esperando un cobro que nadie contesta, y el que escriba el E2E número veinte no tiene
@@ -52,8 +47,8 @@ export const participantOf = (input: ParticipantInput): MatchParticipant =>
 
 // EMITIR tokens es del backend principal y no del dominó, que solo los verifica, así que
 // emitirlos para la suite es trabajo del scaffolding. Acepta el `userId` pelado además del
-// participante entero: lo único que se firma es el `sub`, y la mitad de los llamadores —los que
-// entran al lobby, que no se sienta en ninguna mesa— no tienen un participante que pasar.
+// participante entero: lo único que se firma es el `sub`, y hay llamadores —las rutas HTTP con
+// token— que no tienen un participante que pasar.
 export function mintToken(player: string | { readonly userId: string }): string {
   return jwt.sign({ sub: typeof player === "string" ? player : player.userId }, env.jwtSecret, {
     algorithm: "HS256",

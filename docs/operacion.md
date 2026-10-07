@@ -8,8 +8,11 @@ npm install
 npm run dev
 ```
 
-`BETASO_BACKEND_JWT_SECRET` es obligatorio. `BETASO_ADMIN_PANEL_API_KEY` (la que nos presenta el panel) habilita las rutas internas; `BETASO_BACKEND_API_KEY` (la que presentamos al backend) habilita torneo, antifraude y niveles de apuesta. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches` y `POST /internal/players/:userId/seat`; sin ella esas rutas responden 404, y si está el arranque exige `BILLING_AUTH_PUBLIC_KEY` y que no repita ninguna de las otras dos llaves. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor `JWT_ISSUER` (default `betaso-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; los HS256 del backend principal siguen valiendo. Mongo, Redis, RabbitMQ
-y el backend principal son capacidades opcionales elegidas por la presencia de sus URLs.
+`BETASO_BACKEND_JWT_SECRET` es obligatorio. `BETASO_ADMIN_PANEL_API_KEY` (la que nos presenta el panel) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `BILLING_AUTH_PUBLIC_KEY`, `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita la llave del panel. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor `JWT_ISSUER` (default `betaso-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; los HS256 del backend principal siguen valiendo. Mongo, Redis y los dos
+brokers de RabbitMQ son capacidades opcionales elegidas por la presencia de sus URLs.
+
+El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
+Las partidas ya abiertas terminan.
 
 `npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
 siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local y dev, `info` en stage y
@@ -81,7 +84,7 @@ sequenceDiagram
 
   PM2->>Main: mensaje shutdown o señal
   Main->>Server: gracefullyShutdown(false)
-  Server->>Server: cerrar salas y matchmaking
+  Server->>Server: cerrar salas
   Main->>Container: shutdown()
   Container->>Container: drenar historial y outbox
   Container->>Mongo: cerrar cliente
@@ -91,7 +94,7 @@ sequenceDiagram
 Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos durante el deploy. Un
 `kill -9` no ejecuta este flujo: las claves huérfanas desaparecen por TTL.
 
-## Resultados de partida (mesas del orquestador)
+## Resultados de partida
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
 `betaso_games` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**

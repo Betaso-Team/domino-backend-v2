@@ -28,7 +28,7 @@ features:
 
   - icon: "🔌"
     title: "Contratos externos"
-    details: "Rutas HTTP, mensajes WebSocket, autenticación, estado del lobby y eventos que salen hacia la plataforma."
+    details: "Rutas HTTP, la API del orquestador, mensajes WebSocket, autenticación y eventos que salen hacia la plataforma."
     link: /api-y-mensajes
     linkText: Ver contratos
 

@@ -1,11 +1,5 @@
 import { ErrorCode, ServerError, generateId, matchMaker } from "@colyseus/core";
-import type {
-  CreateMatchRequest,
-  DominoRoomOptions,
-  MatchOpener,
-  MatchParticipant,
-  Seat,
-} from "../match-contract";
+import type { CreateMatchRequest, MatchParticipant } from "../match-contract";
 
 /** La mesa que abrió el orquestador: su sala y una reserva por participante. */
 export interface OpenedTable {
@@ -13,20 +7,12 @@ export interface OpenedTable {
   readonly seats: readonly { readonly userId: string; readonly reservation: unknown }[];
 }
 
-export class ColyseusMatchGateway implements MatchOpener {
-  async open(options: DominoRoomOptions): Promise<readonly Seat[]> {
-    const { reservations } = await this.create(options, options.seats.length);
-    return reservations.map((reservation, index) => ({
-      playerId: options.seats[index] as string,
-      reservation,
-    }));
-  }
-
-  // LA MESA QUE PIDE EL ORQUESTADOR: el request crudo, sin `roomOptions`, así que la sala nace
-  // sin plataforma —no cobra, no reembolsa, no paga— (ver `DominoRoom.onCreate`). El dinero de
-  // esa mesa lo mueve el orquestador, nunca el juego.
+export class ColyseusMatchGateway {
+  // LA MESA QUE PIDE EL ORQUESTADOR, que es la única forma de abrir una: el request crudo, validado
+  // por la sala (`requestOf`). La sala no cobra, no reembolsa y no paga: el dinero de la mesa lo
+  // mueve el orquestador, nunca el juego.
   async openRequest(request: CreateMatchRequest): Promise<OpenedTable> {
-    const { roomId, reservations } = await this.create(request, request.participants.length);
+    const { roomId, reservations } = await this.create(request);
     return {
       roomId,
       seats: reservations.map((reservation, index) => ({
@@ -34,10 +20,6 @@ export class ColyseusMatchGateway implements MatchOpener {
         reservation,
       })),
     };
-  }
-
-  async rejoin(roomId: string, playerId: string): Promise<Seat> {
-    return { playerId, reservation: await matchMaker.joinById(roomId, {}) };
   }
 
   // `undefined` SOLO si la sala ya no existe: el índice de `matchOf` puede sobrevivirla hasta su plazo.
@@ -60,9 +42,9 @@ export class ColyseusMatchGateway implements MatchOpener {
     }
   }
 
-  private async create(options: DominoRoomOptions | CreateMatchRequest, seats: number) {
-    const room = await matchMaker.createRoom("domino", options);
-    const sessionIds = Array.from({ length: seats }, () => generateId());
+  private async create(request: CreateMatchRequest) {
+    const room = await matchMaker.createRoom("domino", request);
+    const sessionIds = Array.from({ length: request.participants.length }, () => generateId());
     const reserved = await matchMaker.reserveMultipleSeatsFor(
       room,
       sessionIds.map((sessionId) => ({ sessionId, options: {}, auth: undefined })),

@@ -31,22 +31,12 @@ services:
       PM2_INSTANCES: 2
       SERVER_ADDRESS: nginx:8080
       BETASO_BACKEND_JWT_SECRET: smoke-jwt-secret-with-more-than-16-chars
-      BETASO_BACKEND_API_KEY: smoke-backend-key-with-more-than-16-chars
       BETASO_ADMIN_PANEL_API_KEY: smoke-admin-panel-key-with-more-than-16-chars
       REDIS_URL: redis://redis:6379/1
       MONGO_URI: mongodb://mongo:27017/domino-smoke
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-      # LA LIGA APUNTA AL NGINX DEL STACK Y NO AL BACKEND REAL, y no es por comodidad: este smoke
-      # TERMINA UNA PARTIDA, así que el `POST leagues/save` se dispara de verdad. Con la URL
-      # productiva acá, cada corrida del smoke le metería un resultado inventado a la liga de
-      # producción — y esa ruta no pide credencial, así que nada del otro lado lo pararía.
-      #
-      # `smoke/nginx.conf` la atiende con un 204. Es obligatoria porque `NODE_ENV=production`
-      # exige las cinco (ver `src/env.ts`): sin esta línea el servidor muere al arrancar con
-      # «en producción faltan: BETASO_BACKEND_URL» y el smoke entero se cae antes de la primera fase.
-      BETASO_BACKEND_URL: http://nginx:8080/
-      # EL ORQUESTADOR DEL SMOKE ES EL NGINX DEL STACK, y por lo mismo que la liga: el smoke juega una
-      # mesa por request, y una mesa así arranca solo si el orquestador cobra la entrada. El nginx
+      # EL ORQUESTADOR DEL SMOKE ES EL NGINX DEL STACK: el smoke juega una mesa, y una mesa arranca
+      # solo si el orquestador cobra la entrada. El nginx
       # aprueba todo cobro (`smoke/nginx.conf`); no certifica el cobro, certifica que la mesa lo pide
       # y arranca con el sí. La clave pública es de una pareja descartada: sin su privada nadie firma.
       ORCHESTRATOR_API_KEY: smoke-orchestrator-key-with-more-than-16-chars

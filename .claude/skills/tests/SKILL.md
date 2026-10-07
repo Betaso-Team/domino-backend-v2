@@ -62,20 +62,20 @@ Dentro de un `tests/`, **un archivo sin `.test.ts` es andamiaje**.
 
 ```
 src/tests/e2e.ts                       bootTestServer(port) · mintToken · joinAs · casualTable · waitUntil
-src/tests/fake-wallet.ts               FakeWallet
-src/tests/fake-client.ts               FakeTournamentClient
+src/tests/fake-orchestrator.ts         FakeOrchestratorCharges: cobros de entrada y de aumento
 src/tests/game-mode-catalog.ts         siembra los modos de la suite: CASUAL_2P · CASUAL_4P · FREE_2P
 src/tests/int-services.ts              MONGO_INT_URI — el único lector de entorno de la suite
 src/tests/routes.ts                    routesOf(router): el orden real de las rutas
 shared/tests/memory-logger.ts          MemoryLogger, para asertar sobre lo que se registró
 
-features/match/tests/e2e-harness.ts    bootServer · seatPair · seatPairAsMatchmaking · seatFour ·
+features/match/tests/e2e-harness.ts    bootServer · seatPair · seatFour ·
                                        revealHands · act · playUntilDecided · historyOf · linesOf ·
                                        playerIdOf · clientOf · writeGolden
 core/engine/tests/build-engine.ts      engineWithHands(manos, pozo, opciones) — el motor entero
 core/engine/tests/match-config-fixture.ts  matchConfig · matchSeat
 core/engine/round/tests/round-fixture.ts   roundState(setup) — la ronda suelta
 core/rules/tests/fixture.ts            viewOf · rulesConfig — la partida en objetos PLANOS
+tournament/tests/fake-client.ts        FakeTournamentClient (la feature está sin cablear)
 game-mode/transports/tests/*-contract.ts   el contrato compartido de los dos adaptadores
 ```
 
@@ -86,13 +86,13 @@ Los archivos se nombran **por lo que guardan**, nunca por su papel (`helpers.ts`
 
 ## 4. Los dobles y los adaptadores de memoria
 
-⚠ **Acá es distinto de truco.** Los `Memory*` (`MemoryHistory`, `MemoryLedger`, `MemorySettings`,
+⚠ **Acá es distinto de truco.** Los `Memory*` (`MemoryHistory`, `MemorySettings`,
 `MemoryGameModeRepository`, `MemoryKeyValueStore`…) **no son dobles**: son el adaptador real del
 despliegue que eligió no tener Mongo/Redis, los registra `di-container.ts` y viven en `transports/`
 o en `shared/`. No hay `fake-backend`: `vitest.setup.ts` BORRA `MONGO_URI`, `REDIS_URL` y
 `RABBITMQ_URL`, así que el container ya arma lo de memoria.
 
-Los dobles de verdad (`FakeWallet`, `FakeTournamentClient`, `MemoryLogger`) van en un `tests/`, y
+Los dobles de verdad (`FakeTournamentClient`, `MemoryLogger`) van en un `tests/`, y
 **nunca** salen por un `index.ts`. Gatillo mecánico: si ningún archivo fuera de un `tests/` lo
 importa, es un doble.
 

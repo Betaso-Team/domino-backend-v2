@@ -153,10 +153,9 @@ function rewardOf(
 
 /**
  * QUIÉNES COBRAN EL PREMIO: los asientos del equipo ganador que todavía son de una PERSONA — ni la
- * máquina ni el que se fue (ver `rewardOf`). Lo usan los DOS que pagan, esta proyección y la
- * billetera de Betaso: dos reglas para la misma mesa le pagarían a uno según quién pague.
+ * máquina ni el que se fue (ver `rewardOf`).
  */
-export const prizeWinnersOf = (match: MatchState, winnerTeamId: string): readonly string[] =>
+const prizeWinnersOf = (match: MatchState, winnerTeamId: string): readonly string[] =>
   match.players
     .filter(({ teamId }) => teamId === winnerTeamId)
     .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
@@ -168,12 +167,8 @@ export const prizeWinnersOf = (match: MatchState, winnerTeamId: string): readonl
  * a x3 cobra `prize × 3`, y una mesa abortada después de un aumento devuelve `entryFee × 3`. Es la
  * regla de v1 (`betAmountsOf`; al aceptar escribe `state.prize = proposal.newPrize` y paga ése): la
  * mesa entera se multiplica por el nivel. Nivel 0 es "ninguno aceptado".
- *
- * UNA SOLA y exportada: la usan los tres que mueven plata con el aumento adentro —esta proyección,
- * el pago de la billetera de Betaso y la fila del historial—. Las dos ramas que se juntaron acá la
- * habían escrito cada una por su lado.
  */
-export const stakesOf = (
+const stakesOf = (
   table: { readonly entryFee: number; readonly prize: number },
   match: Pick<MatchState, "acceptedBetLevel">,
 ): { readonly entryFee: number; readonly prize: number } => {
@@ -191,11 +186,8 @@ export const stakesOf = (
  * filtra de `quitPlayers` a los `isValid`), y es UNA sola para todos los motivos: sólo una mesa
  * anulada en el reparto puede dejar a alguien afuera, porque el que se va a mitad de partida le
  * da el veredicto al rival y esa mesa no se aborta.
- *
- * Vive acá y la usan los DOS que reembolsan —esta proyección y la billetera de Betaso—, porque
- * dos reglas para la misma mesa le devolverían a uno según quién pague.
  */
-export const isRefundable = (player: { hasAbandoned: boolean; hasSeenTiles: boolean }) =>
+const isRefundable = (player: { hasAbandoned: boolean; hasSeenTiles: boolean }) =>
   !(player.hasAbandoned && player.hasSeenTiles);
 
 /**
@@ -274,11 +266,6 @@ export function settlementOf(
     case "MULTIPLIER_AGREED":
     case "MULTIPLIER_REVOKED":
     case "REMATCH_ACCEPTED":
-    // LOS DOS VETOS TAMPOCO LIQUIDAN: no mueven plata, mueven a quién empareja el lobby. Están
-    // enumerados porque el `never` del final obliga a pasar por acá, que es exactamente lo que
-    // se quiere de un evento nuevo en un archivo que paga.
-    case "CASUAL_PAIR_VETOED":
-    case "PAIR_VETOED":
     // SENTAR UN BOT NO MUEVE PLATA EN EL MOMENTO, y sí cambia quién cobra al final: el asiento
     // que pasa a jugar la máquina deja de ser un cobrador. Eso se resuelve en el REWARD del
     // desenlace, que es donde están todos los asientos a la vista, y no acá — una instrucción por

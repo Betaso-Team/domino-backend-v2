@@ -1,4 +1,4 @@
-import { matchmaker, settingsSignal } from "@/di-container";
+import { settingsSignal } from "@/di-container";
 import { env } from "@/env";
 import { bootTestServer } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
@@ -45,18 +45,17 @@ describe("Los endpoints de configuración (integración)", () => {
 
   afterEach(async () => {
     await call("DELETE", "/match");
-    await call("DELETE", "/matchmaking");
   });
 
   it("sin llave no se entra, ni siquiera a mirar", async () => {
     expect((await fetch(url())).status).toBe(401);
   });
 
-  // LA LLAVE DE SALIDA NO ABRE LA ENTRADA. Son dos secretos a propósito (truco `ebf22dd`): el que
-  // tiene la que presentamos al backend, para preguntar un saldo, no puede mover los plazos del juego.
-  it("la llave del backend no abre el panel", async () => {
+  // CADA LLAVE ABRE LO SUYO (truco `ebf22dd`): la que presenta el orquestador para abrir mesas no
+  // puede mover los plazos del juego.
+  it("la llave del orquestador no abre el panel", async () => {
     const res = await fetch(url(), {
-      headers: { "x-internal-api-key": env.backendApiKey ?? "" },
+      headers: { "x-internal-api-key": env.orchestratorApiKey ?? "" },
     });
 
     expect(res.status).toBe(401);
@@ -66,12 +65,7 @@ describe("Los endpoints de configuración (integración)", () => {
     const { data } = await call<Section[]>("GET", "");
 
     // `deal` y `starting-score` existen porque la suite corre como `local` (`isDevEnvironment`).
-    expect(data.map((section) => section.name)).toEqual([
-      "match",
-      "matchmaking",
-      "deal",
-      "starting-score",
-    ]);
+    expect(data.map((section) => section.name)).toEqual(["match", "deal", "starting-score"]);
     expect(data[0]?.effective).toMatchObject({ turnTimeoutMs: env.turnTimeoutMs });
     expect(data[0]?.overrides).toEqual({});
     expect(data[0]?.editable).toContain("presentingRoundMs");
@@ -105,18 +99,7 @@ describe("Los endpoints de configuración (integración)", () => {
   });
 
   it("lo que se lee al arrancar no se puede editar en caliente", async () => {
-    expect((await call("PATCH", "/matchmaking", { tickIntervalMs: 100 })).status).toBe(400);
-  });
-
-  // EL EMPAREJADOR LEE LA SUYA AL USAR: el mismo proceso ve el número editado sin reiniciar. Lo
-  // que el emparejador expone de su config es lo que el composition root le pasó, una función.
-  it("el emparejamiento toma el cambio sin reiniciar", async () => {
-    await call("PATCH", "/matchmaking", { searchTimeoutMs: 45_000 });
-
-    const { config } = (
-      matchmaker as unknown as { deps: { config: () => { searchTimeoutMs: number } } }
-    ).deps;
-    expect(config().searchTimeoutMs).toBe(45_000);
+    expect((await call("PATCH", "/match", { tilesPerPlayer: 5 })).status).toBe(400);
   });
 
   it("una sección que nadie cableó contesta en el mismo idioma que el resto", async () => {

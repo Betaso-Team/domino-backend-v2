@@ -93,7 +93,7 @@ const NEWEST_FIRST = { createdAt: -1 } as const;
 
 export class MongoGameModeRepository implements GameModeRepository {
   // La colección YA PREPARADA, memoizada. Los índices se crean una vez por proceso y no una vez por
-  // consulta: el camino del lobby lee el catálogo seguido, y cuatro `createIndexes` por lectura son
+  // consulta: cada mesa que nace lee el catálogo, y cuatro `createIndexes` por lectura son
   // cuatro round-trips para reconocer índices que ya están.
   private prepared?: Promise<Collection<GameModeDocument>>;
 

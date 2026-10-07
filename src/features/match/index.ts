@@ -31,20 +31,6 @@ export type { DevPresetSource } from "./transports/colyseus/commands/di-wiring";
 export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
 export type { HistoryReader } from "./network/history";
-export { AdmissionRefusedError, MatchPlatform } from "./network/platform";
-export { BetCharger, CachedBetLevelBook, HttpBetLevelBook, NO_BET_LEVELS } from "./network";
-export type { BetLevelBook } from "./network";
-export { RematchCoordinator } from "./network/rematch";
-export type { RematchAntifraud, RematchDoor } from "./network/rematch";
-export type {
-  MatchRow,
-  MatchSummary,
-  MatchSummaryPlayer,
-  MatchSummaryPort,
-  Paginated,
-  PlayerLog,
-  PlayerStats,
-} from "./network/player-log";
 // La proyección monetaria sale por acá porque su consumidor está AFUERA de la feature: hoy
 // el smoke, mañana el adaptador que efectivamente pague. Sale la función y salen sus tipos:
 // una instrucción que nadie puede nombrar no se puede recibir, ni loguear, ni auditar.
@@ -69,15 +55,8 @@ export { type MatchHttpDeps, matchHttp } from "./transports/http/register";
 // nombrar no se puede atrapar.
 export {
   configOf,
-  configFromRoomOptions,
   type CreateMatchRequest,
   type MatchParticipant,
-  type MatchOpener,
-  type MatchSinks,
-  type Seat,
-  type DominoRoomOptions,
-  type CasualRoomOptions,
-  type TournamentRoomOptions,
   replayConfigOf,
   requestOf,
   SeatCountMismatchError,
@@ -90,5 +69,4 @@ export {
   MatchRegistry,
   type MatchConfigResponse,
   type PublicMatchConfig,
-  type PublicPlayer,
 } from "./transports/match-registry";

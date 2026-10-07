@@ -106,9 +106,7 @@ describe("settlementOf", () => {
   );
 
   // ⚠ SALVO AL QUE SE FUE HABIENDO LEVANTADO SUS FICHAS, que pierde la inscripción como en v1
-  // (`two-players/domino-room-state.ts:467-475`). Es la misma regla que la billetera de Betaso
-  // (`refundableSeats`), y tiene que serlo: dos reglas de reembolso para la misma mesa le
-  // devuelven a uno según quién pague.
+  // (`two-players/domino-room-state.ts:467-475`).
   it("no le devuelve la inscripción al que se fue habiendo levantado sus fichas", () => {
     const match = matchOf();
     Object.assign(match.players[0] ?? {}, { hasAbandoned: true, hasSeenTiles: true });
