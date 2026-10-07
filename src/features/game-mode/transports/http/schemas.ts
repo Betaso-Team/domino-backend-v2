@@ -1,5 +1,10 @@
 import { z } from "zod";
-import type { CreateGameMode, GameMode, UpdateGameMode } from "../../core/game-mode";
+import type {
+  CreateGameMode,
+  GameMode,
+  GameModeBetLevel,
+  UpdateGameMode,
+} from "../../core/game-mode";
 
 // LA FRONTERA DE FORMA DEL CATÁLOGO: lo que entra por HTTP y lo que sale. No hay routing acá —eso es
 // `admin.ts`/`catalog.ts`— y no hay reglas de negocio: qué cuenta como duplicado o qué se puede reactivar
@@ -20,6 +25,35 @@ import type { CreateGameMode, GameMode, UpdateGameMode } from "../../core/game-m
 // El snippet del plan escribía `z.number().finite().nonnegative()` a secas: es el agujero que la
 // Tarea 1 acababa de cerrar, reabierto en la otra punta del mismo incremento.
 const ucAmount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+// UN NIVEL DE AUMENTO, con la misma forma que valida el `CreateMatchRequest` (`match-contract.ts`):
+// lo que este catálogo acepta, la mesa lo tiene que aceptar después. `level` 1 es no aumentar.
+const betLevel = z.strictObject({
+  level: z.number().int().min(2).max(100),
+  extra: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+
+// LA LISTA, ORDENADA POR NIVEL al guardarla. Niveles únicos, y el `extra` crece con el nivel: la
+// regla de negocio de Betaso (`bet-increase/lib/monotonic.ts`). Un x5 que suma menos al ranking que
+// un x3 es un error de carga, no una elección.
+const betLevels = z
+  .array(betLevel)
+  .max(16)
+  .transform((levels) => [...levels].sort((a, b) => a.level - b.level))
+  .superRefine((levels, context) => {
+    levels.forEach((current, i) => {
+      const previous = levels[i - 1];
+      if (previous === undefined) return;
+      if (current.level === previous.level)
+        context.addIssue({ code: "custom", message: `nivel x${current.level} repetido` });
+      else if (current.extra <= previous.extra)
+        context.addIssue({
+          code: "custom",
+          message: `el extra tiene que crecer con el nivel (x${previous.level}=${previous.extra}, x${current.level}=${current.extra})`,
+        });
+    });
+  });
 
 // LOS CAMPOS SIN DEFAULT, declarados UNA vez. El cuerpo de creación los envuelve con los defaults del
 // schema productivo y el de edición los vuelve opcionales; escribir las dos listas por separado es la
@@ -47,6 +81,7 @@ const fields = {
   isActive: z.boolean(),
   isFreeRoom: z.boolean(),
   enableBots: z.boolean(),
+  betLevels,
 };
 
 // `strictObject` EN LAS DOS PUNTAS: lo que el catálogo no conoce se contesta 400 en vez de guardarse
@@ -69,6 +104,7 @@ export const CREATE_BODY = z.strictObject({
   // (`game-mode.schema.ts:66-71`). Lo completa el repositorio, que es quien lo tiene escrito para los
   // dos adaptadores; ponerle un default fijo acá lo apagaría en toda mesa de cuatro.
   enableBots: fields.enableBots.optional(),
+  betLevels: fields.betLevels.default([]),
 });
 
 // ⚠ NO ES `CREATE_BODY.partial()`, Y ESA ES LA LÍNEA MÁS IMPORTANTE DEL ARCHIVO. Medido sobre la zod
@@ -91,6 +127,8 @@ export const UPDATE_BODY = z.strictObject({
   isActive: fields.isActive.optional(),
   isFreeRoom: fields.isFreeRoom.optional(),
   enableBots: fields.enableBots.optional(),
+  // REEMPLAZA LA LISTA ENTERA: `[]` apaga los aumentos del modo, y ausente no los toca.
+  betLevels: fields.betLevels.optional(),
 });
 
 // EL IDENTIFICADOR DE LA RUTA, y NO SE EXIGE FORMA DE UUID aunque los nuestros lo sean. El DTO de v1
@@ -133,6 +171,8 @@ export interface GameModeDTO {
   readonly isActive: boolean;
   readonly isFreeRoom: boolean;
   readonly enableBots: boolean;
+  // NUEVO en v2, no está en el DTO de v1: lo lee el orquestador para saber qué aumentos ofrece la mesa.
+  readonly betLevels: readonly GameModeBetLevel[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly __v: number;
@@ -155,6 +195,7 @@ export function toDTO(mode: GameMode): GameModeDTO {
     isActive: mode.isActive,
     isFreeRoom: mode.isFreeRoom,
     enableBots: mode.enableBots,
+    betLevels: mode.betLevels,
     createdAt: mode.createdAt,
     updatedAt: mode.updatedAt,
     __v: mode.version,

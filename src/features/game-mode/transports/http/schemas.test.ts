@@ -19,6 +19,7 @@ function mode(over: Partial<GameMode> = {}): GameMode {
     isActive: true,
     isFreeRoom: false,
     enableBots: false,
+    betLevels: [{ level: 2, extra: 1, additionalPoints: 15 }],
     createdAt: new Date("2026-09-15T10:00:00.000Z"),
     updatedAt: new Date("2026-09-15T11:00:00.000Z"),
     version: 7,
@@ -30,7 +31,7 @@ describe("toDTO", () => {
   // `toEqual` CONTRA EL OBJETO ENTERO y no `objectContaining`: lo que este test tiene que atrapar es
   // un campo de MÁS —`id`, `version`, o cualquier nombre interno que se filtre—, y un
   // `objectContaining` es ciego justamente a eso.
-  it("devuelve los catorce campos de v1, con `_id` y `__v` y ningún nombre interno", () => {
+  it("devuelve los campos de v1 y los niveles, con `_id` y `__v` y ningún nombre interno", () => {
     expect(toDTO(mode())).toEqual({
       _id: "aaaaaaaaaaaaaaaaaaaaaaaa",
       uuid: "11111111-2222-4333-8444-555555555555",
@@ -43,6 +44,7 @@ describe("toDTO", () => {
       isActive: true,
       isFreeRoom: false,
       enableBots: false,
+      betLevels: [{ level: 2, extra: 1, additionalPoints: 15 }],
       createdAt: new Date("2026-09-15T10:00:00.000Z"),
       updatedAt: new Date("2026-09-15T11:00:00.000Z"),
       __v: 7,
@@ -71,6 +73,7 @@ describe("CREATE_BODY", () => {
       pointsToWin: 25,
       isActive: true,
       isFreeRoom: false,
+      betLevels: [],
     });
   });
 
@@ -172,6 +175,7 @@ describe("createInputOf", () => {
       playersQuantity: 2,
       pointsToWin: 25,
       isFreeRoom: false,
+      betLevels: [],
     });
   });
 });
@@ -227,5 +231,55 @@ describe("UUID_PARAMS", () => {
     expect(UUID_PARAMS.safeParse({ uuid: "" }).success).toBe(false);
     expect(UUID_PARAMS.safeParse({ uuid: "mode\n1" }).success).toBe(false);
     expect(UUID_PARAMS.safeParse({ uuid: "x".repeat(129) }).success).toBe(false);
+  });
+});
+
+// LOS NIVELES DE AUMENTO DE UN MODO. Los cobra el orquestador, que los lee de este catálogo; acá se
+// valida que tengan sentido antes de guardarlos.
+describe("betLevels", () => {
+  const base = { name: "Clásica", prize: 18, entryFee: 10, playersQuantity: 2 };
+  const ok = [
+    { level: 2, extra: 1, additionalPoints: 15 },
+    { level: 3, extra: 3, additionalPoints: 45 },
+    { level: 5, extra: 5, additionalPoints: 75 },
+  ];
+
+  it("un modo nuevo sin niveles no ofrece aumentar", () => {
+    expect(CREATE_BODY.parse(base).betLevels).toEqual([]);
+  });
+
+  it("acepta niveles con su extra y sus puntos", () => {
+    expect(CREATE_BODY.parse({ ...base, betLevels: ok }).betLevels).toEqual(ok);
+  });
+
+  // EDITAR SIN NIVELES NO LOS BORRA: el default viviría en el PUT y vaciaría los del modo.
+  it("en la edición son opcionales y sin default", () => {
+    expect(UPDATE_BODY.parse({ prize: 20 })).not.toHaveProperty("betLevels");
+    expect(UPDATE_BODY.parse({ betLevels: [] }).betLevels).toEqual([]);
+  });
+
+  it("rechaza un nivel repetido", () => {
+    const repetido = [ok[0], { level: 2, extra: 2, additionalPoints: 30 }];
+    expect(CREATE_BODY.safeParse({ ...base, betLevels: repetido }).success).toBe(false);
+  });
+
+  // La regla de Betaso: el extra crece con el nivel. Un x5 que suma menos que un x3 no tiene sentido.
+  it("rechaza un extra que no crece con el nivel", () => {
+    const plano = [
+      { level: 2, extra: 3, additionalPoints: 45 },
+      { level: 3, extra: 3, additionalPoints: 45 },
+    ];
+    expect(CREATE_BODY.safeParse({ ...base, betLevels: plano }).success).toBe(false);
+    expect(UPDATE_BODY.safeParse({ betLevels: plano }).success).toBe(false);
+  });
+
+  it.each([
+    ["un nivel menor que 2 (x1 es no aumentar)", { level: 1, extra: 0, additionalPoints: 0 }],
+    ["un nivel no entero", { level: 2.5, extra: 1, additionalPoints: 15 }],
+    ["un extra negativo", { level: 2, extra: -1, additionalPoints: 15 }],
+    ["puntos negativos", { level: 2, extra: 1, additionalPoints: -15 }],
+    ["un campo de más", { level: 2, extra: 1, additionalPoints: 15, enabled: true }],
+  ])("rechaza %s", (_name, level) => {
+    expect(CREATE_BODY.safeParse({ ...base, betLevels: [level] }).success).toBe(false);
   });
 });

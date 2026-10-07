@@ -72,6 +72,14 @@ Estas rutas requieren el header `x-internal-api-key` con la llave de administrac
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
 | `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
 
+**Niveles de aumento de un modo.** `POST` y `PUT /game-modes` aceptan `betLevels`:
+`[{ level, extra, additionalPoints }]`. `level` es el multiplicador de la entrada y el premio (entero
+≥ 2), `extra` se suma al multiplicador de ranking y `additionalPoints` es lo que el ganador suma de
+más. Los niveles son únicos y el `extra` crece con el nivel; si no, la respuesta es 400. Sin
+`betLevels`, un modo nuevo no ofrece aumentar (`[]`). En el `PUT`, la lista reemplaza a la anterior y
+`[]` apaga los aumentos. El `GET` público devuelve `betLevels` ordenados por nivel, y el orquestador los
+lee de ahí. Los eventos `game_mode.*` del exchange `betaso` **no** los llevan.
+
 **Config en caliente.** Una edición llega a las mesas que nacen DESPUÉS; una mesa ya abierta conserva
 los plazos con los que nació. El proceso que atiende el `PATCH` se refresca en el acto y el resto
 del clúster converge en 5 s. Fuera de lo editable queda `tilesPerPlayer` (regla de juego): se rechaza

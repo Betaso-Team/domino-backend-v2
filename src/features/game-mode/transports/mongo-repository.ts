@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Collection, Document, IndexDescription, ObjectId, WithId } from "mongodb";
 import type { GameModeRepository } from "../core/catalog";
-import type { CreateGameMode, GameMode, UpdateGameMode } from "../core/game-mode";
+import type { CreateGameMode, GameMode, GameModeBetLevel, UpdateGameMode } from "../core/game-mode";
 
 // EL CATÁLOGO PRODUCTIVO, LEÍDO Y ESCRITO SIN MONGOOSE. Domino v2 pasa a ser el ÚNICO escritor de
 // una colección que hoy escribe v1 a través de un `mongoose.Schema`, así que el documento que sale
@@ -62,6 +62,8 @@ export interface GameModeDocument {
   isActive: boolean;
   isFreeRoom: boolean;
   enableBots: boolean;
+  // OPCIONAL EN LA BASE: los documentos de antes de los niveles no lo tienen, y se leen como `[]`.
+  betLevels?: GameModeBetLevel[];
   createdAt: Date;
   updatedAt: Date;
   __v: number;
@@ -128,6 +130,7 @@ export class MongoGameModeRepository implements GameModeRepository {
       // Con `??` y no con `||`: un `enableBots: false` explícito sobre una mesa de cuatro es una
       // elección del panel, y `||` la pisaría con el default.
       enableBots: input.enableBots ?? input.playersQuantity === 4,
+      betLevels: [...(input.betLevels ?? [])],
       // `createdAt`/`updatedAt` los ponía el `timestamps: true` de Mongoose. Acá los pone el
       // repositorio desde el reloj INYECTADO —no `new Date()` directo—, que es lo que hace que el
       // contrato pueda medir dos ediciones dentro del mismo milisegundo.
@@ -234,6 +237,7 @@ function modeOf(document: WithId<GameModeDocument>): GameMode {
     isActive: document.isActive,
     isFreeRoom: document.isFreeRoom,
     enableBots: document.enableBots,
+    betLevels: document.betLevels ?? [],
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
     version: document.__v,

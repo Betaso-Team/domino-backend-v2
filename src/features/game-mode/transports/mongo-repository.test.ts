@@ -154,6 +154,8 @@ describe("MongoGameModeRepository: el documento productivo", () => {
       isActive: true,
       isFreeRoom: false,
       enableBots: false,
+      // El único campo que v1 no tenía: los niveles de aumento, vacíos si no vienen.
+      betLevels: [],
       createdAt: new Date(BASE_INSTANT),
       updatedAt: new Date(BASE_INSTANT),
       __v: 0,

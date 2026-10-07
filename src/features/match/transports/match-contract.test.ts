@@ -53,6 +53,7 @@ const modeOf = (overrides: Partial<GameMode> = {}): GameMode => ({
   isActive: true,
   isFreeRoom: false,
   enableBots: false,
+  betLevels: [],
   createdAt: AT,
   updatedAt: AT,
   version: 0,

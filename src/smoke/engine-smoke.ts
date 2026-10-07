@@ -49,6 +49,7 @@ interface GameModeDTO {
   readonly isActive: boolean;
   readonly isFreeRoom: boolean;
   readonly enableBots: boolean;
+  readonly betLevels: GameMode["betLevels"];
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly __v: number;
@@ -279,6 +280,7 @@ async function createGameMode(): Promise<GameMode> {
     isActive: data.isActive,
     isFreeRoom: data.isFreeRoom,
     enableBots: data.enableBots,
+    betLevels: data.betLevels,
     createdAt: new Date(data.createdAt),
     updatedAt: new Date(data.updatedAt),
     version: data.__v,
