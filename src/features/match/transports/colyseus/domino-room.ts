@@ -165,10 +165,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const config = configOf(request, mode, request.betLevels ?? []);
     this.config = config;
     this.seats = playerIdsOf(config);
-    // Colyseus cuenta las reservas de reconexión aunque unlock() abra el listing. Dos
-    // cupos por asiento permiten conservar el token viejo mientras entra un reemplazo,
-    // sin abrir capacidad ilimitada: onJoin sigue siendo la puerta de los asientos reales.
-    this.maxClients = this.seats.length * 2;
+    // SIN `maxClients`, A PROPÓSITO (portado de truco `b90840b`). La puerta es el chequeo del asiento
+    // en `onJoin`; un tope solo agrega un candado que Colyseus aplica ANTES de cualquier hook
+    // (`MatchMaker.mjs:157`). Con `asientos × 2`, las reservas sin consumir —cada vuelta que pide el
+    // orquestador, cada token de reconexión— contaban contra el cupo y llegaban a bloquear la mesa:
+    // el dueño de un asiento cuyo socket muerto el servidor todavía no notó (6-9 s de ping) rebotaba
+    // con su propia partida en curso. Sin tope la sala nunca se bloquea, y con eso se fueron el
+    // `lock()` de `onReconnect` y el `unlock()` de `onDrop`, que era la deuda que nadie medía.
 
     const child = rootContainer.createChildContainer();
     child.register("Config", { useValue: config });
@@ -236,6 +239,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       [
         ...pieces.sinks,
         ...orchestratorSinks,
+        // EL VEREDICTO QUE ENCUENTRA A ALGUIEN AUSENTE cierra la revancha: se cayó antes y no
+        // volvió, así que con quién jugar otra ya no está. Antes del veredicto la caída sólo se
+        // recordaba (`connected`); acá deja de ser un bache y pasa a ser una salida.
+        (events) => {
+          if (events.some((event) => event.type === "MATCH_RESOLVED") && this.someoneAway())
+            this.notifier.notify(this.closeRematch());
+        },
         // EL LATIDO POR HECHO, portado de truco, y va ÚLTIMO: los demás sinks ya vieron el hecho y
         // el árbol ya está mutado. Quién sigue jugando cambia con la partida —un retiro, un
         // veredicto— y el que quedó afuera tiene que poder sentarse en otra mesa YA, no al
@@ -354,14 +364,31 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     client.userData = { playerId };
     client.view = this.views.get(playerId);
     this.player(playerId).connected = true;
-    // El dispositivo más nuevo gana. Registrar primero la identidad de esta conexión
-    // hace que onLeave del socket desplazado ya la vea y no marque al jugador offline.
-    this.clientOf(playerId, client)?.leave(CloseCode.CONSENTED);
+    // UNA CONEXIÓN POR ASIENTO, Y GANA LA ÚLTIMA. La anterior puede ser otro dispositivo o un socket
+    // que murió sin que el servidor lo notara todavía: el servidor no los distingue, y el que acaba
+    // de probar quién es, es el que vale la pena conservar. Registrar primero la identidad de esta
+    // conexión hace que `onLeave` del socket desplazado ya la vea y no marque al jugador offline.
+    // CONSENTED para que el cliente desplazado no intente volver y desplazar a éste.
+    //
+    // ⚠ TODAS las anteriores y no la primera: un desplazado tarda un viaje en irse, así que con
+    // dos vueltas seguidas la primera sigue en `this.clients` y un `find` la volvía a elegir —la del
+    // medio no se iba nunca y el asiento quedaba con tres conexiones—. Lo midió el e2e de las vueltas
+    // sin consumir.
+    const previous = this.clients.filter(
+      (other) => other !== client && this.playerIdOf(other) === playerId,
+    );
+    for (const other of previous) other.leave(CloseCode.CONSENTED);
 
-    const isBack = this.seated.has(playerId);
+    // EL REGRESO SE ANUNCIA SOLO SI LA CAÍDA SE ANUNCIÓ: un desplazamiento no anuncia ninguna de las
+    // dos, así que para el rival el jugador nunca se fue.
+    const isBack = this.seated.has(playerId) && previous.length === 0;
     this.seated.add(playerId);
     if (isBack) this.notifier.notify([{ type: "PLAYER_RECONNECTED", playerId }]);
-    this.log.info("jugador conectado", { playerId, reconnecting: isBack });
+    this.log.info("jugador conectado", {
+      playerId,
+      reconnecting: isBack,
+      displaced: previous.length,
+    });
     this.startIfSeated();
   }
 
@@ -377,26 +404,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       () => this.forgetPendingReconnection(playerId, pending),
       () => this.forgetPendingReconnection(playerId, pending),
     );
-    // ESTA LÍNEA NO TIENE EFECTO OBSERVABLE HOY, y no hay test que la ejerza. Se deja, con
-    // la condición escrita, porque el día que alguien toque `maxClients` vuelve a hacer falta.
-    //
-    // `unlock()` deshace un lock, y con el `maxClients = seats.length * 2` de `onCreate` la
-    // sala NUNCA se lockea: `hasReachedMaxClients()` suma `clients + reservedSeats`
-    // (@colyseus/core Room.mjs:434), y en una mesa de 2 con 4 cupos el máximo alcanzable
-    // tras una caída es 1 + 1 = 2. Medido: `locked` vale `false` antes y después del drop.
-    //
-    // CUÁNDO VOLVERÍA A IMPORTAR — con `maxClients = seats.length`, la sala se auto-lockea
-    // al ocuparse el último asiento, y `joinById` muere en `room.locked` (MatchMaker.mjs:157)
-    // ANTES de mirar la reserva. El auto-unlock del core no salva: cuelga de
-    // `#_decrementClientCount`, que con una reconexión pendiente queda encadenado al rechazo
-    // de esa promesa (Room.mjs:1461-1463), o sea recién cuando la ventana vence. Durante toda
-    // la ventana, sin este `unlock()`, el dueño del asiento rebota con "room is locked".
-    //
-    // Y es el único que puede limpiar el lock EXPLÍCITO de `onReconnect` más abajo: el
-    // automático se abstiene si `_lockedExplicitly` está puesto (Room.mjs:1495).
-    void this.unlock();
     this.player(playerId).connected = false;
     this.log.info("jugador desconectado", { playerId });
+    // DESDE EL VEREDICTO, IRSE ES IRSE, y una recarga no es excepción (truco `0960663`): antes del
+    // veredicto la caída sólo se recuerda —todavía puede volver a jugar—, después ya no hay partida
+    // a la que volver y la revancha se cierra igual que con una salida.
+    if (this.hasOutcome()) this.notifier.notify(this.closeRematch());
   }
 
   override onReconnect(client: Client): void {
@@ -411,7 +424,6 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       return;
     }
     this.player(playerId).connected = true;
-    if (this.clients.length >= this.maxClients) void this.lock();
     this.notifier.notify([{ type: "PLAYER_RECONNECTED", playerId }]);
     this.log.info("jugador reconectado", { playerId });
   }
@@ -502,6 +514,16 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       .map(({ userId }) => userId);
   }
 
+  // Un asiento que sigue jugando, de carne y hueso, sin conexión. La máquina no tiene socket.
+  private someoneAway(): boolean {
+    return this.seats.some(
+      (playerId) =>
+        this.isStillPlaying(playerId) &&
+        !this.player(playerId).isBot &&
+        !this.player(playerId).connected,
+    );
+  }
+
   override onUncaughtException(error: RoomException, methodName: RoomMethodName): void {
     const cause = error.cause;
     if (
@@ -575,7 +597,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.seating?.clear();
     this.seating = undefined;
     if (this.entryCharge === "charged") {
-      this.startMatch();
+      this.notifier.notify(this.startMatch());
       return;
     }
     if (this.entryCharge === "charging") return;
@@ -614,15 +636,18 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // orquestador reembolsa por su ficha. Arrancar el motor de una sala muerta dejaría plazos
     // corriendo sin dueño.
     if (this.disposed) return;
-    this.startMatch();
+    this.notifier.notify(this.startMatch());
   }
 
   private clientOf(playerId: PlayerId, except?: Client): Client | undefined {
     return this.clients.find((client) => client !== except && this.playerIdOf(client) === playerId);
   }
 
+  // `?.` TAMBIÉN EN `reject`: con la sala disponiéndose, `allowReconnection` no devuelve un
+  // `Deferred` sino una `Promise` ya rechazada (`Room.mjs:1189`), y la segunda conexión del mismo
+  // asiento que cae en el apagado reventaba acá con «reject is not a function».
   private cancelPendingReconnection(playerId: PlayerId): void {
-    this.pendingReconnections.get(playerId)?.reject(new Error("reconexión desplazada"));
+    this.pendingReconnections.get(playerId)?.reject?.(new Error("reconexión desplazada"));
   }
 
   private forgetPendingReconnection(playerId: PlayerId, pending: Deferred<Client>): void {

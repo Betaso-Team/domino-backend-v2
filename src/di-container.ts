@@ -62,7 +62,7 @@ import { MongoOutboxStore } from "@/shared/mongo-outbox";
 import { MemoryOutboxStore, type OutboxStore, TopicOutboxDispatcher } from "@/shared/outbox";
 import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
 import { container } from "tsyringe";
-import { env, isDevEnvironment } from "./env";
+import { env, isTestingEnvironment } from "./env";
 import { type Logger, logger } from "./logger";
 
 // Acá viven solo dependencias globales y sin estado de partida. Los actores del motor
@@ -318,7 +318,7 @@ export const settingsSections: readonly SettingsSection[] = [
   // probar a mano necesita y lo que ningún jugador en ningún otro lado puede poder hacer. Detrás de
   // la misma llave del panel que las demás —truco las sirve sin llave; acá no hay por qué abrir una
   // puerta que dev ya tiene—. Portadas de truco (`d6e3219`, `6da7372`).
-  ...(isDevEnvironment(env.appEnv)
+  ...(isTestingEnvironment(env.appEnv)
     ? [
         {
           name: "deal",
@@ -351,7 +351,7 @@ rootContainer.register<GlobalConfigSource>("GlobalConfigSource", {
 // Leídas UNA vez por mesa, como la config de arriba: una edición a mitad de partida espera a la
 // siguiente. El aviso es para el que lea una partida donde las fichas no fueron suerte y se olvidó
 // de que el preset estaba puesto.
-if (isDevEnvironment(env.appEnv)) {
+if (isTestingEnvironment(env.appEnv)) {
   rootContainer.register<DevPresetSource>("DevPresetSource", {
     useValue: (pointsToWin) => {
       const dealPreset = settingsSignal.effective<DealPreset>("deal");

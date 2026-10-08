@@ -331,19 +331,32 @@ export type LogLevel = NonNullable<z.infer<typeof schema>["LOG_LEVEL"]>;
  * CUÁNTO SE ESCRIBE EN CADA ENTORNO cuando nadie lo dijo. Una regla: **cuanto más cerca de quien
  * programa, más verboso**, porque ahí el volumen no cuesta y la respuesta hace falta ya.
  *
- *   local, dev   `debug`   la traza del juego prendida — dev existe para mirar partidas que salieron mal
- *   stage, prod  `info`    los hechos, sin los cientos de líneas por partida
+ *   local, dev, stage   `debug`   la traza del juego prendida — dev existe para mirar partidas que
+ *                                 salieron mal, y stage es de prueba: el nivel no cambia cómo se juega
+ *   prod                `info`    los hechos, sin los cientos de líneas por partida
  *
  * Por `APP_ENV` y NO por `NODE_ENV`: dev corre con `NODE_ENV=production` igual que prod, así que la
  * regla vieja le apagaba a dev justo lo que dev existe para mirar. Truco `b22ce07`.
  */
 export function defaultLogLevel(appEnv: AppEnv): LogLevel {
-  return appEnv === "local" || appEnv === "dev" ? "debug" : "info";
+  return appEnv === "prod" ? "info" : "debug";
 }
 
-/** Donde se prueba a mano: la máquina de quien escribe el código y el servidor de dev. */
+/**
+ * Donde sólo llega el equipo: monta el playground y el monitor de Colyseus. Nunca stage: el monitor
+ * muestra las fichas de cada sala y corre cualquiera de sus métodos.
+ */
 export function isDevEnvironment(appEnv: AppEnv): boolean {
   return appEnv === "local" || appEnv === "dev";
+}
+
+/**
+ * Donde el juego se prueba a mano: sirve las secciones que fijan lo que ningún jugador de prod puede
+ * fijar —el reparto y el marcador inicial—. En todos lados menos prod, porque stage es donde una mano
+ * se prueba de punta a punta antes de salir (truco `2d7e1b3`, `97e475a`). Siguen detrás de la llave.
+ */
+export function isTestingEnvironment(appEnv: AppEnv): boolean {
+  return appEnv !== "prod";
 }
 
 /**

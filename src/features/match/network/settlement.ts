@@ -271,6 +271,8 @@ export function settlementOf(
     // desenlace, que es donde están todos los asientos a la vista, y no acá — una instrucción por
     // este evento sería pagarle a alguien a mitad de partida, con la mesa todavía sin ganador.
     case "BOT_SEATED":
+    // Repartir una mano no mueve plata: es la marca de que empezó otra.
+    case "ROUND_STARTED":
     case "PLAYER_DISCONNECTED":
     case "PLAYER_RECONNECTED":
       return undefined;

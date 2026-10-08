@@ -9,6 +9,12 @@ export interface PublicMatchConfig {
   /** UC completas, tal como las guarda el catálogo: `125` son 125 UC, y `1.5` es válido. */
   readonly entryFee: number;
   readonly prize: number;
+  /**
+   * LOS NIVELES DE AUMENTO QUE LA MESA OFRECE (truco `58ce78f`), para que el front pinte el aumento
+   * ANTES de proponer. Sin el `extra`: es cómo se calcula el ranking, no algo que mostrar. Vacío =
+   * esta mesa no ofrece aumentar. El precio de cada uno lo deriva el cliente con `betAmountsOf`.
+   */
+  readonly betLevels: readonly { readonly level: number; readonly additionalPoints: number }[];
 }
 
 export interface MatchConfigResponse extends PublicMatchConfig {
@@ -120,6 +126,10 @@ export class MatchRegistry {
       // el DTO público publica el mismo número que la mesa cobró, en UC completas.
       entryFee: config.entryFee,
       prize: config.prize,
+      betLevels: config.betLevels.map(({ level, additionalPoints }) => ({
+        level,
+        additionalPoints,
+      })),
     });
     this.seatsByRoomId.set(
       roomId,

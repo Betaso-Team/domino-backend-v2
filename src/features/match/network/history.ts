@@ -17,13 +17,29 @@ import type { NetworkMatchEvent } from "./events";
 //
 // Si esto fuera `string`, un `type: "LOAD_TILE"` (el nombre del v1) se grabaría sin que
 // nada chille, y el replay lo descubriría en runtime rebobinando una partida real.
-export type HistoryEntryType = keyof CommandPayloads | NetworkMatchEvent["type"];
+//
+// UNA ENTRADA NO ES NI ACTO NI HECHO DEL JUEGO: `TILES_DEALT`, las manos y el pozo tal como se
+// repartieron (truco `b5bb427`). Se graba justo detrás de `ROUND_STARTED`, leída del árbol en ese
+// mismo instante, así que todavía nadie jugó ni robó. NO es un evento a propósito: los eventos se
+// difunden a la mesa, y éste le daría a cada jugador las fichas de todos. Para soporte es lo que
+// el replay no puede dar cuando la partida se jugó con un reparto preparado (`deal`).
+export type HistoryEntryType = keyof CommandPayloads | NetworkMatchEvent["type"] | "TILES_DEALT";
+
+/** El payload de una entrada `TILES_DEALT`. Sin `boneyard` en las mesas que no tienen pozo (4P). */
+export interface DealtTiles {
+  readonly hands: readonly {
+    readonly playerId: string;
+    readonly tiles: readonly { readonly left: number; readonly right: number }[];
+  }[];
+  readonly boneyard?: readonly { readonly left: number; readonly right: number }[];
+}
 
 export interface HistoryEntry {
   readonly matchId: string;
   /** Monótono POR PARTIDA. Es el orden, y es lo único que ordena actos y hechos entre sí. */
   readonly seq: number;
   readonly at: number;
+  /** La mano en que pasó; 0 antes del primer reparto. */
   readonly roundNumber: number;
   readonly source: "PLAYER" | "SYSTEM";
   readonly kind: "COMMAND" | "EVENT";
@@ -82,6 +98,11 @@ export interface HistoryReader {
 // Grabador PER-PARTIDA. Lo arma el wiring; la sala solo lo usa.
 export class MatchHistory {
   private seq = 0;
+  // LA AVANZA `ROUND_STARTED` Y NO SE LEE DEL ÁRBOL: el lote que vence la pausa de una mano también
+  // reparte la siguiente, y cuando se graba el árbol ya apunta a la nueva — el vencimiento quedaba
+  // archivado en una mano que no cerró. Un comando se graba ANTES que sus eventos, así que el verbo
+  // que cierra una mano queda en ella.
+  private roundNumber = 0;
 
   constructor(
     private readonly matchId: string,
@@ -103,11 +124,25 @@ export class MatchHistory {
   events(events: readonly NetworkMatchEvent[]): void {
     if (events.length === 0) return;
     this.port.record(
-      events.map((event) => {
+      events.flatMap((event) => {
+        if (event.type === "ROUND_STARTED") this.roundNumber = event.roundNumber;
         const { type, ...rest } = event as NetworkMatchEvent & Record<string, unknown>;
-        return this.wrap("SYSTEM", "EVENT", type, rest);
+        const entry = this.wrap("SYSTEM", "EVENT", type, rest);
+        return type === "ROUND_STARTED" ? [entry, this.dealt()] : [entry];
       }),
     );
+  }
+
+  private dealt(): HistoryEntry {
+    const boneyard = this.match.currentRound?.boneyard;
+    const tiles: DealtTiles = {
+      hands: this.match.players.map((player) => ({
+        playerId: player.playerId,
+        tiles: flatten([...player.hand.tiles]) as DealtTiles["hands"][number]["tiles"],
+      })),
+      ...(boneyard ? { boneyard: flatten([...boneyard.tiles]) as DealtTiles["boneyard"] } : {}),
+    };
+    return this.wrap("SYSTEM", "EVENT", "TILES_DEALT", tiles);
   }
 
   private wrap(
@@ -121,7 +156,7 @@ export class MatchHistory {
       matchId: this.matchId,
       seq: this.seq,
       at: this.clock.now(),
-      roundNumber: this.match.currentRound?.roundNumber ?? 0,
+      roundNumber: this.roundNumber,
       source,
       kind,
       type,

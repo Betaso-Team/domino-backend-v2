@@ -54,8 +54,10 @@ export interface EngineGraph {
    * el replay sin pasar por el historial. Es exactamente la protección que `di-wiring.ts`
    * se toma el trabajo de escribir —"MatchDriver no se registra"— y que esta interfaz
    * cedía por atrás; los dos consumidores solo llamaban `begin()`.
+   *
+   * Devuelve el `ROUND_STARTED` de la primera mano, que la sala difunde y el historial graba.
    */
-  begin(): void;
+  begin(): readonly MatchEvent[];
   readonly referee: Referee;
   readonly commands: { readonly [N in CommandName]: Command<N, MatchEvent> };
   /** ¿Ya hay veredicto de partida? Lo pregunta la sala al disponerse, para no abortar lo ya dictaminado. */

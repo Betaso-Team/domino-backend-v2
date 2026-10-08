@@ -23,7 +23,7 @@ import { CommandCatalog } from "./catalog";
 import { CommandHandler } from "./command-handler";
 import { identityDecoder } from "./decoders";
 
-export type MatchStarter = () => void;
+export type MatchStarter = () => readonly NetworkMatchEvent[];
 export type MatchSeatGuard = (playerId: string) => boolean;
 export type MatchHasOutcome = () => boolean;
 // LO QUE LA SALA NECESITA DE LA REVANCHA, y son dos funciones y no el grafo: la sala no puede

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isDevEnvironment, parseEnv } from "./env";
+import { isDevEnvironment, isTestingEnvironment, parseEnv } from "./env";
 
 // `parseEnv` solo exige que la clave esté; que sea una pública EC P-256 lo valida `JwtVerifier`.
 const KEY = "pem-de-prueba";
@@ -71,6 +71,20 @@ describe("parseEnv", () => {
     const env = parseEnv({
       NODE_ENV: "production",
       APP_ENV: "dev",
+      BILLING_AUTH_PUBLIC_KEY: KEY,
+      MONGO_URI: "mongodb://mongo:27017/domino",
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
+      ADMIN_API_KEY: "k".repeat(16),
+    });
+    expect(env.logLevel).toBe("debug");
+  });
+
+  // STAGE TAMBIÉN (truco `0c4d67f`): es un entorno de prueba, y el nivel del log no cambia cómo se
+  // juega una partida, sólo cuánto se escribe. Sólo prod se queda en `info`.
+  it("stage cuenta la traza del juego", () => {
+    const env = parseEnv({
+      NODE_ENV: "production",
+      APP_ENV: "stage",
       BILLING_AUTH_PUBLIC_KEY: KEY,
       MONGO_URI: "mongodb://mongo:27017/domino",
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
@@ -389,5 +403,17 @@ describe("parseEnv", () => {
     ["prod", false],
   ] as const)("isDevEnvironment(%s) es %s", (appEnv, esperado) => {
     expect(isDevEnvironment(appEnv)).toBe(esperado);
+  });
+
+  // EL REPARTO Y EL MARCADOR PREPARADOS, en todos lados menos prod (truco `2d7e1b3`, `97e475a`):
+  // stage es donde una mano se prueba de punta a punta antes de salir. El playground y el monitor
+  // siguen siendo sólo de `isDevEnvironment` —el monitor muestra las fichas de todos—.
+  it.each([
+    ["local", true],
+    ["dev", true],
+    ["stage", true],
+    ["prod", false],
+  ] as const)("isTestingEnvironment(%s) es %s", (appEnv, esperado) => {
+    expect(isTestingEnvironment(appEnv)).toBe(esperado);
   });
 });

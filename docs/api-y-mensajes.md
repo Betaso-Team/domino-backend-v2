@@ -46,7 +46,7 @@ decoder estricto antes de alcanzar el comando.
 |---|---|
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
-| `GET /config/:roomId` | Config pública de una mesa y `serverNow`; nunca devuelve el seed |
+| `GET /config/:roomId` | Config pública de una mesa (con `betLevels: [{ level, additionalPoints }]`, vacío si no ofrece aumentar) y `serverNow`; nunca devuelve el seed |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
 | `GET /game-modes` | Modos activos del catálogo |
 | `GET /game-modes/:uuid` | Un modo activo; un modo dado de baja responde 404 |
@@ -115,7 +115,7 @@ Betaso).
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
-| `500` | | La sala existe pero está bloqueada por reservas sin consumir: el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+| `500` | | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
 
 **`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
 orquestador lo muestra en los números de su lobby.
@@ -160,6 +160,11 @@ flowchart LR
   Settlement --> Result["Resultado al orquestador\n(outbox → betaso_games)"]
 ```
 
-Los eventos de dominio describen consecuencias (`ROUND_RESOLVED`, `MATCH_RESOLVED`, expiraciones).
-Los de plataforma describen conexión y aborto. Un comando voluntario ya está en el historial como
-comando; no se duplica como evento salvo que exista información nueva.
+Los eventos de dominio describen consecuencias (`ROUND_STARTED` en cada reparto, `ROUND_RESOLVED`,
+`MATCH_RESOLVED`, expiraciones). Los de plataforma describen conexión y aborto. Un comando voluntario
+ya está en el historial como comando; no se duplica como evento salvo que exista información nueva.
+
+Detrás de cada `ROUND_STARTED` el historial graba `TILES_DEALT`: las manos y el pozo tal como se
+repartieron, leídos del árbol en ese instante. No es un evento (no se difunde a la mesa) y es lo que
+soporte tiene cuando la partida se jugó con un reparto preparado y el replay no la reproduce. Cada
+entrada lleva la mano en que pasó, tomada de `ROUND_STARTED` y no del árbol.

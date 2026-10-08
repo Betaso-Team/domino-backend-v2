@@ -32,7 +32,7 @@ export type RoundAction = "PLAYED" | "DREW" | "PASSED" | "ABANDONED" | "REVEALED
 // actor sigue en la mano, y sin lo segundo tendría que adivinar la reconciliación
 // comparando el estado contra sí mismo.
 export interface Driver {
-  begin(): void;
+  begin(): readonly MatchEvent[];
   advance(actorId: PlayerId, action: RoundAction): TransitionResult;
   timeout(): TransitionResult;
 }

@@ -64,7 +64,7 @@ describe("Los endpoints de configuración (integración)", () => {
   it("lista las secciones con lo que está en vigor y lo que se puede tocar", async () => {
     const { data } = await call<Section[]>("GET", "");
 
-    // `deal` y `starting-score` existen porque la suite corre como `local` (`isDevEnvironment`).
+    // `deal` y `starting-score` existen porque la suite corre como `local` (`isTestingEnvironment`).
     expect(data.map((section) => section.name)).toEqual(["match", "deal", "starting-score"]);
     expect(data[0]?.effective).toMatchObject({ turnTimeoutMs: env.turnTimeoutMs });
     expect(data[0]?.overrides).toEqual({});

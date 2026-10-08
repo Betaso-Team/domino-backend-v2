@@ -24,10 +24,10 @@ export class ColyseusMatchGateway {
 
   // `undefined` SOLO si la sala ya no existe: el índice de `matchOf` puede sobrevivirla hasta su plazo.
   // `joinById` tira el MISMO código (MATCHMAKE_INVALID_ROOM_ID) para una sala ausente y para una
-  // BLOQUEADA, y una bloqueada es de alguien que sigue sentado: cada vuelta sin consumir es una
-  // reserva que cuenta contra `maxClients`, así que unas pocas bastan para bloquear una mesa de 2.
-  // Contestar 404 ahí diría "no está en ninguna mesa" y el orquestador le abriría una segunda; por
-  // eso se pregunta si la sala existe y, si existe, el error se relanza (500 ⇒ desconocido).
+  // BLOQUEADA. La sala ya no tiene `maxClients`, así que no se bloquea nunca y un jugador todavía
+  // conectado desde otro lado recibe el asiento igual —consumirlo desplaza la otra conexión—; la
+  // pregunta de abajo queda como red: contestar 404 por una sala viva diría "no está en ninguna
+  // mesa" y el orquestador le abriría una segunda, así que si existe el error se relanza (500).
   // `joinById` pasa solo por el `onAuth` ESTÁTICO de paso; el token se verifica cuando el jugador
   // conecta el socket con esta reserva.
   async seatBack(roomId: string): Promise<unknown | undefined> {

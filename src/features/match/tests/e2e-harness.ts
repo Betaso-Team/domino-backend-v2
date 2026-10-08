@@ -306,9 +306,9 @@ const GOLDEN_DIR = fileURLToPath(new URL("fixtures", import.meta.url));
 // las que la sala se creó y el `globalConfig` del mismo container, así que el fixture no
 // puede describir una partida distinta de la que se jugó.
 //
-// `startedAt` viaja aparte porque NO está en el historial: `begin()` no emite nada, así
-// que la primera entrada grabada es posterior al arranque. Sin él el replay inventa el
-// instante y el árbol reconstruido difiere del real en ese campo.
+// `startedAt` viaja aparte aunque desde `ROUND_STARTED` la primera entrada grabada caiga en el
+// mismo instante del arranque: un historial grabado antes de ese evento empieza después, y el
+// replay tiene que seguir rebobinándolo sin inventar el instante.
 //
 // Solo escribe si se pide con WRITE_GOLDEN=1. En una corrida normal es no-op, así que el
 // fixture no se regenera por accidente y una regresión no se auto-aprueba. El flag entra

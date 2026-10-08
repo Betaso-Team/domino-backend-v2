@@ -32,7 +32,33 @@ export async function bootTestServer(port: number): Promise<ColyseusTestServer> 
   // se cerraría esperando un cobro que nadie contesta, y el que escriba el E2E número veinte no tiene
   // por qué saberlo.
   rootContainer.register("OrchestratorCharges", { useValue: fakeOrchestrator });
+  ignoreUnheardMessages(server);
   return server;
+}
+
+// EL SERVIDOR EMPUJA MENSAJES QUE NADIE PIDIÓ —los `events` de una partida que el test mira a
+// medias— y el SDK avisa una vez por mensaje que un cliente no escucha: cientos de líneas por
+// corrida que entierran la salida de un test que falla (portado de truco `90b46e0`).
+//
+// Un handler comodín es lo que el SDK consulta antes de avisar, y sólo recibe lo que ningún
+// handler específico toma, así que un test que escucha un tipo lo sigue recibiendo. Se registra
+// apenas resuelve la entrada, antes de que se pueda despachar el próximo frame.
+const JOINS = ["joinOrCreate", "joinById", "join", "create", "consumeSeatReservation"] as const;
+
+function ignoreUnheardMessages(server: ColyseusTestServer): void {
+  const sdk = server.sdk as unknown as Record<
+    string,
+    (...args: unknown[]) => Promise<{ onMessage(type: "*", handler: () => void): unknown }>
+  >;
+  for (const method of JOINS) {
+    const join = sdk[method]?.bind(sdk);
+    if (!join) continue;
+    sdk[method] = async (...args) => {
+      const room = await join(...args);
+      room.onMessage("*", () => {});
+      return room;
+    };
+  }
 }
 
 export const participantOf = (input: ParticipantInput): MatchParticipant =>

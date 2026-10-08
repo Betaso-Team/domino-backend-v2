@@ -314,7 +314,10 @@ export function configOf(
     // hace v1 cuando no consigue el catálogo: falla CERRADO. Se congelan con el resto de la
     // economía — el panel puede cambiar los niveles de un modo mientras la mesa se juega, y el
     // que aceptó un x5 lo aceptó al precio de cuando se sentó.
-    betLevels,
+    //
+    // LA MESA GRATIS NO OFRECE AUMENTAR, traiga lo que traiga el request: no hay entrada que
+    // multiplicar ni premio que escalar. Es la regla de v1 (`on-propose-bet-multiplier.ts:46`).
+    betLevels: mode.isFreeRoom ? [] : betLevels,
   };
 }
 
