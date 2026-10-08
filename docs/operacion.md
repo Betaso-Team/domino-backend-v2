@@ -15,11 +15,11 @@ El mantenimiento no se opera acá: el único interruptor es el del orquestador, 
 Las partidas ya abiertas terminan.
 
 `npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
-siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local y dev, `info` en stage y
+siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local, dev y stage, `info` en
 prod) salvo un `LOG_LEVEL` explícito. Cada línea lleva `instance`, `release` y el `traceId` de la
 causa en curso, y nunca un `token` ni un `authorization` (salen `[oculto]`).
 
-En local y dev existen además dos secciones de `/internal/settings`, detrás de la llave del panel,
+En local, dev y stage existen además dos secciones de `/internal/settings`, detrás de la llave del panel,
 para probar a mano: `deal` fija las fichas de cada asiento (`{"hands": [[[6,6]], [[0,0]]]}`) y
 `starting-score` el marcador con el que nace la próxima mesa. Se borran con `DELETE`.
 
