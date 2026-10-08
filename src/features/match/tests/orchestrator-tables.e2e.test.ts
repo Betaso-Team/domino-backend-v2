@@ -154,7 +154,7 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
   });
 
   it("no abre nada con la llave del panel: cada llave abre lo suyo", async () => {
-    const res = await post("/internal/matches", casualTable(["o-g", "o-h"]), env.adminPanelApiKey);
+    const res = await post("/internal/matches", casualTable(["o-g", "o-h"]), env.adminApiKey);
     expect(res.status).toBe(401);
   });
 });

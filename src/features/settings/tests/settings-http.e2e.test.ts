@@ -13,7 +13,7 @@ const PORT = 2611;
 const url = (path = "") => `http://127.0.0.1:${PORT}${SETTINGS_ROUTE}${path}`;
 const admin = {
   "Content-Type": "application/json",
-  "x-internal-api-key": env.adminPanelApiKey ?? "",
+  "x-internal-api-key": env.adminApiKey ?? "",
 };
 
 interface Section {

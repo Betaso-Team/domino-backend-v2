@@ -62,7 +62,7 @@ afterEach(() => {
 
 function harness(
   over: {
-    adminPanelApiKey?: string | undefined;
+    adminApiKey?: string | undefined;
     lease?: Lease;
     repository?: GameModeRepository;
   } = {},
@@ -90,7 +90,7 @@ function harness(
     gameModeHttp({
       service,
       logger,
-      adminPanelApiKey: "adminPanelApiKey" in over ? over.adminPanelApiKey : KEY,
+      adminApiKey: "adminApiKey" in over ? over.adminApiKey : KEY,
     }),
   );
   app.use(httpErrorHandler(logger));
@@ -151,6 +151,7 @@ function wireDtoOf(mode: GameMode): Record<string, unknown> {
     isActive: mode.isActive,
     isFreeRoom: mode.isFreeRoom,
     enableBots: mode.enableBots,
+    betLevels: mode.betLevels,
     createdAt: mode.createdAt.toISOString(),
     updatedAt: mode.updatedAt.toISOString(),
     __v: mode.version,
@@ -174,7 +175,7 @@ async function drain(outbox: MemoryGameModeOutbox): Promise<string[]> {
 // EL REGISTRO, MEDIDO SIN SERVIDOR. Lo que se mide acá es una decisión de wiring —qué rutas llegan a
 // existir y EN QUÉ ORDEN—, y eso un servidor no lo muestra: dos órdenes distintos pueden responder
 // igual hoy y dejar de hacerlo con la ruta que se agregue mañana.
-function routesRegisteredWith(adminPanelApiKey: string | undefined): string[] {
+function routesRegisteredWith(adminApiKey: string | undefined): string[] {
   const clock = mutableClock();
   return routesOf(
     gameModeHttp({
@@ -189,7 +190,7 @@ function routesRegisteredWith(adminPanelApiKey: string | undefined): string[] {
         vi.fn(),
       ),
       logger: fakeLogger(),
-      adminPanelApiKey,
+      adminApiKey,
     }),
   );
 }
@@ -236,7 +237,7 @@ describe("gameModeHttp: las siete rutas", () => {
         vi.fn(),
       ),
       logger,
-      adminPanelApiKey: undefined,
+      adminApiKey: undefined,
     });
 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("/game-modes"));
@@ -249,7 +250,7 @@ describe("gameModeHttp: las siete rutas", () => {
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
   ])("sin llave interna %s %s no existe", async (method, path) => {
-    const app = harness({ adminPanelApiKey: undefined });
+    const app = harness({ adminApiKey: undefined });
 
     const response =
       method === "GET"
@@ -286,6 +287,7 @@ describe("GET /game-modes", () => {
             isActive: true,
             isFreeRoom: false,
             enableBots: false,
+            betLevels: [],
             createdAt: CREATED_AT,
             updatedAt: CREATED_AT,
             __v: 0,
@@ -425,6 +427,45 @@ describe("POST /game-modes", () => {
     const response = await app.post("/game-modes", invalid, KEY);
 
     expect(response.status).toBe(400);
+    expect(await app.repository.all()).toEqual([]);
+  });
+});
+
+// LOS NIVELES DE AUMENTO, de punta a punta: el panel los guarda y el orquestador los lee del GET
+// público para saber qué aumentos ofrece (y cobra) cada mesa.
+describe("niveles de aumento", () => {
+  const body = { name: "Clásica", prize: 18, entryFee: 10, playersQuantity: 2 };
+  const levels = [
+    { level: 2, extra: 1, additionalPoints: 15 },
+    { level: 3, extra: 3, additionalPoints: 45 },
+  ];
+
+  it("se crean con el modo, salen en el GET público y un PUT los reemplaza", async () => {
+    const app = harness();
+
+    // Desordenados a propósito: se guardan por nivel.
+    const created = await app.post(
+      "/game-modes",
+      { ...body, betLevels: [...levels].reverse() },
+      KEY,
+    );
+    expect(created.status).toBe(201);
+    const uuid = (created.body as { data: { uuid: string } }).data.uuid;
+    const read = await app.get(`/game-modes/${uuid}`);
+    expect((read.body as { data: { betLevels: unknown } }).data.betLevels).toEqual(levels);
+
+    expect((await app.put(`/game-modes/${uuid}`, { betLevels: [] }, KEY)).status).toBe(200);
+    expect((await app.repository.byUuid(uuid))?.betLevels).toEqual([]);
+  });
+
+  it("un extra que no crece con el nivel es 400 y no se guarda nada", async () => {
+    const app = harness();
+    const plano = [
+      { level: 2, extra: 3, additionalPoints: 45 },
+      { level: 3, extra: 3, additionalPoints: 45 },
+    ];
+
+    expect((await app.post("/game-modes", { ...body, betLevels: plano }, KEY)).status).toBe(400);
     expect(await app.repository.all()).toEqual([]);
   });
 });

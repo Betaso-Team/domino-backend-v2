@@ -1,5 +1,5 @@
 import type { Logger } from "@/logger";
-import { requireAdminPanelKey } from "@/shared/http/api-key";
+import { requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import { z } from "zod";
@@ -37,23 +37,23 @@ const HISTORY_PARAMS = z.object({
 export function historyRoutes({
   logger,
   history,
-  adminPanelApiKey,
+  adminApiKey,
 }: {
   readonly logger: Logger;
   readonly history: HistoryReader;
   /** `undefined` ⇒ la ruta NO se registra. */
-  readonly adminPanelApiKey: string | undefined;
+  readonly adminApiKey: string | undefined;
 }): Router {
   const router = Router();
   // FAIL CLOSED: sin llave configurada la ruta interna NO EXISTE. La alternativa —
   // registrarla igual y dejar el guard comparando contra vacío— es peor que no tenerla,
   // porque el operador la ve responder y cree que está protegida.
-  if (!adminPanelApiKey) {
+  if (!adminApiKey) {
     // La RUTA va en el mensaje, no solo la causa y la variable. El que llega a este log
     // llega desde un 404 inexplicable, y busca por path: sin el path acá, el aviso que
     // explica el 404 es justamente el que no encuentra.
     logger.warn(
-      `API interna deshabilitada: falta BETASO_ADMIN_PANEL_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
+      `API interna deshabilitada: falta ADMIN_API_KEY, la ruta ${HISTORY_ROUTE} no se registra`,
     );
     return router;
   }
@@ -78,7 +78,7 @@ export function historyRoutes({
   // verde de vitest, que borra los tipos sin chequearlos.
   router.get(
     HISTORY_ROUTE,
-    requireAdminPanelKey(adminPanelApiKey),
+    requireAdminKey(adminApiKey),
     validated({ params: HISTORY_PARAMS }, async ({ params }, response) => {
       // Contra `HistoryReader` y no contra la implementación: el cast a `MemoryHistory`
       // que estaba acá compilaba una promesa que el token no hacía.

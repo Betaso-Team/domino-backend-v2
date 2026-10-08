@@ -1,6 +1,6 @@
 import "reflect-metadata";
-import { generateKeyPairSync } from "node:crypto";
 import dotenv from "dotenv";
+import { TEST_BILLING_AUTH_PUBLIC_KEY } from "./src/tests/billing-auth-keys";
 
 // EL `.env` NO EXISTE PARA LA SUITE, y esta línea es lo único que puede garantizarlo.
 //
@@ -32,24 +32,20 @@ import dotenv from "dotenv";
 // `@colyseus/tools` no tiene `node_modules` propio.
 dotenv.config = () => ({ parsed: {} });
 
-// src/env.ts valida el entorno al importarse y lanza si falta BETASO_BACKEND_JWT_SECRET (ver su cabecera).
+// src/env.ts valida el entorno al importarse y lanza si falta BILLING_AUTH_PUBLIC_KEY (ver su cabecera).
 // Estos defaults evitan que cualquier test que importe env.ts — directa o transitivamente —
 // explote solo por correr sin variables configuradas.
 process.env.NODE_ENV ??= "test";
-process.env.BETASO_BACKEND_JWT_SECRET ??= "test-secret-do-not-use-in-production";
+// La pública de la pareja fija de la suite: `mintBillingToken` firma con su privada.
+process.env.BILLING_AUTH_PUBLIC_KEY ??= TEST_BILLING_AUTH_PUBLIC_KEY;
 // Sin esto la API interna no se registra (fail closed) y sus tests e2e no tendrían
 // ruta contra la cual medir. El caso "sin llave" se prueba aparte, sin servidor.
-process.env.BETASO_ADMIN_PANEL_API_KEY ??= "test-admin-panel-key-do-not-use-in-production";
+process.env.ADMIN_API_KEY ??= "test-admin-key-do-not-use-in-production";
 process.env.ORCHESTRATOR_API_KEY ??= "test-orchestrator-key-do-not-use-in-production";
 // A QUIÉN LE PIDEN LOS COBROS LAS MESAS DEL ORQUESTADOR. Nadie escucha ahí: un test que necesite
 // que el cobro conteste levanta su propio orquestador de mentira (`src/tests/fake-orchestrator.ts`).
 process.env.ORCHESTRATOR_URL ??= "http://127.0.0.1:9/";
 process.env.ORCHESTRATOR_CALLBACK_API_KEY ??= "test-orchestrator-callback-key-not-for-production";
-// `parseEnv` exige la clave pública de billing-auth cuando hay llave del orquestador (sin ella las
-// mesas abren y nadie entra). Una P-256 recién generada: es PÚBLICA y sin su privada nadie firma nada.
-process.env.BILLING_AUTH_PUBLIC_KEY ??= generateKeyPairSync("ec", { namedCurve: "P-256" })
-  .publicKey.export({ type: "spki", format: "pem" })
-  .toString();
 // La de SALIDA, DISTINTA a propósito: con el mismo valor, un test que confundiera las dos llaves
 // daría verde.
 // SE BORRA, no se ignora, y es la única variable que este archivo saca en vez de poner.

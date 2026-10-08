@@ -183,6 +183,7 @@ describe("GameModeService: create", () => {
       isActive: true,
       isFreeRoom: false,
       enableBots: false,
+      betLevels: [],
       createdAt: new Date(BASE_INSTANT),
       updatedAt: new Date(BASE_INSTANT),
       version: 0,

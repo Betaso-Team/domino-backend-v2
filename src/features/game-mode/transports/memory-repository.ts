@@ -43,6 +43,7 @@ export class MemoryGameModeRepository implements GameModeRepository {
       // Con `??` y no con `||`, igual que el adaptador Mongo: un `enableBots: false` explícito
       // sobre una mesa de cuatro es una elección, y `||` la pisaría con el default.
       enableBots: input.enableBots ?? input.playersQuantity === 4,
+      betLevels: [...(input.betLevels ?? [])],
       createdAt: now,
       updatedAt: now,
       version: 0,

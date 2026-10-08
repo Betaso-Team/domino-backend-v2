@@ -1,4 +1,4 @@
-import { requireAdminPanelKey } from "@/shared/http/api-key";
+import { requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import type { Logger } from "@/shared/logger";
 import { type Request, Router } from "express";
@@ -24,7 +24,7 @@ export interface SettingsRoutesDeps {
   readonly sections: readonly SettingsSection[];
   readonly signal: PolledSettingsSignal;
   readonly writer: SettingsWriter;
-  readonly adminPanelApiKey: string | undefined;
+  readonly adminApiKey: string | undefined;
   readonly log: Logger;
 }
 
@@ -42,14 +42,14 @@ export interface SettingsRoutesDeps {
 // la fotografía al crearse: los números de una mesa no se mueven debajo de los que están jugando.
 export function settingsRoutes(deps: SettingsRoutesDeps): Router {
   const router = Router();
-  const { sections, signal, writer, adminPanelApiKey, log } = deps;
-  if (!adminPanelApiKey) {
-    log.warn("configuración en caliente APAGADA: sin BETASO_ADMIN_PANEL_API_KEY no se registra", {
+  const { sections, signal, writer, adminApiKey, log } = deps;
+  if (!adminApiKey) {
+    log.warn("configuración en caliente APAGADA: sin ADMIN_API_KEY no se registra", {
       route: `${SETTINGS_ROUTE}/*`,
     });
     return router;
   }
-  const admin = requireAdminPanelKey(adminPanelApiKey);
+  const admin = requireAdminKey(adminApiKey);
 
   const dtoOf = (section: SettingsSection): SectionDTO => ({
     name: section.name,

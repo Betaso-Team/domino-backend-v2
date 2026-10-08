@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const PORT = 2610;
 const admin = {
   "Content-Type": "application/json",
-  "x-internal-api-key": env.adminPanelApiKey ?? "",
+  "x-internal-api-key": env.adminApiKey ?? "",
 };
 
 describe("La configuración editada en caliente (integración)", () => {

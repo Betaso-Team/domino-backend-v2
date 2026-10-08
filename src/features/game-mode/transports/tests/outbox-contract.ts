@@ -31,6 +31,7 @@ export function clasica(over: Partial<GameMode> = {}): GameMode {
     isActive: true,
     isFreeRoom: true,
     enableBots: true,
+    betLevels: [],
     createdAt: new Date(BASE_INSTANT),
     updatedAt: new Date(BASE_INSTANT),
     version: 0,
