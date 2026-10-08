@@ -176,6 +176,35 @@ describe("cerrar desde afuera", () => {
     expect(e.match.phase).toBe("REMATCH_ACCEPTED");
   });
 
+  // DESDE EL VEREDICTO, IRSE ES IRSE (truco `0960663`). En la pausa de presentación todavía no hay
+  // ventana que cerrar, pero ya no hay revancha posible: el que se fue no vuelve a esta mesa, así
+  // que abrirla serían treinta segundos de un botón que no puede terminar en nada.
+  it("en la pausa del veredicto, cerrar impide que la ventana se abra", () => {
+    const e = table();
+    e.match.phase = "PRESENTING_MATCH";
+
+    e.matchDriver.closeRematch();
+    expect(e.match.phase).toBe("PRESENTING_MATCH");
+
+    const result = e.matchDriver.timeout();
+    expect(e.match.phase).toBe("FINISHED");
+    expect(e.match.rematch).toBeUndefined();
+    expect(result.finished).toBe(true);
+  });
+
+  // Las dos respuestas compiten: el permiso puede seguir en vuelo cuando el rival ya se fue, y todo
+  // motivo para cerrar es definitivo mientras que permitir es sólo la falta de uno.
+  it("cerrar es definitivo: un permiso que llega tarde no reabre la ventana", () => {
+    const e = table();
+    e.match.phase = "PRESENTING_MATCH";
+    e.matchDriver.closeRematch();
+    e.gate.allow();
+
+    e.matchDriver.timeout();
+
+    expect(e.match.phase).toBe("FINISHED");
+  });
+
   it("no hace nada mientras se juega", () => {
     const e = table();
 

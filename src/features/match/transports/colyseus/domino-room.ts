@@ -239,6 +239,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       [
         ...pieces.sinks,
         ...orchestratorSinks,
+        // EL VEREDICTO QUE ENCUENTRA A ALGUIEN AUSENTE cierra la revancha: se cayó antes y no
+        // volvió, así que con quién jugar otra ya no está. Antes del veredicto la caída sólo se
+        // recordaba (`connected`); acá deja de ser un bache y pasa a ser una salida.
+        (events) => {
+          if (events.some((event) => event.type === "MATCH_RESOLVED") && this.someoneAway())
+            this.notifier.notify(this.closeRematch());
+        },
         // EL LATIDO POR HECHO, portado de truco, y va ÚLTIMO: los demás sinks ya vieron el hecho y
         // el árbol ya está mutado. Quién sigue jugando cambia con la partida —un retiro, un
         // veredicto— y el que quedó afuera tiene que poder sentarse en otra mesa YA, no al
@@ -399,6 +406,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     );
     this.player(playerId).connected = false;
     this.log.info("jugador desconectado", { playerId });
+    // DESDE EL VEREDICTO, IRSE ES IRSE, y una recarga no es excepción (truco `0960663`): antes del
+    // veredicto la caída sólo se recuerda —todavía puede volver a jugar—, después ya no hay partida
+    // a la que volver y la revancha se cierra igual que con una salida.
+    if (this.hasOutcome()) this.notifier.notify(this.closeRematch());
   }
 
   override onReconnect(client: Client): void {
@@ -501,6 +512,16 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     return this.config.seats
       .filter(({ playerId }) => this.isStillPlaying(playerId) && !this.player(playerId).isBot)
       .map(({ userId }) => userId);
+  }
+
+  // Un asiento que sigue jugando, de carne y hueso, sin conexión. La máquina no tiene socket.
+  private someoneAway(): boolean {
+    return this.seats.some(
+      (playerId) =>
+        this.isStillPlaying(playerId) &&
+        !this.player(playerId).isBot &&
+        !this.player(playerId).connected,
+    );
   }
 
   override onUncaughtException(error: RoomException, methodName: RoomMethodName): void {

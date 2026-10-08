@@ -19,6 +19,7 @@
  */
 export class RematchGate {
   private allowed = false;
+  private closed = false;
 
   /**
    * @param offered si ESTA MESA ofrece revancha, que es un hecho distinto de si estos dos
@@ -37,14 +38,31 @@ export class RematchGate {
     return this.offered;
   }
 
-  /** Solo tiene efecto antes de que venza la pausa de presentación. */
+  /** Solo tiene efecto antes de que venza la pausa de presentación, y nunca después de `close()`. */
   allow(): void {
-    this.allowed = true;
+    if (!this.closed) this.allowed = true;
   }
 
   /** Idempotente y llamable en cualquier momento: una ventana ya abierta la cierra el conductor. */
   deny(): void {
     this.allowed = false;
+  }
+
+  /**
+   * NO HAY REVANCHA EN ESTA MESA, y es DEFINITIVO (truco `0960663`): alguien se fue después del
+   * veredicto. Distinto de `deny()`, que deja abrir la ventana con el botón apagado: acá no hay con
+   * quién volver a jugar, así que la ventana no se abre. Las dos respuestas compiten —el permiso
+   * puede seguir en vuelo cuando el rival ya se fue— y todo motivo para cerrar es final, mientras
+   * que permitir es solo la falta de uno.
+   */
+  close(): void {
+    this.closed = true;
+    this.allowed = false;
+  }
+
+  /** Si alguien la cerró. Sin ventana, no se abre ni apagada. */
+  isClosed(): boolean {
+    return this.closed;
   }
 
   /** Si además de ofrecerse, estos dos pueden jugarla. Es lo que el front recibe en `eligible`. */

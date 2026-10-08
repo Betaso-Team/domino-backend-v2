@@ -137,7 +137,11 @@ export class MatchDriver implements Driver, Retirement {
       // no hay con quién volver a jugar y no hay nada que el que quedó pueda arreglar. Los dos
       // terminan igual y por eso van juntos; abrir apagado en cualquiera de los dos casos sería
       // treinta segundos mirando un botón gris.
-      if (!this.gate.offersRematch() || !isTableIntact(this.match)) return this.finish(events);
+      //
+      // Y UN TERCERO, que es de la plataforma y llega por la compuerta: alguien se fue después del
+      // veredicto (`closeRematch` en la pausa).
+      if (!this.gate.offersRematch() || this.gate.isClosed() || !isTableIntact(this.match))
+        return this.finish(events);
       this.rematch.open(this.gate.isAllowed());
       this.match.phase = "REMATCH_WINDOW";
       this.stampDeadline(this.config.rematchWindowMs);
@@ -242,10 +246,18 @@ export class MatchDriver implements Driver, Retirement {
    * PLATAFORMA y el juego no los mira. Acá sí importan, por una razón concreta y chica — sin
    * esto, el que ofreció se queda mirando una cuenta atrás que ya no puede terminar en nada.
    *
-   * Idempotente y sin efecto fuera de las fases de revancha, así que una desconexión en medio de
-   * la partida pasa por acá sin consecuencia.
+   * Idempotente y sin efecto mientras se juega, así que una desconexión en medio de la partida
+   * pasa por acá sin consecuencia: el jugador todavía puede volver a jugar.
+   *
+   * DESDE EL VEREDICTO, IRSE ES IRSE (truco `0960663`): en la pausa de presentación todavía no hay
+   * ventana que cerrar, así que se cierra la compuerta, y al vencer la pausa la mesa termina sin
+   * abrirla.
    */
   closeRematch(): TransitionResult {
+    if (matchPhaseOf(this.match) === "PRESENTING_MATCH") {
+      this.gate.close();
+      return { events: [], finished: false };
+    }
     if (!isNegotiatingRematch(matchPhaseOf(this.match))) return { events: [], finished: false };
     return this.finish([]);
   }

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
 import type { MatchState } from "../core/state";
 import {
+  type SeatedMatch,
   act,
   bootServer,
   casualTable,
@@ -14,6 +15,7 @@ import {
   linesOf,
   mintToken,
   participantOf,
+  playOneTurn,
   revealHands,
   seatPair,
   waitUntil,
@@ -44,6 +46,29 @@ afterAll(async () => {
   await server.shutdown();
   rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
+
+// HASTA LA PAUSA DEL VEREDICTO y no más: `playUntilDecided` sigue hasta la ventana o el terminal,
+// y lo que se mide acá pasa ADENTRO de esa pausa.
+async function playUntilVerdict(match: SeatedMatch): Promise<void> {
+  for (let turns = 0; turns < 3_000; turns += 1) {
+    if (match.serverState.phase === "PRESENTING_MATCH") return;
+    if (!(await playOneTurn(match))) {
+      await waitUntil(
+        () =>
+          match.serverState.currentRound?.phase === "PLAYING" ||
+          match.serverState.phase === "PRESENTING_MATCH",
+        3_000,
+      );
+    }
+  }
+}
+
+// Muestrea las fases camino al terminal: una ventana que se abriera quedaría arriba 300 ms.
+async function phasesUntilFinished(match: SeatedMatch): Promise<Set<string>> {
+  const phases = new Set<string>();
+  await waitUntil(() => phases.add(match.serverState.phase).has("FINISHED"), 5_000);
+  return phases;
+}
 
 describe("ciclo de vida de una partida", () => {
   it("la partida arranca sola al ocuparse el último asiento", async () => {
@@ -89,6 +114,40 @@ describe("ciclo de vida de una partida", () => {
     expect(seqs).toEqual(seqs.map((_, index) => index + 1));
   });
 
+  // DESDE EL VEREDICTO, IRSE ES IRSE (truco `0960663`): el que se va en la pausa del final no vuelve
+  // a esta mesa, así que la ventana de revancha no se abre ni apagada.
+  it("si alguien se va en la pausa del veredicto, la ventana de revancha no se abre", async () => {
+    const match = await seatPair(server, ["vs1", "vs2"]);
+    await revealHands(match);
+    await playUntilVerdict(match);
+
+    await clientOf(match, "vs2").leave();
+
+    expect(await phasesUntilFinished(match)).not.toContain("REMATCH_WINDOW");
+  }, 60_000);
+
+  // Y una recarga no es excepción: la caída cuenta igual que la salida.
+  it("si alguien se cae en la pausa del veredicto, la ventana tampoco se abre", async () => {
+    const match = await seatPair(server, ["vd1", "vd2"]);
+    await revealHands(match);
+    await playUntilVerdict(match);
+
+    const client = clientOf(match, "vd2");
+    client.reconnection.enabled = false;
+    void client.leave(false);
+
+    expect(await phasesUntilFinished(match)).not.toContain("REMATCH_WINDOW");
+  }, 60_000);
+
+  // El control: sin nadie que se vaya, la misma mesa sí abre la ventana (apagada).
+  it("si nadie se va, la ventana se abre", async () => {
+    const match = await seatPair(server, ["vc1", "vc2"]);
+    await revealHands(match);
+    await playUntilVerdict(match);
+
+    expect(await phasesUntilFinished(match)).toContain("REMATCH_WINDOW");
+  }, 60_000);
+
   it("un verbo desconocido se rechaza y no entra al historial", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
     const illegal: unknown[] = [];
@@ -129,8 +188,8 @@ describe("ciclo de vida de una partida", () => {
   });
 
   it("la misma cuenta dos veces no completa la mesa: arranca cuando se sientan todos", async () => {
-    const room = await server.createRoom("domino", casualTable(["w1", "w2"]));
-    server.sdk.auth.token = mintToken(participantOf("w1"));
+    const room = await server.createRoom("domino", casualTable(["dup1", "dup2"]));
+    server.sdk.auth.token = mintToken(participantOf("dup1"));
     await server.connectTo(room);
     await server.connectTo(room);
 
@@ -138,7 +197,7 @@ describe("ciclo de vida de una partida", () => {
     const startedAt = () => (server.getRoomById(room.roomId).state as MatchState).startedAt;
     expect(startedAt()).toBe(0);
 
-    server.sdk.auth.token = mintToken(participantOf("w2"));
+    server.sdk.auth.token = mintToken(participantOf("dup2"));
     await server.connectTo(room);
     await waitUntil(() => startedAt() > 0);
   });
