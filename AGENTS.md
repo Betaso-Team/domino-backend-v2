@@ -305,7 +305,7 @@ el punto de la tarea— pero **cliente y servidor tienen que desplegarse juntos*
 no se pueda, los campos nuevos van al FINAL en vez de al medio.
 
 Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y primer paso pendiente.
-No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.
+La sala ya no tiene `maxClients` (ver «la tanda del 06 al 08/10» al final): la deuda del `unlock()` se cerró.
 
 **Si retomás por la Task 3**, leé antes el bloque «Lo que la revisión agregó» al final de la Task 2
 del plan: los snippets de esa tarea NO son el código que quedó, y el smoke se escribe contra lo que
@@ -313,10 +313,10 @@ quedó.
 
 **Deudas abiertas — NO CUMPLIDAS:**
 
-1. El `unlock()` de `onDrop` no tiene test y es inalcanzable bajo el
-   `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva está en el recuadro
-   ⛔ de la Tarea 22 y junto al propio `unlock()`: **si tocás `maxClients`, leelo y agregá el test
-   antes de cambiarlo.**
+1. ~~El `unlock()` de `onDrop` no tiene test y es inalcanzable.~~ **CERRADA**: la sala ya no tiene
+   `maxClients`, así que nunca se bloquea y el `unlock()`/`lock()` se borraron (`7927c39`). Si alguna
+   vez vuelve un tope, las reservas sin consumir vuelven a contar contra él y el dueño de un asiento
+   rebota contra su propia mesa: medilo con el e2e de las vueltas sin consumir.
 2. ~~**El 4P no tiene regla de reparto del premio.**~~ **CERRADO, y la deuda era FALSA**: la regla
    estaba escrita en v1 (`domino-room-state.ts:672-678`) y `settlementOf` ya la implementaba por
    construcción. Ver el bloque «la mesa de cuatro y la máquina que la sostiene» al final.
@@ -2225,6 +2225,36 @@ abiertas por el dominó mismo (las creadas CON `roomOptions`):
    `gameModeExternalId` es nuestro `uuid`).
 3. **El exchange `betaso`** sigue publicándose: Betaso lo consume. Cortarlo depende de quién
    administre el catálogo.
+
+## Port de truco — la tanda del 06 al 08/10 (rama `feat/port-truco-reconexion`)
+
+Truco desde `0c4d67f` hasta `60c696b`, comparado commit por commit. Baseline **1240 tests** en `src`
+(unit + int + e2e), con `typecheck`, lint y `depcruise` en verde; los 27 rojos de `scripts/deploy`
+son los de siempre en Windows (leen `/proc`).
+
+| truco | acá |
+|---|---|
+| `b90840b` gana la última conexión, sin `maxClients` | **PORTADO** (`7927c39`). La mitad del lobby (`MATCH_IN_PROGRESS`) no: no hay lobby. Tampoco el aviso de quién sigue caído: el dominó ya sincroniza `PlayerState.connected` |
+| `0960663` desde el veredicto, irse es irse | **PORTADO** (`eb35030`). Sin `REMATCH_UNAVAILABLE`: el dominó no tiene ese evento y la fase lo dice. La mitad del registro ya estaba: el dominó suelta a todos con el veredicto |
+| `092f42b` sin aumento en mesa gratis | **PORTADO** (`1cc762f`), por `isFreeRoom` como v1 (`on-propose-bet-multiplier.ts:46`) |
+| `58ce78f` niveles del aumento | **PORTADO** sólo la config pública: `betLevels: [{ level, additionalPoints }]` en `/config/:roomId` y `/matches/:roomId`. El peso en el ranking no aplica |
+| `b5bb427` el reparto en el historial | **PORTADO** (`29137c9`) como `ROUND_STARTED` + `TILES_DEALT`. Sin el endpoint agrupado: ya está `/internal/matches/:matchId/history` |
+| `90b46e0` clientes e2e silenciosos | **PORTADO** (`58aecd3`): 365 avisos del SDK por corrida → 3 |
+| `0c4d67f`, `2d7e1b3`, `97e475a` stage | **PORTADO** (`c5d2e76`): `debug` en stage y el reparto preparado en todo menos prod. El panel sigue con llave en todos lados; la política de revancha es del emparejador |
+| `48bfd4e`, `304f87a`, `60c696b` | **NO APLICA**: emparejador y economía, que el dominó ya no tiene |
+| `3a6f892`, `94ce2de` | reglas de truco |
+
+Dos defectos que el port destapó y truco todavía tiene:
+
+- **El desplazamiento elegía con `find` la PRIMERA conexión del asiento**, que con dos vueltas
+  seguidas todavía se estaba cerrando: la del medio no se iba nunca y el asiento quedaba con tres
+  conexiones. Se desplazan todas las anteriores.
+- **Con la sala disponiéndose, `allowReconnection` devuelve una `Promise` rechazada y no un
+  `Deferred`** (`Room.mjs:1189`): la segunda conexión del asiento que caía en el apagado reventaba
+  con «reject is not a function».
+
+⚠ **Rompe para el front, de a poco**: `ROUND_STARTED` es un tipo nuevo en el mensaje `events` (un
+cliente que no lo conoce tiene que ignorarlo), y `betLevels` es un campo nuevo de la config pública.
 
 ## Cómo se ejecuta una tarea
 
