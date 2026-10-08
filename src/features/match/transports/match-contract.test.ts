@@ -147,6 +147,17 @@ describe("configOf", () => {
   // Los valores van como LITERAL y no leídos del modo: recalcularlos con el mismo campo que la
   // implementación copia mediría que dos lecturas del mismo dato coinciden, y seguiría verde el
   // día que alguien vuelva a tomarlos del request.
+  // LA MESA GRATIS NO OFRECE AUMENTAR aunque el llamador traiga niveles: no hay entrada que
+  // multiplicar ni premio que escalar. Es la regla de v1 (`on-propose-bet-multiplier.ts:46`) y la de
+  // truco (`092f42b`).
+  it("en mesa gratis no hay niveles de aumento aunque el request los traiga", () => {
+    const levels = [{ level: 2, extra: 5, additionalPoints: 10 }];
+    expect(configOf(requestOf(request), modeOf(), levels).betLevels).toEqual(levels);
+    expect(configOf(requestOf(request), modeOf({ isFreeRoom: true }), levels).betLevels).toEqual(
+      [],
+    );
+  });
+
   it("copia pointsToWin, entryFee y prize del modo", () => {
     const config = configFrom(request, modeOf({ pointsToWin: 33, entryFee: 1.5, prize: 2.75 }));
     expect(config.pointsToWin).toBe(33);

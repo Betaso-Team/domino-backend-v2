@@ -238,6 +238,7 @@ describe("ciclo de vida de una partida", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
       serverNow: expect.any(Number),
     });
   });

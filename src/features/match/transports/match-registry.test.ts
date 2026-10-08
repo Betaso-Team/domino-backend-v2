@@ -60,7 +60,23 @@ describe("MatchRegistry", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
     });
+  });
+
+  // LOS NIVELES QUE LA MESA OFRECE, para pintar el aumento ANTES de proponer (truco `58ce78f`). Sale
+  // el `level` y los puntos que el front muestra; el `extra` es cómo se calcula el ranking, no algo
+  // que mostrar. El precio lo deriva el cliente con `betAmountsOf`.
+  it("publica los niveles de aumento sin el extra", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register(
+      "room-1",
+      replayConfigOf({ ...roomOptions, betLevels: [{ level: 3, extra: 7, additionalPoints: 15 }] }),
+    );
+
+    expect((await registry.publicConfigOf("room-1"))?.betLevels).toEqual([
+      { level: 3, additionalPoints: 15 },
+    ]);
   });
 
   // La allowlist ahora también decide qué SE ESCRIBE en el almacén compartido, no solo qué se
@@ -119,6 +135,7 @@ describe("MatchRegistry", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
     });
     expect(await procesoB.matchOf("u1")).toBe("room-1");
   });

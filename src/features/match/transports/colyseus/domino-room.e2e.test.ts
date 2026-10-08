@@ -323,6 +323,7 @@ describe("DominoRoom", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
     });
 
     await gameModes.update(editable.uuid, { pointsToWin: 7, entryFee: 1, prize: 2 });
@@ -334,6 +335,7 @@ describe("DominoRoom", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
     });
 
     // Y LA EDICIÓN SÍ OCURRIÓ, que es lo que impide que las tres aserciones de arriba pasen por la

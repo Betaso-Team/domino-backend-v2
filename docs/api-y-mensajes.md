@@ -46,7 +46,7 @@ decoder estricto antes de alcanzar el comando.
 |---|---|
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
-| `GET /config/:roomId` | Config pública de una mesa y `serverNow`; nunca devuelve el seed |
+| `GET /config/:roomId` | Config pública de una mesa (con `betLevels: [{ level, additionalPoints }]`, vacío si no ofrece aumentar) y `serverNow`; nunca devuelve el seed |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
 | `GET /game-modes` | Modos activos del catálogo |
 | `GET /game-modes/:uuid` | Un modo activo; un modo dado de baja responde 404 |
