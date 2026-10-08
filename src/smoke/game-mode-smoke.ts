@@ -171,6 +171,9 @@ async function normal(): Promise<void> {
     [
       "__v",
       "_id",
+      // NO es de v1: los niveles de aumento entraron al modo en `43d89a0`. Es campo de MÁS a
+      // propósito, y por eso se nombra acá en vez de dejar que la aserción lo deje pasar.
+      "betLevels",
       "createdAt",
       "enableBots",
       "entryFee",
