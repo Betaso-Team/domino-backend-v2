@@ -2256,6 +2256,20 @@ Dos defectos que el port destapó y truco todavía tiene:
 ⚠ **Rompe para el front, de a poco**: `ROUND_STARTED` es un tipo nuevo en el mensaje `events` (un
 cliente que no lo conoce tiene que ignorarlo), y `betLevels` es un campo nuevo de la config pública.
 
+## Port de truco — la tarde del 08/10 (`dcf88a0` … `7b3b583`): nada que portar
+
+| truco | acá |
+|---|---|
+| `dcf88a0` un `ranking.match-finished` por partida, con el desenlace de cada asiento (`won`/`lost`/`left`/`timeout`/`disconnected`) y `playedSeconds` | **NO PORTADO**: el dominó no reporta ranking, lo hace el orquestador con el resultado de `betaso_games`. Ese resultado ya lleva `participants[].result` (`won`/`lost`/`abandoned`). Separar `abandoned` en tres y sumar `playedSeconds` cambia el contrato del orquestador, así que lo tiene que pedir él primero: si su consumidor valida estricto, un campo de más es un resultado rechazado, o sea un premio que no se paga |
+| `9168552` el cartel del lobby como estado de sala | **NO APLICA**: no hay lobby |
+| `cfca91f` las marcas de flor después de quemarla | reglas de truco |
+| `fc3d131`, `7b3b583` | docs de truco |
+
+Si el orquestador pide el detalle: el dominó es el único que sabe si al que retiró el reloj se le
+había caído la conexión (`PlayerState.connected` en el momento del `ABANDON` del sistema) y cuánto
+jugó cada uno. Truco lo arma con un listener que sigue la conexión y el `ABANDON` del sistema;
+acá iría en `MatchResultRecorder`.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
