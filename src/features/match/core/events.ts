@@ -33,6 +33,11 @@ export type DeadlineKind =
 // porque ahí no hay comando que los cuente. El evento existe ⟺ no hubo comando detrás.
 export type MatchEvent =
   // ── Consecuencias computadas ────────────────────────────────────────────
+  // EL REPARTO (truco `b5bb427`). El árbol muestra las manos pero nunca dice CUÁNDO se repartieron,
+  // y nadie pide que una mano empiece: sigue de arrancar la partida o de que la anterior cierre. Sin
+  // fichas adentro a propósito: los eventos llegan a la mesa entera. El reparto en sí lo graba el
+  // historial detrás de éste (`TILES_DEALT`), que no se difunde.
+  | { type: "ROUND_STARTED"; roundNumber: number }
   | {
       type: "ROUND_RESOLVED";
       roundNumber: number;

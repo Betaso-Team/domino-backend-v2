@@ -160,6 +160,11 @@ flowchart LR
   Settlement --> Result["Resultado al orquestador\n(outbox → betaso_games)"]
 ```
 
-Los eventos de dominio describen consecuencias (`ROUND_RESOLVED`, `MATCH_RESOLVED`, expiraciones).
-Los de plataforma describen conexión y aborto. Un comando voluntario ya está en el historial como
-comando; no se duplica como evento salvo que exista información nueva.
+Los eventos de dominio describen consecuencias (`ROUND_STARTED` en cada reparto, `ROUND_RESOLVED`,
+`MATCH_RESOLVED`, expiraciones). Los de plataforma describen conexión y aborto. Un comando voluntario
+ya está en el historial como comando; no se duplica como evento salvo que exista información nueva.
+
+Detrás de cada `ROUND_STARTED` el historial graba `TILES_DEALT`: las manos y el pozo tal como se
+repartieron, leídos del árbol en ese instante. No es un evento (no se difunde a la mesa) y es lo que
+soporte tiene cuando la partida se jugó con un reparto preparado y el replay no la reproduce. Cada
+entrada lleva la mano en que pasó, tomada de `ROUND_STARTED` y no del árbol.

@@ -93,6 +93,8 @@ describe("ciclo de vida de una partida", () => {
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
     expect(await linesOf("m-a1-a2")).toEqual([
+      "SYSTEM ROUND_STARTED",
+      "SYSTEM TILES_DEALT",
       "PLAYER REVEAL_TILES",
       "PLAYER REVEAL_TILES",
       "PLAYER ABANDON",
@@ -157,7 +159,12 @@ describe("ciclo de vida de una partida", () => {
 
     await waitUntil(() => illegal.length > 0);
     expect(illegal[0]).toEqual({ code: "UNKNOWN_COMMAND" });
-    expect(await historyOf("m-r1-r2")).toHaveLength(0);
+    // Lo único grabado es el reparto: el verbo rechazado no entra.
+    await waitUntil(() => match.serverState.phase === "PLAYING");
+    expect((await historyOf("m-r1-r2")).map((entry) => entry.type)).toEqual([
+      "ROUND_STARTED",
+      "TILES_DEALT",
+    ]);
     expect(match.serverState.phase).toBe("PLAYING");
   });
 
@@ -304,7 +311,12 @@ describe("ciclo de vida de una partida", () => {
 
     expect(response.status).toBe(200);
     expect(body.matchId).toBe("m-h1-h2");
-    expect(body.entries.map((entry) => entry.type)).toEqual(["REVEAL_TILES", "REVEAL_TILES"]);
+    expect(body.entries.map((entry) => entry.type)).toEqual([
+      "ROUND_STARTED",
+      "TILES_DEALT",
+      "REVEAL_TILES",
+      "REVEAL_TILES",
+    ]);
   });
 
   it("una partida sin historial es 404 y no un cuerpo vacío", async () => {

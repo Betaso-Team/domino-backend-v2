@@ -21,8 +21,8 @@ export interface ReplayInput {
   readonly entries: readonly HistoryEntry[];
   readonly globalConfig?: GlobalDominoConfig;
   /**
-   * El instante en que la partida ARRANCÓ. No está en el historial y no puede estarlo:
-   * `begin()` no emite nada, así que la primera entrada grabada es posterior. Viaja
+   * El instante en que la partida ARRANCÓ. Desde `ROUND_STARTED` la primera entrada grabada
+   * cae justo ahí, pero un historial anterior a ese evento empieza después. Viaja
    * aparte —como el `seed`— porque `MatchState.startedAt` es estado observable, y sin
    * este dato el replay lo inventa y el árbol reconstruido difiere del real en un campo.
    * Cuando falta se usa el instante de la primera entrada, que es la mejor cota superior.

@@ -597,7 +597,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.seating?.clear();
     this.seating = undefined;
     if (this.entryCharge === "charged") {
-      this.startMatch();
+      this.notifier.notify(this.startMatch());
       return;
     }
     if (this.entryCharge === "charging") return;
@@ -636,7 +636,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // orquestador reembolsa por su ficha. Arrancar el motor de una sala muerta dejaría plazos
     // corriendo sin dueño.
     if (this.disposed) return;
-    this.startMatch();
+    this.notifier.notify(this.startMatch());
   }
 
   private clientOf(playerId: PlayerId, except?: Client): Client | undefined {

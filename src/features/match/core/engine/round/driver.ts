@@ -42,7 +42,7 @@ export class RoundDriver implements Driver {
     private readonly bet: BetNegotiation,
   ) {}
 
-  begin(): void {
+  begin(): readonly MatchEvent[] {
     const previous = this.match.currentRound;
     const round = new RoundState();
     round.roundNumber = this.match.pastRounds.length + 1;
@@ -62,12 +62,17 @@ export class RoundDriver implements Driver {
           })),
         );
 
+    // SE ANUNCIA AL REPARTIR y no al levantar: con ventana, las fichas ya están en las manos.
+    const started: readonly MatchEvent[] = [
+      { type: "ROUND_STARTED", roundNumber: round.roundNumber },
+    ];
     if (this.matchConfig.isDealWindowEnabled && round.roundNumber === 1) {
       this.stampDeadline(this.config.dealingTimeoutMs);
-      return;
+      return started;
     }
     this.revealAllHands();
     this.continueAfterDeal();
+    return started;
   }
 
   advance(actorId: PlayerId, action: RoundAction): TransitionResult {

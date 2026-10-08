@@ -38,15 +38,17 @@ export class MatchDriver implements Driver, Retirement {
     private readonly matchConfig: DominoMatchConfig,
   ) {}
 
-  begin(): void {
-    if (matchPhaseOf(this.match) !== "NOT_STARTED") return;
+  // Nadie PIDE arrancar, así que no hay nada que rechazar: un segundo aviso no cuenta nada nuevo.
+  begin(): readonly MatchEvent[] {
+    if (matchPhaseOf(this.match) !== "NOT_STARTED") return [];
     this.match.phase = "PLAYING";
     this.match.startedAt = this.clock.now();
     for (const player of this.match.players) {
       player.extraTimeRemainingMs = this.config.extraTimeReserveMs;
     }
-    this.roundDriver.begin();
+    const events = this.roundDriver.begin();
     this.syncTimeout();
+    return events;
   }
 
   advance(actorId: PlayerId, action: RoundAction): TransitionResult {
@@ -275,8 +277,7 @@ export class MatchDriver implements Driver, Retirement {
 
   private afterRound(): readonly MatchEvent[] {
     if (this.referee.outcome()) return this.enterPresentingMatch();
-    this.roundDriver.begin();
-    return [];
+    return this.roundDriver.begin();
   }
 
   private enterPresentingMatch(): readonly MatchEvent[] {

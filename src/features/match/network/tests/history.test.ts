@@ -54,7 +54,7 @@ function build() {
   round.board = new BoardState();
   round.boneyard = new BoneyardState();
   match.currentRound = round;
-  return { history: new MatchHistory("m1", match, clock, port), recorded, clockBox };
+  return { history: new MatchHistory("m1", match, clock, port), recorded, clockBox, match };
 }
 
 // EL VOCABULARIO DE ESTOS TESTS ES EL DE HOY, no el final. El plan los escribió con
@@ -99,10 +99,68 @@ describe("MatchHistory", () => {
 
   it("envuelve cada entrada con matchId, timestamp del Clock y roundNumber", () => {
     const { history, recorded, clockBox } = build();
+    history.events([{ type: "ROUND_STARTED", roundNumber: 3 }]);
     clockBox.now = 7_777;
     history.command("PLAYER", "ABANDON", { playerId: "u1" });
 
-    expect(recorded[0]).toMatchObject({ matchId: "m1", at: 7_777, roundNumber: 3 });
+    expect(recorded.at(-1)).toMatchObject({ matchId: "m1", at: 7_777, roundNumber: 3 });
+  });
+
+  // EL REPARTO NO ES UN EVENTO —los eventos llegan a la mesa y éste le daría a cada uno las fichas
+  // de todos— así que el grabador lo fotografía del árbol en el instante en que se anuncia la mano,
+  // antes de que nadie pueda jugar ni robar (truco `b5bb427`).
+  it("detrás de ROUND_STARTED graba las manos y el pozo tal como se repartieron", () => {
+    const { history, recorded, match } = build();
+    const tile = (left: number, right: number) => Object.assign(new Tile(), { left, right });
+    match.players[0]?.hand.tiles.push(tile(6, 6), tile(3, 1));
+    match.players[1]?.hand.tiles.push(tile(5, 4), tile(2, 0));
+    match.currentRound?.boneyard?.tiles.push(tile(1, 1));
+
+    history.events([{ type: "ROUND_STARTED", roundNumber: 1 }]);
+
+    expect(recorded.map((e) => [e.seq, e.source, e.kind, e.type, e.roundNumber])).toEqual([
+      [1, "SYSTEM", "EVENT", "ROUND_STARTED", 1],
+      [2, "SYSTEM", "EVENT", "TILES_DEALT", 1],
+    ]);
+    expect(recorded[1]?.payload).toEqual({
+      hands: [
+        {
+          playerId: "seat-1",
+          tiles: [
+            { left: 6, right: 6 },
+            { left: 3, right: 1 },
+          ],
+        },
+        {
+          playerId: "seat-2",
+          tiles: [
+            { left: 5, right: 4 },
+            { left: 2, right: 0 },
+          ],
+        },
+      ],
+      boneyard: [{ left: 1, right: 1 }],
+    });
+  });
+
+  // El lote que vence la pausa de una mano también reparte la siguiente, así que cuando se graba el
+  // árbol ya apunta a la nueva: leída del estado, el vencimiento quedaba en la mano que no cerró.
+  it("el vencimiento de la pausa queda en SU mano aunque el mismo lote reparta la siguiente", () => {
+    const { history, recorded } = build();
+    history.events([{ type: "ROUND_STARTED", roundNumber: 1 }]);
+
+    history.events([
+      { type: "DEADLINE_EXPIRED", kind: "PRESENTING_ROUND" },
+      { type: "ROUND_STARTED", roundNumber: 2 },
+    ]);
+
+    expect(recorded.map((e) => [e.type, e.roundNumber])).toEqual([
+      ["ROUND_STARTED", 1],
+      ["TILES_DEALT", 1],
+      ["DEADLINE_EXPIRED", 1],
+      ["ROUND_STARTED", 2],
+      ["TILES_DEALT", 2],
+    ]);
   });
 
   // En @colyseus/schema 5 los campos dejaron de ser propiedades propias del objeto,
