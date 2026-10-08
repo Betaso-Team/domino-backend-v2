@@ -4,6 +4,7 @@ import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
+import type { MatchState } from "../core/state";
 import {
   act,
   bootServer,
@@ -119,9 +120,27 @@ describe("ciclo de vida de una partida", () => {
     await server.sdk.joinById(match.roomId);
     await waitUntil(() => server.getRoomById(match.roomId).clients.length === 2);
 
+    // Ni caída ni regreso: para el rival, d1 nunca se fue (truco `b90840b`).
     expect(
-      (await linesOf("m-d1-d2")).filter((line) => line.includes("PLAYER_DISCONNECTED")),
+      (await linesOf("m-d1-d2")).filter(
+        (line) => line.includes("PLAYER_DISCONNECTED") || line.includes("PLAYER_RECONNECTED"),
+      ),
     ).toEqual([]);
+  });
+
+  it("la misma cuenta dos veces no completa la mesa: arranca cuando se sientan todos", async () => {
+    const room = await server.createRoom("domino", casualTable(["w1", "w2"]));
+    server.sdk.auth.token = mintToken(participantOf("w1"));
+    await server.connectTo(room);
+    await server.connectTo(room);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const startedAt = () => (server.getRoomById(room.roomId).state as MatchState).startedAt;
+    expect(startedAt()).toBe(0);
+
+    server.sdk.auth.token = mintToken(participantOf("w2"));
+    await server.connectTo(room);
+    await waitUntil(() => startedAt() > 0);
   });
 
   it("quien no tiene asiento no entra", async () => {

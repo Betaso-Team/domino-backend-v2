@@ -115,7 +115,7 @@ Betaso).
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
-| `500` | | La sala existe pero está bloqueada por reservas sin consumir: el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+| `500` | | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
 
 **`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
 orquestador lo muestra en los números de su lobby.
