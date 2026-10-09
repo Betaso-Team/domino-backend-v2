@@ -2270,6 +2270,17 @@ había caído la conexión (`PlayerState.connected` en el momento del `ABANDON` 
 jugó cada uno. Truco lo arma con un listener que sigue la conexión y el `ABANDON` del sistema;
 acá iría en `MatchResultRecorder`.
 
+## Port de truco — el 09/10 (`b631278`, `98f3a3c`): nada que portar
+
+`b631278` es carga contra el backend de Betaso: con 200 jugadores, `my-profile` devolvía 429 porque
+el throttler cuenta por IP y todas las mesas salen de la misma. Truco manda su llave interna para
+que no lo cuente, cachea la cuenta en Redis (lobby y sala en procesos distintos), reintenta el
+congelado y loguea como `warn` la admisión que el afuera no pudo contestar. **NO APLICA**: el dominó
+no lee cuentas ni llama al backend de Betaso; su único HTTP saliente es el orquestador (`chargeEntry`
+y los aumentos), y un cobro que no sale ya se loguea como `warn` y no como bug. Si alguna prueba de
+carga muestra 429 del orquestador, el arreglo es del mismo tipo —identificarse como llamador interno—
+pero del lado del orquestador.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
