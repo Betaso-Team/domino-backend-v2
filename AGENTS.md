@@ -2281,6 +2281,32 @@ y los aumentos), y un cobro que no sale ya se loguea como `warn` y no como bug. 
 carga muestra 429 del orquestador, el arreglo es del mismo tipo —identificarse como llamador interno—
 pero del lado del orquestador.
 
+## Port de truco — el 13/10 (`510c3d8` … `3627021`, rama `feat/port-truco-13-10`)
+
+Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` en verde.
+
+| truco | acá |
+|---|---|
+| `a876258` el cuerpo del panel tal como lo manda | **PORTADO a medias.** `playersQuantity` ya entraba: el schema del dominó usa los nombres de v1. Lo que se portó es el rechazo de la **mesa gratis que cobra entrada** (`FreeRoomWithEntryError`, 400 con el mensaje de truco). Acá `isFreeRoom` es campo propio y no se deriva de la entrada, así que la contradicción se puede guardar: la mesa apaga el aumento y reporta gratis con la entrada cargada. Distinto de truco: el `PUT` sólo la chequea si toca `isFreeRoom` o `entryFee`, para no trabar el premio de un modo heredado de v1 que ya era contradictorio |
+| `9e094ab` la sesión del admin pasa por las rutas del panel | **NO PORTADO, queda como deuda** (abajo) |
+| `510c3d8` el censo cuenta sólo casual | **YA ERA ASÍ**: el contrato del orquestador sólo acepta `mode: "CASUAL"`, no entra una mesa de torneo al censo |
+| `d576fbe` el interruptor de mantenimiento desde v2 | **NO APLICA**: el mantenimiento del dominó se borró entero, el interruptor lo tiene el orquestador |
+| `3627021` | docs de truco |
+
+### Deuda abierta: el panel no puede entrar con su sesión
+
+⚠ **El día que el panel apunte al catálogo de v2, todas las mutaciones dan 401.** El panel corre en el
+navegador, así que no puede mandar `ADMIN_API_KEY` sin publicarla, y hoy esa llave es la única puerta.
+v1 aceptaba el Bearer del admin y leía su rol de Postgres. Truco lo resolvió aceptando también el
+Bearer y preguntándole el rol a `GET auth/me` del backend de Betaso con ese mismo token (caché de un
+minuto por proceso, falla CERRADO con 503), y de paso publica `updatedBy` en `game_mode.*`.
+
+Portarlo revive `BETASO_BACKEND_URL`, que se quitó en «sin credenciales de Betaso». El secreto JWT no
+vuelve: el token de sesión es del backend de Betaso y no de billing-auth, así que `JwtVerifier` no lo
+puede verificar, y es `auth/me` el que lo valida. Se dejó afuera a propósito hasta decidir quién
+administra el catálogo del dominó (la deuda 3 de «sin credenciales»): si es el orquestador, esto no
+hace falta.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
