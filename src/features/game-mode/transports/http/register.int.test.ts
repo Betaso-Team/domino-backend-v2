@@ -421,6 +421,7 @@ describe("POST /game-modes", () => {
     ["con cantidad imposible", { ...body, playersQuantity: 3 }],
     ["con un monto inseguro", { ...body, entryFee: 2 ** 53 }],
     ["con un campo desconocido", { ...body, createdBy: "admin" }],
+    ["gratis y con entrada", { ...body, isFreeRoom: true }],
   ])("contesta 400 %s", async (_label, invalid) => {
     const app = harness();
 
@@ -517,6 +518,16 @@ describe("PUT /game-modes/:uuid", () => {
     const response = await app.put(`/game-modes/${seeded.uuid}`, { prize: -1 }, KEY);
 
     expect(response.status).toBe(400);
+  });
+
+  it("contesta 400 si marca gratis una mesa que cobra entrada", async () => {
+    const app = harness();
+    const seeded = await app.repository.create(clasica());
+
+    expect(await app.put(`/game-modes/${seeded.uuid}`, { isFreeRoom: true }, KEY)).toEqual({
+      status: 400,
+      body: { status: "error", message: "una mesa gratis no puede tener entrada" },
+    });
   });
 });
 

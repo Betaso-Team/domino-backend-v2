@@ -3,6 +3,7 @@ import type { Lease } from "@/shared/mongo-lease";
 import { describe, expect, it, vi } from "vitest";
 import {
   DuplicateGameModeError,
+  FreeRoomWithEntryError,
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
@@ -222,6 +223,26 @@ describe("GameModeService: create", () => {
     expect(wake).not.toHaveBeenCalled();
   });
 
+  it("rechaza la mesa gratis que cobra entrada, no escribe y no despierta", async () => {
+    const { service, repository, outbox, clock, wake } = harness();
+
+    await expect(
+      service.create(clasica({ isFreeRoom: true, entryFee: 10 })),
+    ).rejects.toBeInstanceOf(FreeRoomWithEntryError);
+
+    expect(await repository.all()).toEqual([]);
+    expect(await drain(outbox, clock)).toEqual([]);
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("acepta la mesa gratis sin entrada", async () => {
+    const { service } = harness();
+
+    const creada = await service.create(clasica({ isFreeRoom: true, entryFee: 0 }));
+
+    expect(creada).toMatchObject({ isFreeRoom: true, entryFee: 0 });
+  });
+
   it("acepta el mismo nombre con otra cantidad de jugadores, igual que v1", async () => {
     const { service } = harness();
     await service.create(clasica());
@@ -302,6 +323,38 @@ describe("GameModeService: update", () => {
     expect(entrada?.payload.prize).toBe(20);
     expect(entrada?.payload.name).toBe("Clásica");
     expect(wake).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["le pone entrada a una mesa gratis", { isFreeRoom: true, entryFee: 0 }, { entryFee: 10 }],
+    ["marca gratis una mesa que cobra", { entryFee: 10 }, { isFreeRoom: true }],
+  ])("rechaza el PUT que %s y no escribe", async (_label, seed, patch) => {
+    const { service, repository } = harness();
+    const creada = await service.create(clasica(seed));
+
+    await expect(service.update(creada.uuid, patch)).rejects.toBeInstanceOf(FreeRoomWithEntryError);
+
+    expect(await repository.byUuid(creada.uuid)).toEqual(creada);
+  });
+
+  it("deja apagar la mesa gratis y cobrar en el mismo PUT", async () => {
+    const { service } = harness();
+    const creada = await service.create(clasica({ isFreeRoom: true, entryFee: 0 }));
+
+    const editada = await service.update(creada.uuid, { isFreeRoom: false, entryFee: 10 });
+
+    expect(editada).toMatchObject({ isFreeRoom: false, entryFee: 10 });
+  });
+
+  // UN MODO QUE YA ERA CONTRADICTORIO —el catálogo es el de v1, y v1 no lo impedía— se sigue pudiendo
+  // editar en lo que no toca a la regla: bloquearle el premio no lo arregla, sólo traba al panel.
+  it("no traba el PUT ajeno a la regla sobre un modo que ya era contradictorio", async () => {
+    const { service, repository } = harness();
+    const heredado = await repository.create(clasica({ isFreeRoom: true, entryFee: 10 }));
+
+    const editado = await service.update(heredado.uuid, { prize: 20 });
+
+    expect(editado.prize).toBe(20);
   });
 
   it("rechaza el nombre de otro modo AUNQUE cambie la cantidad, igual que v1", async () => {

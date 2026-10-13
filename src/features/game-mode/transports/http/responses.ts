@@ -1,6 +1,7 @@
 import type { Response } from "express";
 import {
   DuplicateGameModeError,
+  FreeRoomWithEntryError,
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
@@ -27,7 +28,7 @@ export function sendMessage(response: Response, message: string): void {
   response.json({ status: "success", message });
 }
 
-// LA TRADUCCIÓN DE LOS CUATRO ERRORES DE APLICACIÓN, Y EL `throw` DEL FINAL ES LA MITAD DEL ARCHIVO.
+// LA TRADUCCIÓN DE LOS CINCO ERRORES DE APLICACIÓN, Y EL `throw` DEL FINAL ES LA MITAD DEL ARCHIVO.
 // Lo que no reconoce se RELANZA: `validated` lo reenvía a `next` y el manejador compartido lo loguea
 // con stack y contesta 500. v1 hacía lo contrario —un `catch (error)` por ruta que convertía
 // cualquier cosa en 500 con un mensaje genérico—, y ahí se le perdían los dos casos que esta tarea
@@ -47,6 +48,10 @@ export function sendError(response: Response, error: unknown): void {
   // un choque con el estado actual, no con la forma del pedido.
   if (error instanceof DuplicateGameModeError || error instanceof GameModeStateConflictError) {
     response.status(409).json({ status: "error", message: error.message });
+    return;
+  }
+  if (error instanceof FreeRoomWithEntryError) {
+    response.status(400).json({ status: "error", message: error.message });
     return;
   }
   // 503 Y NO 500: el lease lo tiene otro proceso. Nadie hizo nada mal y reintentar es la respuesta

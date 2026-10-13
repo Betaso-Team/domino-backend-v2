@@ -1,6 +1,7 @@
 import type { Lease } from "@/shared/mongo-lease";
 import {
   DuplicateGameModeError,
+  FreeRoomWithEntryError,
   GameModeNotFoundError,
   type GameModeRepository,
   GameModeStateConflictError,
@@ -30,6 +31,13 @@ import type { GameModeOutbox } from "./outbox";
 // `POST /game-modes` y un tick del outbox no se estorban, y compartir el nombre haría que el panel
 // esperara a que termine de publicarse el evento anterior.
 export const CATALOG_LEASE = "catalog-writer";
+
+// El mensaje es el que el panel muestra, el mismo texto que truco.
+function refuseChargedFreeRoom(mode: { isFreeRoom?: boolean; entryFee: number }): void {
+  if (mode.isFreeRoom === true && mode.entryFee > 0) {
+    throw new FreeRoomWithEntryError("una mesa gratis no puede tener entrada");
+  }
+}
 
 // Quince segundos, igual que el del despachador. No se renueva (ver `shared/mongo-lease.ts`), y la
 // contramedida es que adentro no vaya un trabajo largo: una mutación son dos lecturas y dos
@@ -79,6 +87,7 @@ export class GameModeService {
 
   create(input: CreateGameMode): Promise<GameMode> {
     return this.mutating(async () => {
+      refuseChargedFreeRoom(input);
       // LA REGLA DE v1 AL PIE: `findOne({ name, playersQuantity })`
       // (`game-mode.service.ts:58`), o sea el PAR y no el nombre solo. Una regla más estricta
       // —nombre a secas— rechazaría modos que el panel crea hoy: el catálogo productivo puede tener
@@ -99,6 +108,12 @@ export class GameModeService {
   update(uuid: string, input: UpdateGameMode): Promise<GameMode> {
     return this.mutating(async () => {
       const current = await this.found(uuid);
+      // CONTRA EL MODO QUE QUEDA y no contra el parche: el que le pone entrada a una mesa gratis no
+      // manda la bandera. Pero SOLO si el parche toca uno de los dos campos: el catálogo es el de v1,
+      // que no lo impedía, y trabarle el premio a un modo heredado contradictorio no lo arregla.
+      if (input.isFreeRoom !== undefined || input.entryFee !== undefined) {
+        refuseChargedFreeRoom({ ...current, ...input });
+      }
       // ⚠ LA REGLA DE `update` ES OTRA QUE LA DE `create`, Y LA ASIMETRÍA ES DE v1, NO UN DESCUIDO
       // DE ACÁ. Allá `update` consulta `findOne({ name, uuid: { $ne: uuid } })`
       // (`game-mode.service.ts:100-103`): **sólo el nombre**, cruzando mesas de dos y de cuatro, y
