@@ -23,6 +23,7 @@ export default withMermaid(
             { text: "API HTTP y mensajes", link: "/api-y-mensajes" },
             { text: "Operación y despliegue", link: "/operacion" },
             { text: "Reglas y anatomía de v1", link: "/reglas-de-juego-v1" },
+            { text: "Acoplamiento con Betaso", link: "/acoplamiento-con-betaso" },
           ],
         },
         {
