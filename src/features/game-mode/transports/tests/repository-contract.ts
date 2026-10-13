@@ -71,10 +71,25 @@ export function describeGameModeRepositoryContract(
         isActive: true,
         isFreeRoom: false,
         enableBots: false,
+        // SIN NIVELES, el reposo: una mesa que nadie configuró no ofrece aumentar.
+        betLevels: [],
         createdAt: new Date(BASE_INSTANT),
         updatedAt: new Date(BASE_INSTANT),
         version: 0,
       });
+    });
+
+    it("guarda los niveles de aumento que vienen dados", async () => {
+      const { repository } = harnessOf();
+      const betLevels = [
+        { level: 2, extra: 1, additionalPoints: 15 },
+        { level: 3, extra: 3, additionalPoints: 45 },
+      ];
+
+      const created = await repository.create(clasica({ betLevels }));
+
+      expect(created.betLevels).toEqual(betLevels);
+      expect((await repository.byUuid(created.uuid))?.betLevels).toEqual(betLevels);
     });
 
     // EL DEFAULT QUE DEPENDE DE OTRO CAMPO, y el único del documento que no es una constante:
@@ -156,8 +171,8 @@ export function describeGameModeRepositoryContract(
   describe(`${label}: listados`, () => {
     // El orden es RECIENTES PRIMERO, igual que el `sort({ createdAt: -1 })` de v1
     // (`game-mode.service.ts:25` y `:36`). Es una propiedad de la consulta y por eso la fija el
-    // adaptador, pero los dos adaptadores tienen que fijar la misma: el lobby de una instancia sin
-    // Mongo mostraría el catálogo al revés.
+    // adaptador, pero los dos adaptadores tienen que fijar la misma: una instancia sin Mongo
+    // listaría el catálogo al revés.
     it("active() devuelve sólo los activos, recientes primero", async () => {
       const { repository, clock } = harnessOf();
       const viejo = await repository.create(clasica({ name: "Vieja" }));
@@ -282,6 +297,7 @@ export function describeGameModeRepositoryContract(
         isActive: false,
         isFreeRoom: true,
         enableBots: true,
+        betLevels: [{ level: 2, extra: 1, additionalPoints: 15 }],
       });
 
       expect(updated).toMatchObject({
@@ -294,6 +310,7 @@ export function describeGameModeRepositoryContract(
         isActive: false,
         isFreeRoom: true,
         enableBots: true,
+        betLevels: [{ level: 2, extra: 1, additionalPoints: 15 }],
       });
       // La identidad y el nacimiento NO son editables: `update` que los moviera dejaría al outbox
       // publicando un modo distinto con la misma clave de deduplicación.

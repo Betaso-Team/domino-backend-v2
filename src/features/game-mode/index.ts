@@ -7,7 +7,7 @@
 // quien los consume adentro es el servicio de la feature (Tarea 8). Exportar `GameModeRepository`
 // hoy sería un tipo que nadie de afuera puede nombrar para nada.
 //
-// Lo que NO sale, y por qué: los cuatro errores los atrapan la frontera HTTP y el outbox de esta
+// Lo que NO sale, y por qué: los cinco errores los atrapan la frontera HTTP y el outbox de esta
 // misma feature (Tareas 7 y 9), y el contrato Rabbit (`GAME_MODE_EXCHANGE`, las claves,
 // `createdEventOf`/`updatedEventOf`) lo consume el outbox, que también vive acá adentro.
 // Exportarlos ahora sería una superficie que nadie usa —y una superficie que nadie usa es una que
@@ -26,21 +26,18 @@
 // distinguirlos, salen; exportarlos antes es superficie que nadie puede podar después.
 //
 // `gameModeHttp` sale con su tipo de dependencias, igual que las otras dos superficies HTTP
-// del repo (`features/match/index.ts`, `features/lobby/index.ts`): el composition root es el único
+// del repo (`features/match/index.ts`, `features/settings/index.ts`): el composition root es el único
 // que puede llamarla porque es el único que tiene el servicio armado y el único que lee
-// `env.adminPanelApiKey`. Los CUATRO ERRORES siguen sin salir: quien los traduce a 404/409/503 es esa
+// `env.adminApiKey`. Los CUATRO ERRORES siguen sin salir: quien los traduce a 404/409/503 es esa
 // misma función, acá adentro.
 export type { GameModeReader } from "./core/catalog";
 export type { GameMode } from "./core/game-mode";
-// `CachedGameModeReader` sale como VALOR para el composition root, que es quien decide que el
-// emparejador sondee a través de él y la sala no.
 export { OutboxDispatcher } from "./outbox";
 export { GameModeService } from "./service";
 export {
   type GameModeHttpDeps,
   gameModeHttp,
 } from "./transports/http/register";
-export { CachedGameModeReader } from "./transports/cached-reader";
 export { MemoryGameModeOutbox } from "./transports/memory-outbox";
 export { MemoryGameModeRepository } from "./transports/memory-repository";
 export { MongoGameModeOutbox } from "./transports/mongo-outbox";

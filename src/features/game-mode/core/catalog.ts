@@ -28,8 +28,8 @@ export interface GameModeRepository extends GameModeReader {
   update(uuid: string, input: UpdateGameMode): Promise<GameMode | undefined>;
 }
 
-// Los CUATRO errores de APLICACIÓN del catálogo. Son cuatro y no uno porque un solo error con un
-// campo `kind` adentro obliga a un `switch` en cada `catch` en vez de a cuatro `catch` que el
+// Los CINCO errores de APLICACIÓN del catálogo. Son cinco y no uno porque un solo error con un
+// campo `kind` adentro obliga a un `switch` en cada `catch` en vez de a cinco `catch` que el
 // compilador ya distingue. `override readonly name` es la convención del repo: sin él,
 // `instanceof` sigue funcionando pero el log dice "Error" y el que audita no sabe cuál fue.
 //
@@ -64,6 +64,15 @@ export class DuplicateGameModeError extends Error {
 // exactamente el aviso que se pierde.
 export class GameModeStateConflictError extends Error {
   override readonly name = "GameModeStateConflictError";
+}
+
+// UNA MESA GRATIS QUE COBRA ENTRADA (truco `a876258`). En el dominó `isFreeRoom` es un campo propio
+// y no se deriva de la entrada —v1 decide «gratis» por la bandera—, así que el panel puede mandar los
+// dos contradiciéndose: la mesa apaga el aumento y reporta gratis mientras la entrada sigue cargada.
+// Es plata, así que se rechaza en vez de elegir uno de los dos. 400 y no 409: lo que está mal es el
+// pedido, no un choque con el estado.
+export class FreeRoomWithEntryError extends Error {
+  override readonly name = "FreeRoomWithEntryError";
 }
 
 // La escritura no pudo TOMAR SU TURNO: otro proceso tiene el lease que serializa las

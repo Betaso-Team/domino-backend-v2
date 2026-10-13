@@ -82,27 +82,30 @@ describe("ventana de reparto", () => {
     expect(tilesSeenBy(match, "deal-v2", "deal-v1")).toHaveLength(0);
   });
 
-  it("retira al ausente y resuelve por forfeit cuando solo uno levanta", async () => {
+  // ⚠ ANULA, NO RESUELVE. Antes el que levantó ganaba por forfeit y cobraba el premio de una
+  // partida que nunca empezó; v1 la cancela y devuelve la inscripción (`isGameValid()`).
+  it("si solo uno levanta, retira al ausente y ANULA la partida: nadie gana y se aborta", async () => {
     const match = await seatPair(server, ["deal-f1", "deal-f2"]);
     const matchId = "m-deal-f1-deal-f2";
 
     await revealTiles(match, "deal-f1");
     await waitUntil(() => playerStateOf(match, "deal-f2")?.hasAbandoned === true, 5_000);
 
-    const winnerTeamId = playerStateOf(match, "deal-f1")?.teamId;
-    // Al presente NO lo retiran: el forfeit es del que no levantó, y solo de él.
+    // Al presente NO lo retiran: el retiro es del que no levantó, y solo de él.
     expect(playerStateOf(match, "deal-f1")?.hasAbandoned).toBe(false);
     expect(await linesOf(matchId)).toContain("SYSTEM ABANDON");
-    expect(await linesOf(matchId)).toContain("SYSTEM MATCH_RESOLVED");
-    expect(
-      (await historyOf(matchId)).find((entry) => entry.type === "MATCH_RESOLVED")?.payload,
-    ).toEqual({
-      winnerTeamId,
-      reason: "ABANDONMENT",
-    });
-  }, 7_000);
+    expect(await linesOf(matchId)).not.toContain("SYSTEM MATCH_RESOLVED");
+    expect(match.serverState.phase).toBe("PRESENTING_ABORT");
+    await waitUntil(() => match.serverState.phase === "FINISHED", 5_000);
 
-  it("si nadie levanta abandona a ambos, no inventa ganador y aborta como NEVER_PLAYED", async () => {
+    await server.getRoomById(match.roomId).disconnect();
+    await waitUntil(async () => (await linesOf(matchId)).includes("SYSTEM MATCH_ABORTED"), 5_000);
+    expect(
+      (await historyOf(matchId)).find((entry) => entry.type === "MATCH_ABORTED")?.payload,
+    ).toEqual({ reason: "TILES_NOT_SEEN" });
+  }, 10_000);
+
+  it("si nadie levanta abandona a ambos, no inventa ganador y aborta como TILES_NOT_SEEN", async () => {
     const match = await seatPair(server, ["deal-z1", "deal-z2"]);
     const matchId = "m-deal-z1-deal-z2";
 
@@ -110,8 +113,8 @@ describe("ventana de reparto", () => {
 
     expect((await linesOf(matchId)).filter((line) => line === "SYSTEM ABANDON")).toHaveLength(2);
     expect(await linesOf(matchId)).not.toContain("SYSTEM MATCH_RESOLVED");
-    expect(match.serverState.phase).not.toBe("FINISHED");
-    expect(match.serverState.activeDeadline).toBe(0);
+    // Es la misma anulación que la de arriba: pausa del aborto y después el terminal.
+    expect(match.serverState.phase).toBe("PRESENTING_ABORT");
 
     await server.getRoomById(match.roomId).disconnect();
     await waitUntil(async () => (await linesOf(matchId)).includes("SYSTEM MATCH_ABORTED"), 5_000);
@@ -123,6 +126,6 @@ describe("ventana de reparto", () => {
     // `toEqual` y no `toMatchObject`: el payload del aborto es el motivo del reembolso
     // y nada más. Con `toMatchObject` un campo agregado mañana entra sin que nadie se
     // entere, y este es el registro que respalda no haber pagado el premio.
-    expect(aborted?.payload).toEqual({ reason: "NEVER_PLAYED" });
+    expect(aborted?.payload).toEqual({ reason: "TILES_NOT_SEEN" });
   }, 7_000);
 });

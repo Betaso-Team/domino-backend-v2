@@ -10,6 +10,8 @@ export { validated } from "./validated";
 export type { RouteSchemas, Validated } from "./validated";
 export { httpErrorHandler } from "./error-handler";
 export { exposeServerTime } from "./server-time";
+export { requestLog } from "./request-log";
+export { traceScope } from "./trace-scope";
 export { HttpClient, HttpError } from "./client";
 export { healthRoutes } from "./health";
 export type { HttpClientOptions } from "./client";

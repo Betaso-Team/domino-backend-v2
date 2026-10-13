@@ -1,26 +1,6 @@
 import "reflect-metadata";
-import { randomUUID } from "node:crypto";
 import { JwtVerifier } from "@/features/auth";
 import {
-  type AccountDirectory,
-  AccountUnavailableError,
-  AmqpWallet,
-  BetasoWallet,
-  HttpAccountDirectory,
-  HttpRateBook,
-  HttpWallet,
-  type Ledger,
-  MatchAccounts,
-  MatchRates,
-  MemoryLedger,
-  MongoLedger,
-  Outbox,
-  type RateBook,
-  type WalletPort,
-  WalletUnavailableError,
-} from "@/features/economy";
-import {
-  CachedGameModeReader,
   type GameModeReader,
   GameModeService,
   MemoryGameModeOutbox,
@@ -29,19 +9,21 @@ import {
   MongoGameModeRepository,
   OutboxDispatcher,
 } from "@/features/game-mode";
-import { LobbySettings } from "@/features/lobby/settings";
 import {
-  BetCharger,
-  type BetLevelBook,
-  CachedBetLevelBook,
   ColyseusMatchGateway,
-  HttpBetLevelBook,
+  DEAL_PRESET_EDITABLE,
+  type DealPreset,
+  type DevPresetSource,
   MATCH_EDITABLE,
-  MatchPlatform,
   MatchRegistry,
-  NO_BET_LEVELS,
-  RematchCoordinator,
+  NO_DEAL_PRESET,
+  NO_STARTING_SCORE,
+  STARTING_SCORE_EDITABLE,
+  type StartingScore,
+  dealPresetPatch,
   matchConfigPatch,
+  startingScoreBelow,
+  startingScorePatch,
 } from "@/features/match";
 import {
   type GlobalConfigSource,
@@ -50,35 +32,19 @@ import {
 } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
 import type { HistoryPort, HistoryReader } from "@/features/match/network/history";
-import type { StandingsFeeds } from "@/features/match/network/standings";
-import { AmqpRankingFeed } from "@/features/match/network/transports/amqp-ranking";
-import { HttpLeagueFeed } from "@/features/match/network/transports/http-leagues";
+import {
+  MATCH_RESULT_EXCHANGE,
+  type MatchResultKey,
+  type MatchResultPayload,
+  MatchResultRecorder,
+} from "@/features/match/network/match-results";
+import {
+  OrchestratorBetCharger,
+  type OrchestratorCharges,
+} from "@/features/match/network/orchestrator-charges";
+import { HttpOrchestratorCharges } from "@/features/match/network/transports/http-orchestrator";
 import { MemoryHistory } from "@/features/match/network/transports/memory-history";
 import { MongoHistory } from "@/features/match/network/transports/mongo-history";
-import {
-  type AntifraudFlag,
-  CASUAL_SCOPE,
-  CachedAntifraudFlag,
-  CooldownBook,
-  DEFAULT_COOLDOWN,
-  DEFAULT_MATCHMAKING_CONFIG,
-  HttpAntifraudFlag,
-  MATCHMAKING_EDITABLE,
-  type MaintenanceBook,
-  Matchmaker,
-  type MatchmakingConfig,
-  MemoryMatchPool,
-  MongoMaintenanceBook,
-  OPEN,
-  PolledCensus,
-  PolledMaintenanceSignal,
-  ScopedPoolDirectory,
-  VetoBook,
-  casualVetoKey,
-  matchmakingConfigPatch,
-  matchmakingSink,
-  tournamentVetoKey,
-} from "@/features/matchmaking";
 import {
   MemorySettings,
   MongoSettings,
@@ -87,25 +53,16 @@ import {
   type SettingsSection,
   type SettingsWriter,
 } from "@/features/settings";
-import {
-  AmqpParticipationTransport,
-  CachedTournamentClient,
-  DEFAULT_TOURNAMENT_CONFIG,
-  HttpTournamentClient,
-  ParticipationReporter,
-  StrikeBook,
-  type TournamentClient,
-  TournamentUnavailableError,
-  TournamentWatcher,
-} from "@/features/tournament";
 import { AmqpPublisher } from "@/shared/amqp";
 import { HttpClient } from "@/shared/http";
 import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
 import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
+import { MongoOutboxStore } from "@/shared/mongo-outbox";
+import { MemoryOutboxStore, type OutboxStore, TopicOutboxDispatcher } from "@/shared/outbox";
 import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
 import { container } from "tsyringe";
-import { env } from "./env";
+import { env, isTestingEnvironment } from "./env";
 import { type Logger, logger } from "./logger";
 
 // Acá viven solo dependencias globales y sin estado de partida. Los actores del motor
@@ -130,7 +87,7 @@ const clock: Clock = { now: () => Date.now() };
 rootContainer.register<Clock>("Clock", { useValue: clock });
 rootContainer.register<Logger>("Logger", { useValue: logger });
 rootContainer.register("TokenVerifier", {
-  useValue: new JwtVerifier(env.jwtSecret, env.billingAuth),
+  useValue: new JwtVerifier(env.billingAuth),
 });
 
 // EL PRESENCE Y EL DRIVER DE COLYSEUS, que son infraestructura del SERVIDOR y no de una feature:
@@ -169,21 +126,18 @@ export const driver: MatchMakerDriver | undefined = env.redisUrl
 // igual que `MemoryHistory` más abajo.
 const store: KeyValueStore = presence ?? new MemoryKeyValueStore();
 
-rootContainer.register(LobbySettings, { useValue: new LobbySettings(store) });
-
 // EL REGISTRO DE PARTIDAS VIVAS, que ya no es del proceso sino del CLÚSTER: sus dos respuestas
 // —el config público del endpoint HTTP y en qué sala está sentado un jugador— salen del almacén
 // compartido y no de un `Map` local. Sobrevive a las salas sin convertir a la sala en dueña de
 // esa infraestructura, igual que el historial.
 const matchRegistry = new MatchRegistry(store);
 rootContainer.register(MatchRegistry, { useValue: matchRegistry });
-rootContainer.register("MatchCensus", { useValue: matchRegistry });
 
 // LA PRESENCIA DE LA URI ES LA QUE ELIGE, y no hay un `HISTORY_DRIVER` ni lo va a haber:
 // un interruptor que NOMBRA la implementación es deuda, no configuración —deja escribir
 // "mongo" sin URI y "memory" con una base andando al lado—, y truco ya borró el suyo por
 // esa razón. Acá el dato y la decisión son lo mismo, así que la combinación incoherente no
-// se puede escribir. Es el mismo fail-closed que la API interna usa con `BETASO_ADMIN_PANEL_API_KEY`:
+// se puede escribir. Es el mismo fail-closed que la API interna usa con `ADMIN_API_KEY`:
 // la variable ausente es una decisión, no un error.
 //
 // Sin `MONGO_URI` queda `MemoryHistory`, que NO es un doble: es la implementación de
@@ -219,25 +173,6 @@ rootContainer.register("PlayerLog", { useValue: history });
 // del despachador.
 export const amqp = env.rabbitmqUrl ? new AmqpPublisher(env.rabbitmqUrl, logger) : undefined;
 
-// ── LAS DOS TABLAS DEL CIERRE ───────────────────────────────────────────────────────────────────
-//
-// El ranking y la liga, que son lo que se cuenta afuera cuando una partida cierra con ganador y no
-// es plata (ver `network/standings.ts`). Se registran JUNTOS en un solo token porque el único
-// consumidor es el mismo listener, y dos tokens opcionales obligarían al wiring de la sala a
-// preguntar `isRegistered` dos veces por algo que se decide una.
-//
-// CADA UNO DEPENDE DE LO SUYO Y POR SEPARADO: el ranking del broker, la liga del backend
-// principal. Una instancia con broker y sin `BETASO_BACKEND_URL` reporta puntos y no liga, que es un
-// estado legítimo y no un error — el mismo criterio que el outbox que acumula sin publicador.
-//
-// SON DEL PROCESO y no de la sala: el publicador ya es único y el destino de liga no tiene estado.
-// Lo per-partida es el listener, que lo arma `buildPieces` con el árbol y el snapshot a la vista.
-const standings: StandingsFeeds = {
-  ranking: amqp ? new AmqpRankingFeed(amqp) : undefined,
-  leagues: env.backendUrl ? new HttpLeagueFeed(env.backendUrl) : undefined,
-};
-rootContainer.register<StandingsFeeds>("StandingsFeeds", { useValue: standings });
-
 // EL CATÁLOGO DE MODOS, que desde la Tarea 10 es la AUTORIDAD sobre la economía de una mesa: la
 // sala resuelve acá el modo que el request nombró y de él salen `pointsToWin`, `entryFee` y
 // `prize`. Sin este registro ninguna sala puede nacer, así que el token no es opcional.
@@ -270,6 +205,77 @@ export const outboxDispatcher =
     : undefined;
 outboxDispatcher?.start();
 
+// ── LAS MESAS DEL ORQUESTADOR: el resultado y los cobros ────────────────────────────────────────
+//
+// EL RESULTADO VA POR SU PROPIO BROKER (`BETASO_GAMES_RABBITMQ_URL`, vhost `betaso_games`), que no es
+// el de Betaso: otro publicador, otra conexión. El outbox elige por `MONGO_URI` como el del catálogo,
+// y el despachador existe con el broker aunque no haya Mongo —sin Mongo, lo encolado se pierde con
+// el proceso, pero lo que alcance a salir sale—. Sin broker, el outbox acumula.
+//
+// `mandatory` es lo que hace que un resultado publicado antes de que el orquestador declare su cola
+// cuente como fallo y se reintente (ver `shared/amqp.ts`).
+export const betasoGamesAmqp = env.betasoGamesRabbitmqUrl
+  ? new AmqpPublisher(env.betasoGamesRabbitmqUrl, logger)
+  : undefined;
+const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
+  ? new MongoOutboxStore(mongo, "match_result_outbox", clock, {
+      // SIETE DÍAS: lo enviado se borra solo, y mientras tanto es la red si el broker pierde su disco.
+      sentRetentionSeconds: 7 * 24 * 3600,
+    })
+  : new MemoryOutboxStore(clock);
+export const matchResultDispatcher = betasoGamesAmqp
+  ? new TopicOutboxDispatcher({
+      exchange: MATCH_RESULT_EXCHANGE,
+      // OTRO LEASE que el del catálogo: comparten colección, no nombre, así que no se bloquean.
+      leaseName: "match-result-publisher",
+      queue: matchResultOutbox,
+      delivery: betasoGamesAmqp,
+      lease: catalogLease,
+      clock,
+      log: logger,
+      label: "resultado de partida",
+      // LAS PARTIDAS TERMINAN EN RÁFAGAS: una por segundo no alcanza para un servidor lleno.
+      perTick: 20,
+      // DIEZ MINUTOS sin salir es un error en el log, que es lo que una alerta mira.
+      stuckAfterMs: 10 * 60_000,
+      publishOptions: (entry) => ({ mandatory: true, messageId: entry.dedupeKey }),
+    })
+  : undefined;
+matchResultDispatcher?.start();
+rootContainer.register(MatchResultRecorder, {
+  useValue: new MatchResultRecorder({
+    outbox: matchResultOutbox,
+    wake: () => matchResultDispatcher?.wake(),
+    now: () => clock.now(),
+    log: logger,
+  }),
+});
+// Para la suite: lo encolado, sin broker. Se exporta como el catálogo exporta `gameModes`.
+export const matchResults = matchResultOutbox;
+
+// A QUIÉN LE PIDEN LOS COBROS. Existe si y solo si esta instancia atiende al orquestador: `parseEnv`
+// exige la URL y la llave junto con `ORCHESTRATOR_API_KEY`.
+const orchestratorCharges: OrchestratorCharges | undefined = env.orchestratorCallback
+  ? new HttpOrchestratorCharges(
+      new HttpClient({ baseUrl: env.orchestratorCallback.url, timeoutMs: 10_000 }),
+      env.orchestratorCallback.apiKey,
+    )
+  : undefined;
+if (orchestratorCharges) {
+  rootContainer.register<OrchestratorCharges>("OrchestratorCharges", {
+    useValue: orchestratorCharges,
+  });
+  rootContainer.register(OrchestratorBetCharger, {
+    useValue: new OrchestratorBetCharger({
+      orchestrator: orchestratorCharges,
+      // EL TECHO DE v1 (15 s), generoso a propósito: el que espera es un jugador que ya apretó
+      // «acepto», y el trato espera, con la mesa diciendo x2, a lo sumo esto.
+      timeoutMs: 15_000,
+      log: logger,
+    }),
+  });
+}
+
 // Se registra SOLO el puerto de LECTURA aunque el adaptador sepa escribir: quien crea y edita es
 // la API administrativa del catálogo, que recibe su propio servicio. Un token de escritura acá
 // sería una puerta que la sala podría abrir sin querer.
@@ -285,117 +291,19 @@ rootContainer.register(GameModeService, {
   ),
 });
 
-// The integration ring follows truco: matchmaking owns room creation and the authenticated `sub`
-// is the player id. Tests and service-free development keep memory implementations, while the same
-// ports use Mongo/HTTP/Rabbit as soon as their coordinates are present.
-const http = env.backendUrl ? new HttpClient({ baseUrl: env.backendUrl }) : undefined;
-const unavailableAccounts: AccountDirectory = {
-  accountOf: async (playerId) => {
-    throw new AccountUnavailableError(`backend no configurado para ${playerId}`);
-  },
-};
-const accounts: AccountDirectory = http ? new HttpAccountDirectory(http) : unavailableAccounts;
-const unavailableRates: RateBook = {
-  rateFor: async (currency) => {
-    throw new Error(`backend no configurado para convertir ${currency}`);
-  },
-};
-const rates: RateBook = http ? new HttpRateBook(http) : unavailableRates;
-const matchAccounts = new MatchAccounts(accounts);
-const matchRates = new MatchRates(rates);
-export const ledger: Ledger = mongo
-  ? new MongoLedger(mongo, "dominotransactions")
-  : new MemoryLedger(clock.now);
-
-const httpWallet =
-  http && env.backendApiKey
-    ? new HttpWallet({
-        http,
-        apiKey: { value: env.backendApiKey },
-        accounts,
-        matchAccounts,
-        rates,
-        matchRates,
-      })
-    : undefined;
-const amqpWallet = amqp
-  ? new AmqpWallet({ publisher: amqp, matchAccounts, matchRates, ledger })
-  : undefined;
-const wallet: WalletPort =
-  httpWallet && amqpWallet
-    ? new BetasoWallet(httpWallet, amqpWallet)
-    : {
-        canAfford: (query) => httpWallet?.canAfford(query) ?? Promise.resolve(false),
-        charge: (movement) =>
-          httpWallet?.charge(movement) ??
-          Promise.reject(new WalletUnavailableError("backend no configurado")),
-        credit: (movement) =>
-          amqpWallet?.credit(movement) ??
-          Promise.reject(new WalletUnavailableError("broker no configurado")),
-        refund: (movement) =>
-          amqpWallet?.refund(movement) ??
-          Promise.reject(new WalletUnavailableError("broker no configurado")),
-        refundMatch: (matchId, playerIds) =>
-          amqpWallet?.refundMatch(matchId, playerIds) ??
-          Promise.reject(new WalletUnavailableError("broker no configurado")),
-      };
-export const economyOutbox = new Outbox(wallet, ledger, logger);
-
-const tournamentClient: TournamentClient | undefined =
-  http && env.backendApiKey
-    ? new HttpTournamentClient(http, { value: env.backendApiKey }, DEFAULT_TOURNAMENT_CONFIG)
-    : undefined;
-const unavailableTournament: TournamentClient = {
-  infoOf: async (id) => {
-    throw new TournamentUnavailableError(id);
-  },
-  isEnrolled: async (id) => {
-    throw new TournamentUnavailableError(id);
-  },
-};
-const askTournament = tournamentClient ?? unavailableTournament;
-const pollTournament = new CachedTournamentClient(askTournament, 30_000, clock.now);
-export const participationReporter = amqp
-  ? new ParticipationReporter(new AmqpParticipationTransport(amqp), logger)
-  : undefined;
-
-const strikes = new StrikeBook(store, DEFAULT_TOURNAMENT_CONFIG, clock.now);
-const maintenanceBook: MaintenanceBook = mongo
-  ? new MongoMaintenanceBook(mongo, "domino_settings", logger)
-  : {
-      current: async () => {
-        const value = await rootContainer.resolve(LobbySettings).get();
-        return value.isUnderMaintenance
-          ? { isUnderMaintenance: true, message: value.maintenanceMessage }
-          : OPEN;
-      },
-    };
-export const maintenanceSignal = new PolledMaintenanceSignal({
-  book: maintenanceBook,
-  intervalMs: DEFAULT_MATCHMAKING_CONFIG.maintenancePollMs,
-  log: logger,
-});
-export const census = new PolledCensus({
-  source: { count: () => matchRegistry.census() },
-  intervalMs: DEFAULT_MATCHMAKING_CONFIG.censusPollMs,
-  log: logger,
-});
-
 // ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────
 //
-// Portado de truco (`3cab0f8`). Los dos tokens de config —`GlobalDominoConfig` y
-// `MatchmakingConfig`— siguen significando LA BASE: lo que sale del entorno y del código, y lo que la
-// suite re-registra para acortar sus plazos. En la base queda sólo lo que se APARTA de eso, y la
-// señal compone las dos cosas.
+// Portado de truco (`3cab0f8`). El token de config —`GlobalDominoConfig`— sigue significando LA
+// BASE: lo que sale del entorno y del código, y lo que la suite re-registra para acortar sus plazos.
+// En la base queda sólo lo que se APARTA de eso, y la señal compone las dos cosas.
 //
 // LA PRESENCIA DE `MONGO_URI` ELIGE, como en todo lo demás: con Mongo, un documento propio en la
-// colección `domino_settings` de v1 —la del mantenimiento—; sin Mongo, la memoria del proceso, que
+// colección `domino_settings` de v1; sin Mongo, la memoria del proceso, que
 // con una sola instancia es exactamente lo correcto.
 //
 // Éste es el único lugar donde el nombre de una sección se encuentra con un tipo, porque es el único
 // que conoce todas las features. Los `defaults` se resuelven AL PREGUNTAR: un test que re-registra
 // la base con el servidor ya levantado tiene que ganar.
-rootContainer.register("MatchmakingConfig", { useValue: DEFAULT_MATCHMAKING_CONFIG });
 const settingsStore = mongo
   ? new MongoSettings(mongo, "domino_settings", logger)
   : new MemorySettings();
@@ -406,12 +314,26 @@ export const settingsSections: readonly SettingsSection[] = [
     editable: MATCH_EDITABLE,
     defaults: () => rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
   },
-  {
-    name: "matchmaking",
-    schema: matchmakingConfigPatch,
-    editable: MATCHMAKING_EDITABLE,
-    defaults: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig"),
-  },
+  // LAS DOS DE PRUEBA A MANO, y SÓLO donde existen: fijan las fichas y el marcador, que es lo que
+  // probar a mano necesita y lo que ningún jugador en ningún otro lado puede poder hacer. Detrás de
+  // la misma llave del panel que las demás —truco las sirve sin llave; acá no hay por qué abrir una
+  // puerta que dev ya tiene—. Portadas de truco (`d6e3219`, `6da7372`).
+  ...(isTestingEnvironment(env.appEnv)
+    ? [
+        {
+          name: "deal",
+          schema: dealPresetPatch,
+          editable: DEAL_PRESET_EDITABLE,
+          defaults: () => NO_DEAL_PRESET,
+        },
+        {
+          name: "starting-score",
+          schema: startingScorePatch,
+          editable: STARTING_SCORE_EDITABLE,
+          defaults: () => NO_STARTING_SCORE,
+        },
+      ]
+    : []),
 ];
 export const settingsSignal = new PolledSettingsSignal({
   book: settingsStore,
@@ -426,86 +348,27 @@ export const settingsWriter: SettingsWriter = settingsStore;
 rootContainer.register<GlobalConfigSource>("GlobalConfigSource", {
   useValue: () => settingsSignal.effective<GlobalDominoConfig>("match"),
 });
-// El emparejamiento lee la suya POR USO y no por mesa: los números se preguntan cuando alguien entra
-// a la cola, no cuando arrancó el proceso.
-const matchmakingConfig = (): MatchmakingConfig =>
-  settingsSignal.effective<MatchmakingConfig>("matchmaking");
-
-// Se EXPORTA para que un E2E pueda comprobar que el veto se escribió de verdad. No es una puerta
-// nueva: el defecto que esto cerró fue justamente que nadie escribía el libro, y eso solo se ve
-// leyéndolo del lado de afuera de la cadena que lo llena.
-export const casualVeto = new VetoBook(store, casualVetoKey, { ttlMs: 30 * 60_000 });
-const tournamentVeto = new VetoBook(store, tournamentVetoKey, { ttlMs: 6 * 60 * 60_000 });
-const cooldown = new CooldownBook(store, DEFAULT_COOLDOWN, clock.now);
-const antifraud: AntifraudFlag =
-  http && env.backendApiKey
-    ? new CachedAntifraudFlag(
-        new HttpAntifraudFlag(http, { value: env.backendApiKey }),
-        5_000,
-        clock.now,
-        logger,
-      )
-    : { isRematchRulesEnabled: async () => true };
-
-// EL MODO, EN CACHÉ, sólo para el emparejador. El tick rearma la especificación del pozo cada 250 ms,
-// así que sin esto un modo con alguien esperando cuesta 4 lecturas de Mongo por segundo. CINCO
-// segundos y no los treinta del torneo: la ventana es lo que tarda un cambio del panel en llegar a
-// una mesa NUEVA, y la especificación del modo lleva la entrada y el premio que la sala cobra. Más
-// allá de cinco el ahorro ya es nulo —0,2 lecturas por segundo contra 0,03—. La sala NO pasa por acá:
-// nace con `activeByUuid` contra el repositorio.
-const pollCatalog = new CachedGameModeReader(gameModeRepository, 5_000, clock.now);
-
-const poolDirectory = new ScopedPoolDirectory(
-  {
-    catalog: pollCatalog,
-    wallet,
-    avoid: async (playerId) =>
-      (await antifraud.isRematchRulesEnabled()) ? casualVeto.vetoedFor(CASUAL_SCOPE, playerId) : [],
-  },
-  {
-    client: pollTournament,
-    strikes,
-    avoid: (tournamentId, playerId) => tournamentVeto.vetoedFor(tournamentId, playerId),
-  },
-);
-const gateway = new ColyseusMatchGateway();
-// El MISMO gateway que usa el emparejador, registrado para la API del orquestador.
-rootContainer.register(ColyseusMatchGateway, { useValue: gateway });
-export const matchmaker = new Matchmaker({
-  directory: poolDirectory,
-  pool: new MemoryMatchPool(),
-  gateway,
-  config: matchmakingConfig,
-  cooldown,
-  live: { matchOf: (playerId) => matchRegistry.matchOf(playerId) },
-  maintenance: maintenanceSignal,
-  now: clock.now,
-  seedOf: randomUUID,
-  log: logger,
-});
-// EL COORDINADOR DE LA REVANCHA, con las tres piezas que ya existían y una que es nueva sólo
-// como composición: el ANTIFRAUDE de la revancha es la MISMA bandera que apaga el veto del
-// emparejador, leída al revés — allá decide si evitar a un rival, acá si dejar repetir con él.
-//
-// ⚠ EL VETO SE CONSULTA PERO NO SE ESCRIBE ACÁ. Si estos dos ya están vetados entre sí, la
-// revancha no se ofrece; anotar el veto cuando una revancha TERMINA es del cierre de esa mesa,
-// y hoy no se hace (ver la deuda en AGENTS.md). Sin esa mitad, el tope de la cadena
-// —`rematchCount`— es lo único que impide la repetición infinita, y alcanza: el par vuelve al
-// emparejador, que es quien los separa.
-// EL CATÁLOGO DE NIVELES DE AUMENTO, con el mismo criterio que el antifraude: hace falta el
-// backend Y la llave interna, porque es un endpoint interno del backend principal. Sin alguno de
-// los dos el libro es el de reposo y NINGUNA mesa ofrece aumentar — que es el lado seguro en el
-// que equivocarse: el `extra` de un nivel determina puntos de ranking reales, y ofrecer uno con
-// un valor inventado le entrega al jugador un puntaje que nadie configuró.
-//
-// La ventana de cache es la de v1 (30 s). Se consulta al crear CADA mesa, y los niveles de un
-// modo cambian cuando el panel los toca, no entre dos partidas.
-// EL COBRO DEL AUMENTO. Se registra sólo con billetera: sin ella no habría a quién cobrarle —y
-// tampoco habría niveles, porque el libro depende del mismo backend, así que las dos ausencias
-// coinciden y ninguna mesa llega a ofrecer aumentar.
-//
-// El plazo es el de v1 (15 s) y es generoso a propósito: el que espera es un jugador que ya
-// apretó «acepto», y cortar antes de tiempo le anula un trato que iba a salir bien.
+// Leídas UNA vez por mesa, como la config de arriba: una edición a mitad de partida espera a la
+// siguiente. El aviso es para el que lea una partida donde las fichas no fueron suerte y se olvidó
+// de que el preset estaba puesto.
+if (isTestingEnvironment(env.appEnv)) {
+  rootContainer.register<DevPresetSource>("DevPresetSource", {
+    useValue: (pointsToWin) => {
+      const dealPreset = settingsSignal.effective<DealPreset>("deal");
+      const startingScore = startingScoreBelow(
+        settingsSignal.effective<StartingScore>("starting-score"),
+        pointsToWin,
+      );
+      if (dealPreset.hands.length > 0) logger.warn("reparto preparado", { dealPreset });
+      if (startingScore.teamA > 0 || startingScore.teamB > 0)
+        logger.warn("marcador inicial preparado", { startingScore });
+      return { dealPreset, startingScore };
+    },
+  });
+}
+// LA API INTERNA DEL ORQUESTADOR abre las mesas con este gateway: es la única puerta de entrada a
+// una partida.
+rootContainer.register(ColyseusMatchGateway, { useValue: new ColyseusMatchGateway() });
 // LA TRAZA DEL JUEGO, y el token existe SÓLO cuando el nivel la pide. El sink no sabe de
 // niveles ni pregunta por ninguno: con el debug apagado no se construye, y así el costo de
 // filtrar los campos de cada evento de cada mesa tampoco se paga.
@@ -517,95 +380,13 @@ export const matchmaker = new Matchmaker({
 if (env.logLevel === "debug") {
   rootContainer.register("MatchTraceLog", { useValue: logger });
 }
-rootContainer.register(BetCharger, {
-  useValue: new BetCharger({ wallet, ledger, timeoutMs: 15_000, log: logger }),
-});
-rootContainer.register<BetLevelBook>("BetLevelBook", {
-  useValue:
-    http && env.backendApiKey
-      ? new CachedBetLevelBook(
-          new HttpBetLevelBook(http, { value: env.backendApiKey }),
-          30_000,
-          clock.now,
-          logger,
-        )
-      : NO_BET_LEVELS,
-});
-rootContainer.register(RematchCoordinator, {
-  useValue: new RematchCoordinator({
-    wallet,
-    antifraud: async (playerIds) => {
-      if (!(await antifraud.isRematchRulesEnabled())) return true;
-      const vetoed = await casualVeto.vetoedFor(CASUAL_SCOPE, playerIds[0] ?? "");
-      return !playerIds.some((playerId) => vetoed.includes(playerId));
-    },
-    opener: gateway,
-    seedOf: randomUUID,
-    maxRematchesPerChain: () => matchmakingConfig().maxRematchesPerChain,
-    log: logger,
-  }),
-});
-rootContainer.register(MatchPlatform, {
-  useValue: new MatchPlatform({
-    wallet,
-    ledger,
-    accounts,
-    matchAccounts,
-    outbox: economyOutbox,
-    tournament: tournamentClient,
-    participation: participationReporter,
-    strikes,
-    tournamentConfig: DEFAULT_TOURNAMENT_CONFIG,
-    summaries: history,
-    now: clock.now,
-    log: logger,
-  }),
-});
-rootContainer.register("MatchSinks", {
-  useValue: (options: import("@/features/match").DominoRoomOptions) => {
-    const casual = options.mode === "CASUAL";
-    return [
-      matchmakingSink(
-        {
-          cooldown,
-          veto: casual ? casualVeto : tournamentVeto,
-          isCasualVetoEnabled: () => antifraud.isRematchRulesEnabled(),
-          log: logger,
-        },
-        {
-          poolId: casual ? options.gameModeId : options.tournamentId,
-          playerIds: options.seats,
-        },
-      ),
-    ];
-  },
-});
-
-export const tournamentWatcher =
-  amqp && tournamentClient
-    ? new TournamentWatcher({
-        client: pollTournament,
-        publisher: amqp,
-        liveTournaments: () => matchRegistry.tournamentsWithMatches(),
-        intervalMs: DEFAULT_TOURNAMENT_CONFIG.gamesCheckIntervalMs,
-        log: logger,
-      })
-    : undefined;
-rootContainer.register("StrikeBook", { useValue: strikes });
 
 export function startServices(): void {
   settingsSignal.start();
-  matchmaker.start();
-  maintenanceSignal.start();
-  census.start();
-  tournamentWatcher?.start();
 }
 
 export function stopAcceptingMatches(): void {
   settingsSignal.stop();
-  matchmaker.stop();
-  maintenanceSignal.stop();
-  census.stop();
 }
 
 // CERRAR LO QUE ESTE ARCHIVO ABRIÓ, que es la deuda que el incremento del clúster dejó
@@ -632,22 +413,19 @@ export function stopAcceptingMatches(): void {
 // el historial de las otras cuarenta que siguen jugando.
 export async function shutdown(): Promise<void> {
   stopAcceptingMatches();
-  await Promise.allSettled([
-    economyOutbox.close(),
-    participationReporter?.close(),
-    tournamentWatcher?.close(),
-  ]);
   // 0. PARAR EL DESPACHADOR, y va PRIMERO por lo mismo que el historial va antes que Mongo: tiene
   //    una entrega EN VUELO. `close()` cancela el temporizador y espera el `inFlight`, así que lo
   //    que estaba publicado y confirmado alcanza a marcarse `SENT`. Cortarle la base debajo dejaría
   //    un evento entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
   //    duplicado que el consumidor ya deduplica, pero el costo de esperar son milisegundos.
   await outboxDispatcher?.close();
+  await matchResultDispatcher?.close();
   await history.drain();
   // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
   //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`
   //    tolera una conexión ya cerrada, así que no hay nada que proteger acá.
   await amqp?.close();
+  await betasoGamesAmqp?.close();
   // 3. CERRAR MONGO ÚLTIMO. Los tres pasos de arriba escriben ahí: el despachador marca `SENT`, el
   //    historial drena su último lote. Al revés se pierde exactamente lo que se acaba de esperar.
   await mongo?.close();

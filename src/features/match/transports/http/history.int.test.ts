@@ -23,7 +23,7 @@ function fakeLogger(): Logger {
 // Las rutas que el router trae, leídas de su `stack`. No hace falta levantar un servidor: lo que se
 // mide acá es una decisión de wiring —si la ruta llega a existir—, y el comportamiento de la ruta ya
 // lo cubren los tests e2e con la llave puesta.
-function pathsRegisteredWith(adminPanelApiKey: string | undefined): string[] {
+function pathsRegisteredWith(adminApiKey: string | undefined): string[] {
   return routesOf(
     historyRoutes({
       logger: fakeLogger(),
@@ -34,7 +34,7 @@ function pathsRegisteredWith(adminPanelApiKey: string | undefined): string[] {
           throw new Error("el registro de la ruta no debe leer el historial");
         },
       },
-      adminPanelApiKey,
+      adminApiKey,
     }),
   );
 }
@@ -51,7 +51,7 @@ describe("historyRoutes", () => {
   });
 
   // El aviso es lo ÚNICO que explica el 404 de una instancia sin llave, así que se mide que
-  // nombre la ruta: un warn que dice "falta BETASO_ADMIN_PANEL_API_KEY" y no dice cuál path se apagó
+  // nombre la ruta: un warn que dice "falta ADMIN_API_KEY" y no dice cuál path se apagó
   // no lo encuentra el que busca por path.
   it("sin llave interna avisa nombrando la ruta que no se registró", () => {
     const logger = fakeLogger();
@@ -59,7 +59,7 @@ describe("historyRoutes", () => {
     historyRoutes({
       logger,
       history: { of: () => Promise.resolve([]) },
-      adminPanelApiKey: undefined,
+      adminApiKey: undefined,
     });
 
     expect(logger.warn).toHaveBeenCalledWith(
@@ -84,7 +84,7 @@ describe("historyRoutes", () => {
       historyRoutes({
         logger: fakeLogger(),
         history: { of: () => Promise.resolve(entries) },
-        adminPanelApiKey: "k".repeat(16),
+        adminApiKey: "k".repeat(16),
       }),
     );
     const server = app.listen(0, "127.0.0.1");

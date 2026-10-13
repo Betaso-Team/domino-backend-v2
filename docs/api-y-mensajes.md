@@ -1,17 +1,19 @@
 # API HTTP y mensajes
 
-El juego usa WebSocket/Colyseus para la partida y HTTP para configuración, operación y catálogo. No
-hay Swagger: los mensajes de sala no son HTTP y los contratos se mantienen tipados en el código.
+El juego usa WebSocket/Colyseus para la partida y HTTP para configuración, operación, catálogo y la
+API del orquestador. No hay Swagger: los mensajes de sala no son HTTP y los contratos se mantienen
+tipados en el código.
 
 ## Salas Colyseus
 
 | Sala | Quién entra | Estado principal |
 |---|---|---|
 | `domino` | Participante reservado con JWT válido | Partida, ronda, jugadores, tablero, pozo, turnos y deadlines |
-| `lobby` | Cualquier identidad con JWT válido | Contadores, mantenimiento y jugadores conectados al lobby |
 
-El JWT usa `sub` como `userUuid` y lleva `platformId`. La pareja se normaliza con `trim()` y se
-compara completa; el UUID solo no identifica un asiento entre plataformas.
+Es la única sala. No hay lobby ni emparejamiento en este servidor: los hace el orquestador, que abre
+cada mesa por `POST /internal/matches` y le entrega a cada jugador su reserva de asiento. El jugador
+se conecta con esa reserva y su JWT; el `sub` del token es el `userId` con el que el orquestador lo
+sentó, normalizado con `trim()`.
 
 ## Mensajes de la sala `domino`
 
@@ -44,7 +46,8 @@ decoder estricto antes de alcanzar el comando.
 |---|---|
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
-| `GET /config/:roomId` | Config pública de una mesa y `serverNow`; nunca devuelve el seed |
+| `GET /config/:roomId` | Config pública de una mesa (con `betLevels: [{ level, additionalPoints }]`, vacío si no ofrece aumentar) y `serverNow`; nunca devuelve el seed |
+| `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
 | `GET /game-modes` | Modos activos del catálogo |
 | `GET /game-modes/:uuid` | Un modo activo; un modo dado de baja responde 404 |
 
@@ -53,33 +56,40 @@ cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 
 ## HTTP interno
 
-Estas rutas requieren el header `x-internal-api-key` con la llave del panel de administración. Si `BETASO_ADMIN_PANEL_API_KEY` no existe, no se registran y responden
+Estas rutas requieren el header `x-internal-api-key` con la llave de administración. Si `ADMIN_API_KEY` no existe, no se registran y responden
 404: fallan cerradas.
 
 | Método y ruta | Uso |
 |---|---|
 | `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte |
-| `POST /internal/lobby/maintenance` | Activa o desactiva mantenimiento para mesas nuevas |
 | `POST /game-modes` | Crea un modo |
 | `PUT /game-modes/:uuid` | Aplica un patch al modo |
 | `DELETE /game-modes/:uuid` | Baja lógica |
 | `GET /game-modes/reactive/:uuid` | Reactiva; conserva el verbo de v1 por compatibilidad |
 | `POST /game-modes/sync` | Encola una republicación completa del catálogo |
-| `GET /internal/settings` | Las secciones de config en caliente (`match`, `matchmaking`): en vigor, overrides y editables |
+| `GET /internal/settings` | Las secciones de config en caliente (`match`; en local y dev también `deal` y `starting-score`): en vigor, overrides y editables |
 | `GET /internal/settings/:section` | Una sección |
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
 | `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
 
+**Niveles de aumento de un modo.** `POST` y `PUT /game-modes` aceptan `betLevels`:
+`[{ level, extra, additionalPoints }]`. `level` es el multiplicador de la entrada y el premio (entero
+≥ 2), `extra` se suma al multiplicador de ranking y `additionalPoints` es lo que el ganador suma de
+más. Los niveles son únicos y el `extra` crece con el nivel; si no, la respuesta es 400. Sin
+`betLevels`, un modo nuevo no ofrece aumentar (`[]`). En el `PUT`, la lista reemplaza a la anterior y
+`[]` apaga los aumentos. El `GET` público devuelve `betLevels` ordenados por nivel, y el orquestador los
+lee de ahí. Los eventos `game_mode.*` del exchange `betaso` **no** los llevan.
+
 **Config en caliente.** Una edición llega a las mesas que nacen DESPUÉS; una mesa ya abierta conserva
 los plazos con los que nació. El proceso que atiende el `PATCH` se refresca en el acto y el resto
-del clúster converge en 5 s. Fuera de lo editable quedan `tilesPerPlayer` (regla de juego) y los
-tres intervalos que el emparejador lee al arrancar (`tickIntervalMs`, `maintenancePollMs`,
-`censusPollMs`): se rechazan con 400 en vez de aceptarse e ignorarse.
+del clúster converge en 5 s. Fuera de lo editable queda `tilesPerPlayer` (regla de juego): se rechaza
+con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Dos rutas que sólo usa el orquestador de Betaso Juegos. Van con `x-internal-api-key` igual a
-`ORCHESTRATOR_API_KEY` (la del panel no las abre); sin esa variable no se registran y responden 404.
+Tres rutas que sólo usa el orquestador de Betaso Juegos, y son la única puerta de entrada a una
+partida. Van con `x-internal-api-key` igual a
+`ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
 cuerpo.
 
@@ -95,7 +105,7 @@ Betaso).
 | `400` | `{ code: "MALFORMED", detail }` | El cuerpo no cumple la forma |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `422` | `{ error: "UNKNOWN_GAME_MODE" }`, `"UNSUPPORTED_GAME_MODE"` o `"SEAT_COUNT_MISMATCH"` | La sala rechazó la mesa: modo inexistente o dado de baja, 4P, o cantidad que no coincide con el modo |
-| `500` | | Cualquier otra falla es nuestra, incluido el mantenimiento |
+| `500` | | Cualquier otra falla es nuestra |
 
 **`POST /internal/players/:userId/seat`** devuelve el asiento de quien sigue jugando (sin cuerpo).
 
@@ -105,12 +115,36 @@ Betaso).
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
-| `500` | | La sala existe pero está bloqueada por reservas sin consumir: el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+| `500` | | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
 
-**Estas mesas no mueven dinero ni reportan resultados.** Una sala creada por este camino no tiene
-`roomOptions`: no ofrece niveles de apuesta, no cobra aumentos, no toca la billetera ni el ledger,
-y al resolverse no publica `ranking.won` ni llama a la liga de Betaso. El dinero lo mueve el
-orquestador, y qué se reporta de estas mesas lo decide el Plan 3.
+**`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
+orquestador lo muestra en los números de su lobby.
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }] } }` | Siempre; un modo sin nadie jugando no aparece |
+| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+
+`CreateMatchRequest` acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
+los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
+
+**Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
+ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
+
+- **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}internal/matches/:matchId/charges`
+  (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
+  cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
+  `CHARGE_REJECTED`.
+- **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
+  anula (`MULTIPLIER_REVOKED`).
+- **El resultado** sale por un outbox durable al exchange `betaso_games` (broker y vhost de
+  `BETASO_GAMES_RABBITMQ_URL`), con `mandatory` y publisher confirm: `domino.match.finished` al
+  dictaminarse (participantes, apuesta de la mesa y el premio de `settlementOf`, ya con el aumento) y
+  `domino.match.aborted` al cerrarse sin veredicto (sin montos: el orquestador devuelve lo que cobró).
+  `messageId = <matchId>:finished|aborted`.
+
+El contrato completo vive en el monorepo del orquestador:
+`docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`.
 
 ## Eventos y salidas
 
@@ -122,10 +156,15 @@ flowchart LR
   Domain --> History["Historial de soporte"]
   Platform --> History
   Domain --> Clients["Clientes de la sala"]
-  Domain --> Standing["Ranking y liga"]
   Domain --> Settlement["settlementOf\nproyección de dinero"]
+  Settlement --> Result["Resultado al orquestador\n(outbox → betaso_games)"]
 ```
 
-Los eventos de dominio describen consecuencias (`ROUND_RESOLVED`, `MATCH_RESOLVED`, expiraciones).
-Los de plataforma describen conexión y aborto. Un comando voluntario ya está en el historial como
-comando; no se duplica como evento salvo que exista información nueva.
+Los eventos de dominio describen consecuencias (`ROUND_STARTED` en cada reparto, `ROUND_RESOLVED`,
+`MATCH_RESOLVED`, expiraciones). Los de plataforma describen conexión y aborto. Un comando voluntario
+ya está en el historial como comando; no se duplica como evento salvo que exista información nueva.
+
+Detrás de cada `ROUND_STARTED` el historial graba `TILES_DEALT`: las manos y el pozo tal como se
+repartieron, leídos del árbol en ese instante. No es un evento (no se difunde a la mesa) y es lo que
+soporte tiene cuando la partida se jugó con un reparto preparado y el replay no la reproduce. Cada
+entrada lleva la mano en que pasó, tomada de `ROUND_STARTED` y no del árbol.

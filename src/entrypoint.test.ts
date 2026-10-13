@@ -67,12 +67,12 @@ const nodeMajorFloor = (range: string): number => {
 
 // EL ARRANQUE DE LOS SERVICIOS DE FONDO es un contrato entre dos archivos que no se leen entre
 // sí, que es de lo que trata este archivo entero. `src/main.ts` es el que CORRE y `src/app.config.ts`
-// el que se IMPORTA; el emparejador, el mantenimiento, el censo y el vigilante de torneos viven en
-// el container y alguien tiene que encenderlos.
+// el que se IMPORTA; la pasada de la configuración en caliente vive en el container y alguien tiene
+// que encenderla.
 //
-// SE MIDE PORQUE EL OLVIDO NO FALLA, CUELGA. Sin `startServices()` el servidor levanta, acepta
-// sockets, contesta el HTTP y crea salas — y nadie se empareja nunca, porque la cola no tiene quién
-// la mire. No hay excepción, no hay log y el `/health` sigue en 200.
+// SE MIDE PORQUE EL OLVIDO NO FALLA. Sin `startServices()` el servidor levanta, acepta sockets,
+// contesta el HTTP y crea salas — y una edición del panel nunca llega a las mesas nuevas. No hay
+// excepción, no hay log y el `/health` sigue en 200.
 describe("los servicios de fondo los enciende el que corre", () => {
   const main = read(ENTRYPOINT_SOURCE);
 

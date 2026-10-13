@@ -1,5 +1,6 @@
 import type { DominoMatchConfig, MatchSeat } from "../core/config";
 import { InvariantViolationError } from "../core/engine/errors";
+import { betAmountsOf } from "../core/rules/config";
 import type { MatchState } from "../core/state";
 import type { NetworkMatchEvent } from "./events";
 
@@ -124,12 +125,7 @@ function rewardOf(
   // pagarle sería premiar el abandono con el premio de la mesa. Es el
   // `filter(player => !player.isBot)` de v1 (`:605`), más los que quedaron en `quitPlayers` —que
   // acá son los `hasAbandoned`—.
-  const winnerIds = new Set(
-    match.players
-      .filter(({ teamId }) => teamId === winnerTeamId)
-      .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
-      .map(({ playerId }) => playerId),
-  );
+  const winnerIds = new Set(prizeWinnersOf(match, winnerTeamId));
   const winners = config.seats.filter(({ playerId }) => winnerIds.has(playerId));
   // PLATA DE POR MEDIO: ante la duda, rechazar. **Cero ganadores** sigue siendo un invariante
   // roto —un veredicto sobre un equipo donde no queda nadie a quien pagarle—, y cierra la partida
@@ -149,9 +145,50 @@ function rewardOf(
     matchId: config.matchId,
     rateId: config.rateId,
     kind: "REWARD",
-    entries: winners.map((seat) => entryOf(config.matchId, "REWARD", config.prize, seat)),
+    entries: winners.map((seat) =>
+      entryOf(config.matchId, "REWARD", stakesOf(config, match).prize, seat),
+    ),
   };
 }
+
+/**
+ * QUIÉNES COBRAN EL PREMIO: los asientos del equipo ganador que todavía son de una PERSONA — ni la
+ * máquina ni el que se fue (ver `rewardOf`).
+ */
+const prizeWinnersOf = (match: MatchState, winnerTeamId: string): readonly string[] =>
+  match.players
+    .filter(({ teamId }) => teamId === winnerTeamId)
+    .filter(({ isBot, hasAbandoned }) => !isBot && !hasAbandoned)
+    .map(({ playerId }) => playerId);
+
+/**
+ * LO QUE VALE LA MESA AL CERRAR, con el aumento aceptado adentro. La config está CONGELADA al nacer
+ * y el aumento se acuerda a mitad de partida, así que el nivel sale del ESTADO: el que ganó una mesa
+ * a x3 cobra `prize × 3`, y una mesa abortada después de un aumento devuelve `entryFee × 3`. Es la
+ * regla de v1 (`betAmountsOf`; al aceptar escribe `state.prize = proposal.newPrize` y paga ése): la
+ * mesa entera se multiplica por el nivel. Nivel 0 es "ninguno aceptado".
+ */
+const stakesOf = (
+  table: { readonly entryFee: number; readonly prize: number },
+  match: Pick<MatchState, "acceptedBetLevel">,
+): { readonly entryFee: number; readonly prize: number } => {
+  if (match.acceptedBetLevel <= 0) return { entryFee: table.entryFee, prize: table.prize };
+  const extra = betAmountsOf(match.acceptedBetLevel, table.entryFee, table.prize);
+  return {
+    entryFee: table.entryFee + extra.additionalEntryFee,
+    prize: table.prize + extra.additionalPrize,
+  };
+};
+
+/**
+ * A QUIÉN SE LE DEVUELVE LA INSCRIPCIÓN DE UNA MESA SIN VEREDICTO: a todos menos al que se fue
+ * habiendo levantado sus fichas. Es la regla de v1 (`two-players/domino-room-state.ts:467-475`
+ * filtra de `quitPlayers` a los `isValid`), y es UNA sola para todos los motivos: sólo una mesa
+ * anulada en el reparto puede dejar a alguien afuera, porque el que se va a mitad de partida le
+ * da el veredicto al rival y esa mesa no se aborta.
+ */
+const isRefundable = (player: { hasAbandoned: boolean; hasSeenTiles: boolean }) =>
+  !(player.hasAbandoned && player.hasSeenTiles);
 
 /**
  * El desenlace de la mesa como instrucción monetaria, o `undefined` si el evento no es un
@@ -181,13 +218,16 @@ export function settlementOf(
   switch (event.type) {
     case "MATCH_ABORTED": {
       assertSameTable(match, config);
+      const refundable = new Set(
+        match.players.filter(isRefundable).map(({ playerId }) => playerId),
+      );
       return {
         matchId: config.matchId,
         rateId: config.rateId,
         kind: "REFUND",
-        entries: config.seats.map((seat) =>
-          entryOf(config.matchId, "REFUND", config.entryFee, seat),
-        ),
+        entries: config.seats
+          .filter(({ playerId }) => refundable.has(playerId))
+          .map((seat) => entryOf(config.matchId, "REFUND", stakesOf(config, match).entryFee, seat)),
       };
     }
     case "MATCH_RESOLVED": {
@@ -218,24 +258,21 @@ export function settlementOf(
     // `MULTIPLIER_AGREED` la mueve, pero NO por acá: lo cobra su propio listener contra la
     // billetera, con su razón (`BET_MULTIPLIER`) y su clave de idempotencia, en el instante en
     // que se acepta. `settlementOf` proyecta el DESENLACE de la mesa —premio o reembolso— y el
-    // aumento ya está adentro de ese número: sube `entryFee` y `prize` antes de que la partida
-    // termine. Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
+    // aumento ya está adentro de ese número: `stakesOf` lo lee del estado (`acceptedBetLevel`) al
+    // proyectar el desenlace. Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
     //
     // `MULTIPLIER_REVOKED` es el mismo caso al revés: el reembolso de lo que sí se cobró lo hace
     // el que compensa, que es quien sabe a quién alcanzó a cobrarle.
     case "MULTIPLIER_AGREED":
     case "MULTIPLIER_REVOKED":
     case "REMATCH_ACCEPTED":
-    // LOS DOS VETOS TAMPOCO LIQUIDAN: no mueven plata, mueven a quién empareja el lobby. Están
-    // enumerados porque el `never` del final obliga a pasar por acá, que es exactamente lo que
-    // se quiere de un evento nuevo en un archivo que paga.
-    case "CASUAL_PAIR_VETOED":
-    case "PAIR_VETOED":
     // SENTAR UN BOT NO MUEVE PLATA EN EL MOMENTO, y sí cambia quién cobra al final: el asiento
     // que pasa a jugar la máquina deja de ser un cobrador. Eso se resuelve en el REWARD del
     // desenlace, que es donde están todos los asientos a la vista, y no acá — una instrucción por
     // este evento sería pagarle a alguien a mitad de partida, con la mesa todavía sin ganador.
     case "BOT_SEATED":
+    // Repartir una mano no mueve plata: es la marca de que empezó otra.
+    case "ROUND_STARTED":
     case "PLAYER_DISCONNECTED":
     case "PLAYER_RECONNECTED":
       return undefined;

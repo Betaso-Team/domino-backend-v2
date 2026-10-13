@@ -27,7 +27,7 @@ function fakeRepo(): string {
     Dockerfile: "FROM scratch\n",
     "src/main.ts": "\n",
     ".gitignore": ".env\ndist\nnode_modules\n",
-    ".env": "BETASO_BACKEND_JWT_SECRET=secreto\n",
+    ".env": "ADMIN_API_KEY=secreto\n",
     "dist/main.js": "\n",
   };
   for (const [path, body] of Object.entries(files)) {

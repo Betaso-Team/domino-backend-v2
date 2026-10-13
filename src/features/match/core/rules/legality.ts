@@ -215,6 +215,25 @@ export const playersWithoutTilesSeen = (match: PublicMatchView): readonly Player
     .filter((player) => isRoundActive(player) && !player.hasSeenTiles)
     .map((player) => player.playerId);
 
+/**
+ * ALGUIEN SE FUE CON LA VENTANA DE REPARTO ABIERTA, y eso ANULA la partida: no gana nadie.
+ *
+ * Es la regla de v1 (`isGameValid()`, `two-players/domino-room-state.ts:196`): una partida cuenta
+ * recién cuando TODOS levantaron sus fichas. Antes de eso nadie jugó nada, así que coronar al que
+ * se quedó sería pagarle el premio de una partida que no empezó; lo que corresponde es devolver.
+ *
+ * DERIVADA y ESTABLE, sin campo propio: la ventana sólo existe en la ronda 1, y una ronda 1
+ * anulada no continúa nunca, así que se queda en `DEALING` para siempre. Sin ventana esa fase se
+ * atraviesa dentro de la misma llamada que reparte, así que nadie puede irse durante ella. La
+ * pregunta la hacen el juez (que no da veredicto), el conductor (que abre la pausa del aborto) y
+ * la red (que decide reembolsos, vetos y strikes) — tres lectores de un solo hecho.
+ */
+export const wasAbortedAtDeal = (match: Pick<PublicMatchView, "players" | "currentRound">) => {
+  const round = match.currentRound;
+  if (!round || round.roundNumber !== 1 || roundPhaseOf(round) !== "DEALING") return false;
+  return match.players.some((player) => player.hasAbandoned);
+};
+
 // ── privadas ─────────────────────────────────────────────────────────────────────────────────
 
 // Las dos guardas que los tres verbos de turno comparten, en el orden que comparten.

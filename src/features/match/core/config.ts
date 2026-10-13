@@ -77,12 +77,9 @@ export interface DominoMatchConfig {
    * juego, y multiplica los PUNTOS que el ganador suma al ranking — **no el premio**, que sale de
    * `prize`. Confundirlos es pagar de más.
    *
-   * EL MOTOR NO LO LEE, y por eso llegó tarde: las piedras de una ronda se cuentan igual en una
-   * mesa de peso 1 que en una de peso 5. Lo consume el reporte del cierre
-   * (`network/report-standings.ts`), que suma `acceptedBetExtra` encima — así lo hace v1
-   * (`domino-room-state.ts:582`), y esa suma es la razón por la que el peso tiene que estar
-   * congelado acá y no releerse del catálogo al cerrar: el modo pudo cambiar de peso mientras la
-   * partida se jugaba.
+   * EL MOTOR NO LO LEE: las piedras de una ronda se cuentan igual en una mesa de peso 1 que en una
+   * de peso 5. Está congelado acá y no se relee del catálogo al cerrar porque el modo pudo cambiar
+   * de peso mientras la partida se jugaba. Hoy ningún reporte del cierre lo consume.
    */
   readonly multiplier: number;
   /**

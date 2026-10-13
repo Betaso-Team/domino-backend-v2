@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "@/logger";
-import { requireAdminPanelKey } from "@/shared/http/api-key";
+import { requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import type { GameModeService } from "../../service";
@@ -25,18 +25,18 @@ import {
 export function adminRoutes({
   service,
   logger,
-  adminPanelApiKey,
+  adminApiKey,
 }: {
   readonly service: GameModeService;
   readonly logger: Logger;
-  readonly adminPanelApiKey: string | undefined;
+  readonly adminApiKey: string | undefined;
 }): Router {
   const router = Router();
 
   // FAIL CLOSED, y es la decisión del incremento entero: sin llave configurada las mutaciones NO
   // EXISTEN. La alternativa —registrarlas y comparar contra vacío— deja endpoints que configuran
   // dinero real respondiendo sin credencial, y el operador los ve contestar y los cree protegidos.
-  if (!adminPanelApiKey) {
+  if (!adminApiKey) {
     // LAS RUTAS VAN EN EL MENSAJE. El que llega a este log llega desde un 404 inexplicable en el
     // panel y busca por path: sin el path acá, el aviso que explica el 404 es justamente el que no
     // encuentra.
@@ -48,7 +48,7 @@ export function adminRoutes({
       `GET ${BASE}/reactive/:uuid`,
     ].join(", ");
     logger.warn(
-      `API administrativa del catálogo deshabilitada: falta BETASO_ADMIN_PANEL_API_KEY, no se registran ${missing}`,
+      `API administrativa del catálogo deshabilitada: falta ADMIN_API_KEY, no se registran ${missing}`,
     );
     return router;
   }
@@ -64,7 +64,7 @@ export function adminRoutes({
     // LA CREDENCIAL PRIMERO Y EL SCHEMA DESPUÉS, en las cinco mutaciones: al revés, un anónimo
     // puede distinguir "forma inválida" de "forma válida" en una ruta que no tiene derecho a
     // tocar.
-    requireAdminPanelKey(adminPanelApiKey),
+    requireAdminKey(adminApiKey),
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         await service.reactivate(params.uuid);
@@ -77,7 +77,7 @@ export function adminRoutes({
 
   router.post(
     BASE,
-    requireAdminPanelKey(adminPanelApiKey),
+    requireAdminKey(adminApiKey),
     validated({ body: CREATE_BODY }, async ({ body }, response) => {
       try {
         // 201 y no 200, igual que v1 (`routes.ts:94`).
@@ -90,7 +90,7 @@ export function adminRoutes({
 
   router.put(
     `${BASE}/:uuid`,
-    requireAdminPanelKey(adminPanelApiKey),
+    requireAdminKey(adminApiKey),
     validated({ params: UUID_PARAMS, body: UPDATE_BODY }, async ({ params, body }, response) => {
       try {
         sendData(response, 200, toDTO(await service.update(params.uuid, updateInputOf(body))));
@@ -104,7 +104,7 @@ export function adminRoutes({
   // `POST /game-modes/:uuid` que pueda absorberlo. El orden es el del plan y el del archivo de v1.
   router.post(
     `${BASE}/sync`,
-    requireAdminPanelKey(adminPanelApiKey),
+    requireAdminKey(adminApiKey),
     validated({}, async (_input, response) => {
       try {
         // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
@@ -124,7 +124,7 @@ export function adminRoutes({
 
   router.delete(
     `${BASE}/:uuid`,
-    requireAdminPanelKey(adminPanelApiKey),
+    requireAdminKey(adminApiKey),
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         // SIN `data`, igual que v1 (`routes.ts:167-170`): la baja devuelve el mensaje y nada más.

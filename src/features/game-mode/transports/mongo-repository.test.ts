@@ -154,6 +154,8 @@ describe("MongoGameModeRepository: el documento productivo", () => {
       isActive: true,
       isFreeRoom: false,
       enableBots: false,
+      // El único campo que v1 no tenía: los niveles de aumento, vacíos si no vienen.
+      betLevels: [],
       createdAt: new Date(BASE_INSTANT),
       updatedAt: new Date(BASE_INSTANT),
       __v: 0,
@@ -208,7 +210,7 @@ describe("MongoGameModeRepository: el documento productivo", () => {
   });
 
   // MEMOIZADO: crear índices es una operación de arranque, no de consulta. Sin el memo, cada lectura
-  // del catálogo —que es el camino del lobby— pagaría un round-trip extra contra la base para
+  // del catálogo —una por mesa que nace— pagaría un round-trip extra contra la base para
   // recrear cuatro índices que ya están.
   it("los índices se crean una sola vez para todas las operaciones", async () => {
     const { repository, collection } = harness();

@@ -60,7 +60,23 @@ describe("MatchRegistry", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
     });
+  });
+
+  // LOS NIVELES QUE LA MESA OFRECE, para pintar el aumento ANTES de proponer (truco `58ce78f`). Sale
+  // el `level` y los puntos que el front muestra; el `extra` es cómo se calcula el ranking, no algo
+  // que mostrar. El precio lo deriva el cliente con `betAmountsOf`.
+  it("publica los niveles de aumento sin el extra", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register(
+      "room-1",
+      replayConfigOf({ ...roomOptions, betLevels: [{ level: 3, extra: 7, additionalPoints: 15 }] }),
+    );
+
+    expect((await registry.publicConfigOf("room-1"))?.betLevels).toEqual([
+      { level: 3, additionalPoints: 15 },
+    ]);
   });
 
   // La allowlist ahora también decide qué SE ESCRIBE en el almacén compartido, no solo qué se
@@ -119,6 +135,7 @@ describe("MatchRegistry", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
     });
     expect(await procesoB.matchOf("u1")).toBe("room-1");
   });
@@ -223,6 +240,72 @@ describe("MatchRegistry", () => {
 
     expect(await nueva.matchOf("u1")).toBe("room-2");
     expect(await vieja.matchOf("u2")).toBeUndefined();
+  });
+});
+
+// LOS ASIENTOS QUE SE LIBERAN EN VIDA DE LA SALA. Una mesa que terminó sigue viva un rato —la
+// ventana de revancha, el traspaso, los clientes que no se fueron— y mientras tanto su registro
+// mandaba al jugador de vuelta a una partida terminada: el orquestador le devolvía ESE asiento y
+// `onJoin` lo rechazaba con `PlayerAlreadyOutError`. Portado de truco.
+describe("MatchRegistry: el latido suelta a quien ya no juega", () => {
+  it("suelta al que dejó de estar activo y renueva al resto", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", config);
+
+    await registry.keepAlive("room-1", ["u2"]);
+
+    expect(await registry.matchOf("u1")).toBeUndefined();
+    expect(await registry.matchOf("u2")).toBe("room-1");
+  });
+
+  it("con la partida terminada no queda nadie sentado, y la sala sigue respondiendo su config", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", config);
+
+    await registry.keepAlive("room-1", []);
+
+    expect(await registry.matchOf("u1")).toBeUndefined();
+    expect(await registry.matchOf("u2")).toBeUndefined();
+    expect(await registry.publicConfigOf("room-1")).toBeDefined();
+  });
+
+  // Soltado es para siempre: un latido posterior sin la lista —el de `rememberPlayer`— no puede
+  // volver a sentarlo, o el jugador quedaría preso de la mesa vieja otra vez.
+  it("un latido sin lista no revive a quien ya se soltó", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", config);
+    await registry.keepAlive("room-1", ["u2"]);
+
+    await registry.keepAlive("room-1");
+
+    expect(await registry.matchOf("u1")).toBeUndefined();
+    expect(await registry.matchOf("u2")).toBe("room-1");
+  });
+
+  it("no suelta al jugador que ya se sentó en otra mesa", async () => {
+    const compartido = new MemoryKeyValueStore();
+    const vieja = new MatchRegistry(compartido);
+    const nueva = new MatchRegistry(compartido);
+    await vieja.register("room-1", config);
+    await nueva.register(
+      "room-2",
+      replayConfigOf({ ...roomOptions, matchId: "m2", seats: [seat("u1", 0), seat("u3", 1)] }),
+    );
+
+    await vieja.keepAlive("room-1", []);
+
+    expect(await nueva.matchOf("u1")).toBe("room-2");
+  });
+
+  it("el censo cuenta solo a los que siguen jugando", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", config);
+
+    await registry.keepAlive("room-1", ["u2"]);
+    expect(await registry.census()).toMatchObject({ playersInMatch: 1 });
+
+    await registry.keepAlive("room-1", []);
+    expect(await registry.census()).toMatchObject({ playersInMatch: 0 });
   });
 });
 

@@ -5,8 +5,7 @@ export interface SettingsBook {
   current(): Promise<SettingsOverrides>;
 }
 
-// MOVERLOS. Puerto propio y no dos verbos más en el libro, por lo mismo que el interruptor de
-// mantenimiento se lee en un lugar y se mueve en otro: cómo se lee la verdad y cómo cambia son
+// MOVERLOS. Puerto propio y no dos verbos más en el libro: cómo se lee la verdad y cómo cambia son
 // preguntas distintas con públicos distintos.
 //
 // Los dos verbos devuelven todo como quedó, así el que escribió no tiene que volver a leer.

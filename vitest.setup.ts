@@ -1,6 +1,6 @@
 import "reflect-metadata";
-import { generateKeyPairSync } from "node:crypto";
 import dotenv from "dotenv";
+import { TEST_BILLING_AUTH_PUBLIC_KEY } from "./src/tests/billing-auth-keys";
 
 // EL `.env` NO EXISTE PARA LA SUITE, y esta línea es lo único que puede garantizarlo.
 //
@@ -32,23 +32,22 @@ import dotenv from "dotenv";
 // `@colyseus/tools` no tiene `node_modules` propio.
 dotenv.config = () => ({ parsed: {} });
 
-// src/env.ts valida el entorno al importarse y lanza si falta BETASO_BACKEND_JWT_SECRET (ver su cabecera).
+// src/env.ts valida el entorno al importarse y lanza si falta BILLING_AUTH_PUBLIC_KEY (ver su cabecera).
 // Estos defaults evitan que cualquier test que importe env.ts — directa o transitivamente —
 // explote solo por correr sin variables configuradas.
 process.env.NODE_ENV ??= "test";
-process.env.BETASO_BACKEND_JWT_SECRET ??= "test-secret-do-not-use-in-production";
+// La pública de la pareja fija de la suite: `mintBillingToken` firma con su privada.
+process.env.BILLING_AUTH_PUBLIC_KEY ??= TEST_BILLING_AUTH_PUBLIC_KEY;
 // Sin esto la API interna no se registra (fail closed) y sus tests e2e no tendrían
 // ruta contra la cual medir. El caso "sin llave" se prueba aparte, sin servidor.
-process.env.BETASO_ADMIN_PANEL_API_KEY ??= "test-admin-panel-key-do-not-use-in-production";
+process.env.ADMIN_API_KEY ??= "test-admin-key-do-not-use-in-production";
 process.env.ORCHESTRATOR_API_KEY ??= "test-orchestrator-key-do-not-use-in-production";
-// `parseEnv` exige la clave pública de billing-auth cuando hay llave del orquestador (sin ella las
-// mesas abren y nadie entra). Una P-256 recién generada: es PÚBLICA y sin su privada nadie firma nada.
-process.env.BILLING_AUTH_PUBLIC_KEY ??= generateKeyPairSync("ec", { namedCurve: "P-256" })
-  .publicKey.export({ type: "spki", format: "pem" })
-  .toString();
+// A QUIÉN LE PIDEN LOS COBROS LAS MESAS DEL ORQUESTADOR. Nadie escucha ahí: un test que necesite
+// que el cobro conteste levanta su propio orquestador de mentira (`src/tests/fake-orchestrator.ts`).
+process.env.ORCHESTRATOR_URL ??= "http://127.0.0.1:9/";
+process.env.ORCHESTRATOR_CALLBACK_API_KEY ??= "test-orchestrator-callback-key-not-for-production";
 // La de SALIDA, DISTINTA a propósito: con el mismo valor, un test que confundiera las dos llaves
 // daría verde.
-process.env.BETASO_BACKEND_API_KEY ??= "test-backend-key-do-not-use-in-production";
 // SE BORRA, no se ignora, y es la única variable que este archivo saca en vez de poner.
 // La presencia de `MONGO_URI` es lo que elige la implementación del historial en el
 // composition root (ver src/di-container.ts), así que un desarrollador que la tenga
@@ -84,6 +83,9 @@ delete process.env.REDIS_URL;
 // cuando el broker no está —cuelga, ver `src/shared/amqp.ts`—, así que el modo de falla del
 // olvido no sería un rojo sino una suite que se queda esperando.
 delete process.env.RABBITMQ_URL;
+// Y EL DE LA PLATAFORMA DE JUEGOS, por lo mismo y con el mismo daño: publicaría resultados de
+// partidas inventadas a la cola del orquestador, que los liquidaría.
+delete process.env.BETASO_GAMES_RABBITMQ_URL;
 process.env.PORT ??= "2567";
 // LOS PLAZOS SE DIVIDEN EN LOS QUE VENCEN Y LOS QUE SE CANCELAN (truco `9d543c6`), no en cortos
 // y largos. Los que VENCEN —las pausas de presentación— los espera el flujo entero en cada mano,

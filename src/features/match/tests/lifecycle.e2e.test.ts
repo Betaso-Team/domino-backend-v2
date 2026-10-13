@@ -4,7 +4,9 @@ import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
+import type { MatchState } from "../core/state";
 import {
+  type SeatedMatch,
   act,
   bootServer,
   casualTable,
@@ -13,6 +15,7 @@ import {
   linesOf,
   mintToken,
   participantOf,
+  playOneTurn,
   revealHands,
   seatPair,
   waitUntil,
@@ -24,7 +27,7 @@ const HISTORY_URL = (matchId: string) =>
   `http://localhost:2585/internal/matches/${matchId}/history`;
 // La misma llave que vitest.setup.ts le pone al entorno: es la credencial de la consola
 // de soporte, no un dato de la partida.
-const INTERNAL_HEADERS = { "x-internal-api-key": env.adminPanelApiKey ?? "" };
+const INTERNAL_HEADERS = { "x-internal-api-key": env.adminApiKey ?? "" };
 
 let originalGlobalConfig: GlobalDominoConfig;
 
@@ -44,6 +47,29 @@ afterAll(async () => {
   rootContainer.register("GlobalDominoConfig", { useValue: originalGlobalConfig });
 });
 
+// HASTA LA PAUSA DEL VEREDICTO y no más: `playUntilDecided` sigue hasta la ventana o el terminal,
+// y lo que se mide acá pasa ADENTRO de esa pausa.
+async function playUntilVerdict(match: SeatedMatch): Promise<void> {
+  for (let turns = 0; turns < 3_000; turns += 1) {
+    if (match.serverState.phase === "PRESENTING_MATCH") return;
+    if (!(await playOneTurn(match))) {
+      await waitUntil(
+        () =>
+          match.serverState.currentRound?.phase === "PLAYING" ||
+          match.serverState.phase === "PRESENTING_MATCH",
+        3_000,
+      );
+    }
+  }
+}
+
+// Muestrea las fases camino al terminal: una ventana que se abriera quedaría arriba 300 ms.
+async function phasesUntilFinished(match: SeatedMatch): Promise<Set<string>> {
+  const phases = new Set<string>();
+  await waitUntil(() => phases.add(match.serverState.phase).has("FINISHED"), 5_000);
+  return phases;
+}
+
 describe("ciclo de vida de una partida", () => {
   it("la partida arranca sola al ocuparse el último asiento", async () => {
     const match = await seatPair(server, ["u1", "u2"]);
@@ -59,13 +85,18 @@ describe("ciclo de vida de una partida", () => {
 
   it("abandonar cierra la partida por forfeit, y el historial queda intercalado", async () => {
     const match = await seatPair(server, ["a1", "a2"]);
-    await waitUntil(() => match.serverState.phase === "PLAYING");
+    // Destapadas primero: irse con la ventana de reparto abierta ANULA, no da forfeit.
+    await revealHands(match);
 
     await act(match, "a1", "ABANDON");
     expect(match.serverState.phase).toBe("PRESENTING_MATCH");
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
     expect(await linesOf("m-a1-a2")).toEqual([
+      "SYSTEM ROUND_STARTED",
+      "SYSTEM TILES_DEALT",
+      "PLAYER REVEAL_TILES",
+      "PLAYER REVEAL_TILES",
       "PLAYER ABANDON",
       "SYSTEM MATCH_RESOLVED",
       "SYSTEM DEADLINE_EXPIRED",
@@ -76,6 +107,7 @@ describe("ciclo de vida de una partida", () => {
 
   it("el seq no tiene huecos y es estrictamente creciente", async () => {
     const match = await seatPair(server, ["s1", "s2"]);
+    await revealHands(match);
     await act(match, "s1", "ABANDON");
     await waitUntil(() => match.serverState.phase === "FINISHED", 3_000);
 
@@ -83,6 +115,40 @@ describe("ciclo de vida de una partida", () => {
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
     expect(seqs).toEqual(seqs.map((_, index) => index + 1));
   });
+
+  // DESDE EL VEREDICTO, IRSE ES IRSE (truco `0960663`): el que se va en la pausa del final no vuelve
+  // a esta mesa, así que la ventana de revancha no se abre ni apagada.
+  it("si alguien se va en la pausa del veredicto, la ventana de revancha no se abre", async () => {
+    const match = await seatPair(server, ["vs1", "vs2"]);
+    await revealHands(match);
+    await playUntilVerdict(match);
+
+    await clientOf(match, "vs2").leave();
+
+    expect(await phasesUntilFinished(match)).not.toContain("REMATCH_WINDOW");
+  }, 60_000);
+
+  // Y una recarga no es excepción: la caída cuenta igual que la salida.
+  it("si alguien se cae en la pausa del veredicto, la ventana tampoco se abre", async () => {
+    const match = await seatPair(server, ["vd1", "vd2"]);
+    await revealHands(match);
+    await playUntilVerdict(match);
+
+    const client = clientOf(match, "vd2");
+    client.reconnection.enabled = false;
+    void client.leave(false);
+
+    expect(await phasesUntilFinished(match)).not.toContain("REMATCH_WINDOW");
+  }, 60_000);
+
+  // El control: sin nadie que se vaya, la misma mesa sí abre la ventana (apagada).
+  it("si nadie se va, la ventana se abre", async () => {
+    const match = await seatPair(server, ["vc1", "vc2"]);
+    await revealHands(match);
+    await playUntilVerdict(match);
+
+    expect(await phasesUntilFinished(match)).toContain("REMATCH_WINDOW");
+  }, 60_000);
 
   it("un verbo desconocido se rechaza y no entra al historial", async () => {
     const match = await seatPair(server, ["r1", "r2"]);
@@ -93,7 +159,12 @@ describe("ciclo de vida de una partida", () => {
 
     await waitUntil(() => illegal.length > 0);
     expect(illegal[0]).toEqual({ code: "UNKNOWN_COMMAND" });
-    expect(await historyOf("m-r1-r2")).toHaveLength(0);
+    // Lo único grabado es el reparto: el verbo rechazado no entra.
+    await waitUntil(() => match.serverState.phase === "PLAYING");
+    expect((await historyOf("m-r1-r2")).map((entry) => entry.type)).toEqual([
+      "ROUND_STARTED",
+      "TILES_DEALT",
+    ]);
     expect(match.serverState.phase).toBe("PLAYING");
   });
 
@@ -115,9 +186,27 @@ describe("ciclo de vida de una partida", () => {
     await server.sdk.joinById(match.roomId);
     await waitUntil(() => server.getRoomById(match.roomId).clients.length === 2);
 
+    // Ni caída ni regreso: para el rival, d1 nunca se fue (truco `b90840b`).
     expect(
-      (await linesOf("m-d1-d2")).filter((line) => line.includes("PLAYER_DISCONNECTED")),
+      (await linesOf("m-d1-d2")).filter(
+        (line) => line.includes("PLAYER_DISCONNECTED") || line.includes("PLAYER_RECONNECTED"),
+      ),
     ).toEqual([]);
+  });
+
+  it("la misma cuenta dos veces no completa la mesa: arranca cuando se sientan todos", async () => {
+    const room = await server.createRoom("domino", casualTable(["dup1", "dup2"]));
+    server.sdk.auth.token = mintToken(participantOf("dup1"));
+    await server.connectTo(room);
+    await server.connectTo(room);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const startedAt = () => (server.getRoomById(room.roomId).state as MatchState).startedAt;
+    expect(startedAt()).toBe(0);
+
+    server.sdk.auth.token = mintToken(participantOf("dup2"));
+    await server.connectTo(room);
+    await waitUntil(() => startedAt() > 0);
   });
 
   it("quien no tiene asiento no entra", async () => {
@@ -156,6 +245,7 @@ describe("ciclo de vida de una partida", () => {
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
+      betLevels: [],
       serverNow: expect.any(Number),
     });
   });
@@ -221,7 +311,12 @@ describe("ciclo de vida de una partida", () => {
 
     expect(response.status).toBe(200);
     expect(body.matchId).toBe("m-h1-h2");
-    expect(body.entries.map((entry) => entry.type)).toEqual(["REVEAL_TILES", "REVEAL_TILES"]);
+    expect(body.entries.map((entry) => entry.type)).toEqual([
+      "ROUND_STARTED",
+      "TILES_DEALT",
+      "REVEAL_TILES",
+      "REVEAL_TILES",
+    ]);
   });
 
   it("una partida sin historial es 404 y no un cuerpo vacío", async () => {
@@ -238,7 +333,7 @@ describe("ciclo de vida de una partida", () => {
   // Las DOS llaves malas son dos ramas distintas del guard, y una sola no cubre la otra:
   // la corta muere en el `a.length === b.length` —que existe porque `timingSafeEqual` LANZA
   // con buffers de distinto largo—, y la del MISMO LARGO es la única que llega a la
-  // comparación en tiempo constante. Se deriva de `env.adminPanelApiKey` y no se escribe a
+  // comparación en tiempo constante. Se deriva de `env.adminApiKey` y no se escribe a
   // mano: una constante literal deja de medir el largo real el día que la llave de
   // vitest.setup.ts cambie, y el test seguiría verde midiendo la rama equivocada. Así
   // estaba antes —37 caracteres contra una llave de 42— y por eso se corrigió.
@@ -246,7 +341,7 @@ describe("ciclo de vida de una partida", () => {
     const match = await seatPair(server, ["k1", "k2"]);
     await revealHands(match);
 
-    const mismoLargo = "x".repeat(env.adminPanelApiKey?.length ?? 0);
+    const mismoLargo = "x".repeat(env.adminApiKey?.length ?? 0);
     const sinLlave = await fetch(HISTORY_URL("m-k1-k2"));
     const conLlaveCorta = await fetch(HISTORY_URL("m-k1-k2"), {
       headers: { "x-internal-api-key": "corta" },
@@ -255,8 +350,8 @@ describe("ciclo de vida de una partida", () => {
       headers: { "x-internal-api-key": mismoLargo },
     });
 
-    expect(mismoLargo).toHaveLength(env.adminPanelApiKey?.length ?? 0);
-    expect(mismoLargo).not.toBe(env.adminPanelApiKey);
+    expect(mismoLargo).toHaveLength(env.adminApiKey?.length ?? 0);
+    expect(mismoLargo).not.toBe(env.adminApiKey);
     expect(sinLlave.status).toBe(401);
     expect(await sinLlave.json()).toEqual({ error: "UNAUTHORIZED" });
     expect(conLlaveCorta.status).toBe(401);

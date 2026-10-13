@@ -1,3 +1,13 @@
+// UN NIVEL DE AUMENTO que el modo ofrece: `level` multiplica la entrada y el premio (x2, x3, x5),
+// `extra` se suma al multiplicador de ranking y `additionalPoints` es lo que el ganador suma de más
+// (se muestra antes de aceptar). Misma forma que el `betLevels` del `CreateMatchRequest`: el
+// orquestador los lee de acá y los manda con la mesa, porque es él quien cobra el aumento.
+export interface GameModeBetLevel {
+  readonly level: number;
+  readonly extra: number;
+  readonly additionalPoints: number;
+}
+
 // La entidad PORTABLE del catálogo: lo que el resto del sistema nombra cuando dice "un modo
 // de juego". No es el documento BSON —ese vive adentro del adaptador Mongo (Tarea 4) y trae
 // `_id` y `__v`—, ni el DTO HTTP —que reconstruye esos dos nombres para el panel de v1—.
@@ -31,6 +41,9 @@ export interface GameMode {
   // los tiene y perderlos en un round-trip sería una migración destructiva encubierta.
   readonly isFreeRoom: boolean;
   readonly enableBots: boolean;
+  // LOS AUMENTOS QUE OFRECE, ordenados por nivel. **Vacío = no ofrece aumentar**, y es el reposo:
+  // un modo que nadie configuró (o un Novato) no cobra de más.
+  readonly betLevels: readonly GameModeBetLevel[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
   // El `__v` de Mongoose, que este incremento usa como REVISIÓN y no como adorno: el
@@ -43,7 +56,12 @@ export interface GameMode {
 // repetidos en los dos `Omit`/`Pick` de abajo porque la lista tiene que ser UNA: si un campo
 // se agrega al default y se olvida en el otro lado, el tipo queda pidiendo un valor que el
 // llamador no tiene por qué conocer.
-type DefaultedGameModeFields = "multiplier" | "pointsToWin" | "isFreeRoom" | "enableBots";
+type DefaultedGameModeFields =
+  | "multiplier"
+  | "pointsToWin"
+  | "isFreeRoom"
+  | "enableBots"
+  | "betLevels";
 
 // Lo que hace falta para CREAR un modo. Fuera quedan la identidad (`id`/`uuid`), las fechas y
 // la revisión —los pone el repositorio—, `isActive` —un modo nace activo; darlo de baja es
@@ -70,5 +88,6 @@ export type UpdateGameMode = Partial<
     | "isActive"
     | "isFreeRoom"
     | "enableBots"
+    | "betLevels"
   >
 >;

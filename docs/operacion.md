@@ -8,8 +8,20 @@ npm install
 npm run dev
 ```
 
-`BETASO_BACKEND_JWT_SECRET` es obligatorio. `BETASO_ADMIN_PANEL_API_KEY` (la que nos presenta el panel) habilita las rutas internas; `BETASO_BACKEND_API_KEY` (la que presentamos al backend) habilita torneo, antifraude y niveles de apuesta. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches` y `POST /internal/players/:userId/seat`; sin ella esas rutas responden 404, y si está el arranque exige `BILLING_AUTH_PUBLIC_KEY` y que no repita ninguna de las otras dos llaves. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor `JWT_ISSUER` (default `betaso-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; los HS256 del backend principal siguen valiendo. Mongo, Redis, RabbitMQ
-y el backend principal son capacidades opcionales elegidas por la presencia de sus URLs.
+`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor `JWT_ISSUER` (default `betaso-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y los dos
+brokers de RabbitMQ son capacidades opcionales elegidas por la presencia de sus URLs.
+
+El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
+Las partidas ya abiertas terminan.
+
+`npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
+siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local, dev y stage, `info` en
+prod) salvo un `LOG_LEVEL` explícito. Cada línea lleva `instance`, `release` y el `traceId` de la
+causa en curso, y nunca un `token` ni un `authorization` (salen `[oculto]`).
+
+En local, dev y stage existen además dos secciones de `/internal/settings`, detrás de la llave del panel,
+para probar a mano: `deal` fija las fichas de cada asiento (`{"hands": [[[6,6]], [[0,0]]]}`) y
+`starting-score` el marcador con el que nace la próxima mesa. Se borran con `DELETE`.
 
 Con el stack local completo:
 
@@ -72,7 +84,7 @@ sequenceDiagram
 
   PM2->>Main: mensaje shutdown o señal
   Main->>Server: gracefullyShutdown(false)
-  Server->>Server: cerrar salas y matchmaking
+  Server->>Server: cerrar salas
   Main->>Container: shutdown()
   Container->>Container: drenar historial y outbox
   Container->>Mongo: cerrar cliente
@@ -81,6 +93,30 @@ sequenceDiagram
 
 Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos durante el deploy. Un
 `kill -9` no ejecuta este flujo: las claves huérfanas desaparecen por TTL.
+
+## Resultados de partida
+
+Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
+`betaso_games` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
+(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite, con espera
+creciente hasta 5 minutos.
+
+- **Un resultado trabado** deja un `warn` por cada fallo, y pasados **10 minutos** sin salir cada fallo
+  es un `error` con `«el resultado de partida lleva demasiado sin salir»`. Es la línea que conviene
+  alertar: detrás hay un premio que no se pagó.
+- **Si el broker pierde su disco**, se pierde lo que estaba en las colas sin consumir, pero dominó
+  conserva cada resultado de los últimos 7 días. Para reenviarlos, se vuelven a `PENDING` los enviados
+  desde un poco antes del incidente; el despachador los publica solo:
+
+  ```js
+  db.match_result_outbox.updateMany(
+    { status: "SENT", sentAt: { $gte: ISODate("<instante anterior al incidente>") } },
+    { $set: { status: "PENDING", attempts: 0, nextAttemptAt: new Date() }, $unset: { sentAt: "" } },
+  )
+  ```
+
+  Repetirlos es seguro: el orquestador encuentra las órdenes de un premio por su clave y no paga dos
+  veces, y cada cliente descarta un reporte repetido por `Idempotency-Key`.
 
 ## Verificación
 
@@ -185,7 +221,10 @@ niegan a arrancar mientras el otro medio esté sirviendo, porque usan el mismo p
      `BILLING_AUTH_PUBLIC_KEY`;
    - `MONGO_URI` (el Mongo del VPS escucha en `:27018`);
    - `REDIS_URL`, con un índice propio;
-   - `RABBITMQ_URL`.
+   - `RABBITMQ_URL`;
+   - para las mesas del orquestador, `ORCHESTRATOR_URL` (la base del orquestador),
+     `ORCHESTRATOR_CALLBACK_API_KEY` (= `DOMINO_CALLBACK_API_KEY` del orquestador) y
+     `BETASO_GAMES_RABBITMQ_URL` (el vhost `betaso_games`, donde salen los resultados).
 2. Crear el vhost del dominio hacia `127.0.0.1:PORT`, con el `RewriteRule … ws://` del upgrade de
    WebSocket.
 3. Cargar en GitHub las variables y los secretos de arriba, y sumar el entorno a `DEPLOY_ENVIRONMENTS`.

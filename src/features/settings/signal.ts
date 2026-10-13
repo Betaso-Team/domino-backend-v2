@@ -14,8 +14,8 @@ export const SETTINGS_POLL_MS = 5_000;
 
 // LO QUE EL RESTO DEL SERVIDOR CONSUME: la configuración como está AHORA, sin esperar la red.
 //
-// Separada del libro por lo mismo que la señal de mantenimiento —el libro es dónde se lee la verdad,
-// esto es cómo se mantiene al día a todos—, y esa separación es la que compra UNA lectura de la base
+// Separada del libro —el libro es dónde se lee la verdad, esto es cómo se mantiene al día a todos—,
+// y esa separación es la que compra UNA lectura de la base
 // por proceso y por pasada, sin importar cuántas mesas nazcan en el medio.
 export interface SettingsSignal {
   // Los valores de la sección con sus overrides encima. `T` es el emparejamiento que hace el que
@@ -35,7 +35,7 @@ export interface PolledSettingsSignalDeps {
 
 // LA CONFIGURACIÓN DE HOY: lo único que le pregunta a la base, y de donde leen todos los demás.
 //
-// Dos cosas que la señal de mantenimiento no hace, las dos a propósito:
+// Dos cosas que hace a propósito:
 //
 //   · GUARDA EL ÚLTIMO VALOR BUENO cuando una pasada falla, en vez de volver a los defaults. Un hipo
 //     de la base que le cambiara la configuración a todos a mitad de sesión sería peor que estar

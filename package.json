@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsup",
     "start": "node dist/main.js",
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch src/main.ts | pino-pretty",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
@@ -50,6 +50,7 @@
     "@types/node": "^24.10.1",
     "dependency-cruiser": "^16.10.0",
     "mermaid": "^11.17.2",
+    "pino-pretty": "^13.2.0",
     "svg-pan-zoom": "^3.6.2",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",

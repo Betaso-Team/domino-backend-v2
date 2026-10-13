@@ -68,7 +68,12 @@ const refundOfMoney1 = {
   ],
 };
 
-const abortReasons: readonly AbortReason[] = ["NEVER_STARTED", "NEVER_PLAYED", "INTERRUPTED"];
+const abortReasons: readonly AbortReason[] = [
+  "NEVER_STARTED",
+  "TILES_NOT_SEEN",
+  "NEVER_PLAYED",
+  "INTERRUPTED",
+];
 
 describe("settlementOf", () => {
   it("premia al ganador con su identidad y la moneda cobrada", () => {
@@ -99,6 +104,24 @@ describe("settlementOf", () => {
       );
     },
   );
+
+  // ⚠ SALVO AL QUE SE FUE HABIENDO LEVANTADO SUS FICHAS, que pierde la inscripción como en v1
+  // (`two-players/domino-room-state.ts:467-475`).
+  it("no le devuelve la inscripción al que se fue habiendo levantado sus fichas", () => {
+    const match = matchOf();
+    Object.assign(match.players[0] ?? {}, { hasAbandoned: true, hasSeenTiles: true });
+    expect(
+      settlementOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config),
+    ).toEqual({ ...refundOfMoney1, entries: [refundOfMoney1.entries[1]] });
+  });
+
+  it("el que se fue SIN levantar sí recupera la inscripción", () => {
+    const match = matchOf();
+    Object.assign(match.players[0] ?? {}, { hasAbandoned: true, hasSeenTiles: false });
+    expect(
+      settlementOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config),
+    ).toEqual(refundOfMoney1);
+  });
 
   it("reembolsa las cuatro entradas de una mesa de cuatro, cada una en su moneda", () => {
     const fourSeatConfig = replayConfigOf(fourSeatOptions);
@@ -163,6 +186,37 @@ describe("settlementOf", () => {
 // LA MESA DE CUATRO PAGA, y hasta este incremento no podía: la guarda pedía EXACTAMENTE un
 // ganador, que era lo que mantenía inerte la falta de una regla de reparto. La regla existía y
 // estaba en v1.
+describe("settlementOf — el aumento de apuesta aceptado", () => {
+  // EL AUMENTO MULTIPLICA LA MESA ENTERA (`betAmountsOf`, la regla de v1): aceptado el nivel N, la
+  // entrada vale `entryFee × N` y el premio `prize × N`. La config está CONGELADA al nacer, así que
+  // el nivel se lee del ESTADO; sin eso, el que ganó una mesa a x3 cobraba el premio de x1.
+  const withBet = (level: number) => {
+    const match = matchOf();
+    match.acceptedBetLevel = level;
+    match.acceptedBetExtra = 1;
+    return match;
+  };
+
+  it("paga el premio con el nivel aceptado", () => {
+    const match = withBet(3);
+    const winnerTeamId = match.players[0]?.teamId as "A" | "B";
+    expect(
+      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, config)
+        ?.entries,
+    ).toEqual([{ userId: "ada", currency: "VES", amount: 750, idempotencyKey: rewardKey }]);
+  });
+
+  it("reembolsa la entrada con el nivel aceptado", () => {
+    expect(
+      settlementOf(
+        { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
+        withBet(2),
+        config,
+      )?.entries.map(({ amount }) => amount),
+    ).toEqual([250, 250]);
+  });
+});
+
 describe("settlementOf — el premio de la pareja", () => {
   const fourSeatConfig = replayConfigOf(fourSeatOptions);
   const fourSeatMatch = () => createMatchState(fourSeatConfig);

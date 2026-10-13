@@ -63,15 +63,15 @@ describe.skipIf(!MONGO_INT_URI)("MongoSettings (el parche y la convivencia con v
 
   it("cada sección vive por su cuenta", async () => {
     await settings.save("match", { presentingRoundMs: 6000 });
-    await settings.save("matchmaking", { searchTimeoutMs: 90_000 });
+    await settings.save("otra", { searchTimeoutMs: 90_000 });
 
     await settings.clear("match");
 
-    expect(await settings.current()).toEqual({ matchmaking: { searchTimeoutMs: 90_000 } });
+    expect(await settings.current()).toEqual({ otra: { searchTimeoutMs: 90_000 } });
   });
 
-  // LA QUE IMPORTA el día que alguien mueva esto: el interruptor de mantenimiento se lee de un
-  // documento de esta misma colección.
+  // LA QUE IMPORTA el día que alguien mueva esto: el singleton de v1 —con su interruptor de
+  // mantenimiento, que v1 todavía lee— vive en esta misma colección.
   it("el documento de v1 queda intacto después de escribir el nuestro", async () => {
     await (await mongo.collection(COLLECTION)).insertOne({ ...V1 });
 

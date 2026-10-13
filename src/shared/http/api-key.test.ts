@@ -1,6 +1,6 @@
 import type { Request, RequestHandler, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
-import { API_KEY_HEADER, requireAdminPanelKey } from "./api-key";
+import { API_KEY_HEADER, requireAdminKey } from "./api-key";
 
 // LA PUERTA DE LAS RUTAS INTERNAS: la que pide la llave que el PANEL DE ADMINISTRACIÓN presenta para
 // administrar el catálogo, el mantenimiento, el historial de soporte y la configuración en caliente.
@@ -42,7 +42,7 @@ const knock = (guard: RequestHandler, key?: string) => {
   return { sent, next };
 };
 
-const guard = requireAdminPanelKey("la-llave");
+const guard = requireAdminKey("la-llave");
 
 describe("la puerta de la llave interna", () => {
   it("con la llave correcta deja pasar sin contestar nada", () => {
@@ -89,7 +89,7 @@ describe("la puerta de la llave interna", () => {
   // Y con la llave configurada en blanco no pasa NADIE, ni siquiera el que manda el header vacío:
   // una instalación mal configurada no puede terminar siendo una puerta abierta.
   it("con la llave esperada vacía no deja pasar a nadie", () => {
-    const abierta = requireAdminPanelKey("");
+    const abierta = requireAdminKey("");
 
     expect(knock(abierta, "").sent.status).toBe(401);
     expect(knock(abierta, undefined).sent.status).toBe(401);

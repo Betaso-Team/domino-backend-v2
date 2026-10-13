@@ -24,8 +24,8 @@ const CONFIG_PARAMS = z.object({
 });
 
 // UNA PARTIDA: su configuración pública, para el que se va a sentar o ya está sentado. Dos puertas y
-// la misma respuesta: `/matches/:roomId` pide token —lleva perfiles y apuesta— y `/config/:roomId`
-// es la de siempre, pública, con el `serverNow` del que el cliente saca su desfase de reloj.
+// la misma configuración: `/matches/:roomId` pide token y `/config/:roomId` es la de siempre,
+// pública, con el `serverNow` del que el cliente saca su desfase de reloj.
 export function matchRoutes(deps: {
   readonly registry: MatchRegistry;
   readonly clock: Clock;

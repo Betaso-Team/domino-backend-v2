@@ -4,6 +4,34 @@ Backend de dominó multijugador sobre Colyseus 0.18. Es un **port de la arquitec
 truco** (`truco-backend-v2`), no un rediseño: cuando algo no cierra, la respuesta suele
 estar en cómo lo resolvió truco.
 
+## Estado actual — leelo antes que el historial de abajo
+
+El resto de este archivo es el registro de los incrementos, en orden; esta sección es la foto de hoy.
+
+- **El dominó es un game backend del orquestador de Betaso Juegos**
+  (`betaso-games-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
+  entrada**: admite, empareja, tiene el único interruptor de mantenimiento y abre cada mesa por la API
+  interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/census`,
+  en `features/match/transports/http/tables.ts`). Toda sala `domino` nace de un `CreateMatchRequest`.
+- **No hay lobby, emparejador ni mantenimiento propios.** No hay sala `lobby`, ni `GET /maintenance`,
+  ni `GET /players-in-match`, ni `POST /internal/lobby/maintenance`. La configuración en caliente
+  (`/internal/settings`) tiene una sola sección, `match`, más `deal` y `starting-score` en local y dev
+  (herramientas de prueba a mano).
+- **Un juego nunca mueve dinero.** El dominó no tiene billetera, ledger ni credenciales de ninguna:
+  le pide al orquestador que cobre la entrada (`chargeEntry`) y cada aumento
+  (`OrchestratorBetCharger`), y le publica el resultado por el outbox de `betaso_games`
+  (`MatchResultRecorder`). Tampoco reporta ranking ni liga, ni sirve `/me/matches` o `/me/metrics`.
+- **Un solo emisor de tokens: billing-auth.** El `JwtVerifier` acepta solo ES256 contra
+  `BILLING_AUTH_PUBLIC_KEY` (obligatoria); no hay HS256 ni secreto compartido con el backend de
+  Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
+  llave nuestra, no la de un cliente.
+- **La revancha**: el motor abre la ventana (`isRematchEnabled: true` en `configOf`), pero nadie abre
+  la compuerta, así que sale siempre con `eligible: false`. Revancha de verdad pide que el orquestador
+  vuelva a cobrar.
+- **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
+  compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
+  `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
+
 ## El plan es la autoridad
 
 `docs/superpowers/plans/2026-09-09-domino-v2-esqueleto-y-juego-2p.md` — 24 tareas (la 0 a la
@@ -277,7 +305,7 @@ el punto de la tarea— pero **cliente y servidor tienen que desplegarse juntos*
 no se pueda, los campos nuevos van al FINAL en vez de al medio.
 
 Al terminar cada tarea, actualizar esta línea con tarea, commit, baseline y primer paso pendiente.
-No cambiar `maxClients`: sigue abierta la deuda del `unlock()` descrita más abajo.
+La sala ya no tiene `maxClients` (ver «la tanda del 06 al 08/10» al final): la deuda del `unlock()` se cerró.
 
 **Si retomás por la Task 3**, leé antes el bloque «Lo que la revisión agregó» al final de la Task 2
 del plan: los snippets de esa tarea NO son el código que quedó, y el smoke se escribe contra lo que
@@ -285,10 +313,10 @@ quedó.
 
 **Deudas abiertas — NO CUMPLIDAS:**
 
-1. El `unlock()` de `onDrop` no tiene test y es inalcanzable bajo el
-   `maxClients = seats.length * 2` actual. La condición exacta que lo reactiva está en el recuadro
-   ⛔ de la Tarea 22 y junto al propio `unlock()`: **si tocás `maxClients`, leelo y agregá el test
-   antes de cambiarlo.**
+1. ~~El `unlock()` de `onDrop` no tiene test y es inalcanzable.~~ **CERRADA**: la sala ya no tiene
+   `maxClients`, así que nunca se bloquea y el `unlock()`/`lock()` se borraron (`7927c39`). Si alguna
+   vez vuelve un tope, las reservas sin consumir vuelven a contar contra él y el dueño de un asiento
+   rebota contra su propia mesa: medilo con el e2e de las vueltas sin consumir.
 2. ~~**El 4P no tiene regla de reparto del premio.**~~ **CERRADO, y la deuda era FALSA**: la regla
    estaba escrita en v1 (`domino-room-state.ts:672-678`) y `settlementOf` ya la implementaba por
    construcción. Ver el bloque «la mesa de cuatro y la máquina que la sostiene» al final.
@@ -1291,17 +1319,19 @@ la misma trampa que ya pagó `src/deploy-smoke.test.ts`.
    archivos de `matchmaking/`, `tournament/`, `economy/` y media docena de `shared/`. Es cosmético
    y es real: la doctrina de este repo vive en los comentarios, y media base en otro idioma la parte
    en dos. No se tocó por volumen.
-2. **`features/lobby/` y `features/matchmaking/` conviven.** El `LobbyRoom` que `app.config.ts`
+2. ~~**`features/lobby/` y `features/matchmaking/` conviven.** El `LobbyRoom` que `app.config.ts`
    registra es el de matchmaking; del viejo sobrevive `LobbySettings` —que es el almacén del
    mantenimiento y lo usa el libro del container— y su `LobbyRoomState`. **El `LobbyRoom` viejo sigue saliendo por el
    `index.ts` de su feature y NO lo importa nadie: es una exportación muerta.** Antes de borrarlo hay que decidir dónde vive la palanca de
-   mantenimiento, porque hoy vive ahí al lado.
+   mantenimiento, porque hoy vive ahí al lado.~~ **Cerrada:** no existen ni `lobby/` ni
+   `matchmaking/`, y la palanca de mantenimiento es la del orquestador (ver «Sin lobby propio»).
 3. **El smoke real no se volvió a correr.** Pide Docker y no se ejecutó en esta tanda. La identidad plana
    tocó `src/smoke/engine-smoke.ts` —los dos asientos pasaron de compartir `shared-smoke-uuid` en
    dos plataformas a `smoke-ada`/`smoke-lin`, porque el `userId` repetido ya no valida— y eso solo
    lo certifica `npm run smoke:client` contra el compose.
-4. **Sigue sin haber orquestador que cobre.** `settlementOf` proyecta y nadie la llama — es lo que
-   este incremento difirió a propósito.
+4. ~~**Sigue sin haber orquestador que cobre.** `settlementOf` proyecta y nadie la llama — es lo que
+   este incremento difirió a propósito.~~ **Cerrada:** el orquestador cobra y `settlementOf` alimenta el
+   resultado que se le publica.
 
 ## Incremento completo — la revancha
 
@@ -1900,10 +1930,10 @@ en verde.
 | `dfc6603` suite en paralelo en el CI | **PORTADO** (`0c6566d`) con una corrección que acá era obligatoria — abajo |
 | `32d83de` caché de `node_modules`, docs fuera del deploy, reuso de dependencias en el servidor | **PORTADO** (`cc233c9`, `ff6488b`). El backtick del heredoc no existe acá |
 | `ad1ccdd` sondear las bases una vez | **NO APLICA**: el CI del dominó no tiene servicios |
-| `fa246ad` core-loop: rake perdonado a nuevos + ventana blanda del emparejador | **NO PORTADO, y es regresión contra v1**: `Betaso-Domino-Backend/src/core-loop/` existe (`full-pot.ts`, `core-loop.service.ts`) y el lobby de v1 lo usa. Es negocio con plata; va en un incremento propio |
-| `cfb0393` abortar si alguien se va en la ventana de reparto | **NO PORTADO**: ciclo de vida de la partida y reembolso, no infraestructura. Revisar contra v1 antes de decidir |
-| `b0d7e4c` strike de torneo al que abandona por su cuenta | **NO PORTADO**: negocio de torneo |
-| `d6e3219` fijar el reparto desde `/settings/deal` en local/dev | **NO PORTADO**: herramienta de prueba, pero el preset (vira, flor) es de cartas; el gemelo del dominó sería fijar fichas |
+| `fa246ad` core-loop: rake perdonado a nuevos + ventana blanda del emparejador | ~~NO PORTADO~~ **PORTADO** después — ver «la tanda del 06/10» |
+| `cfb0393` abortar si alguien se va en la ventana de reparto | ~~NO PORTADO~~ **PORTADO** después, y v1 decía lo mismo — ver «la tanda del 06/10» |
+| `b0d7e4c` strike de torneo al que abandona por su cuenta | ~~NO PORTADO~~ **PORTADO** después — ver «la tanda del 06/10» |
+| `d6e3219` fijar el reparto desde `/settings/deal` en local/dev | ~~NO PORTADO~~ **PORTADO** después, con fichas — ver «la tanda del 06/10» |
 | `4a0873e`, `9068b10`, `133290a`, `7947c95`, `f109e86`, `d655a28`, `735ff75`, `07d5e20` | reglas y pausas de truco |
 
 - **`APP_ENV` vive en el `.env` de cada servidor y NO viaja con el deploy.** Truco lo manda el
@@ -1926,6 +1956,107 @@ en verde.
 - **Sin verificar**: `actionlint`, `shellcheck` y el despliegue de verdad — Docker estaba apagado.
   El reuso de dependencias se ensayó en seco con Git Bash (reusa con el mismo lockfile, reinstala
   con otro). Este repo sigue sin el arnés de `deploy-remote.test.ts` que truco tiene.
+
+## Port de truco — la tanda del 06/10 (rama `feat/port-truco-cierres`)
+
+Salió de comparar truco contra dominó en todas las capas y leer v1 donde el juego difiere. Truco tenía
+sólo tres commits de código nuevos desde la tanda anterior; lo grande eran las deudas que esa tanda
+había dejado como «NO PORTADO». Baseline **1090 unit / 268 int (+32 saltados) / 115 e2e, 149
+archivos**, con `typecheck`, lint, `depcruise` (**444 módulos / 1820 dependencias**) y `docs:build` en
+verde.
+
+### Cuatro defectos con plata, y los cuatro los decía v1
+
+1. **Irse con la ventana de reparto abierta ANULA la partida** (`990fc2a`, `1c64fbc`). Antes el que
+   levantó ganaba por forfeit y cobraba el premio de una partida que nunca empezó; v1 la cancela
+   (`isGameValid()`). `wasAbortedAtDeal` es una regla derivada (ronda 1 en `DEALING` y alguien
+   retirado), el juez no da veredicto, la mesa pasa por **`PRESENTING_ABORT`** —fase nueva del
+   wire— y la sala aborta con **`TILES_NOT_SEEN`**. Se reembolsa a todos menos al que se fue
+   habiendo levantado (`isRefundable`, la usan la billetera y `settlementOf`), la revancha anulada
+   veta y en torneo no hay cooldown. ⚠ **Seis e2e usaban el forfeit en la ventana como atajo**, y
+   dos quedaban VERDES sin resolver nada: un e2e que quiera un veredicto por abandono tiene que
+   llamar `revealHands` antes del `ABANDON`.
+2. **La meta alcanzada le gana al forfeit** (`674bdae`). En la pausa de la mano decisiva `ABANDON`
+   es legal y el juez preguntaba primero por el retiro: el ganador que apretaba «salir» le regalaba
+   la partida al rival. Truco `6da7372`.
+3. **El aumento aceptado se cobraba y no se pagaba** (`2290f37`). `PRIZE` salía con el premio BASE
+   mientras cada uno había pagado la diferencia de un x3. v1 paga `newPrize`. `stakesOf` es la regla
+   única (el nivel ES el multiplicador). De paso: la billetera de Betaso le pagaba al equipo entero,
+   máquina y retirados incluidos; `prizeWinnersOf` es la regla de `settlementOf`, ahora compartida.
+4. **El abandono voluntario en torneo no costaba strike** (`3d76d26`). Sólo el `ABANDON` del sistema
+   lo cobraba, y el verbo no emite evento. v1 lo cobra (`on-leave.ts:33`); se lee del estado al
+   cerrar. No levantar a tiempo sigue sin costar nada.
+
+### `platform.ts` se partió, y encima entró el core-loop
+
+`MatchPlatform.sinkFor` compone un sink por hecho (`casual/pay-winner.ts`, `casual/refund-on-abort.ts`,
+`tournament/add-strike.ts`, `tournament/report-participation.ts`, `summary.ts`) — la partición de truco
+con funciones en vez de clases (`39d80b9`). Y gana un `emit` para lo que un sink produce después de
+que el comando volvió.
+
+**`features/core-loop`** (`6110505`, `0ecdcca`) era una regresión contra v1. Dos mitades:
+
+- **El emparejador evita sentar a un novato en su ventana contra un shark**, como preferencia MÁS
+  DÉBIL que el veto del antifraude: cede primero, al vencer `softTimeoutSeconds`.
+- **El ganador con el rake perdonado cobra el pozo completo**, con el aumento adentro y el **divisor
+  NOMINAL** de v1 (en 4P la pareja reparte entre dos aunque uno se haya ido; medido por mutación).
+  Se liquida SIEMPRE, también en mesa gratis, por moneda congelada y sin máquinas; la respuesta anota
+  la ventana blanda y, si alguno sigue adentro, veta a la pareja (`registerVetoIfSoftWindow` de v1).
+
+Los dos lados seguros son opuestos a propósito: las perillas fallan APAGADAS y el winrate falla
+ABIERTO, como en v1. El perfil lee el winrate por una interfaz ESTRUCTURAL: si `core-loop` importara
+el `PlayerLog` de `match`, las dos features quedaban en un ciclo.
+
+**Ya no existe nada de esta sección** (ver «Sin lobby propio»): `MatchPlatform`, sus cinco sinks y
+`features/core-loop` solo servían a las mesas con `roomOptions`. El emparejamiento blando y el rake
+perdonado, si vuelven, son del orquestador.
+
+### Infraestructura
+
+- **El log** (`9c21c27`, `72c21b0`): redacción de `token`/`authorization` (no había ninguna),
+  `traceId` en cada línea, `traceScope` + `requestLog` en la entrada HTTP (verificado con el
+  servidor real), buffer de 4 KB con `flushLogs()` antes de cada `process.exit`, `instance`/
+  `release`/`hostname`/`pid` en la base, y el nivel por `APP_ENV` con `LOG_LEVEL` explícito ganando
+  — **dev corre con `NODE_ENV=production` y perdía la traza del juego**.
+- ~~**El deploy** (`cdfa158`)~~ **QUEDÓ SUPERADO AL MERGEAR A `develop`**: `develop` ya había
+  reemplazado el pipeline entero (`65eb87c`, `ci-cd.yml` + `scripts/deploy/`, con `deploy.env`, los
+  tres atajos, `FAILED`, `RELEASE` y 31 tests propios). Se quedó lo de `develop`; de esta tanda sólo
+  sobrevive `pino-pretty.config.cjs` para el `npm run dev`, con `pino-pretty` como devDependency —el
+  `./logs` de `develop` lee JSON crudo a propósito—. ⚠ Los 31 tests de `scripts/deploy` leen `/proc`
+  y NO tienen `skipIf`: en Windows salen 27 rojos. En `node:22-bookworm` pasan 31/31.
+- **Herramientas de dev** (`88609b2`): secciones `deal` y `starting-score` de `/internal/settings`,
+  sólo en local y dev y **detrás de la llave del panel** (truco las sirve públicas). Entran por
+  `EngineDeps`: el replay no las ve, así que una partida jugada con preset no se rebobina igual.
+- `.claude/skills/tests/SKILL.md` y el test de contrato del `HttpClient` (`c4dea29`).
+
+### ⚠ Rompe para el front
+
+`PRESENTING_ABORT` es un valor nuevo de `phase` y `TILES_NOT_SEEN` un motivo nuevo de
+`MATCH_ABORTED`. El front tiene que pintar la anulación; hasta entonces ve una fase que no conoce.
+
+### Deudas de ESTA tanda — NO CUMPLIDAS
+
+1. ~~**El reembolso no espera al cobro del aumento en vuelo.** Truco encadena `RefundOnAbort` detrás
+   del `charge.settled()` del multiplicador; acá los dos sinks son independientes y un aborto justo
+   después de aceptar puede reembolsar antes de que el cobro termine. El reembolso de Betaso
+   reconstruye lo cobrado del otro lado, así que el riesgo es un cobro que llega DESPUÉS del
+   reembolso y queda sin devolver. No se tocó: pide coordinar dos sinks.~~ Ya no aplica en el dominó:
+   `refund-on-abort.ts` no existe y lo que se devuelve lo decide el orquestador con el resultado.
+2. **El smoke real no corrió.** Docker estaba disponible y sólo se usó para el arnés del deploy,
+   shellcheck y actionlint.
+3. ~~**Nada de core-loop está certificado contra el backend de verdad**: contrato medido contra un
+   servidor HTTP de prueba, igual que el antifraude.~~ Ya no aplica: `core-loop` no existe.
+4. ~~`settlementOf` no lleva el aumento~~ **CERRADA en `develop`** (`8e6522c`), que escribió su propio
+   `stakesOf` en paralelo. Al mergear quedó UNO: `stakesOf(table, match)`, en `settlement.ts`.
+
+### Lo que encontró el merge a `develop`
+
+- **Seis e2e más usaban el forfeit en la ventana de reparto como atajo**, los nuevos del orquestador
+  (`orchestrator-money`, `orchestrator-tables`). Destapan antes de abandonar.
+- **`activeSeats` soltaba a los jugadores sólo con veredicto** (`bc7ce9c`), y una partida anulada en
+  el reparto no lo tiene: el que se quedó seguía retenido hasta que la sala se dispusiera y el
+  orquestador no podía abrirle otra mesa. Ahora la anulada suelta a todos; lo mide un e2e propio
+  que salió rojo antes del arreglo.
 
 ## Incremento en curso — API para el orquestador
 
@@ -1953,13 +2084,13 @@ si hay `BILLING_AUTH_PUBLIC_KEY`; el `alg` del header elige la clave y cada rama
 
 Hechos medidos en la Tarea 13, Parte B:
 
-- **`createRoom` propaga el mensaje del error `onCreate` con su prefijo de código** (`UNKNOWN_GAME_MODE: …`), que es cómo la ruta responde 422 (medido sobre `@colyseus/core` 0.18.15); `MaintenanceModeError` no tiene prefijo y sale como 500 (pendiente).
+- **`createRoom` propaga el mensaje del error `onCreate` con su prefijo de código** (`UNKNOWN_GAME_MODE: …`), que es cómo la ruta responde 422 (medido sobre `@colyseus/core` 0.18.15). ~~`MaintenanceModeError` no tiene prefijo y sale como 500 (pendiente).~~ Ya no existe: el mantenimiento es del orquestador.
 - **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. La ruta responde 404 solo si `matchMaker.query({ roomId })` no encuentra nada; una sala bloqueada es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa).
 - **Toda reserva sin consumir mantiene viva su sala ~15 s** (`seatReservationTimeout`) y retrasa `server.shutdown()` — los tests que obtienen una reserva tienen que consumirla.
-- **Pendiente de decidir:** qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing); `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
+- **Pendiente de decidir:** ~~qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing);~~ (cerradas: no hay lobby propio y el resultado sale por `betaso_games`) `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
 - **`BILLING_AUTH_PUBLIC_KEY` se valida al boot** (EC P-256 solo público; una clave privada se rechaza).
 - **El ES256 exige el juego**: billing-auth firma `aud: ['orchestrator','domino']` para todos los juegos, así que el `JwtVerifier` rechaza un ES256 cuyo claim `game` no sea `"domino"` (un token de truco pasaría emisor y audiencia). Y `parseEnv` falla al arrancar si hay `ORCHESTRATOR_API_KEY` sin `BILLING_AUTH_PUBLIC_KEY`, o si esa llave repite `BETASO_ADMIN_PANEL_API_KEY` o `BETASO_BACKEND_API_KEY`.
-- **Bug previo, pendiente y con su propio ticket (no se arregla en esta rama):** `BetCharger.charge` trata `DuplicateMovementError` como "pagado", pero la clave del ledger es `(matchId, playerId, reason)` sin secuencia; tras un aumento revocado, un segundo aumento en la misma partida cuenta a los dos como pagados (`bet-charge.ts:84-89`, `legality.ts:170`).
+- ~~**Bug previo, pendiente y con su propio ticket (no se arregla en esta rama):** `BetCharger.charge` trata `DuplicateMovementError` como "pagado", pero la clave del ledger es `(matchId, playerId, reason)` sin secuencia; tras un aumento revocado, un segundo aumento en la misma partida cuenta a los dos como pagados (`bet-charge.ts:84-89`, `legality.ts:170`).~~ Ya no aplica: `BetCharger` no existe; el aumento lo cobra el orquestador.
 
 ## Incremento en curso — el CI/CD de games-orchestrator (rama `ci/despliegue`)
 
@@ -1987,6 +2118,194 @@ Se reemplazó por el estilo de billing-auth y el orquestador (`games-orchestrato
 - **Los tests de `scripts/deploy` corren en el proyecto `unit`**, contra un servidor de mentira
   (procesos reales con su cwd, y pm2, docker, curl y npm falsos). Que el rollback saltea un `FAILED`
   se verificó por mutación.
+
+## Incremento en curso — las mesas del orquestador cobran por él y publican su resultado
+
+Rama `feat/orquestador-cobro-y-resultados`. Contrato (en el monorepo del orquestador):
+`docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`. **El dinero del lado
+del orquestador está mockeado** (registro contable y wallet falsos); de este lado no cambia nada por eso.
+
+- **`shared/outbox.ts` + `shared/mongo-outbox.ts`**: el outbox durable salió del catálogo cuando apareció
+  el segundo usuario. El catálogo es una capa fina con sus claves y su reconciliación; sus tests no
+  cambiaron. El despachador ganó `perTick` (los resultados llegan en ráfagas) y `publishOptions`.
+- **`publishTopic(…, { mandatory, messageId, headers })`**: con `mandatory` un `basic.return` hace fallar
+  la entrega aunque llegue el ack. Es lo que impide que un resultado publicado antes de que el
+  orquestador declare su cola se marque `SENT` y se pierda.
+- **El resultado** (`network/match-results.ts`) sale de toda mesa (todas son por request), al exchange
+  `betaso_games` en su propio broker (`BETASO_GAMES_RABBITMQ_URL`), con outbox
+  `match_result_outbox` y lease `match-result-publisher`. El premio viaja calculado por `settlementOf`;
+  los reembolsos no viajan.
+- ⚠ **`settlementOf` liquidaba sin el aumento aceptado** (`8e6522c`): la config se congela al nacer y
+  el nivel vive en el estado. El comentario del `switch` afirmaba lo contrario.
+- **El cobro de la entrada** (`domino-room.ts`, `chargeEntry`): con la mesa completa, la sala pide el
+  cobro y arranca recién con el sí. Falla CERRADO también sin orquestador configurado, así que la suite
+  registra `src/tests/fake-orchestrator.ts` en `bootTestServer`, y el smoke apunta los cobros a su nginx.
+- **El aumento** (`network/orchestrator-charges.ts`): los niveles llegan en el request (`betLevels`) y el
+  cobro se le pide al orquestador; un rechazo, un silencio o un orquestador caído lo anulan.
+- `ORCHESTRATOR_API_KEY` exige ahora `ORCHESTRATOR_URL` y `ORCHESTRATOR_CALLBACK_API_KEY` (y en
+  producción `BETASO_GAMES_RABBITMQ_URL`). `vitest.setup.ts` borra `BETASO_GAMES_RABBITMQ_URL`.
+- Smoke real con Docker verde (`RUN_ENGINE_SMOKE=1 npm run test:deploy`): la partida pidió el cobro al
+  stub, arrancó y cerró con 120 entradas de historial.
+- **`match_result_outbox` vence lo ENVIADO a los 7 días** (TTL sobre `sentAt`, opción
+  `sentRetentionSeconds` de `MongoOutboxStore`); lo pendiente no tiene `sentAt` y no vence nunca. El
+  catálogo NO lleva TTL: su reconciliador necesita los `SENT`. Mientras duran, son la red si el broker
+  pierde su disco (procedimiento en `docs/operacion.md`). Un resultado con más de 10 minutos sin salir
+  loguea `error` en cada fallo (`stuckAfterMs`).
+
+**Una mesa terminada ya no retiene a nadie** (portado de truco): el registro suelta en cada latido a
+quien dejó de jugar, y la sala late además después de cada hecho. Se suelta al tener VEREDICTO —no en
+`FINISHED` como truco— salvo durante una ventana de revancha ELEGIBLE, así que una mesa del orquestador
+(`eligible: false`) suelta a los dos en el acto aunque la ventana siga abierta. El reemplazado por un bot
+también se suelta. Lo mide `orchestrator-tables.e2e.test.ts`, rojo sin el cambio de la sala. La ventana
+en sí sigue abriéndose en esas mesas: quitarla cambia el golden y ya no hace falta para esto.
+
+## Incremento completo — sin lobby propio (rama `feat/sin-lobby-propio`)
+
+El orquestador es la única entrada al dominó, así que se borró todo lo que solo servía a las mesas
+abiertas por el dominó mismo (las creadas CON `roomOptions`):
+
+- **Fuera:** `features/matchmaking/`, `features/lobby/`, `features/economy/` (billeteras, ledger,
+  outbox de economía, cuentas y tasas), la sala `lobby`, `GET /maintenance`, `GET /players-in-match`,
+  `POST /internal/lobby/maintenance`, `/me/matches`, `/me/metrics` y la sección `matchmaking` de la
+  configuración en caliente. En `match/`: `MatchPlatform`, `RematchCoordinator`, los vetos, el
+  `BetCharger`, el libro de niveles de apuesta, el reporte de ranking y liga (`StandingsFeeds`), los
+  eventos `CASUAL_PAIR_VETOED`/`PAIR_VETOED`, `configFromRoomOptions` y los tipos de `roomOptions`, y
+  `ColyseusMatchGateway.open`/`rejoin`. El `MatchRegistry` perdió `options`, `stakes`, `players`,
+  `rememberPlayer` y los conjuntos de torneo. `CachedGameModeReader` (solo lo usaba el emparejador).
+- **El mantenimiento de dominó desapareció entero**, incluido el chequeo de `onCreate`: nada entra sin
+  pasar por el orquestador, que tiene el único interruptor.
+- **Lo que `feat/port-truco-cierres` agregó para las mesas propias, fuera también:**
+  `features/core-loop/` entera (perfil y ventana blandos, rake perdonado, pozo completo y su cliente
+  HTTP al backend de Betaso), `casual/pay-winner.ts`, `casual/refund-on-abort.ts`, `summary.ts`,
+  `tournament/add-strike.ts`, `tournament/report-participation.ts`, `platform.test.ts` y
+  `MatchMessenger`. Se quedan porque las mesas del orquestador los usan: `wasAbortedAtDeal` y
+  `TILES_NOT_SEEN` (el orquestador acepta el motivo), `stakesOf`/`prizeWinnersOf`/`isRefundable`
+  dentro de `settlement.ts` (ya no exportadas: `settlementOf` es su único usuario), el log
+  (`traceScope`, `requestLog`, `LOG_LEVEL`, `RELEASE`, `flushLogs`) y las secciones `deal` y
+  `starting-score` de local y dev, que entran por `DevPresetSource` a toda mesa.
+- **Variables fuera:** `BETASO_BACKEND_URL` y `BETASO_BACKEND_API_KEY` (solo las usaban la liga, la
+  billetera, el antifraude, los niveles y el torneo). En producción quedan obligatorias `MONGO_URI`,
+  `RABBITMQ_URL` y `BETASO_ADMIN_PANEL_API_KEY`.
+- **Las mesas se comportan igual que antes**: los sinks que se borraron nunca se enganchaban sin
+  `roomOptions`. La ventana de revancha sigue abriéndose con la compuerta cerrada.
+- **El torneo queda sin cablear** (ver «Estado actual»): su feature compila y sus tests unitarios
+  corren; se borró `penalty-endpoint.e2e.test.ts`, que medía la ruta que ya no se monta.
+
+### Deudas abiertas de ESTE incremento
+
+1. **Los torneos esperan a que el orquestador abra mesas de torneo.** Hasta entonces
+   `features/tournament` no se usa.
+2. ~~**`BETASO_BACKEND_JWT_SECRET` sigue obligatoria**~~ Resuelta en `feat/sin-credenciales-de-betaso`
+   (ver abajo).
+
+## Incremento completo — sin credenciales de Betaso (rama `feat/sin-credenciales-de-betaso`)
+
+- **Fuera el HS256:** `BETASO_BACKEND_JWT_SECRET` ya no existe. `JwtVerifier` verifica solo ES256 de
+  billing-auth (`algorithms: ["ES256"]`, emisor, audiencia, `exp` y `game: "domino"`), y
+  `BILLING_AUTH_PUBLIC_KEY` pasó de opcional a **obligatoria**: sin ella el proceso no arranca.
+- **`BETASO_ADMIN_PANEL_API_KEY` → `ADMIN_API_KEY`** (y `adminPanelApiKey` → `adminApiKey`,
+  `requireAdminPanelKey` → `requireAdminKey`). Mismo header (`x-internal-api-key`) y mismas rutas: al
+  desplegar se renombra la variable en el `.env` y quien la presente sigue usando el mismo valor.
+- **La suite firma como billing-auth**: `src/tests/billing-auth-keys.ts` tiene una pareja P-256 fija y
+  publicada a propósito (`mintBillingToken`); `vitest.setup.ts` y `compose.smoke.yaml` usan su pública.
+  Ningún entorno de verdad confía en ella.
+- **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume), y
+  `JWT_ISSUER` vale `betaso-auth`.
+- **Los niveles de aumento son parte del modo** (`43d89a0`): `betLevels: [{ level, extra,
+  additionalPoints }]`, la misma forma del `CreateMatchRequest`. Vacío = no ofrece aumentar. Se
+  validan niveles únicos (≥ 2) y el `extra` creciente; el `PUT` reemplaza la lista. El `GET` público
+  los devuelve; los eventos `game_mode.*` no. `additionalPoints` se guarda tal cual (depende del
+  ranking de cada cliente, que dominó no conoce).
+
+### Deudas abiertas de este incremento
+
+1. **El orquestador todavía no lee `betLevels`**: sigue con `BET_LEVELS_URL`, que no responde, así
+   que ninguna mesa ofrece aumentar hasta que lo haga.
+2. **Quién carga los niveles** y la migración desde `bet_increase_configs` de Betaso (su
+   `gameModeExternalId` es nuestro `uuid`).
+3. **El exchange `betaso`** sigue publicándose: Betaso lo consume. Cortarlo depende de quién
+   administre el catálogo.
+
+## Port de truco — la tanda del 06 al 08/10 (rama `feat/port-truco-reconexion`)
+
+Truco desde `0c4d67f` hasta `60c696b`, comparado commit por commit. Baseline **1240 tests** en `src`
+(unit + int + e2e), con `typecheck`, lint y `depcruise` en verde; los 27 rojos de `scripts/deploy`
+son los de siempre en Windows (leen `/proc`).
+
+| truco | acá |
+|---|---|
+| `b90840b` gana la última conexión, sin `maxClients` | **PORTADO** (`7927c39`). La mitad del lobby (`MATCH_IN_PROGRESS`) no: no hay lobby. Tampoco el aviso de quién sigue caído: el dominó ya sincroniza `PlayerState.connected` |
+| `0960663` desde el veredicto, irse es irse | **PORTADO** (`eb35030`). Sin `REMATCH_UNAVAILABLE`: el dominó no tiene ese evento y la fase lo dice. La mitad del registro ya estaba: el dominó suelta a todos con el veredicto |
+| `092f42b` sin aumento en mesa gratis | **PORTADO** (`1cc762f`), por `isFreeRoom` como v1 (`on-propose-bet-multiplier.ts:46`) |
+| `58ce78f` niveles del aumento | **PORTADO** sólo la config pública: `betLevels: [{ level, additionalPoints }]` en `/config/:roomId` y `/matches/:roomId`. El peso en el ranking no aplica |
+| `b5bb427` el reparto en el historial | **PORTADO** (`29137c9`) como `ROUND_STARTED` + `TILES_DEALT`. Sin el endpoint agrupado: ya está `/internal/matches/:matchId/history` |
+| `90b46e0` clientes e2e silenciosos | **PORTADO** (`58aecd3`): 365 avisos del SDK por corrida → 3 |
+| `0c4d67f`, `2d7e1b3`, `97e475a` stage | **PORTADO** (`c5d2e76`): `debug` en stage y el reparto preparado en todo menos prod. El panel sigue con llave en todos lados; la política de revancha es del emparejador |
+| `48bfd4e`, `304f87a`, `60c696b` | **NO APLICA**: emparejador y economía, que el dominó ya no tiene |
+| `3a6f892`, `94ce2de` | reglas de truco |
+
+Dos defectos que el port destapó y truco todavía tiene:
+
+- **El desplazamiento elegía con `find` la PRIMERA conexión del asiento**, que con dos vueltas
+  seguidas todavía se estaba cerrando: la del medio no se iba nunca y el asiento quedaba con tres
+  conexiones. Se desplazan todas las anteriores.
+- **Con la sala disponiéndose, `allowReconnection` devuelve una `Promise` rechazada y no un
+  `Deferred`** (`Room.mjs:1189`): la segunda conexión del asiento que caía en el apagado reventaba
+  con «reject is not a function».
+
+⚠ **Rompe para el front, de a poco**: `ROUND_STARTED` es un tipo nuevo en el mensaje `events` (un
+cliente que no lo conoce tiene que ignorarlo), y `betLevels` es un campo nuevo de la config pública.
+
+## Port de truco — la tarde del 08/10 (`dcf88a0` … `7b3b583`): nada que portar
+
+| truco | acá |
+|---|---|
+| `dcf88a0` un `ranking.match-finished` por partida, con el desenlace de cada asiento (`won`/`lost`/`left`/`timeout`/`disconnected`) y `playedSeconds` | **NO PORTADO**: el dominó no reporta ranking, lo hace el orquestador con el resultado de `betaso_games`. Ese resultado ya lleva `participants[].result` (`won`/`lost`/`abandoned`). Separar `abandoned` en tres y sumar `playedSeconds` cambia el contrato del orquestador, así que lo tiene que pedir él primero: si su consumidor valida estricto, un campo de más es un resultado rechazado, o sea un premio que no se paga |
+| `9168552` el cartel del lobby como estado de sala | **NO APLICA**: no hay lobby |
+| `cfca91f` las marcas de flor después de quemarla | reglas de truco |
+| `fc3d131`, `7b3b583` | docs de truco |
+
+Si el orquestador pide el detalle: el dominó es el único que sabe si al que retiró el reloj se le
+había caído la conexión (`PlayerState.connected` en el momento del `ABANDON` del sistema) y cuánto
+jugó cada uno. Truco lo arma con un listener que sigue la conexión y el `ABANDON` del sistema;
+acá iría en `MatchResultRecorder`.
+
+## Port de truco — el 09/10 (`b631278`, `98f3a3c`): nada que portar
+
+`b631278` es carga contra el backend de Betaso: con 200 jugadores, `my-profile` devolvía 429 porque
+el throttler cuenta por IP y todas las mesas salen de la misma. Truco manda su llave interna para
+que no lo cuente, cachea la cuenta en Redis (lobby y sala en procesos distintos), reintenta el
+congelado y loguea como `warn` la admisión que el afuera no pudo contestar. **NO APLICA**: el dominó
+no lee cuentas ni llama al backend de Betaso; su único HTTP saliente es el orquestador (`chargeEntry`
+y los aumentos), y un cobro que no sale ya se loguea como `warn` y no como bug. Si alguna prueba de
+carga muestra 429 del orquestador, el arreglo es del mismo tipo —identificarse como llamador interno—
+pero del lado del orquestador.
+
+## Port de truco — el 13/10 (`510c3d8` … `3627021`, rama `feat/port-truco-13-10`)
+
+Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` en verde.
+
+| truco | acá |
+|---|---|
+| `a876258` el cuerpo del panel tal como lo manda | **PORTADO a medias.** `playersQuantity` ya entraba: el schema del dominó usa los nombres de v1. Lo que se portó es el rechazo de la **mesa gratis que cobra entrada** (`FreeRoomWithEntryError`, 400 con el mensaje de truco). Acá `isFreeRoom` es campo propio y no se deriva de la entrada, así que la contradicción se puede guardar: la mesa apaga el aumento y reporta gratis con la entrada cargada. Distinto de truco: el `PUT` sólo la chequea si toca `isFreeRoom` o `entryFee`, para no trabar el premio de un modo heredado de v1 que ya era contradictorio |
+| `9e094ab` la sesión del admin pasa por las rutas del panel | **NO PORTADO, queda como deuda** (abajo) |
+| `510c3d8` el censo cuenta sólo casual | **YA ERA ASÍ**: el contrato del orquestador sólo acepta `mode: "CASUAL"`, no entra una mesa de torneo al censo |
+| `d576fbe` el interruptor de mantenimiento desde v2 | **NO APLICA**: el mantenimiento del dominó se borró entero, el interruptor lo tiene el orquestador |
+| `3627021` | docs de truco |
+
+### Deuda abierta: el panel no puede entrar con su sesión
+
+⚠ **El día que el panel apunte al catálogo de v2, todas las mutaciones dan 401.** El panel corre en el
+navegador, así que no puede mandar `ADMIN_API_KEY` sin publicarla, y hoy esa llave es la única puerta.
+v1 aceptaba el Bearer del admin y leía su rol de Postgres. Truco lo resolvió aceptando también el
+Bearer y preguntándole el rol a `GET auth/me` del backend de Betaso con ese mismo token (caché de un
+minuto por proceso, falla CERRADO con 503), y de paso publica `updatedBy` en `game_mode.*`.
+
+Portarlo revive `BETASO_BACKEND_URL`, que se quitó en «sin credenciales de Betaso». El secreto JWT no
+vuelve: el token de sesión es del backend de Betaso y no de billing-auth, así que `JwtVerifier` no lo
+puede verificar, y es `auth/me` el que lo valida. Se dejó afuera a propósito hasta decidir quién
+administra el catálogo del dominó (la deuda 3 de «sin credenciales»): si es el orquestador, esto no
+hace falta.
 
 ## Cómo se ejecuta una tarea
 

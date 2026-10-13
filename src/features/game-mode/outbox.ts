@@ -1,6 +1,13 @@
 import type { Logger } from "@/logger";
 import type { AmqpDelivery } from "@/shared/amqp";
 import type { Lease } from "@/shared/mongo-lease";
+import {
+  type OutboxClock,
+  type OutboxEntry,
+  type OutboxQueue,
+  type OutboxRecord,
+  TopicOutboxDispatcher,
+} from "@/shared/outbox";
 import type { GameModeReader } from "./core/catalog";
 import type { GameMode } from "./core/game-mode";
 import {
@@ -30,82 +37,31 @@ import {
 // publicando a la vez entregan la misma entrada dos veces y —peor— pueden entregarlas cruzadas.
 export const OUTBOX_LEASE = "outbox-publisher";
 
-// Quince segundos, igual que el lease del escritor del catálogo. No se renueva (ver
-// `shared/mongo-lease.ts`), y la contramedida es que adentro no vaya un trabajo largo: UNA entrada
-// por adquisición y nunca un bucle.
-const LEASE_TTL_MS = 15_000;
-
-// UN TICK POR SEGUNDO. Es el piso de latencia de un cambio que nadie despertó —una reconciliación, un
-// reintento vencido—; el camino normal no lo espera porque la mutación llama `wake()`.
-const TICK_MS = 1_000;
-
-// EL PLAZO DE LA PUBLICACIÓN, Y NO ES DECORACIÓN. `AmqpPublisher.publishTopic` **no rechaza solo con
-// el broker caído: se cuelga** —`connect()` con `recovery: true` reintenta para siempre y su promesa
-// nunca se resuelve (ver la cabecera de `shared/amqp.ts`)—. Sin este plazo, el primer tick contra un
-// Rabbit apagado se queda esperando con el lease tomado, el outbox deja de drenar y no aparece ni un
-// error en el log: el catálogo se desincroniza en silencio, que es exactamente lo que este archivo
-// existe para impedir.
-const PUBLISH_TIMEOUT_MS = 5_000;
-
-// EL BACKOFF: duplica desde un segundo y se corta en cinco minutos. El techo es lo que impide que
-// doce fallos seguidos dejen el próximo intento a más de un día.
-//
-// **NO HAY LÍMITE DE INTENTOS, y la ausencia es la decisión.** Un evento que se descarta al intento
-// número N es una pérdida silenciosa: el consumidor se queda con el catálogo viejo y del lado de acá
-// todo está "resuelto". Una caída larga del broker tiene que costar retraso, no datos. Lo que crece
-// es la tabla, y eso se ve.
-const BASE_BACKOFF_MS = 1_000;
-const MAX_BACKOFF_MS = 300_000;
+// EL TICK, EL PLAZO DE PUBLICACIÓN Y EL BACKOFF son los del despachador compartido
+// (`shared/outbox.ts`): un segundo, cinco segundos, y de uno a trescientos sin límite de intentos.
 
 // EL DISCRIMINADOR DE LAS CLAVES DE `sync`, y NO es una clave de ruteo: el evento sale igual como
 // `game_mode.updated`. Se escribe distinto justamente para que un lote de `sync` no pueda suprimir
 // —ni ser suprimido por— el evento de una revisión. Ver `syncKeyOf`.
 const SYNC_TAG = "game_mode.sync";
 
-export type OutboxStatus = "PENDING" | "SENT";
+export type { OutboxStatus } from "@/shared/outbox";
 
-// EL RELOJ INYECTADO, redeclarado acá por lo mismo que en `transports/mongo-repository.ts` y en
-// `shared/mongo-lease.ts`: es una interfaz de un método y el tipado estructural une las tres sin que
-// ninguna sepa de las otras. Sin él, medir el backoff exigiría esperar cinco minutos de verdad.
-export interface Clock {
-  now(): number;
-}
+// EL RELOJ INYECTADO, el del outbox compartido: es una interfaz de un método y el tipado estructural
+// une las tres declaraciones sin que ninguna sepa de las otras.
+export type Clock = OutboxClock;
 
-// LA ENTRADA PORTABLE. `id` es opaco —el adaptador Mongo pone el hex de su `ObjectId`— y es lo único
-// que el dispatcher le devuelve a `sent`/`retry`.
-export interface GameModeOutboxEntry {
-  readonly id: string;
-  readonly dedupeKey: string;
-  // LA CLAVE Y EL CUERPO VIAJAN JUNTOS, persistidos los dos: el publicador no decide ninguno de los
-  // dos. Separarlos dejaría que una entrada se publique con la clave de otra, y en un topic exchange
-  // eso es un mensaje que llega a la cola equivocada sin error de nadie.
-  readonly routingKey: GameModeEventKey;
-  readonly payload: GameModePayload;
-  readonly status: OutboxStatus;
-  readonly attempts: number;
-  readonly createdAt: Date;
-  readonly nextAttemptAt: Date;
-  readonly sentAt?: Date;
-  readonly lastError?: string;
-}
+// LA ENTRADA y LO QUE SE PERSISTE, las del outbox compartido con la clave y el cuerpo del catálogo.
+export type GameModeOutboxEntry = OutboxEntry<GameModeEventKey, GameModePayload>;
+export type GameModeOutboxRecord = OutboxRecord<GameModeEventKey, GameModePayload>;
 
-// LO QUE SE PERSISTE, que es la entrada SIN su identidad: el `id` lo pone el almacén —el hex del
-// `ObjectId` del lado de Mongo— y por eso no se puede escribir. Lo nombra el adaptador durable para
-// declarar su documento sin repetir nueve campos que entonces podrían derivar del puerto.
-export type GameModeOutboxRecord = Omit<GameModeOutboxEntry, "id">;
-
-export interface GameModeOutbox {
+export interface GameModeOutbox extends OutboxQueue<GameModeEventKey, GameModePayload> {
   enqueueCreated(mode: GameMode): Promise<void>;
   ensureUpdated(mode: GameMode): Promise<void>;
   // El botón de "republicar todo" del operador. Devuelve cuántos modos encoló, que es lo que el
   // `POST /sync` de v1 contesta como `synced`.
   sync(modes: readonly GameMode[], batchId: string): Promise<number>;
   reconcile(modes: readonly GameMode[]): Promise<void>;
-  // El pendiente más viejo, SI YA LE TOCA. Devuelve vacío —y no el siguiente— cuando el más viejo
-  // todavía espera su reintento: ver la regla de no adelantarse, arriba.
-  next(now: Date): Promise<GameModeOutboxEntry | undefined>;
-  sent(id: string, at: Date): Promise<void>;
-  retry(id: string, error: string, nextAttemptAt: Date): Promise<void>;
 }
 
 // LAS TRES CLAVES DE DEDUPLICACIÓN, ESCRITAS ACÁ Y NO EN CADA ADAPTADOR. El formato ES el contrato:
@@ -168,132 +124,47 @@ export function revisionKeysOf(mode: GameMode): readonly string[] {
   return mode.version === 0 ? [createdKeyOf(mode), updatedKeyOf(mode)] : [updatedKeyOf(mode)];
 }
 
-// EL DESPACHADOR. Un tick = un lease, una reconciliación y UNA entrada.
+// EL DESPACHADOR DEL CATÁLOGO: el compartido, con la reconciliación como trabajo previo de cada tick y
+// UNA entrada por tick.
 export class OutboxDispatcher {
-  private timer?: ReturnType<typeof setInterval>;
-  // LA GUARDA DE CONCURRENCIA ES SUYA Y NO DEL LEASE, y hay que saber por qué: `MongoLease` excluye
-  // PROCESOS y no llamadas —el dueño es por proceso, así que dos ticks de la misma instancia entran
-  // los dos (ver el comentario del `owner` en `shared/mongo-lease.ts`)—. Sin esta promesa compartida,
-  // un `wake()` que cae encima del tick programado publica la misma entrada dos veces.
-  private inFlight?: Promise<boolean>;
-  private closed = false;
+  private readonly inner: TopicOutboxDispatcher<GameModeEventKey, GameModePayload>;
 
   constructor(
     // El catálogo ENTERO —`all()`, no `active()`—: un modo dado de baja cuyo `updated` se perdió tiene
     // que poder recuperarse igual, o el consumidor sigue ofreciendo para siempre un modo retirado.
-    private readonly reader: GameModeReader,
-    private readonly outbox: GameModeOutbox,
-    private readonly delivery: AmqpDelivery,
-    private readonly lease: Lease,
-    private readonly clock: Clock,
-    private readonly log: Logger,
-  ) {}
+    reader: GameModeReader,
+    outbox: GameModeOutbox,
+    delivery: AmqpDelivery,
+    lease: Lease,
+    clock: Clock,
+    log: Logger,
+  ) {
+    this.inner = new TopicOutboxDispatcher({
+      exchange: GAME_MODE_EXCHANGE,
+      leaseName: OUTBOX_LEASE,
+      queue: outbox,
+      delivery,
+      lease,
+      clock,
+      log,
+      label: "evento del catálogo",
+      beforeEach: async () => outbox.reconcile(await reader.all()),
+    });
+  }
 
   start(): void {
-    if (this.timer || this.closed) return;
-    const timer = setInterval(() => {
-      this.wake();
-    }, TICK_MS);
-    // DESREFERENCIADO: un intervalo referenciado mantiene vivo el event loop y el proceso no termina
-    // de salir nunca. Es la misma decisión que el plazo de `shared/http/health.ts`.
-    timer.unref?.();
-    this.timer = timer;
+    this.inner.start();
   }
 
-  // ADELANTA EL TICK tras una mutación, para que el panel no pague hasta un segundo de latencia. No
-  // devuelve promesa a propósito: el request administrativo no espera a Rabbit. Si ya hay un tick
-  // corriendo, éste se une a él y el cambio recién escrito lo toma el siguiente — a lo sumo un
-  // segundo después.
   wake(): void {
-    void this.tick().catch((error: unknown) => {
-      // SE REGISTRA Y NO SE PROPAGA. Ni el temporizador ni el llamador de `wake()` tienen a quién
-      // devolverle el error, y una promesa rechazada sin manejador tumba el proceso en Node — con
-      // todas sus partidas en curso.
-      this.log.error("el tick del outbox falló", { error: String(error) });
-    });
+    this.inner.wake();
   }
 
-  // VACÍA LO QUE YA VENCIÓ, un tick por vuelta. El bucle está AFUERA del lease a propósito: adentro
-  // iría un trabajo de duración desconocida contra un lease que no se renueva.
-  async drain(): Promise<void> {
-    let published = true;
-    while (published) {
-      published = await this.tick();
-    }
+  drain(): Promise<void> {
+    return this.inner.drain();
   }
 
-  async close(): Promise<void> {
-    this.closed = true;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = undefined;
-    // SE ESPERA EL TICK EN VUELO. Sin esta línea, el apagado le cierra la conexión AMQP por debajo a
-    // una entrega que estaba confirmando: el mensaje puede haber salido y la marca de entregado no
-    // llega nunca, o sea un duplicado garantizado en el arranque siguiente.
-    await this.inFlight?.catch(() => false);
+  close(): Promise<void> {
+    return this.inner.close();
   }
-
-  private tick(): Promise<boolean> {
-    if (this.closed) return Promise.resolve(false);
-    this.inFlight ??= this.run().finally(() => {
-      this.inFlight = undefined;
-    });
-    return this.inFlight;
-  }
-
-  private async run(): Promise<boolean> {
-    const published = await this.lease.within(OUTBOX_LEASE, LEASE_TTL_MS, async () => {
-      await this.outbox.reconcile(await this.reader.all());
-      const entry = await this.outbox.next(new Date(this.clock.now()));
-      if (!entry) return false;
-      return this.deliver(entry);
-    });
-    // `undefined` ES "NO LO CONSEGUÍ", y es un desenlace normal: otro proceso está publicando. El tick
-    // se saltea en vez de fallar.
-    return published ?? false;
-  }
-
-  private async deliver(entry: GameModeOutboxEntry): Promise<boolean> {
-    try {
-      await confirmedWithin(
-        this.delivery.publishTopic(GAME_MODE_EXCHANGE, entry.routingKey, entry.payload),
-        PUBLISH_TIMEOUT_MS,
-      );
-    } catch (error) {
-      // EL BACKOFF SE CALCULA CON LOS INTENTOS **YA ACUMULADOS**: el primer fallo espera un segundo.
-      const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** entry.attempts);
-      await this.outbox.retry(entry.id, String(error), new Date(this.clock.now() + delay));
-      this.log.warn("no se pudo publicar el evento del catálogo", {
-        id: entry.id,
-        routingKey: entry.routingKey,
-        attempts: entry.attempts + 1,
-        error: String(error),
-      });
-      return false;
-    }
-    // SE MARCA DESPUÉS DEL CONFIRM DEL BROKER, que es lo que `publishTopic` promete. Marcar antes
-    // daría por entregado un mensaje que el broker nunca tomó, y el evento se perdería sin rastro.
-    await this.outbox.sent(entry.id, new Date(this.clock.now()));
-    return true;
-  }
-}
-
-// EL PLAZO, DEL LADO DEL QUE LLAMA. `shared/amqp.ts` no lo acota a propósito —el que sabe cuánto puede
-// esperar es el llamador— y acá son cinco segundos. Rechaza en vez de resolver: el desenlace tiene que
-// ir al camino de reintento, no darse por bueno.
-//
-// La promesa original puede no resolverse NUNCA (broker caído), y eso está contemplado: su `then` ya
-// tiene manejador, así que un rechazo tardío no queda sin atender.
-function confirmedWithin<T>(work: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    // `unref()` para que un plazo pendiente no le impida salir al proceso, igual que en
-    // `shared/http/health.ts`.
-    const timer: { unref?: () => void } = setTimeout(
-      () => reject(new Error(`la publicación no confirmó en ${ms} ms`)),
-      ms,
-    );
-    timer.unref?.();
-    work
-      .then(resolve, reject)
-      .finally(() => clearTimeout(timer as unknown as Parameters<typeof clearTimeout>[0]));
-  });
 }

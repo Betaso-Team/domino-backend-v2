@@ -1,9 +1,9 @@
 import type { AmqpDelivery } from "@/shared/amqp";
 import { MemoryLogger } from "@/shared/tests/memory-logger";
-import { FakeTournamentClient } from "@/tests/fake-client";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { TournamentInfo, TournamentStatus } from "../client";
 import { TournamentWatcher } from "../watcher";
+import { FakeTournamentClient } from "./fake-client";
 
 const INFO = (status: TournamentStatus): TournamentInfo => ({
   status,

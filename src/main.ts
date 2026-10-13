@@ -2,7 +2,7 @@ import { listen } from "@colyseus/tools";
 import app from "./app.config";
 import { settingsSignal, shutdown, startServices, stopAcceptingMatches } from "./di-container";
 import { env } from "./env";
-import { logger } from "./logger";
+import { flushLogs, logger } from "./logger";
 
 // EL ARCHIVO QUE SE EJECUTA, y está separado del que se IMPORTA (`app.config.ts`, que compone
 // las dos superficies y del que cuelga la suite entera). Se llamaba `index.ts` y el rename no
@@ -72,6 +72,7 @@ const PLAZO_DE_ARRANQUE_MS = 20_000;
 
 const morirSinServidor = (error: unknown): never => {
   logger.error("no se pudo escuchar: esta instancia no tiene servidor", { error: String(error) });
+  flushLogs();
   process.exit(1);
 };
 
@@ -130,7 +131,10 @@ const apagar = (code = 0): void => {
   drenando = true;
   void drain()
     .catch((error) => logger.error("apagado ordenado: falló el drenado", { error: String(error) }))
-    .finally(() => process.exit(code));
+    .finally(() => {
+      flushLogs();
+      process.exit(code);
+    });
 };
 
 // PRIMER CAMINO: las mismas señales que atendía Colyseus, repuestas para no perder ninguna al

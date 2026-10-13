@@ -6,17 +6,16 @@ import type { Identity } from "@/features/auth";
 import type { GameMode } from "@/features/game-mode";
 import { z } from "zod";
 import type { BetLevel, DominoMatchConfig } from "../core/config";
-import type { MatchEventSink } from "../network/listeners";
 
-// Contrato en la raíz de transports porque matchmaking crea las salas. `mode` lo deja
-// discriminado para sumar otros orígenes sin adivinar por campos opcionales.
+// Contrato en la raíz de transports porque las salas las crea la API interna del orquestador. `mode`
+// lo deja discriminado para sumar otros orígenes sin adivinar por campos opcionales.
 //
 // ES LA ÚNICA FRONTERA QUE VALIDA, y por eso valida con zod y no con tipos: lo que llega
 // por `createRoom` es un objeto del otro lado del cable, y un `CreateMatchRequest` escrito
 // en la firma solo describe lo que se espera —no lo comprueba—. De acá para adentro el
 // `DominoMatchConfig` es un dato confiable, y eso incluye la moneda, la tasa y los montos.
 //
-// SON DOS ENTRADAS Y POR ESO SON DOS FUNCIONES. `requestOf` valida lo que matchmaking PIDE —una
+// SON DOS ENTRADAS Y POR ESO SON DOS FUNCIONES. `requestOf` valida lo que el orquestador PIDE —una
 // mesa, unos participantes y el uuid de un modo—; `replayConfigOf` valida un snapshot YA GRABADO,
 // que trae los asientos numerados y el dinero adentro. Meterlas en una sola con campos opcionales
 // haría que la mesa que nace y la partida que se rebobina compartieran reglas que no comparten:
@@ -97,6 +96,18 @@ function checkTableShape(
   });
 }
 
+// UN NIVEL DE AUMENTO. Lo valida el snapshot y lo valida el request del orquestador, con la misma
+// forma: si divergen, una mesa que la ruta acepta la sala la rechaza después de crearla.
+const betLevel = z.strictObject({
+  level: z.number().int().positive().safe(),
+  extra: z.number().nonnegative().safe(),
+  // LOS MONTOS NO ESTÁN, y la ausencia es la corrección: el catálogo del backend principal devuelve
+  // `{ level, extra, additionalPoints }` y la plata se deriva de la mesa (`betAmountsOf`). Guardarlos
+  // acá era pedirle al snapshot un dato que nadie produce — y un cobro cableado contra ellos habría
+  // cobrado cero, en silencio.
+  additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+
 // EL REQUEST VIVO. No trae `pointsToWin`, ni `entryFee`, ni `prize`: los tres salen del catálogo,
 // y el `strictObject` los RECHAZA en vez de ignorarlos. La diferencia importa — ignorarlos dejaría
 // a un llamador creyendo que fijó la economía de la mesa mientras el modo la pisa en silencio.
@@ -114,6 +125,11 @@ const createRequest = z
     teamAssignment,
     // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
     rateId: nonBlank,
+    // LOS NIVELES DE AUMENTO QUE OFRECE LA MESA, y los decide el ORQUESTADOR: él es quien cobra el
+    // aumento, así que él dice cuáles hay. Opcional y sin default de catálogo: ausente es "esta mesa
+    // no ofrece aumentar", que es el reposo y lo que hacen las mesas del orquestador hasta que el
+    // orquestador mande niveles.
+    betLevels: z.array(betLevel).max(16).optional(),
   })
   .superRefine(({ participants }, context) =>
     checkTableShape(participants, context, "participants"),
@@ -151,19 +167,7 @@ const matchSnapshot = z
     // partida vieja con peso 1 y volver a reportarla al ranking le daría menos puntos de los que
     // le dio. No pasa —el replay NO reporta nada afuera, solo reconstruye el árbol— pero el día
     // que alguien quiera re-liquidar desde el historial, esto es lo que tiene que mirar primero.
-    betLevels: z
-      .array(
-        z.strictObject({
-          level: z.number().int().positive().safe(),
-          extra: z.number().nonnegative().safe(),
-          // LOS MONTOS NO ESTÁN, y la ausencia es la corrección: el catálogo del backend
-          // principal devuelve `{ level, extra, additionalPoints }` y la plata se deriva de la
-          // mesa (`betAmountsOf`). Guardarlos acá era pedirle al snapshot un dato que nadie
-          // produce — y un cobro cableado contra ellos habría cobrado cero, en silencio.
-          additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
-        }),
-      )
-      .default([]),
+    betLevels: z.array(betLevel).default([]),
     isFreeRoom: z.boolean().default(false),
     // CUARTO campo con default en el schema del replay, por lo mismo que los otros tres: toda la
     // historia grabada antes de la mesa de cuatro tiene que seguir rebobinando. El default es el
@@ -290,7 +294,7 @@ export function configOf(
     pointsToWin: mode.pointsToWin,
     teamAssignment: request.teamAssignment,
     // La ventana siempre está encendida en este contrato: es control de presencia
-    // anti-fraude, no una opción que matchmaking pueda omitir por accidente.
+    // anti-fraude, no una opción que el orquestador pueda omitir por accidente.
     isDealWindowEnabled: true,
     rateId: request.rateId,
     entryFee: mode.entryFee,
@@ -301,14 +305,19 @@ export function configOf(
     multiplier: mode.multiplier,
     isFreeRoom: mode.isFreeRoom,
     enableBots: mode.enableBots,
-    // TODA MESA CASUAL OFRECE REVANCHA, y esta función solo sienta mesas casuales: el torneo no
-    // pasa por acá. Cuando el catálogo tenga la palanca por modo, sale de `mode`.
+    // LA MESA ABRE LA VENTANA DE REVANCHA, pero la compuerta (`RematchGate`) queda CERRADA: nadie
+    // la abre, porque la revancha necesita que el orquestador vuelva a cobrar y eso todavía no
+    // existe. El cliente ve la ventana con `eligible: false` durante `rematchWindowMs` y la mesa
+    // termina. Cuando el orquestador abra revanchas, éste es el campo y el coordinador es suyo.
     isRematchEnabled: true,
     // LOS QUE EL LLAMADOR TRAJO. Vacío = la mesa no ofrece aumentar, que es el reposo y lo que
     // hace v1 cuando no consigue el catálogo: falla CERRADO. Se congelan con el resto de la
     // economía — el panel puede cambiar los niveles de un modo mientras la mesa se juega, y el
     // que aceptó un x5 lo aceptó al precio de cuando se sentó.
-    betLevels,
+    //
+    // LA MESA GRATIS NO OFRECE AUMENTAR, traiga lo que traiga el request: no hay entrada que
+    // multiplicar ni premio que escalar. Es la regla de v1 (`on-propose-bet-multiplier.ts:46`).
+    betLevels: mode.isFreeRoom ? [] : betLevels,
   };
 }
 
@@ -322,96 +331,4 @@ export function configOf(
  */
 export function replayConfigOf(input: unknown): DominoMatchConfig {
   return matchSnapshot.parse(input);
-}
-
-interface CommonRoomOptions {
-  readonly seats: readonly string[];
-  readonly seed: string;
-  readonly pointsToWin: number;
-}
-
-export interface CasualRoomOptions extends CommonRoomOptions {
-  readonly mode: "CASUAL";
-  readonly gameModeId: string;
-  readonly entryFee: number;
-  readonly prize: number;
-  readonly rankingWeight: number;
-  readonly isFreeRoom: boolean;
-  /**
-   * CUÁNTAS REVANCHAS LLEVA ESTA CADENA. Ausente es CERO —la mesa original no tiene por qué
-   * declararse «la número cero»— y la revancha llega con uno, que es lo que la vuelve
-   * inelegible: el tope de la cadena es 1 por default (`maxRematchesPerChain` de la config del
-   * emparejamiento, que `network/rematch.ts` lee al usar).
-   *
-   * Es anti-abuso y es de v1: sin el tope, dos cómplices se pasan la partida entre ellos
-   * indefinidamente sin volver a pasar por el emparejador, que es quien los separaría.
-   */
-  readonly rematchCount?: number;
-  /**
-   * QUÉ CADENA. Lo bautiza la PRIMERA mesa y las revanchas lo heredan; sin él cada revancha
-   * empezaría una cadena nueva y el tope de la anterior no limitaría nada.
-   *
-   * Hoy nadie lo lee más que la mesa siguiente — existe para que el día que el reporte quiera
-   * agrupar «estas tres partidas fueron la misma sentada» el dato ya esté grabado.
-   */
-  readonly rematchChainId?: string;
-}
-
-export interface TournamentRoomOptions extends CommonRoomOptions {
-  readonly mode: "TOURNAMENT";
-  readonly tournamentId: string;
-  readonly pointsPerLoss: number;
-}
-
-export type DominoRoomOptions = CasualRoomOptions | TournamentRoomOptions;
-export type MatchSinks = (options: DominoRoomOptions) => readonly MatchEventSink[];
-
-/**
- * Matchmaking owns creation now. The engine keeps its existing snapshot shape while account data is
- * resolved at admission, exactly as in truco: the authenticated `sub` is the seat id and no client
- * supplied identity is trusted.
- */
-export function configFromRoomOptions(
-  options: DominoRoomOptions,
-  matchId: string,
-  betLevels: readonly BetLevel[] = [],
-): DominoMatchConfig {
-  return {
-    matchId,
-    gameModeId: options.mode === "CASUAL" ? options.gameModeId : options.tournamentId,
-    seed: options.seed,
-    seats: options.seats.map((playerId) => ({
-      playerId,
-      userId: playerId,
-      displayName: playerId,
-      currency: "USD",
-    })),
-    pointsToWin: options.pointsToWin,
-    teamAssignment: "SHUFFLED",
-    isDealWindowEnabled: true,
-    // The platform integration freezes the real account and rate on admission. These legacy fields
-    // remain only so old replay snapshots keep their shape; no movement reads them on this path.
-    rateId: "00000000-0000-4000-8000-000000000000",
-    entryFee: options.mode === "CASUAL" ? options.entryFee : 0,
-    prize: options.mode === "CASUAL" ? options.prize : 0,
-    multiplier: options.mode === "CASUAL" ? options.rankingWeight : 1,
-    // EL TORNEO NO OFRECE REVANCHA: ahí se vuelve a jugar cuando el torneo lo diga.
-    isRematchEnabled: options.mode === "CASUAL",
-    betLevels,
-    isFreeRoom: options.mode === "CASUAL" ? options.isFreeRoom : true,
-    // EL EMPAREJADOR NO TRAE EL MODO ENTERO, así que acá no hay de dónde leerlo. Queda apagado, que
-    // es el reposo correcto: este camino sienta mesas de dos, donde `canSeatBot` diría que no
-    // igual. El día que el emparejador arme mesas de cuatro, el campo entra por `DominoRoomOptions`
-    // junto con el resto de la economía.
-    enableBots: false,
-  };
-}
-
-export interface Seat {
-  readonly playerId: string;
-  readonly reservation: unknown;
-}
-
-export interface MatchOpener {
-  open(options: DominoRoomOptions): Promise<readonly Seat[]>;
 }

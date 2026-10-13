@@ -1,5 +1,5 @@
 import { env } from "@/env";
-import { bootTestServer, casualTable, mintToken } from "@/tests/e2e";
+import { bootTestServer, casualTable, mintToken, waitUntil } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -23,9 +23,13 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
   beforeAll(async () => {
     server = await bootTestServer(PORT);
   });
+  // UN PLAZO MAYOR QUE LA RESERVA DE ASIENTO DE COLYSEUS (15 s). Los casos que esperan el 404 del
+  // asiento de vuelta lo piden en un bucle, y cada 200 en el camino RESERVA un asiento que nadie
+  // consume: como la mesa suelta a sus jugadores apenas tiene veredicto, con la sala todavía viva,
+  // esas reservas la retienen hasta vencer y el cierre del servidor espera con ellas.
   afterAll(async () => {
     await server.shutdown();
-  });
+  }, 30_000);
 
   const sitEveryone = async ({ data }: Opened) => {
     for (const seat of data.seats) {
@@ -63,30 +67,79 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect(back.roomId).toBe(opened.data.roomId);
   });
 
-  // UNA SALA BLOQUEADA NO ES UNA SALA AUSENTE: cada vuelta sin consumir es una reserva y cuenta
-  // contra `maxClients` (asientos × 2). Con 2 sentados, 2 reservas la bloquean y `joinById` tira el
-  // MISMO código que para una sala inexistente. Un 404 acá diría "no está en ninguna mesa" de quien
-  // sí está sentado, y el orquestador le abriría una segunda.
-  it("no contesta 404 cuando la sala existe pero está bloqueada", async () => {
+  // UNA MESA TERMINADA NO RETIENE A NADIE, aunque la sala siga viva. Antes el registro anotaba los
+  // asientos del config hasta que la sala se disponía, así que el orquestador le devolvía al
+  // jugador una mesa donde `onJoin` lo rechaza (`PlayerAlreadyOutError`) y no le abría otra.
+  it("suelta a los dos apenas la partida tiene veredicto, con la sala todavía abierta", async () => {
+    const opened = (await (
+      await post("/internal/matches", casualTable(["o-r1", "o-r2"]))
+    ).json()) as Opened;
+    const rooms = [];
+    for (const seat of opened.data.seats) {
+      server.sdk.auth.token = mintToken(seat.userId);
+      rooms.push(await server.sdk.consumeSeatReservation(seat.reservation as never));
+    }
+    const [quitter, stayer] = rooms;
+    const state = () =>
+      stayer?.state as { phase?: string; currentRound?: { phase?: string } } | undefined;
+    await waitUntil(() => state()?.phase !== undefined && state()?.phase !== "NOT_STARTED");
+    // Destapadas primero: con la ventana de reparto abierta, irse ANULA la partida (el caso de abajo).
+    for (const room of rooms) room.send("REVEAL_TILES", {});
+    await waitUntil(() => state()?.currentRound?.phase === "PLAYING");
+
+    quitter?.send("ABANDON", {});
+
+    await waitUntil(async () => (await post("/internal/players/o-r2/seat")).status === 404);
+    expect((await post("/internal/players/o-r1/seat")).status).toBe(404);
+    expect(stayer?.connection.isOpen).toBe(true);
+  });
+
+  // Y TAMBIÉN LA ANULADA EN EL REPARTO, que no tiene veredicto: no hay revancha posible ni partida
+  // que volver a jugar, así que retener al que se quedó lo mandaría de vuelta a una mesa muerta —y
+  // el orquestador no podría abrirle otra hasta que la sala se disponga—.
+  it("suelta a los dos cuando la partida se anula en el reparto", async () => {
+    const opened = (await (
+      await post("/internal/matches", casualTable(["o-z1", "o-z2"]))
+    ).json()) as Opened;
+    const rooms = [];
+    for (const seat of opened.data.seats) {
+      server.sdk.auth.token = mintToken(seat.userId);
+      rooms.push(await server.sdk.consumeSeatReservation(seat.reservation as never));
+    }
+    const [quitter, stayer] = rooms;
+    const state = () => stayer?.state as { phase?: string } | undefined;
+    await waitUntil(() => state()?.phase !== undefined && state()?.phase !== "NOT_STARTED");
+
+    quitter?.send("ABANDON", {});
+
+    await waitUntil(async () => (await post("/internal/players/o-z2/seat")).status === 404);
+    expect((await post("/internal/players/o-z1/seat")).status).toBe(404);
+    expect(state()?.phase).not.toBe("PLAYING");
+  });
+
+  // LAS VUELTAS SIN CONSUMIR NO LE CIERRAN LA MESA A SU DUEÑO. Cada vuelta es una reserva, y con el
+  // viejo `maxClients = asientos × 2` dos de ellas sobre una mesa llena la bloqueaban: `joinById`
+  // tiraba el mismo código que para una sala inexistente y el que de verdad estaba sentado se quedaba
+  // afuera de su propia partida (portado de truco `b90840b`). Sin tope, la sala no se bloquea nunca.
+  it("sigue devolviendo el asiento aunque haya vueltas sin consumir", async () => {
     const opened = (await (
       await post("/internal/matches", casualTable(["o-i", "o-j"]))
     ).json()) as Opened;
     await sitEveryone(opened);
     type Back = { data: { reservation: Record<string, unknown> } };
     const pending: Back[] = [];
-    let locked: Response | undefined;
-    for (let i = 0; i < 4 && !locked; i++) {
+    for (let i = 0; i < 4; i++) {
       const res = await post("/internal/players/o-i/seat");
-      if (res.status === 200) pending.push((await res.json()) as Back);
-      else locked = res;
+      expect(res.status).toBe(200);
+      pending.push((await res.json()) as Back);
     }
-    expect(locked?.status).toBe(500);
-    // Se consumen las reservas que sí salieron: sin eso la sala espera su plazo (~15 s) y el cierre
-    // del servidor se cuelga. Consumir una reserva ya emitida no depende del bloqueo.
+    // Se consumen: sin eso la sala espera el plazo de cada reserva (~15 s) y el cierre del servidor
+    // se cuelga. Cada una desplaza a la anterior, y la mesa sigue con dos conexiones.
     server.sdk.auth.token = mintToken("o-i");
     for (const { data } of pending) {
       await server.sdk.consumeSeatReservation(data.reservation as never);
     }
+    await waitUntil(() => server.getRoomById(opened.data.roomId).clients.length === 2);
   });
 
   it("contesta 404 a quien no está en ninguna mesa", async () => {
@@ -100,7 +153,7 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
   });
 
   it("no abre nada con la llave del panel: cada llave abre lo suyo", async () => {
-    const res = await post("/internal/matches", casualTable(["o-g", "o-h"]), env.adminPanelApiKey);
+    const res = await post("/internal/matches", casualTable(["o-g", "o-h"]), env.adminApiKey);
     expect(res.status).toBe(401);
   });
 });

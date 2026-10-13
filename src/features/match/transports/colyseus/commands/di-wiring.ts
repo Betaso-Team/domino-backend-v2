@@ -1,9 +1,10 @@
-import { DEFAULT_TOURNAMENT_CONFIG } from "@/features/tournament";
 import type { Logger } from "@/logger";
 import type { DependencyContainer } from "tsyringe";
 import type { CommandName } from "../../../core/command";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config";
 import type { Clock } from "../../../core/engine/clock";
+import type { DealPreset } from "../../../core/engine/dealer";
+import type { StartingScore } from "../../../core/engine/genesis";
 import type { TimeoutScheduler } from "../../../core/engine/timeout-scheduler";
 import type { SchemaVisibilityController } from "../../../core/engine/visibility";
 import type { MatchEvent } from "../../../core/events";
@@ -14,21 +15,15 @@ import {
   type MatchEventSink,
   MatchHistory,
   type MatchPieces,
-  type StandingsFeeds,
   logSink,
-  registerCasualVeto,
-  registerTournamentVeto,
-  reportStandings,
 } from "../../../network";
 import type { NetworkMatchEvent } from "../../../network/events";
-import type { MatchEventListener } from "../../../network/listeners";
-import type { DominoRoomOptions } from "../../match-contract";
 import { MessageRouter } from "../messages";
 import { CommandCatalog } from "./catalog";
 import { CommandHandler } from "./command-handler";
 import { identityDecoder } from "./decoders";
 
-export type MatchStarter = () => void;
+export type MatchStarter = () => readonly NetworkMatchEvent[];
 export type MatchSeatGuard = (playerId: string) => boolean;
 export type MatchHasOutcome = () => boolean;
 // LO QUE LA SALA NECESITA DE LA REVANCHA, y son dos funciones y no el grafo: la sala no puede
@@ -40,6 +35,12 @@ export type RematchCloser = () => readonly NetworkMatchEvent[];
 // y por el mismo motivo que las otras dos: cobrar es RED y el motor asentó el trato sin poder
 // esperarla.
 export type MultiplierRevoker = () => readonly NetworkMatchEvent[];
+// LAS DOS DE PRUEBA A MANO, preguntadas UNA vez por mesa con su meta. Sólo existen donde el
+// composition root las registró —local y dev—; en cualquier otro lado la mesa nace como siempre.
+export type DevPresetSource = (pointsToWin: number) => {
+  readonly dealPreset: DealPreset;
+  readonly startingScore: StartingScore;
+};
 
 // Este archivo ya NO arma el grafo: lo pide a `buildEngineGraph` y solo decide qué queda
 // alcanzable desde el container. La génesis y el orden de construcción viven en UN solo
@@ -52,7 +53,16 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   const scheduler = child.resolve<TimeoutScheduler>("TimeoutScheduler");
   const visibility = child.resolve<SchemaVisibilityController>("SchemaVisibilityController");
 
-  const graph = buildEngineGraph(config, globalConfig, { clock, scheduler, visibility });
+  const presets = child.isRegistered("DevPresetSource", true)
+    ? child.resolve<DevPresetSource>("DevPresetSource")(config.pointsToWin)
+    : {};
+
+  const graph = buildEngineGraph(config, globalConfig, {
+    clock,
+    scheduler,
+    visibility,
+    ...presets,
+  });
 
   // El árbol lo crea la fábrica, no la sala: la génesis es una regla del juego y tenerla
   // de los dos lados era la duplicación que este refactor cierra.
@@ -157,56 +167,8 @@ export function buildPieces(child: DependencyContainer, emit: MatchEventSink): M
   const port = child.resolve<HistoryPort>("HistoryPort");
   const history = new MatchHistory(config.matchId, match, clock, port);
 
-  // EL PRIMER LISTENER DEL REPO, y llena el hueco que este archivo tenía reservado. Los destinos
-  // son del PROCESO —el publicador es único, el de liga no tiene estado— y lo que se arma por
-  // partida es el traductor, que necesita el árbol y el snapshot de ESTA mesa.
-  //
-  // Se arma SIEMPRE, aunque los dos destinos falten: el listener anota lo que no puede reportar, y
-  // saltearlo acá convertiría una instancia sin configurar en una que reporta en silencio nada.
-  const feeds = child.resolve<StandingsFeeds>("StandingsFeeds");
-  const options = child.isRegistered("RoomOptions")
-    ? child.resolve<DominoRoomOptions>("RoomOptions")
-    : undefined;
-
-  // ⚠ EL CIERRE SE REPORTA SÓLO EN EL CAMINO DEL EMPAREJADOR (`RoomOptions`). Antes se armaba para
-  // los dos, y el del REQUEST —la mesa que abre el orquestador— publicaba `ranking.won` (RabbitMQ)
-  // y `leagues.record` (HTTP) con los `sub` de billing-auth, que el ranking y la liga de Betaso no
-  // conocen. Qué se reporta de esas mesas, y adónde, lo decide el Plan 3; hasta entonces callan.
-  //
-  // En el camino del emparejador se arma SIEMPRE, aunque los dos destinos falten: el listener anota
-  // lo que no puede reportar, y saltearlo convertiría una instancia sin configurar en una que
-  // reporta en silencio nada. (Antes de que este listener corriera por los dos caminos, las
-  // partidas reales no llegaban ni al ranking ni a la liga: un reporte que no sale no falla.)
-  const listeners: MatchEventListener[] = options
-    ? [
-        reportStandings({
-          config,
-          match,
-          ranking: feeds.ranking,
-          leagues: feeds.leagues,
-          log: child.resolve<Logger>("Logger"),
-        }),
-      ]
-    : [];
-
-  // LOS DOS VETOS SÓLO EXISTEN CON `RoomOptions`, y no es una omisión del otro camino: los datos
-  // con los que deciden —cuántas revanchas lleva la cadena, de qué torneo es la mesa— viven en
-  // las opciones y el request no los tiene. Una mesa creada por request no es una mesa del
-  // emparejador, así que no hay a quién evitar en una cola por la que no pasó.
-  if (options?.mode === "CASUAL") listeners.push(registerCasualVeto(options, match));
-  if (options?.mode === "TOURNAMENT") {
-    listeners.push(
-      registerTournamentVeto({
-        options,
-        match,
-        config: DEFAULT_TOURNAMENT_CONFIG,
-        clock,
-      }),
-    );
-  }
-
-  // `emit` sigue sin usarse: es el canal para el listener que PRODUZCA eventos, y el del cierre no
-  // produce ninguno a propósito (las dos tablas son de plataforma y nadie de esta partida las mira).
+  // `emit` es el canal para un listener que PRODUZCA eventos, y hoy no hay ninguno: lo que una mesa
+  // cuenta afuera al cerrar es el resultado al orquestador, que es un sink de la sala.
   void emit;
   // LA TRAZA VA PRIMERO, y el orden importa cuando algo se rompe: si el historial revienta al
   // escribir, lo que quedó en el log es lo que permite reconstruir qué pasaba. Al revés, el
@@ -217,5 +179,5 @@ export function buildPieces(child: DependencyContainer, emit: MatchEventSink): M
   const trace = child.isRegistered("MatchTraceLog")
     ? [logSink(child.resolve<Logger>("MatchTraceLog"))]
     : [];
-  return { history, listeners, sinks: [...trace, (events) => history.events(events)] };
+  return { history, listeners: [], sinks: [...trace, (events) => history.events(events)] };
 }

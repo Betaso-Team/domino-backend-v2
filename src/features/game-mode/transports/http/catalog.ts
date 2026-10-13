@@ -19,7 +19,7 @@ export function catalogRoutes({ service }: { readonly service: GameModeService }
     `${BASE}/:uuid`,
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       // `getActive` y no `get`: desde afuera un modo dado de baja NO EXISTE, y devolverlo acá lo
-      // dejaría elegible en el lobby público.
+      // dejaría elegible para quien arma las mesas.
       const mode = await service.getActive(params.uuid);
       if (!mode) {
         response.status(404).json({ status: "error", message: NOT_FOUND_MESSAGE });

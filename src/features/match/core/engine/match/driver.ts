@@ -2,6 +2,7 @@ import type { DominoMatchConfig, GlobalDominoConfig } from "../../config";
 import type { MatchEvent } from "../../events";
 import type { PlayerId } from "../../ids";
 import { canSeatBot } from "../../rules/bot";
+import { wasAbortedAtDeal } from "../../rules/legality";
 import { isTableIntact } from "../../rules/rematch";
 import type { MatchState } from "../../state";
 import { SchemaMatchView } from "../../state/view";
@@ -13,7 +14,7 @@ import type { Player } from "../player-facade";
 import type { RematchGate } from "../rematch/gate";
 import type { RematchNegotiation } from "../rematch/negotiation";
 import type { RoundDriver } from "../round/driver";
-import { matchPhaseOf, roundActivePlayers } from "../state-projections";
+import { matchPhaseOf } from "../state-projections";
 import type { TimeoutScheduler } from "../timeout-scheduler";
 import type { MatchReferee } from "./referee";
 
@@ -37,19 +38,28 @@ export class MatchDriver implements Driver, Retirement {
     private readonly matchConfig: DominoMatchConfig,
   ) {}
 
-  begin(): void {
-    if (matchPhaseOf(this.match) !== "NOT_STARTED") return;
+  // Nadie PIDE arrancar, así que no hay nada que rechazar: un segundo aviso no cuenta nada nuevo.
+  begin(): readonly MatchEvent[] {
+    if (matchPhaseOf(this.match) !== "NOT_STARTED") return [];
     this.match.phase = "PLAYING";
     this.match.startedAt = this.clock.now();
     for (const player of this.match.players) {
       player.extraTimeRemainingMs = this.config.extraTimeReserveMs;
     }
-    this.roundDriver.begin();
+    const events = this.roundDriver.begin();
     this.syncTimeout();
+    return events;
   }
 
   advance(actorId: PlayerId, action: RoundAction): TransitionResult {
     if (matchPhaseOf(this.match) !== "PLAYING") return { events: [], finished: false };
+    // Antes que cualquier veredicto: el que se va con la ventana de reparto abierta no le
+    // regala la partida al que se quedó, la anula.
+    if (wasAbortedAtDeal(this.match)) {
+      this.enterPresentingAbort();
+      this.syncTimeout();
+      return { events: [], finished: false };
+    }
     const transition = this.referee.outcome()
       ? { events: this.enterPresentingMatch(), finished: false }
       : this.roundDriver.advance(actorId, action);
@@ -66,15 +76,13 @@ export class MatchDriver implements Driver, Retirement {
       for (const playerId of missing) this.players.abandon(playerId);
       events.push(...missing.map((playerId) => ({ type: "ABANDON", playerId }) as const));
 
-      if (roundActivePlayers(this.match).length === 0) {
-        this.match.activeDeadline = 0;
+      // RETIRAR AL QUE NO LEVANTÓ ANULA LA PARTIDA (`wasAbortedAtDeal`), y por eso ya no hay
+      // forfeit ni caso aparte para "no levantó nadie": los dos son la misma anulación. Las
+      // manos NO se destapan — eso marcaría como vistas las fichas que nadie miró.
+      if (wasAbortedAtDeal(this.match)) {
+        this.enterPresentingAbort();
         this.syncTimeout();
         return { events, finished: false };
-      }
-      if (this.referee.outcome()) {
-        const transition = { events: [...events, ...this.enterPresentingMatch()], finished: false };
-        this.syncTimeout();
-        return transition;
       }
       this.roundDriver.resumeAfterDealWindow();
       this.syncTimeout();
@@ -112,6 +120,9 @@ export class MatchDriver implements Driver, Retirement {
       return transition;
     }
 
+    // LA PAUSA DEL ABORTO SE ACABÓ. Sin revancha: no hubo partida que volver a jugar.
+    if (kind === "PRESENTING_ABORT") return this.finish(events);
+
     // LA PAUSA DE PRESENTACIÓN SE ACABÓ, y acá se decide si la mesa muere o se abre la ventana.
     //
     // ⚠ LA VENTANA SE ABRE AUNQUE NO SEAN ELEGIBLES, y ahí este repo sigue a v1 y no a truco.
@@ -128,7 +139,11 @@ export class MatchDriver implements Driver, Retirement {
       // no hay con quién volver a jugar y no hay nada que el que quedó pueda arreglar. Los dos
       // terminan igual y por eso van juntos; abrir apagado en cualquiera de los dos casos sería
       // treinta segundos mirando un botón gris.
-      if (!this.gate.offersRematch() || !isTableIntact(this.match)) return this.finish(events);
+      //
+      // Y UN TERCERO, que es de la plataforma y llega por la compuerta: alguien se fue después del
+      // veredicto (`closeRematch` en la pausa).
+      if (!this.gate.offersRematch() || this.gate.isClosed() || !isTableIntact(this.match))
+        return this.finish(events);
       this.rematch.open(this.gate.isAllowed());
       this.match.phase = "REMATCH_WINDOW";
       this.stampDeadline(this.config.rematchWindowMs);
@@ -233,10 +248,18 @@ export class MatchDriver implements Driver, Retirement {
    * PLATAFORMA y el juego no los mira. Acá sí importan, por una razón concreta y chica — sin
    * esto, el que ofreció se queda mirando una cuenta atrás que ya no puede terminar en nada.
    *
-   * Idempotente y sin efecto fuera de las fases de revancha, así que una desconexión en medio de
-   * la partida pasa por acá sin consecuencia.
+   * Idempotente y sin efecto mientras se juega, así que una desconexión en medio de la partida
+   * pasa por acá sin consecuencia: el jugador todavía puede volver a jugar.
+   *
+   * DESDE EL VEREDICTO, IRSE ES IRSE (truco `0960663`): en la pausa de presentación todavía no hay
+   * ventana que cerrar, así que se cierra la compuerta, y al vencer la pausa la mesa termina sin
+   * abrirla.
    */
   closeRematch(): TransitionResult {
+    if (matchPhaseOf(this.match) === "PRESENTING_MATCH") {
+      this.gate.close();
+      return { events: [], finished: false };
+    }
     if (!isNegotiatingRematch(matchPhaseOf(this.match))) return { events: [], finished: false };
     return this.finish([]);
   }
@@ -254,8 +277,7 @@ export class MatchDriver implements Driver, Retirement {
 
   private afterRound(): readonly MatchEvent[] {
     if (this.referee.outcome()) return this.enterPresentingMatch();
-    this.roundDriver.begin();
-    return [];
+    return this.roundDriver.begin();
   }
 
   private enterPresentingMatch(): readonly MatchEvent[] {
@@ -264,6 +286,17 @@ export class MatchDriver implements Driver, Retirement {
     this.match.phase = "PRESENTING_MATCH";
     this.stampDeadline(this.config.presentingMatchMs);
     return [{ type: "MATCH_RESOLVED", ...outcome }];
+  }
+
+  /**
+   * LA PAUSA DE UNA PARTIDA ANULADA EN EL REPARTO. No anuncia nada: sin veredicto no hay hecho
+   * del juego que contar — el `MATCH_ABORTED` lo emite la sala al cerrarse, igual que en
+   * cualquier otro final sin veredicto. Dura lo mismo que la de una partida decidida, así que los
+   * dos finales se muestran el mismo tiempo.
+   */
+  private enterPresentingAbort(): void {
+    this.match.phase = "PRESENTING_ABORT";
+    this.stampDeadline(this.config.presentingMatchMs);
   }
 
   private stampDeadline(durationMs: number): void {

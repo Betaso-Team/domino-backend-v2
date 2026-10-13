@@ -1,22 +1,20 @@
 import type { TokenVerifier } from "@/features/auth";
 import { GameModeService, gameModeHttp } from "@/features/game-mode";
-import { LobbySettings, lobbyHttp } from "@/features/lobby";
 import {
   type Clock,
   ColyseusMatchGateway,
   type HistoryReader,
   MatchRegistry,
-  type PlayerLog,
   matchHttp,
   selectProcessIdToCreateRoom,
 } from "@/features/match";
 import { matchRooms } from "@/features/match/transports/colyseus/register";
-import { type MatchmakingConfig, matchmakingHttp, matchmakingRooms } from "@/features/matchmaking";
 import { settingsHttp } from "@/features/settings";
-import { type StrikeBook, tournamentHttp } from "@/features/tournament";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, healthRoutes } from "@/shared/http/health";
+import { requestLog } from "@/shared/http/request-log";
 import { exposeServerTime } from "@/shared/http/server-time";
+import { traceScope } from "@/shared/http/trace-scope";
 import config from "@colyseus/tools";
 import {
   type ServerOptions,
@@ -29,10 +27,8 @@ import {
 import express, { type Application } from "express";
 import {
   amqp,
-  census,
+  betasoGamesAmqp,
   driver,
-  maintenanceSignal,
-  matchmaker,
   mongo,
   presence,
   rootContainer,
@@ -44,15 +40,9 @@ import { env, isDevEnvironment } from "./env";
 import type { Logger } from "./logger";
 
 // CADA FEATURE TRAE SU PEDAZO DEL MAPA DE SALAS (`transports/colyseus/register.ts`), como trae su
-// router HTTP.
+// router HTTP. La única sala es la mesa (`domino`): no hay lobby, porque quien admite y empareja es el
+// orquestador, que abre cada mesa por la API interna.
 const rooms = {
-  ...matchmakingRooms({
-    matchmaker,
-    verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-    maintenance: maintenanceSignal,
-    census,
-    pulseMs: () => rootContainer.resolve<MatchmakingConfig>("MatchmakingConfig").censusPollMs,
-  }),
   ...matchRooms(),
 };
 
@@ -61,8 +51,12 @@ const rooms = {
 // ninguna de las dos cosas existe (Regla 3). Es el mismo lugar que `src/index.ts` ocupa en
 // truco; en domino el `app.config` es el que arma las dos superficies, la de test y la real.
 //
-// EL ORDEN DE LAS TRES LÍNEAS ES EL CONTRATO, y no es estilo:
-//   1. `express.json()` primero, o las rutas leen un `req.body` que nadie parseó;
+// EL ORDEN ES EL CONTRATO, y no es estilo:
+//   0. `traceScope()` antes que nada, o lo que corra afuera de su alcance —la línea que cierra la
+//      request incluida— sale sin `traceId`;
+//   1. `express.json()`, o las rutas leen un `req.body` que nadie parseó;
+//   1b. `requestLog()` después del parser y antes de las rutas, el único lugar desde donde las ve
+//      a todas;
 //   2. las rutas;
 //   3. el manejador de errores ÚLTIMO. Express lo reconoce por la ARIDAD de cuatro
 //      parámetros y solo alcanza lo que se registró ANTES que él.
@@ -134,10 +128,14 @@ const rooms = {
 const mongoConnection = mongo;
 const sharedStore = presence;
 const broker = amqp;
+// EL BROKER DE LA PLATAFORMA DE JUEGOS, con su nombre propio en el mapa: un 503 que dice `rabbit`
+// cuando el caído es el vhost `betaso_games` manda a mirar el broker de Betaso, que está sano.
+const gamesBroker = betasoGamesAmqp;
 const hardDependencies: DependencyChecks = {
   ...(mongoConnection ? { mongo: () => mongoConnection.ping() } : {}),
   ...(sharedStore ? { redis: () => sharedStore.get("readiness") } : {}),
   ...(broker ? { rabbit: () => broker.ping() } : {}),
+  ...(gamesBroker ? { betaso_games: () => gamesBroker.ping() } : {}),
 };
 
 // LAS DOS HERRAMIENTAS DE COLYSEUS PARA PROBAR A MANO, sólo donde se prueba a mano: el playground y
@@ -170,6 +168,7 @@ const devTools = isDevEnvironment(env.appEnv)
 
 const registerHttp = (app: Application) => {
   const logger = rootContainer.resolve<Logger>("Logger");
+  app.use(traceScope());
   // PRIMERAS, como en truco: son SPAs con router propio (better-call) y no tienen nada que hacer
   // con el parser de cuerpo ni con las rutas del juego.
   if (devTools) {
@@ -177,6 +176,7 @@ const registerHttp = (app: Application) => {
     app.use("/monitor", devTools.monitor);
   }
   app.use(express.json());
+  app.use(requestLog(logger));
   // PRIMERO DE TODOS, porque es de la costura y no de una ruta: así la cabecera sale también
   // en las respuestas de los chequeos y en las de error, que son las que el cliente tiene a
   // mano cuando algo va mal.
@@ -190,43 +190,29 @@ const registerHttp = (app: Application) => {
   // ruta y no por prefijo, y las dependencias entran ya resueltas (truco `0b0a467`). El orden de
   // montaje es el de registro, y sólo importa DENTRO de una feature —el catálogo lo pinea—.
   app.use(
-    lobbyHttp({
-      settings: rootContainer.resolve(LobbySettings),
-      adminPanelApiKey: env.adminPanelApiKey,
-    }),
-  );
-  app.use(matchmakingHttp({ maintenance: maintenanceSignal, census }));
-  app.use(
-    tournamentHttp({
-      strikes: rootContainer.resolve<StrikeBook>("StrikeBook"),
-      verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-    }),
-  );
-  app.use(
     matchHttp({
       registry: rootContainer.resolve(MatchRegistry),
       clock: rootContainer.resolve<Clock>("Clock"),
       logger,
       history: rootContainer.resolve<HistoryReader>("HistoryReader"),
-      adminPanelApiKey: env.adminPanelApiKey,
+      adminApiKey: env.adminApiKey,
       tables: rootContainer.resolve(ColyseusMatchGateway),
       orchestratorApiKey: env.orchestratorApiKey,
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-      playerLog: rootContainer.resolve<PlayerLog>("PlayerLog"),
     }),
   );
   // EL CATÁLOGO, y va ANTES del manejador de errores como todas las demás: Express reconoce ese
   // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta
   // puesta después queda con el HTML por defecto de Express, con el stack adentro.
   //
-  // Los GET son públicos y las cinco mutaciones viven detrás de `adminPanelApiKey`; sin llave no se
+  // Los GET son públicos y las cinco mutaciones viven detrás de `adminApiKey`; sin llave no se
   // registran (fail closed, §`features/game-mode/transports/http/admin.ts`). Quien autentica
   // al administrador es el orquestador, no el dominó.
   app.use(
     gameModeHttp({
       service: rootContainer.resolve(GameModeService),
       logger,
-      adminPanelApiKey: env.adminPanelApiKey,
+      adminApiKey: env.adminApiKey,
     }),
   );
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
@@ -236,7 +222,7 @@ const registerHttp = (app: Application) => {
       sections: settingsSections,
       signal: settingsSignal,
       writer: settingsWriter,
-      adminPanelApiKey: env.adminPanelApiKey,
+      adminApiKey: env.adminApiKey,
       log: logger,
     }),
   );

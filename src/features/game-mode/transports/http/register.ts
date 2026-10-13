@@ -19,7 +19,7 @@ export interface GameModeHttpDeps {
   readonly service: GameModeService;
   readonly logger: Logger;
   /** `undefined` ⇒ las cinco mutaciones NO se registran. Ver el fail closed de abajo. */
-  readonly adminPanelApiKey: string | undefined;
+  readonly adminApiKey: string | undefined;
 }
 
 // EL HTTP DEL CATÁLOGO: las lecturas que ve el jugador (`catalog.ts`) y el CRUD que mueve el panel

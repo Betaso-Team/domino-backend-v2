@@ -1,4 +1,6 @@
-import { wrap } from "@/logger";
+import { Writable } from "node:stream";
+import { baseFieldsOf, createPino, wrap } from "@/logger";
+import { newTrace, withTrace } from "@/shared/trace";
 import type pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
@@ -66,5 +68,67 @@ describe("la fachada del log", () => {
     expect(instance.child).toHaveBeenCalledWith({ matchId: "m1" });
     expect(childCalls).toEqual([{ fields: { a: 1 }, message: "en la sala" }]);
     expect(calls).toEqual([]);
+  });
+});
+
+// LO QUE SALE DE VERDAD. Se arma el MISMO pino que el del proceso —`createPino`, con su
+// redacción y su `mixin`— contra un destino que se puede leer, porque el real escribe al fd 1
+// directo y no pasa por `process.stdout`.
+const capture = (base: Record<string, unknown> = {}) => {
+  const lines: Record<string, unknown>[] = [];
+  const destination = new Writable({
+    write(chunk, _encoding, done) {
+      lines.push(JSON.parse(String(chunk)));
+      done();
+    },
+  });
+  return { log: wrap(createPino({ level: "debug", base, destination })), lines };
+};
+
+describe("lo que nunca sale", () => {
+  // ⚠ UN TOKEN EN UN LOG ES UNA SESIÓN REGALADA a quien lea el panel, y la llave interna es peor.
+  // Las dos formas en que llegan: suelto en los campos, y adentro de un objeto (un request, unas
+  // opciones de sala).
+  it("tapa el token y la autorización, sueltos o un nivel adentro", () => {
+    const { log, lines } = capture();
+
+    log.info("entró", { token: "jwt-secreto", req: { authorization: "Bearer otro-secreto" } });
+
+    expect(JSON.stringify(lines)).not.toContain("secreto");
+    expect(lines[0]).toMatchObject({ token: "[oculto]", req: { authorization: "[oculto]" } });
+  });
+});
+
+describe("la causa en curso", () => {
+  // EL `traceId` EN CADA LÍNEA SIN QUE NADIE LO PASE: es lo que junta nuestra mitad de un
+  // incidente con la del backend principal.
+  it("toda línea dentro de una causa lleva su traceId, y fuera de ella no", () => {
+    const { log, lines } = capture();
+    const trace = newTrace();
+
+    withTrace(trace, () => log.info("adentro"));
+    log.info("afuera");
+
+    expect(lines[0]?.traceId).toBe(trace.traceId);
+    expect(lines[1]).not.toHaveProperty("traceId");
+  });
+});
+
+describe("quién habla", () => {
+  it("dice la instancia como texto, también la cero, y el release", () => {
+    const base = baseFieldsOf({ appEnv: "prod", instanceIndex: 0, release: "20261006-abc" });
+
+    expect(base).toMatchObject({ env: "prod", instance: "0", release: "20261006-abc" });
+    expect(base.hostname).toEqual(expect.any(String));
+    expect(base.pid).toBe(process.pid);
+  });
+
+  // `undefined` NO ES LA INSTANCIA CERO, es "esto no lo levantó pm2". Con un `?? 0`, un
+  // `node dist/main.js` a mano se leería como el primer worker.
+  it("sin pm2 no inventa instancia, y sin release no inventa release", () => {
+    const base = baseFieldsOf({ appEnv: "local", instanceIndex: undefined, release: undefined });
+
+    expect(base).not.toHaveProperty("instance");
+    expect(base).not.toHaveProperty("release");
   });
 });

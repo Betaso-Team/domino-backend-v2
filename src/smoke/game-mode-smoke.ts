@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { env } from "@/env";
-import { logger } from "@/logger";
+import { flushLogs, logger } from "@/logger";
 import { connect } from "amqplib";
 import { MongoClient } from "mongodb";
 
@@ -23,7 +23,7 @@ import { MongoClient } from "mongodb";
 // no sobreviviría a `compose run --rm` y además mentiría si una fase quedó a medias.
 
 const HTTP = "http://nginx:8080";
-const KEY = env.adminPanelApiKey ?? "";
+const KEY = env.adminApiKey ?? "";
 const EXCHANGE = "betaso";
 // LA COLA ES DURABLE Y CON NOMBRE, y se declara ANTES de la primera mutación. Un topic exchange
 // DESCARTA lo que no matchea ninguna binding: sin la cola puesta primero, el `game_mode.created`
@@ -171,6 +171,9 @@ async function normal(): Promise<void> {
     [
       "__v",
       "_id",
+      // NO es de v1: los niveles de aumento entraron al modo en `43d89a0`. Es campo de MÁS a
+      // propósito, y por eso se nombra acá en vez de dejar que la aserción lo deje pasar.
+      "betLevels",
       "createdAt",
       "enableBots",
       "entryFee",
@@ -407,7 +410,7 @@ const FASES = { normal, enqueue, recover } as const;
 
 async function run(): Promise<void> {
   assert.equal(env.runEngineSmoke, true, "game-mode-smoke exige RUN_ENGINE_SMOKE=1");
-  assert.ok(KEY, "el cliente smoke necesita BETASO_ADMIN_PANEL_API_KEY para las mutaciones");
+  assert.ok(KEY, "el cliente smoke necesita ADMIN_API_KEY para las mutaciones");
   const fase = process.argv[2] as keyof typeof FASES | undefined;
   assert.ok(fase && fase in FASES, `fase desconocida: ${fase} — usá normal | enqueue | recover`);
   await FASES[fase]();
@@ -421,4 +424,7 @@ run()
   // SE SALE EXPLÍCITAMENTE, por lo mismo que `engine-smoke.ts`: una conexión de Mongo o de AMQP
   // que quedó abierta por un camino de error sostiene el event loop, y una fase colgada es un
   // runner colgado — en verde y sin decir nada. Ver el comentario largo en el otro archivo.
-  .finally(() => process.exit(process.exitCode ?? 0));
+  .finally(() => {
+    flushLogs();
+    process.exit(process.exitCode ?? 0);
+  });

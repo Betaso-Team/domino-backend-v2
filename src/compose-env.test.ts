@@ -4,13 +4,12 @@ import { parseEnv } from "./env";
 
 // EL ENTORNO DEL SMOKE DEL DEPLOY, VALIDADO CON EL VALIDADOR DE VERDAD.
 //
-// `src/env.ts` exige en producción un conjunto de variables que crece —hoy son cuatro— y el
+// `src/env.ts` exige en producción un conjunto de variables que crece —hoy son tres— y el
 // servicio del compose corre con `NODE_ENV=production`. Las dos listas viven en archivos que no se
 // leen entre sí, y la desincronización NO ROMPE NINGÚN GATE: `tsc` no lee YAML, la suite no levanta
 // contenedores, y `npm run test:deploy` necesita un Docker andando que el gate no tiene.
 //
-// Ya cobró una vez, en el incremento del ranking: `BETASO_BACKEND_URL` pasó a ser obligatoria y el
-// servicio del smoke no la tenía. El síntoma era el peor posible para diagnosticar —el servidor
+// Ya cobró una vez: una variable pasó a ser obligatoria y el servicio del smoke no la tenía. El síntoma era el peor posible para diagnosticar —el servidor
 // muere ANTES de escuchar, así que nginx contesta 502 y el cliente del smoke falla midiendo un
 // `/ready` que nunca existió— y el rojo apunta a la fase, no a una variable que falta.
 //
@@ -73,29 +72,12 @@ describe("el entorno del smoke del deploy arranca de verdad", () => {
     expect(() => parseEnv(environment)).not.toThrow();
   });
 
-  // EL CLIENTE NO CORRE EN PRODUCCIÓN y por eso no necesita las cuatro, pero sí tiene que parsear:
+  // EL CLIENTE NO CORRE EN PRODUCCIÓN y por eso no necesita las tres, pero sí tiene que parsear:
   // `src/env.ts` se ejecuta al IMPORTARSE, así que un valor mal escrito acá mata el smoke en su
   // primera línea y no en la aserción que iba a medir algo.
   it("el servicio del cliente también parsea", () => {
     const environment = environmentOf("smoke-client");
     expect(environment.RUN_ENGINE_SMOKE).toBe("1");
     expect(() => parseEnv(environment)).not.toThrow();
-  });
-
-  // LA URL DE LA LIGA NO PUEDE SER LA PRODUCTIVA, y esto es lo único que lo impide. El smoke
-  // TERMINA una partida, así que el reporte del cierre sale de verdad; con la URL de producción
-  // acá, cada corrida le mete un resultado inventado a la liga real — y esa ruta no pide
-  // credencial, así que nada del otro lado lo pararía. Tiene que quedar dentro del stack.
-  it("la liga del smoke apunta adentro del stack, nunca al backend real", () => {
-    const { BETASO_BACKEND_URL } = environmentOf("domino");
-    expect(BETASO_BACKEND_URL).toBeDefined();
-    expect(new URL(String(BETASO_BACKEND_URL)).hostname).toBe("nginx");
-  });
-
-  // Y EL DOBLE QUE LA ATIENDE TIENE QUE EXISTIR. Sin esta ruta el POST cae en el `location /`, que
-  // proxya al servidor, que contesta 404: el reporte falla en cada cierre de partida y el log del
-  // smoke se llena de un error que no es el que se está buscando.
-  it("nginx atiende la ruta de la liga en vez de proxearla al servidor", () => {
-    expect(readFileSync("smoke/nginx.conf", "utf8")).toContain("location = /leagues/save");
   });
 });

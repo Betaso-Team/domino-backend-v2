@@ -28,6 +28,7 @@ const mode: GameMode = {
   isActive: true,
   isFreeRoom: true,
   enableBots: true,
+  betLevels: [],
   createdAt: new Date("2026-09-15T00:00:00.000Z"),
   updatedAt: new Date("2026-09-15T01:00:00.000Z"),
   version: 7,
