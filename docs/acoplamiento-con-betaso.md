@@ -45,8 +45,9 @@ Sirve de referencia para medir lo que falta:
 
 - `src/env.ts:445-451`: con `NODE_ENV=production`, `RABBITMQ_URL` es obligatoria junto a `MONGO_URI`
   y `ADMIN_API_KEY`.
-- `src/app.config.ts:137`: `/ready` incluye el chequeo `rabbit`. Si el broker de Betaso cae, el dominó
-  se reporta no listo.
+- ~~`/ready` incluye el chequeo `rabbit`.~~ Resuelto: `/ready` ya no consulta el broker de Betaso. Si
+  cae, los eventos del catálogo se acumulan en el outbox y, a los diez minutos sin salir, el
+  despachador loguea `error`.
 
 ### Las colecciones de Mongo son las de v1
 
@@ -54,6 +55,10 @@ Sirve de referencia para medir lo que falta:
   "game_modes_domino"`, el nombre que declaró v1. Otro nombre daría un catálogo vacío.
 - `src/di-container.ts:301-308`: los ajustes se leen de `domino_settings`, también de v1.
 - Juntas suponen que v2 corre sobre la base de datos del dominó v1 de Betaso.
+- **Decidido el 2026-10-14: el catálogo de modos y los ajustes viven en el dominó.** El dominó es
+  dueño de los dos: los guarda, los modifica y los sirve; ni el orquestador ni un cliente los
+  administran. Lo que queda abierto de este punto es solo el nombre heredado de las colecciones, que
+  importa el día que el dominó tenga su propia base y no la del dominó v1.
 
 ### Torneos: escritos contra Betaso, todavía sin cablear
 
@@ -109,6 +114,10 @@ El admin inicia sesión en billing-auth, que le emite un token ES256 con audienc
 `betaso-games-admin`. Las rutas de admin del dominó lo aceptan como `Bearer`, verificado con la misma
 clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a Betaso quién es un
 administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
+
+**Decidido el 2026-10-14:** no se porta. El panel será uno propio de Betaso Games, con login del
+sistema, y no es del MVP. Mientras tanto el catálogo y los ajustes se administran con `ADMIN_API_KEY`
+desde un cliente HTTP.
 
 ## 3. Reglas de negocio copiadas de Betaso v1
 

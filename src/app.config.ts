@@ -27,7 +27,6 @@ import {
 } from "colyseus";
 import express, { type Application } from "express";
 import {
-  amqp,
   betasoGamesAmqp,
   driver,
   mongo,
@@ -117,25 +116,29 @@ const rooms = {
 // dentro de la flecha no compila aunque el ternario de afuera ya lo haya descartado. Con la
 // copia local sí, y el gate lo cazó con la suite en verde, que es el modo de falla de siempre.
 //
-// A RABBIT SE LE PIDE UN `ping()`, que abre el canal SIN publicar: una sonda que publicara mandaría
-// un evento de catálogo a los consumidores en cada chequeo del balanceador.
+// EL BROKER DE BETASO (`RABBITMQ_URL`, el del exchange `betaso`) NO ENTRA AL MAPA. Sólo lleva el
+// catálogo hacia Betaso, y eso ya está desacoplado por el outbox: con el broker caído los eventos se
+// acumulan y salen cuando vuelve, y ninguna partida lo nota. Con él adentro, una caída del broker de
+// UN cliente sacaba de rotación al dominó —o le hacía volver atrás un deploy— sin que hubiera nada
+// roto acá. La alarma de esa caída es el `error` del outbox del catálogo a los diez minutos.
+//
+// AL BROKER DE JUEGOS SE LE PIDE UN `ping()`, que abre el canal SIN publicar: una sonda que publicara
+// mandaría un evento a los consumidores en cada chequeo del balanceador.
 //
 // ⚠ Y `ping()` NO RECHAZA SOLO CON EL BROKER CAÍDO: **cuelga**. `amqplib` con `recovery: true` usa
 // `maxRetries: Infinity` (`lib/recovery.js:8`), así que la rama que rechaza el connect inicial es
 // inalcanzable (§`src/shared/amqp.ts`). Lo que lo convierte en un 503 y no en un `/ready` que no
 // contesta es el plazo POR CHEQUEO de `healthRoutes` — el mismo que ya cubre el Mongo inalcanzable
-// y por el mismo motivo: una base caída no falla, CUELGA. Sacar ese plazo saca a Rabbit del mapa sin
+// y por el mismo motivo: una base caída no falla, CUELGA. Sacar ese plazo saca al broker del mapa sin
 // que ningún test de esta capa se ponga rojo.
 const mongoConnection = mongo;
 const sharedStore = presence;
-const broker = amqp;
-// EL BROKER DE LA PLATAFORMA DE JUEGOS, con su nombre propio en el mapa: un 503 que dice `rabbit`
-// cuando el caído es el vhost `betaso_games` manda a mirar el broker de Betaso, que está sano.
+// EL BROKER DE LA PLATAFORMA DE JUEGOS, con su nombre propio en el mapa: de él depende que el
+// resultado —el premio— llegue al orquestador.
 const gamesBroker = betasoGamesAmqp;
 const hardDependencies: DependencyChecks = {
   ...(mongoConnection ? { mongo: () => mongoConnection.ping() } : {}),
   ...(sharedStore ? { redis: () => sharedStore.get("readiness") } : {}),
-  ...(broker ? { rabbit: () => broker.ping() } : {}),
   ...(gamesBroker ? { betaso_games: () => gamesBroker.ping() } : {}),
 };
 
