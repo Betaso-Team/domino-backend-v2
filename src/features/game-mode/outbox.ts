@@ -148,6 +148,9 @@ export class OutboxDispatcher {
       clock,
       log,
       label: "evento del catálogo",
+      // DIEZ MINUTOS sin salir es un `error` en el log. Es la única alarma de un broker de Betaso
+      // caído: no está en `/ready`, porque su caída no frena ninguna partida.
+      stuckAfterMs: 10 * 60_000,
       beforeEach: async () => outbox.reconcile(await reader.all()),
     });
   }
