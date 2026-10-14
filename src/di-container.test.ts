@@ -90,9 +90,17 @@ describe("la superficie Express", () => {
     expect(source.indexOf("gameModeHttp(")).toBeLessThan(source.indexOf("httpErrorHandler("));
   });
 
-  // RABBIT ENTRA A READINESS Y NO A `/health`. `/health` no consulta NADA a propósito —"reiniciame"
-  // es la única respuesta que destruye partidas en curso— y el dominó sigue jugando sin publicar.
-  it("suma rabbit a las dependencias duras, con ping y no con una publicación", () => {
-    expect(source).toMatch(/rabbit:\s*\(\)\s*=>\s*broker\.ping\(\)/);
+  // EL BROKER DE JUEGOS ENTRA A READINESS Y NO A `/health`. `/health` no consulta NADA a propósito
+  // —"reiniciame" es la única respuesta que destruye partidas en curso—.
+  it("suma el broker de juegos a las dependencias duras, con ping y no con una publicación", () => {
+    expect(source).toMatch(/betaso_games:\s*\(\)\s*=>\s*gamesBroker\.ping\(\)/);
+  });
+
+  // EL BROKER DE BETASO NO: sólo lleva el catálogo a un cliente, el outbox lo acumula mientras está
+  // caído y ninguna partida lo nota. Con él en el mapa, la caída del broker de un cliente sacaba de
+  // rotación al dominó.
+  it("no pone el broker de Betaso en las dependencias duras", () => {
+    expect(source).not.toMatch(/rabbit:/);
+    expect(source).not.toMatch(/amqp\.ping\(/);
   });
 });

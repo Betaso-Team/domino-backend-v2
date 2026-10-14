@@ -346,9 +346,9 @@ describe("AmqpPublisher: el ciclo de vida", () => {
 
   // Misma advertencia que arriba, y acá es la que más importa: esto mide que `ping()` TRADUZCA un
   // rechazo, no que un Rabbit caído lo haga rechazar. **`ping()` no se rechaza solo**: contra un
-  // broker caído se queda esperando mientras el modelo reintenta. Quien cablee la Tarea 11 tiene que
-  // poner el `rabbit: () => amqp.ping()` detrás del plazo POR CHEQUEO de `/ready`, que es lo que
-  // convierte el cuelgue en un 503 que nombra la dependencia.
+  // broker caído se queda esperando mientras el modelo reintenta. Quien lo ponga en `/ready` tiene que
+  // ponerlo detrás del plazo POR CHEQUEO, que es lo que convierte el cuelgue en un 503 que nombra la
+  // dependencia.
   it("ping traduce un rechazo al abrir a AmqpDeliveryError", async () => {
     const { publisher } = harness();
     connect.mockRejectedValue(new Error("sin broker"));
