@@ -45,8 +45,9 @@ Sirve de referencia para medir lo que falta:
 
 - `src/env.ts:445-451`: con `NODE_ENV=production`, `RABBITMQ_URL` es obligatoria junto a `MONGO_URI`
   y `ADMIN_API_KEY`.
-- `src/app.config.ts:137`: `/ready` incluye el chequeo `rabbit`. Si el broker de Betaso cae, el dominó
-  se reporta no listo.
+- ~~`/ready` incluye el chequeo `rabbit`.~~ Resuelto: `/ready` ya no consulta el broker de Betaso. Si
+  cae, los eventos del catálogo se acumulan en el outbox y, a los diez minutos sin salir, el
+  despachador loguea `error`.
 
 ### Las colecciones de Mongo son las de v1
 
