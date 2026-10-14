@@ -2293,7 +2293,13 @@ Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` e
 | `d576fbe` el interruptor de mantenimiento desde v2 | **NO APLICA**: el mantenimiento del dominó se borró entero, el interruptor lo tiene el orquestador |
 | `3627021` | docs de truco |
 
-### Deuda abierta: el panel no puede entrar con su sesión
+### ~~Deuda abierta: el panel no puede entrar con su sesión~~
+
+Resuelta en `feat/emisor-betaso-games` (2026-10-13), sin el backend de Betaso: billing-auth emite el
+token del operador al iniciar sesión en el panel (`POST /v1/operators/login`), y las rutas de admin
+aceptan `Authorization: Bearer` con ese token además de `ADMIN_API_KEY` (`requireAdminKey`,
+`features/auth/transports/operator-verifier.ts`). Las mutaciones piden el rol `catalog`; las lecturas,
+cualquier operador. Lo de abajo queda como contexto de por qué no se portó lo de truco.
 
 ⚠ **El día que el panel apunte al catálogo de v2, todas las mutaciones dan 401.** El panel corre en el
 navegador, así que no puede mandar `ADMIN_API_KEY` sin publicarla, y hoy esa llave es la única puerta.

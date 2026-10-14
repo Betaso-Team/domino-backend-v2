@@ -17,11 +17,11 @@ btLrkUlRvHcf05aATv2b2fV7btQxZWGs02T58sChoGipEbpG1t1m6G0T
 -----END PRIVATE KEY-----
 `;
 
-/** Un token de jugador como lo firma billing-auth: ES256, `betaso-auth`, las dos audiencias y `game`. */
+/** Un token de jugador como lo firma billing-auth: ES256, `betaso-games-auth`, las dos audiencias y `game`. */
 export function mintBillingToken(userId: string, expiresIn: jwt.SignOptions["expiresIn"] = "1h") {
   return jwt.sign({ sub: userId, game: "domino" }, TEST_BILLING_AUTH_PRIVATE_KEY, {
     algorithm: "ES256",
-    issuer: "betaso-auth",
+    issuer: "betaso-games-auth",
     audience: ["orchestrator", "domino"],
     expiresIn,
   });

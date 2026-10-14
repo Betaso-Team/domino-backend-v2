@@ -1,5 +1,6 @@
 import type { TokenVerifier } from "@/features/auth";
 import type { Logger } from "@/logger";
+import type { OperatorCheck } from "@/shared/http/api-key";
 import { Router } from "express";
 import type { Clock } from "../../core/engine/clock";
 import type { HistoryReader } from "../../network/history";
@@ -28,6 +29,8 @@ export interface MatchHttpDeps {
   readonly history: HistoryReader;
   /** `undefined` ⇒ la ruta interna NO se registra. Ver `historyRoutes`. */
   readonly adminApiKey: string | undefined;
+  /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
+  readonly operators?: OperatorCheck;
   readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack">;
   /** `undefined` ⇒ la API del orquestador NO se registra. Ver `tablesRoutes`. */
   readonly orchestratorApiKey: string | undefined;

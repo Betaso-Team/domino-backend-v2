@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "@/logger";
-import { requireAdminKey } from "@/shared/http/api-key";
+import { type OperatorCheck, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import type { GameModeService } from "../../service";
@@ -26,10 +26,12 @@ export function adminRoutes({
   service,
   logger,
   adminApiKey,
+  operators,
 }: {
   readonly service: GameModeService;
   readonly logger: Logger;
   readonly adminApiKey: string | undefined;
+  readonly operators?: OperatorCheck;
 }): Router {
   const router = Router();
 
@@ -53,6 +55,9 @@ export function adminRoutes({
     return router;
   }
 
+  // La llave, o un operador del panel con el rol del catálogo.
+  const admin = requireAdminKey(adminApiKey, operators, "catalog");
+
   // `reactive/:uuid` ES UNA MUTACIÓN aunque conserve el verbo GET por compatibilidad, así que va
   // detrás de la llave. Y VA ANTES DE `/:uuid`: hoy Express no las confunde —`/game-modes/reactive/x`
   // son dos segmentos y `/:uuid` matchea uno solo, medido contra la 5.2 instalada—, pero el orden es
@@ -64,7 +69,7 @@ export function adminRoutes({
     // LA CREDENCIAL PRIMERO Y EL SCHEMA DESPUÉS, en las cinco mutaciones: al revés, un anónimo
     // puede distinguir "forma inválida" de "forma válida" en una ruta que no tiene derecho a
     // tocar.
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         await service.reactivate(params.uuid);
@@ -77,7 +82,7 @@ export function adminRoutes({
 
   router.post(
     BASE,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ body: CREATE_BODY }, async ({ body }, response) => {
       try {
         // 201 y no 200, igual que v1 (`routes.ts:94`).
@@ -90,7 +95,7 @@ export function adminRoutes({
 
   router.put(
     `${BASE}/:uuid`,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ params: UUID_PARAMS, body: UPDATE_BODY }, async ({ params, body }, response) => {
       try {
         sendData(response, 200, toDTO(await service.update(params.uuid, updateInputOf(body))));
@@ -104,7 +109,7 @@ export function adminRoutes({
   // `POST /game-modes/:uuid` que pueda absorberlo. El orden es el del plan y el del archivo de v1.
   router.post(
     `${BASE}/sync`,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({}, async (_input, response) => {
       try {
         // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
@@ -124,7 +129,7 @@ export function adminRoutes({
 
   router.delete(
     `${BASE}/:uuid`,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         // SIN `data`, igual que v1 (`routes.ts:167-170`): la baja devuelve el mensaje y nada más.

@@ -1,4 +1,5 @@
 import type { Logger } from "@/logger";
+import type { OperatorCheck } from "@/shared/http/api-key";
 import { Router } from "express";
 import type { GameModeService } from "../../service";
 import { adminRoutes } from "./admin";
@@ -20,6 +21,8 @@ export interface GameModeHttpDeps {
   readonly logger: Logger;
   /** `undefined` ⇒ las cinco mutaciones NO se registran. Ver el fail closed de abajo. */
   readonly adminApiKey: string | undefined;
+  /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
+  readonly operators?: OperatorCheck;
 }
 
 // EL HTTP DEL CATÁLOGO: las lecturas que ve el jugador (`catalog.ts`) y el CRUD que mueve el panel

@@ -56,8 +56,15 @@ cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 
 ## HTTP interno
 
-Estas rutas requieren el header `x-internal-api-key` con la llave de administración. Si `ADMIN_API_KEY` no existe, no se registran y responden
-404: fallan cerradas.
+Estas rutas requieren una de dos credenciales:
+
+- el header `x-internal-api-key` con la llave de administración (scripts y soporte);
+- `Authorization: Bearer <token>` con el token de operador que billing-auth emite al iniciar sesión en
+  el panel (`POST /v1/operators/login` de billing-auth): ES256, audiencia `betaso-games-admin`, `typ:
+  operator` y los roles del operador. Las mutaciones del catálogo y de la configuración piden el rol
+  `catalog` (si falta, `403 { error: "FORBIDDEN" }`); las lecturas, cualquier operador.
+
+Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 
 | Método y ruta | Uso |
 |---|---|

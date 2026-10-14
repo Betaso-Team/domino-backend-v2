@@ -10,6 +10,7 @@ import {
 } from "@/features/match";
 import { matchRooms } from "@/features/match/transports/colyseus/register";
 import { settingsHttp } from "@/features/settings";
+import type { OperatorCheck } from "@/shared/http/api-key";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { type DependencyChecks, healthRoutes } from "@/shared/http/health";
 import { requestLog } from "@/shared/http/request-log";
@@ -196,6 +197,7 @@ const registerHttp = (app: Application) => {
       logger,
       history: rootContainer.resolve<HistoryReader>("HistoryReader"),
       adminApiKey: env.adminApiKey,
+      operators: rootContainer.resolve<OperatorCheck>("OperatorCheck"),
       tables: rootContainer.resolve(ColyseusMatchGateway),
       orchestratorApiKey: env.orchestratorApiKey,
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
@@ -213,6 +215,7 @@ const registerHttp = (app: Application) => {
       service: rootContainer.resolve(GameModeService),
       logger,
       adminApiKey: env.adminApiKey,
+      operators: rootContainer.resolve<OperatorCheck>("OperatorCheck"),
     }),
   );
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
@@ -223,6 +226,7 @@ const registerHttp = (app: Application) => {
       signal: settingsSignal,
       writer: settingsWriter,
       adminApiKey: env.adminApiKey,
+      operators: rootContainer.resolve<OperatorCheck>("OperatorCheck"),
       log: logger,
     }),
   );

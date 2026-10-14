@@ -11,7 +11,8 @@ const BILLING_GAME = "domino";
 /** Cómo reconocer un token de billing-auth: su clave pública, quién lo emite y para quién. */
 export interface BillingAuthTrust {
   readonly publicKeyPem: string;
-  readonly issuer: string;
+  // Más de uno solo mientras el emisor de billing-auth cambia de nombre.
+  readonly issuer: readonly string[];
   readonly audience: string;
 }
 
@@ -40,7 +41,7 @@ export class JwtVerifier implements TokenVerifier {
     try {
       payload = jwt.verify(token, this.key, {
         algorithms: ["ES256"],
-        issuer: this.trust.issuer,
+        issuer: [...this.trust.issuer] as [string, ...string[]],
         audience: this.trust.audience,
       });
     } catch (error: unknown) {
@@ -68,7 +69,7 @@ export class JwtVerifier implements TokenVerifier {
 // FALLA AL ARRANCAR, no jugador por jugador: el constructor corre al armar el container. Acepta
 // SOLO una clave pública EC P-256 (ES256). Una clave PRIVADA se rechaza aunque Node sepa derivar
 // de ella la pública: dominó solo verifica, y no debe tener en la config nada con lo que firmar.
-function parseBillingKey(pem: string): KeyObject {
+export function parseBillingKey(pem: string): KeyObject {
   if (isPrivateKey(pem)) {
     throw new Error(
       "BILLING_AUTH_PUBLIC_KEY contiene una clave PRIVADA: debe ser la clave PÚBLICA de billing-auth",

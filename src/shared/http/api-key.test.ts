@@ -95,3 +95,56 @@ describe("la puerta de la llave interna", () => {
     expect(knock(abierta, undefined).sent.status).toBe(401);
   });
 });
+
+// EL PANEL CON SESIÓN: el operador presenta el token que billing-auth le emitió al iniciar sesión.
+// Este archivo no verifica tokens (eso es `features/auth`): recibe quién es, o nadie.
+describe("la puerta con un token de operador", () => {
+  const operators = async (token: string) =>
+    token === "token-de-ana"
+      ? { name: "ana", roles: ["catalog"] }
+      : token === "token-de-luis"
+        ? { name: "luis", roles: [] }
+        : undefined;
+
+  const knockWithBearer = async (handler: RequestHandler, token: string) => {
+    const { res, sent } = fakeRes();
+    (res as unknown as { locals: Record<string, unknown> }).locals = {};
+    const next = vi.fn();
+    const req = {
+      get: (name: string) => (name === "authorization" ? `Bearer ${token}` : undefined),
+    } as unknown as Request;
+    handler(req, res, next);
+    await new Promise((resolve) => setImmediate(resolve));
+    return { sent, next, locals: (res as unknown as { locals: Record<string, unknown> }).locals };
+  };
+
+  it("deja pasar a un operador con el rol que pide la ruta, y lo nombra", async () => {
+    const { next, locals } = await knockWithBearer(
+      requireAdminKey("la-llave", operators, "catalog"),
+      "token-de-ana",
+    );
+    expect(next).toHaveBeenCalledOnce();
+    expect(locals.operator).toBe("ana");
+  });
+
+  it("a un operador sin ese rol le contesta 403", async () => {
+    const { sent, next } = await knockWithBearer(
+      requireAdminKey("la-llave", operators, "catalog"),
+      "token-de-luis",
+    );
+    expect(next).not.toHaveBeenCalled();
+    expect(sent).toEqual({ status: 403, body: { error: "FORBIDDEN" } });
+  });
+
+  it("a una lectura sin rol pedido la abre cualquier operador", async () => {
+    const { next } = await knockWithBearer(requireAdminKey("la-llave", operators), "token-de-luis");
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("un token que no es de operador es 401, y sin verificador ningún token abre", async () => {
+    const bad = await knockWithBearer(requireAdminKey("la-llave", operators), "basura");
+    expect(bad.sent).toEqual({ status: 401, body: { error: "UNAUTHORIZED" } });
+    const keyOnly = await knockWithBearer(requireAdminKey("la-llave"), "token-de-ana");
+    expect(keyOnly.sent).toEqual({ status: 401, body: { error: "UNAUTHORIZED" } });
+  });
+});
