@@ -2307,6 +2307,11 @@ puede verificar, y es `auth/me` el que lo valida. Se dejó afuera a propósito h
 administra el catálogo del dominó (la deuda 3 de «sin credenciales»): si es el orquestador, esto no
 hace falta.
 
+**Decidido el 14/10:** el catálogo y los ajustes son del dominó, y el panel que los administre será
+uno propio de Betaso Games, con un login del sistema (billing-auth u otro) y no el de Betaso. **No es
+del MVP.** Hasta entonces se administran con `ADMIN_API_KEY` en `x-internal-api-key`, desde un
+cliente HTTP (Insomnia o similar). No se porta el `auth/me` de truco.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.

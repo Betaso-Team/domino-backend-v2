@@ -115,6 +115,10 @@ Bearer del admin contra `GET auth/me` del backend de Betaso. En el dominó eso n
 como deuda abierta en `AGENTS.md` («el panel no puede entrar con su sesión»). Portarlo así reviviría
 `BETASO_BACKEND_URL`.
 
+**Decidido el 2026-10-14:** no se porta. El panel será uno propio de Betaso Games, con login del
+sistema, y no es del MVP. Mientras tanto el catálogo y los ajustes se administran con `ADMIN_API_KEY`
+desde un cliente HTTP.
+
 ## 3. Reglas de negocio copiadas de Betaso v1
 
 - **Niveles de aumento.** El `extra` tiene que crecer con el nivel: es la regla de
