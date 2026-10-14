@@ -23,29 +23,28 @@ const sameKey = (provided: string, expected: string): boolean => {
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
-/** Un operador de Betaso Games, según el token que billing-auth le emitió al iniciar sesión. */
-export interface Operator {
+/** Un admin de Betaso Games, según el token que billing-auth le emitió al iniciar sesión. */
+export interface Admin {
   readonly name: string;
-  readonly roles: readonly string[];
 }
 
 /**
- * Quién es el operador de un `Bearer`, o `undefined` si no es un token de operador válido. La
- * implementación vive en `features/auth` (verifica contra la clave pública de billing-auth); acá
- * solo se usa, para que esta puerta no dependa de esa feature.
+ * Quién es el admin de un `Bearer`, o `undefined` si no es un token de admin válido. La implementación
+ * vive en `features/auth` (verifica contra la clave pública de billing-auth); acá solo se usa, para que
+ * esta puerta no dependa de esa feature.
  */
-export type OperatorCheck = (token: string) => Promise<Operator | undefined>;
+export type AdminTokenCheck = (token: string) => Promise<Admin | undefined>;
 
 // LA PUERTA DE ENTRADA DEL PANEL, con dos credenciales:
 // - la llave (`x-internal-api-key`), que autoriza pero no identifica: dice que habla el panel o un
-//   script, no qué administrador apretó el botón;
-// - el token de operador (`Authorization: Bearer`), que emite billing-auth al iniciar sesión el
-//   operador en el panel. Ese sí identifica, y trae sus roles: si la ruta pide uno (`role`) y el
-//   operador no lo tiene, 403. Con él el panel entra sin pedirle nada al backend de Betaso.
+//   script, no qué persona apretó el botón;
+// - el token de admin (`Authorization: Bearer`), que emite billing-auth cuando un admin inicia sesión.
+//   Ese sí identifica, y abre todo lo que abre la llave: no hay roles. Con él el panel entra sin
+//   pedirle nada al backend de Betaso.
 // El orquestador entra por el mismo guardia con SU llave (`requireApiKey`): cada llave abre las rutas
 // que se le montaron y ninguna otra.
 export const requireAdminKey =
-  (expected: string, operators?: OperatorCheck, role?: string): RequestHandler =>
+  (expected: string, adminTokens?: AdminTokenCheck): RequestHandler =>
   (request, response, next) => {
     const provided = request.get(API_KEY_HEADER);
     if (provided && sameKey(provided, expected)) {
@@ -53,21 +52,17 @@ export const requireAdminKey =
       return;
     }
     const bearer = /^Bearer (.+)$/.exec(request.get("authorization") ?? "")?.[1];
-    if (!bearer || !operators) {
+    if (!bearer || !adminTokens) {
       response.status(401).json({ error: "UNAUTHORIZED" });
       return;
     }
-    operators(bearer).then(
-      (operator) => {
-        if (!operator) {
+    adminTokens(bearer).then(
+      (admin) => {
+        if (!admin) {
           response.status(401).json({ error: "UNAUTHORIZED" });
           return;
         }
-        if (role && !operator.roles.includes(role)) {
-          response.status(403).json({ error: "FORBIDDEN" });
-          return;
-        }
-        response.locals.operator = operator.name;
+        response.locals.admin = admin.name;
         next();
       },
       () => response.status(401).json({ error: "UNAUTHORIZED" }),
@@ -75,5 +70,5 @@ export const requireAdminKey =
   };
 
 // EL MISMO GUARDIA para cualquier llave de entrada: entre el panel y el orquestador cambia la
-// llave, no el chequeo. El orquestador nunca trae token de operador: no se le pasa `operators`.
+// llave, no el chequeo. El orquestador nunca trae token de admin: no se le pasa `adminTokens`.
 export const requireApiKey = (expected: string): RequestHandler => requireAdminKey(expected);

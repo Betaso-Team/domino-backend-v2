@@ -112,7 +112,7 @@ describe("parseEnv", () => {
     });
     expect(parsed.billingAuth).toEqual({
       publicKeyPem: "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----",
-      issuer: ["betaso-games-auth", "betaso-auth"],
+      issuer: "betaso-games-auth",
       audience: "domino",
     });
   });

@@ -12,7 +12,7 @@ const BILLING_GAME = "domino";
 export interface BillingAuthTrust {
   readonly publicKeyPem: string;
   // Más de uno solo mientras el emisor de billing-auth cambia de nombre.
-  readonly issuer: readonly string[];
+  readonly issuer: string;
   readonly audience: string;
 }
 
@@ -41,7 +41,7 @@ export class JwtVerifier implements TokenVerifier {
     try {
       payload = jwt.verify(token, this.key, {
         algorithms: ["ES256"],
-        issuer: [...this.trust.issuer] as [string, ...string[]],
+        issuer: this.trust.issuer,
         audience: this.trust.audience,
       });
     } catch (error: unknown) {

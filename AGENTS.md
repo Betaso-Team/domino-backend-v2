@@ -2209,8 +2209,8 @@ abiertas por el dominó mismo (las creadas CON `roomOptions`):
 - **La suite firma como billing-auth**: `src/tests/billing-auth-keys.ts` tiene una pareja P-256 fija y
   publicada a propósito (`mintBillingToken`); `vitest.setup.ts` y `compose.smoke.yaml` usan su pública.
   Ningún entorno de verdad confía en ella.
-- **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume), y
-  `JWT_ISSUER` vale `betaso-auth`.
+- **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume).
+  ~~`JWT_ISSUER` vale `betaso-auth`.~~ Desde 2026-10-14 es uno solo, `betaso-games-auth`.
 - **Los niveles de aumento son parte del modo** (`43d89a0`): `betLevels: [{ level, extra,
   additionalPoints }]`, la misma forma del `CreateMatchRequest`. Vacío = no ofrece aumentar. Se
   validan niveles únicos (≥ 2) y el `extra` creciente; el `PUT` reemplaza la lista. El `GET` público
@@ -2296,10 +2296,11 @@ Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` e
 ### ~~Deuda abierta: el panel no puede entrar con su sesión~~
 
 Resuelta en `feat/emisor-betaso-games` (2026-10-13), sin el backend de Betaso: billing-auth emite el
-token del operador al iniciar sesión en el panel (`POST /v1/operators/login`), y las rutas de admin
-aceptan `Authorization: Bearer` con ese token además de `ADMIN_API_KEY` (`requireAdminKey`,
-`features/auth/transports/operator-verifier.ts`). Las mutaciones piden el rol `catalog`; las lecturas,
-cualquier operador. Lo de abajo queda como contexto de por qué no se portó lo de truco.
+token del admin cuando inicia sesión (`POST /v1/admins/login`), y las rutas de admin aceptan
+`Authorization: Bearer` con ese token además de `ADMIN_API_KEY` (`requireAdminKey`,
+`features/auth/transports/admin-token-verifier.ts`). ~~Las mutaciones piden el rol `catalog`~~: desde el
+2026-10-14 no hay roles, y un admin abre lo mismo que la llave. Lo de abajo queda como contexto de por
+qué no se portó lo de truco.
 
 ⚠ **El día que el panel apunte al catálogo de v2, todas las mutaciones dan 401.** El panel corre en el
 navegador, así que no puede mandar `ADMIN_API_KEY` sin publicarla, y hoy esa llave es la única puerta.

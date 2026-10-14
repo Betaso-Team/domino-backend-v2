@@ -1,4 +1,4 @@
-import { type OperatorCheck, requireAdminKey } from "@/shared/http/api-key";
+import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import type { Logger } from "@/shared/logger";
 import { type Request, Router } from "express";
@@ -26,7 +26,7 @@ export interface SettingsRoutesDeps {
   readonly writer: SettingsWriter;
   readonly adminApiKey: string | undefined;
   /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
-  readonly operators?: OperatorCheck;
+  readonly adminTokens?: AdminTokenCheck;
   readonly log: Logger;
 }
 
@@ -44,17 +44,16 @@ export interface SettingsRoutesDeps {
 // la fotografía al crearse: los números de una mesa no se mueven debajo de los que están jugando.
 export function settingsRoutes(deps: SettingsRoutesDeps): Router {
   const router = Router();
-  const { sections, signal, writer, adminApiKey, operators, log } = deps;
+  const { sections, signal, writer, adminApiKey, adminTokens, log } = deps;
   if (!adminApiKey) {
     log.warn("configuración en caliente APAGADA: sin ADMIN_API_KEY no se registra", {
       route: `${SETTINGS_ROUTE}/*`,
     });
     return router;
   }
-  // Leerla: la llave o cualquier operador. Cambiarla mueve los plazos de todas las mesas: el rol del
-  // catálogo.
-  const reader = requireAdminKey(adminApiKey, operators);
-  const admin = requireAdminKey(adminApiKey, operators, "catalog");
+  // Leerla y cambiarla: la llave o un admin.
+  const admin = requireAdminKey(adminApiKey, adminTokens);
+  const reader = admin;
 
   const dtoOf = (section: SettingsSection): SectionDTO => ({
     name: section.name,

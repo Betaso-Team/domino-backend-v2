@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { JwtVerifier, operatorCheck } from "@/features/auth";
+import { JwtVerifier, adminTokenCheck } from "@/features/auth";
 import {
   type GameModeReader,
   GameModeService,
@@ -55,7 +55,7 @@ import {
 } from "@/features/settings";
 import { AmqpPublisher } from "@/shared/amqp";
 import { HttpClient } from "@/shared/http";
-import type { OperatorCheck } from "@/shared/http/api-key";
+import type { AdminTokenCheck } from "@/shared/http/api-key";
 import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
 import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
@@ -92,8 +92,8 @@ rootContainer.register("TokenVerifier", {
 });
 // LOS OPERADORES DEL PANEL, con el token que billing-auth les emite al iniciar sesión: la misma clave
 // pública y los mismos emisores que los jugadores, otra audiencia.
-rootContainer.register<OperatorCheck>("OperatorCheck", {
-  useValue: operatorCheck(env.billingAuth),
+rootContainer.register<AdminTokenCheck>("AdminTokenCheck", {
+  useValue: adminTokenCheck(env.billingAuth),
 });
 
 // EL PRESENCE Y EL DRIVER DE COLYSEUS, que son infraestructura del SERVIDOR y no de una feature:

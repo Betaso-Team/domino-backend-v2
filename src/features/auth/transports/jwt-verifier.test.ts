@@ -9,7 +9,7 @@ const BILLING_PUBLIC = billing.publicKey.export({ type: "spki", format: "pem" })
 const BILLING_PRIVATE = billing.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const verifier = new JwtVerifier({
   publicKeyPem: BILLING_PUBLIC,
-  issuer: ["betaso-games-auth", "betaso-auth"],
+  issuer: "betaso-games-auth",
   audience: "domino",
 });
 
@@ -40,14 +40,12 @@ describe("JwtVerifier", () => {
     await expect(verifier.verify(token)).resolves.toEqual({ userId: "u1" });
   });
 
-  // El emisor de billing-auth cambia de nombre: los dos valen hasta que no quede un token vivo del viejo.
-  it("acepta un token de cualquiera de los dos emisores de billing-auth, y de ningún otro", async () => {
-    await expect(verifier.verify(billingToken({ issuer: "betaso-auth" }))).resolves.toEqual({
-      userId: "p-1",
-    });
-    await expect(verifier.verify(billingToken({ issuer: "otro" }))).rejects.toBeInstanceOf(
-      InvalidTokenError,
-    );
+  it("rechaza un token de otro emisor, también el nombre viejo de billing-auth", async () => {
+    for (const issuer of ["betaso-auth", "otro"]) {
+      await expect(verifier.verify(billingToken({ issuer }))).rejects.toBeInstanceOf(
+        InvalidTokenError,
+      );
+    }
   });
 
   it("rechaza un token ausente", async () => {
@@ -115,7 +113,7 @@ describe("JwtVerifier", () => {
   it("rechaza un ES256 sin exp", async () => {
     const noExp = jwt.sign({ sub: "p-1", game: "domino" }, BILLING_PRIVATE, {
       algorithm: "ES256",
-      issuer: "betaso-auth",
+      issuer: "betaso-games-auth",
       audience: "domino",
     });
     await expect(verifier.verify(noExp)).rejects.toBeInstanceOf(InvalidTokenError);
@@ -144,7 +142,7 @@ describe("JwtVerifier", () => {
 // clave mala tumba el arranque en vez de fallar jugador por jugador.
 describe("JwtVerifier: validación de la clave de billing-auth", () => {
   const build = (publicKeyPem: string) => () =>
-    new JwtVerifier({ publicKeyPem, issuer: ["betaso-games-auth"], audience: "domino" });
+    new JwtVerifier({ publicKeyPem, issuer: "betaso-games-auth", audience: "domino" });
 
   it("una clave que no es un PEM revienta al construir, nombrando la variable", () => {
     expect(build("esto no es un pem")).toThrow(/BILLING_AUTH_PUBLIC_KEY/);

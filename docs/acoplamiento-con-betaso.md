@@ -105,10 +105,10 @@ Betaso:
 
 ### El panel de admin
 
-El operador inicia sesión en billing-auth, que le emite un token ES256 con audiencia
-`betaso-games-admin` y sus roles. Las rutas de admin del dominó lo aceptan como `Bearer`, verificado
-con la misma clave pública de billing-auth (`operator-verifier.ts`): no se le pregunta a Betaso quién
-es un administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
+El admin inicia sesión en billing-auth, que le emite un token ES256 con audiencia
+`betaso-games-admin`. Las rutas de admin del dominó lo aceptan como `Bearer`, verificado con la misma
+clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a Betaso quién es un
+administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
 
 ## 3. Reglas de negocio copiadas de Betaso v1
 
@@ -128,9 +128,6 @@ marca del sistema, o atan el servicio a Betaso de otra forma. Los nombres del br
 (`BETASO_GAMES_RABBITMQ_URL`, `betasoGamesAmqp` y el exchange `betaso_games`) llevan la marca y no
 figuran aquí.
 
-- **Emisor del JWT.** `JWT_ISSUER` acepta `betaso-games-auth` y `betaso-auth` (lista separada por
-  coma) mientras billing-auth pasa al nombre nuevo. Cuando no pueda quedar vivo un token del viejo
-  (12 h después de desplegar billing-auth), se quita `betaso-auth` de la lista.
 - **Paquete.** `package.json`: `"@betaso/domino-backend"`, «Backend del Dominó Betaso».
 - **Dominios y rutas.**
   - `.env.example:154`: `SERVER_ADDRESS=domino.betaso.com`.

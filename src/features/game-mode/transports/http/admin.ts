@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "@/logger";
-import { type OperatorCheck, requireAdminKey } from "@/shared/http/api-key";
+import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import type { GameModeService } from "../../service";
@@ -26,12 +26,12 @@ export function adminRoutes({
   service,
   logger,
   adminApiKey,
-  operators,
+  adminTokens,
 }: {
   readonly service: GameModeService;
   readonly logger: Logger;
   readonly adminApiKey: string | undefined;
-  readonly operators?: OperatorCheck;
+  readonly adminTokens?: AdminTokenCheck;
 }): Router {
   const router = Router();
 
@@ -55,8 +55,8 @@ export function adminRoutes({
     return router;
   }
 
-  // La llave, o un operador del panel con el rol del catálogo.
-  const admin = requireAdminKey(adminApiKey, operators, "catalog");
+  // La llave, o un admin con su token.
+  const admin = requireAdminKey(adminApiKey, adminTokens);
 
   // `reactive/:uuid` ES UNA MUTACIÓN aunque conserve el verbo GET por compatibilidad, así que va
   // detrás de la llave. Y VA ANTES DE `/:uuid`: hoy Express no las confunde —`/game-modes/reactive/x`

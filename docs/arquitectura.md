@@ -16,7 +16,7 @@ resultado de cada partida.
 flowchart LR
   Client["Cliente de juego"]
   Orch["Orquestador\n(domino-orchestrator)"]
-  Panel["Panel / operador"]
+  Panel["Panel / admin"]
   Proxy["Nginx\nWebSocket + HTTP"]
 
   subgraph Process["Proceso Node + Colyseus"]
