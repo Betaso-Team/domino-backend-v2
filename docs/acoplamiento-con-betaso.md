@@ -55,6 +55,10 @@ Sirve de referencia para medir lo que falta:
   "game_modes_domino"`, el nombre que declaró v1. Otro nombre daría un catálogo vacío.
 - `src/di-container.ts:301-308`: los ajustes se leen de `domino_settings`, también de v1.
 - Juntas suponen que v2 corre sobre la base de datos del dominó v1 de Betaso.
+- **Decidido el 2026-10-14: el catálogo de modos y los ajustes viven en el dominó.** El dominó es
+  dueño de los dos: los guarda, los modifica y los sirve; ni el orquestador ni un cliente los
+  administran. Lo que queda abierto de este punto es solo el nombre heredado de las colecciones, que
+  importa el día que el dominó tenga su propia base y no la del dominó v1.
 
 ### Torneos: escritos contra Betaso, todavía sin cablear
 
