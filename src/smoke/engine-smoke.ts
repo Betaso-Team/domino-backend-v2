@@ -325,7 +325,15 @@ async function run(): Promise<void> {
     const wire = JSON.stringify(first.state.toJSON());
     assert.match(wire, /Ada/);
     assert.match(wire, /Lin/);
-    for (const privateValue of ["smoke-ada", "smoke-lin", "VES", "USD"]) {
+    // El `userId` viaja a propósito: es como cada cliente encuentra SU asiento. La moneda no.
+    for (const [room, userId] of [
+      [first, "smoke-ada"],
+      [second, "smoke-lin"],
+    ] as const) {
+      const mine = room.state.players.find((player) => player.userId === userId);
+      assert.ok(mine, `el cliente de ${userId} no encuentra su asiento por userId`);
+    }
+    for (const privateValue of ["VES", "USD"]) {
       assert.equal(wire.includes(privateValue), false, `dato privado filtrado: ${privateValue}`);
     }
 
