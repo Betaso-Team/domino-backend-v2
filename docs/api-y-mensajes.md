@@ -37,7 +37,10 @@ decoder estricto antes de alcanzar el comando.
 - Cada jugador ve sus fichas y sólo el conteo de las fichas rivales.
 - Nadie ve el contenido del pozo; sí ve cuántas quedan.
 - `displayName`, `username` y `profilePicture` son presentación sincronizada.
-- `platformId`, `userUuid` y `currency` están en el snapshot del servidor, pero no viajan por wire.
+- `userId` (el `sub` del token) viaja en cada asiento: así el cliente reconoce el suyo con
+  `players.find((p) => p.userId === sub)`, también antes de revelar las fichas. Es el último campo de
+  `PlayerState`.
+- La moneda no es del estado: vive en el `seat` de la config del servidor y no viaja por wire.
 - Las fichas colocadas, el turno, puntajes, fases y deadlines son públicos.
 
 ## HTTP público

@@ -233,9 +233,16 @@ Lo que dejó la Tarea 1, y que conviene saber antes de tocar nada de acá:
 - **`playerId` es OPACO y posicional** (`seat-1`, `seat-2`, …). Adentro de la partida —motor,
   historial, wire, registro público— no hay plataformas ni UUIDs. El cruce entre la pareja
   autenticada y el asiento pasa en UN solo lugar: `onJoin`.
-- **`PlayerState` sincroniza presentación y NO identidad.** `platformId`/`userUuid`/`currency` son
-  `noSync()`: no entran a la metadata del Schema, así que ni se codifican ni aparecen en
-  `toJSON()`. `displayName`/`username`/`profilePicture` sí viajan.
+- **`PlayerState` es lo que se juega y se dibuja, y todo viaja; la moneda NO está.** `currency` ya no
+  es un campo del estado: es dato de infraestructura y vive en el `seat` de la config congelada
+  (`config.seats`), de donde la lee la liquidación. `displayName`/`username`/`profilePicture` viajan, y `userId` también (desde `feat/userid-publico-en-asiento`):
+  es el `sub` del token (el `players.id` de billing-auth, estable entre lanzamientos) y es como el cliente
+  encuentra SU asiento, `players.find(p => p.userId === sub)`, porque `seat-N` es posicional y no hay otra
+  forma de saber cuál es el suyo, ni siquiera antes de `REVEAL_TILES`. Es el modelo de truco, donde el
+  `playerId` es el `userId`. No es una credencial: el `sid` no entra al estado. **Es campo nuevo AL FINAL
+  de `PlayerState`** (antes era `noSync()` y no ocupaba índice): un cliente con el schema pre-generado
+  tiene que regenerarlo. Los comentarios de más abajo que dicen que el `userId`/la pareja/la moneda es `noSync()`
+  describen el diseño anterior (ya no queda ningún campo `noSync()` en `PlayerState`).
   **OJO con el golden**: `golden-2p.json` **sí** contiene `betaso` y `VES`, y no es una filtración
   —están en `meta`, que es el `DominoMatchConfig` de ENTRADA que el replay necesita para rebobinar;
   `finalState`, que es el árbol serializado, no los tiene—. Es el primer archivo donde se va a
@@ -1256,7 +1263,8 @@ contra 5 de `userUuid`).
 - **`idempotencyKey` CONSERVA el `JSON.stringify`**, y no es inercia: sigue concatenando `matchId` y
   `kind` con la identidad, que son los que reintroducen la colisión.
 - **`PlayerState` perdió un campo `noSync()` y ninguno sincronizado**, así que esto NO es una
-  ruptura de wire — a diferencia de la que los agregó.
+  ruptura de wire — a diferencia de la que los agregó. (Después, `userId` se hizo sincronizable, al final
+  del schema: eso sí rompe el wire. Ver la entrada de `PlayerState` en "Lo que dejó la Tarea 1".)
 - **`configOf` rechaza el `userId` repetido** donde antes rechazaba la pareja repetida: es
   estrictamente más estricto.
 - Verificado por MUTACIÓN: `assertSameTable` sin comparar el `userId` (1 rojo de 12) y la unicidad

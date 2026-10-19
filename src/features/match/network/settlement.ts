@@ -77,8 +77,8 @@ const entryOf = (
  * IDENTIDAD que cada asiento lleva: `PlayerState` guarda la pareja congelada
  * (`core/state/player.ts`), escrita una sola vez desde el asiento en `genesis.ts` y sin
  * ninguna otra ruta de escritura en el repo. Comparar la pareja asiento por asiento vuelve
- * la guarda exacta hoy, sin tocar el schema y sin costo de wire: esos campos son `noSync()`
- * y no salen al cliente.
+ * la guarda exacta hoy, sin campos nuevos: el `userId` ya vive en el asiento (y viaja al cliente,
+ * que lo usa para reconocer el suyo); la moneda se lee de `config.seats`.
  */
 const assertSameTable = (match: MatchState, config: DominoMatchConfig): void => {
   const seatsById = new Map(config.seats.map((seat) => [seat.playerId, seat]));
