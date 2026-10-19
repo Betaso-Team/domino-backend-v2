@@ -2327,6 +2327,17 @@ uno propio de Betaso Games, con un login del sistema (billing-auth u otro) y no 
 del MVP.** Hasta entonces se administran con `ADMIN_API_KEY` en `x-internal-api-key`, desde un
 cliente HTTP (Insomnia o similar). No se porta el `auth/me` de truco.
 
+## Port de truco — del 15 al 17/10 (`3d8dbdb` … `cf527d5`, rama `fix/premio-espera-cobro-del-aumento`)
+
+| truco | acá |
+|---|---|
+| `a384487` cada movimiento de plata con su clave | **PORTADO lo que aplica.** La clave por aumento ya estaba (`step` en `OrchestratorBetCharger`, desde el principio). Lo que faltaba era que **el premio espere al cobro del aumento en vuelo**: `MatchResultRecorder` leía `acceptedBetLevel` en el acto del veredicto, y el cobro tarda hasta 15 s. Si la partida terminaba antes —un abandono alcanza— y el orquestador después rechazaba, el resultado ya había salido con el premio x2 que nadie pagó. Ahora el desenlace espera `settled()` y relee el estado; el apagado espera esos resultados (`drain()`) antes de cerrar Mongo, y `kill_timeout` pasó de 5 a 20 s (⚠ un `pm2 reload` no lo aplica: hace falta `./restart` o `pm2 delete` + `start`). El resto —ledger, reversiones por clave, reintento de la entrada— es de quien mueve la plata, o sea del orquestador |
+| `3d8dbdb` montos del historial en centavos | **NO APLICA**: no hay `/me/matches` |
+| `f589e0d` fecha de creación de la cuenta | **NO APLICA**: el dominó no lee cuentas |
+| `ba49623` avisos por jugador en el lobby | **NO APLICA**: no hay lobby. Si hacen falta, son del orquestador |
+| `545fdc4` techo de winrate y orden de la relajación | **NO APLICA**: emparejador y core-loop, que el dominó no tiene |
+| `60c2c41`, `a9f9f14`, `95aea3e`, `f050b68`, `cf527d5` | docs de truco |
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.

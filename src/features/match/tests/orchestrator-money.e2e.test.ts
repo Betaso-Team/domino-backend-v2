@@ -101,6 +101,37 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     expect(match.serverState.acceptedBetLevel).toBe(2);
   });
 
+  it("la partida que termina con el cobro del aumento en vuelo publica el premio recién con el cobro resuelto", async () => {
+    let refuse = () => {};
+    chargeBet.mockImplementation(
+      () =>
+        new Promise<void>((_, reject) => {
+          refuse = () => reject(new ChargeRejectedError("INSUFFICIENT_FUNDS"));
+        }),
+    );
+    const enqueue = vi.spyOn(matchResults, "enqueue");
+    const match = await seatPair(server, ["w1", "w2"], undefined, { betLevels: [...LEVELS] });
+    await revealHands(match);
+    clientOf(match, "w1").send("PROPOSE_BET_MULTIPLIER", { level: 2 });
+    await waitUntil(() => match.serverState.currentRound?.betOffer !== undefined);
+    clientOf(match, "w2").send("RESPOND_BET_MULTIPLIER", { accept: true });
+    await waitUntil(() => chargeBet.mock.calls.length === 1);
+
+    // Con el cobro todavía en vuelo la mesa dice x2, y el que se va le da la partida al otro.
+    await act(match, "w2", "ABANDON");
+    await new Promise((resume) => setTimeout(resume, 20));
+    const key = `${match.config.matchId}:finished`;
+    expect((await matchResults.present([key])).has(key)).toBe(false);
+
+    refuse();
+    await waitUntil(async () => (await matchResults.present([key])).has(key), 3_000);
+    const payload = enqueue.mock.calls.find((call) => call[0] === key)?.[2];
+    expect(payload).toMatchObject({
+      stakes: { bet: null },
+      settlement: [{ amountUc: configOfRoom(match.roomId).prize }],
+    });
+  });
+
   it("con la mesa completa pide el cobro de la entrada, y no arranca hasta el sí", async () => {
     let release!: () => void;
     fakeOrchestrator.failEntryWith(

@@ -248,14 +248,13 @@ export const matchResultDispatcher = betasoGamesAmqp
     })
   : undefined;
 matchResultDispatcher?.start();
-rootContainer.register(MatchResultRecorder, {
-  useValue: new MatchResultRecorder({
-    outbox: matchResultOutbox,
-    wake: () => matchResultDispatcher?.wake(),
-    now: () => clock.now(),
-    log: logger,
-  }),
+const matchResultRecorder = new MatchResultRecorder({
+  outbox: matchResultOutbox,
+  wake: () => matchResultDispatcher?.wake(),
+  now: () => clock.now(),
+  log: logger,
 });
+rootContainer.register(MatchResultRecorder, { useValue: matchResultRecorder });
 // Para la suite: lo encolado, sin broker. Se exporta como el catálogo exporta `gameModes`.
 export const matchResults = matchResultOutbox;
 
@@ -419,6 +418,10 @@ export function stopAcceptingMatches(): void {
 // el historial de las otras cuarenta que siguen jugando.
 export async function shutdown(): Promise<void> {
   stopAcceptingMatches();
+  // LOS RESULTADOS QUE TODAVÍA NO ENTRARON AL OUTBOX, antes que nada: uno de una partida que terminó
+  // con el cobro del aumento en vuelo espera a ese cobro (hasta 15 s). Al revés se cierra Mongo debajo
+  // y el resultado se pierde, que es un premio que no se paga.
+  await matchResultRecorder.drain();
   // 0. PARAR EL DESPACHADOR, y va PRIMERO por lo mismo que el historial va antes que Mongo: tiene
   //    una entrega EN VUELO. `close()` cancela el temporizador y espera el `inFlight`, así que lo
   //    que estaba publicado y confirmado alcanza a marcarse `SENT`. Cortarle la base debajo dejaría
