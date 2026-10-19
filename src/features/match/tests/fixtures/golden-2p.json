@@ -3319,7 +3319,8 @@
             }
           ]
         },
-        "isBot": false
+        "isBot": false,
+        "userId": "g1"
       },
       {
         "playerId": "seat-2",
@@ -3348,7 +3349,8 @@
             }
           ]
         },
-        "isBot": false
+        "isBot": false,
+        "userId": "g2"
       }
     ],
     "currentRound": {

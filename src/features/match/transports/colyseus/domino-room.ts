@@ -302,7 +302,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     });
     this.setState(match);
     // El modo queda en el listing compartido de Colyseus (lo muestra el monitor). La metadata lleva
-    // solo el identificador público; perfil, moneda, tasa y seed no salen.
+    // solo el identificador público; perfil, userId, moneda, tasa y seed no salen.
     await this.setMetadata({ gameModeId: config.gameModeId });
 
     // SE ANOTA ENTRE LAS PARTIDAS VIVAS DEL CLÚSTER, y SE ESPERA. A partir de que `onCreate`
@@ -343,9 +343,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   }
 
   override async onJoin(client: Client): Promise<void> {
-    // ACÁ SE CRUZA LA IDENTIDAD EXTERNA CON EL ASIENTO OPACO, y es el único lugar donde
-    // pasa. De estas cuatro líneas para abajo nadie vuelve a ver una plataforma ni un
-    // UUID: el motor, el historial y el wire hablan de `seat-N`.
+    // ACÁ SE CRUZA EL `userId` DEL TOKEN CON EL ASIENTO OPACO, y es el único lugar donde pasa.
+    // De estas líneas para abajo el motor, el historial y el wire hablan de `seat-N`; el
+    // `userId` solo sale en `PlayerState.userId`, para que cada cliente encuentre su asiento.
     const identity = client.auth as SeatCredentials;
     const playerId = this.config.seats.find((seat) => seat.userId === identity.userId)?.playerId;
     // Primero pertenece a la mesa; recién después se pregunta si sigue jugando. Invertir

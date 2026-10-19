@@ -16,6 +16,7 @@ import {
   mintToken,
   participantOf,
   playOneTurn,
+  playerIdOf,
   revealHands,
   seatPair,
   waitUntil,
@@ -183,8 +184,13 @@ describe("ciclo de vida de una partida", () => {
   it("una segunda conexión del mismo asiento desplaza a la primera", async () => {
     const match = await seatPair(server, ["d1", "d2"]);
     server.sdk.auth.token = mintToken(participantOf("d1"));
-    await server.sdk.joinById(match.roomId);
+    const displacer = await server.sdk.joinById<MatchState>(match.roomId);
     await waitUntil(() => server.getRoomById(match.roomId).clients.length === 2);
+    // La conexión que desplaza también se reconoce por `userId`, en su asiento.
+    await displacer.waitForInitialState();
+    expect(displacer.state.players.find((p) => p.userId === "d1")?.playerId).toBe(
+      playerIdOf(match, "d1"),
+    );
 
     // Ni caída ni regreso: para el rival, d1 nunca se fue (truco `b90840b`).
     expect(

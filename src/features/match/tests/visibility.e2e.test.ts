@@ -111,11 +111,10 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     }
   });
 
-  // EL WIRE NO LLEVA IDENTIDAD EXTERNA NI MONEDA. `displayName` y el resto del perfil son
-  // presentación y viajan; el `userId` de plataforma y la moneda ya cobrada son
-  // `noSync()` y no entran al árbol sincronizado. Si entraran, cualquier cliente conocería
-  // la cuenta del rival en la plataforma — y con plata de por medio eso no se deshace.
-  it("sincroniza presentación pero no identidad externa ni moneda", async () => {
+  // EL WIRE LLEVA EL `userId` Y NO LA MONEDA. `displayName` y el resto del perfil son
+  // presentación y viajan; el `userId` (el `sub` del token) también, porque es como el cliente
+  // encuentra su asiento. La moneda es de infraestructura: vive en el `seat` de la config y no en el estado.
+  it("sincroniza presentación y userId, pero no la moneda", async () => {
     const match = await seatPair(server, [
       {
         userId: "private-a",
@@ -135,8 +134,26 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     expect(wire).toContain("Lin");
     expect(wire).toContain("ada99");
     expect(wire).toContain("https://img.test/ada.png");
-    for (const privateValue of ["private-a", "private-b", "betaso", "partner", "VES", "USD"]) {
-      expect(wire).not.toContain(privateValue);
+    // Cada cliente ve el `userId` de TODOS los asientos, cada uno en el suyo.
+    for (const viewer of ["private-a", "private-b"]) {
+      const seats = clientState(match, viewer).players.map((p) => [p.userId, p.displayName]);
+      expect(seats).toEqual([
+        ["private-a", "Ada"],
+        ["private-b", "Lin"],
+      ]);
+    }
+    for (const privateValue of ["VES", "USD"]) expect(wire).not.toContain(privateValue);
+  });
+
+  // El requisito del front: reconocer el propio asiento por el `userId`, también ANTES de que
+  // nadie levante sus fichas (la mano llega tapada incluso para su dueño hasta `REVEAL_TILES`).
+  it("cada cliente reconoce su asiento por userId desde antes de revelar las fichas", async () => {
+    const match = await seatPair(server, ["own-a", "own-b"]);
+    for (const viewer of ["own-a", "own-b"]) {
+      await waitUntil(() => clientState(match, viewer).players.length === 2);
+      const mine = clientState(match, viewer).players.find((p) => p.userId === viewer);
+      expect(mine?.playerId).toBe(playerIdOf(match, viewer));
+      expect(mine?.hasSeenTiles).toBe(false);
     }
   });
 

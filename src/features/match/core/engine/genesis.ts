@@ -49,7 +49,6 @@ export function createMatchState(
     player.username = seat.username;
     player.profilePicture = seat.profilePicture;
     player.userId = seat.userId;
-    player.currency = seat.currency;
     player.seatIndex = seatIndex;
     player.teamId = teamId;
     player.hand = new Hand();
