@@ -36,12 +36,12 @@ const REVOKED: NetworkMatchEvent[] = [{ type: "MULTIPLIER_REVOKED", level: 2 }];
 function charger(chargeBet: OrchestratorCharges["chargeBet"], timeoutMs = 1_000) {
   const emitted: NetworkMatchEvent[][] = [];
   const revoke = vi.fn(() => REVOKED);
-  const sink = new OrchestratorBetCharger({
+  const { sink, settled } = new OrchestratorBetCharger({
     orchestrator: { chargeEntry: vi.fn(), chargeBet: vi.fn(chargeBet) },
     timeoutMs,
     log: silentLogger(),
   }).sinkFor("m-1", (events) => emitted.push([...events]), revoke);
-  return { sink, emitted, revoke };
+  return { sink, settled, emitted, revoke };
 }
 
 describe("OrchestratorBetCharger", () => {
@@ -85,6 +85,28 @@ describe("OrchestratorBetCharger", () => {
       [0, 2],
       [1, 3],
     ]);
+  });
+
+  it("settled espera al cobro en vuelo y resuelve con el trato ya anulado si no se pudo", async () => {
+    let answer = () => {};
+    const { sink, settled, revoke } = charger(
+      () =>
+        new Promise<void>((_, reject) => {
+          answer = () => reject(new ChargeRejectedError("INSUFFICIENT_FUNDS"));
+        }),
+    );
+
+    sink([agreed(2)]);
+    let done = false;
+    const waiting = settled().then(() => {
+      done = true;
+    });
+    await new Promise((resume) => setTimeout(resume, 0));
+    expect(done).toBe(false);
+
+    answer();
+    await waiting;
+    expect(revoke).toHaveBeenCalledOnce();
   });
 
   it("un aumento que no cuesta nada no se cobra", async () => {

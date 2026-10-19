@@ -91,10 +91,13 @@ module.exports = {
       // dispondrían. Una partida que muere sin veredicto es un reembolso que nunca se anuncia.
       //
       // `kill_timeout` es cuánto espera pm2 antes de matar de verdad: es el presupuesto del
-      // drenado. Medido con Mongo y Redis reales, el apagado tarda decenas de milisegundos, así
-      // que 5 s es holgura y no una apuesta.
+      // drenado. Medido con Mongo y Redis reales, el apagado tarda decenas de milisegundos, pero
+      // el resultado de una partida que terminó con el cobro de un aumento en vuelo espera a ese
+      // cobro, hasta 15 s (`OrchestratorBetCharger`), así que tiene que quedar por encima.
+      //
+      // Un `reload` no lo aplica: hace falta `pm2 delete` + `start`.
       shutdown_with_message: true,
-      kill_timeout: 5_000,
+      kill_timeout: 20_000,
 
       // CADA INSTANCIA ESCUCHA EN `PORT + NODE_APP_INSTANCE`, y el que suma no es pm2 ni
       // nosotros: es `@colyseus/tools`, adentro de su `listen()`. pm2 solo aporta el índice.

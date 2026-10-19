@@ -219,19 +219,21 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // LOS DOS SINKS DE LA PLATA, y ninguno la mueve: el aumento se le pide cobrar al ORQUESTADOR y
     // el resultado se le PUBLICA. Dominó dice qué pasó y pide que se cobre; un juego nunca mueve
     // dinero.
+    const bet = rootContainer.isRegistered(OrchestratorBetCharger)
+      ? rootContainer.resolve(OrchestratorBetCharger).sinkFor(
+          config.matchId,
+          (events) => this.notifier.notify(events),
+          () => revokeMultiplier(),
+        )
+      : undefined;
+    // EL COBRO DEL AUMENTO VA ANTES QUE EL RESULTADO, y el resultado espera a que termine: con el
+    // cobro en vuelo el estado todavía dice x2, y el premio no puede salir multiplicado por un aumento
+    // que el orquestador después rechaza.
     const orchestratorSinks = [
+      ...(bet ? [bet.sink] : []),
       rootContainer
         .resolve(MatchResultRecorder)
-        .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason),
-      ...(rootContainer.isRegistered(OrchestratorBetCharger)
-        ? [
-            rootContainer.resolve(OrchestratorBetCharger).sinkFor(
-              config.matchId,
-              (events) => this.notifier.notify(events),
-              () => revokeMultiplier(),
-            ),
-          ]
-        : []),
+        .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason, bet?.settled),
     ];
     this.notifier = new MatchEventNotifier(
       pieces.listeners,

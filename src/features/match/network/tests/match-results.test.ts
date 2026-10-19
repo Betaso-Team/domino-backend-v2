@@ -227,4 +227,79 @@ describe("MatchResultRecorder", () => {
       expect.objectContaining({ reason: "CHARGE_REJECTED" }),
     );
   });
+
+  it("el premio espera al cobro del aumento en vuelo: si se anuló, sale sin multiplicar", async () => {
+    const enqueue = vi.fn(async (_key: string, _routingKey: string, _payload: unknown) => true);
+    const recorder = new MatchResultRecorder({
+      outbox: { enqueue },
+      wake: vi.fn(),
+      now: () => AT.getTime(),
+      log: silentLogger(),
+    });
+    const match = createMatchState(config);
+    match.acceptedBetLevel = 2;
+    match.acceptedBetExtra = 1;
+    let settle = () => {};
+    const inFlight = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+
+    recorder.sinkFor(
+      config,
+      match,
+      "room-9",
+      () => undefined,
+      () => inFlight,
+    )([{ type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" }]);
+    await new Promise((resume) => setTimeout(resume, 0));
+    expect(enqueue).not.toHaveBeenCalled();
+
+    // El orquestador no cobró: el sink del aumento anuló el trato antes de soltar la espera.
+    match.acceptedBetLevel = 0;
+    match.acceptedBetExtra = 0;
+    settle();
+
+    await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
+    expect(enqueue.mock.calls[0]?.[2]).toMatchObject({
+      stakes: { bet: null },
+      settlement: [{ userId: "p-ana", amountUc: 18 }],
+    });
+  });
+
+  it("drain espera al resultado que aguarda el cobro y a su primer encolado", async () => {
+    let enqueued = false;
+    const enqueue = vi.fn(async () => {
+      enqueued = true;
+      return true;
+    });
+    const recorder = new MatchResultRecorder({
+      outbox: { enqueue },
+      wake: vi.fn(),
+      now: () => AT.getTime(),
+      log: silentLogger(),
+    });
+    const match = createMatchState(config);
+    let settle = () => {};
+    const inFlight = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    recorder.sinkFor(
+      config,
+      match,
+      "room-9",
+      () => undefined,
+      () => inFlight,
+    )([{ type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" }]);
+
+    let drained = false;
+    const draining = recorder.drain().then(() => {
+      drained = true;
+    });
+    await new Promise((resume) => setTimeout(resume, 0));
+    expect(drained).toBe(false);
+
+    settle();
+    await draining;
+    expect(enqueued).toBe(true);
+  });
 });

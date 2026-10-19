@@ -57,23 +57,32 @@ export interface OrchestratorBetChargerDeps {
 export class OrchestratorBetCharger {
   constructor(private readonly deps: OrchestratorBetChargerDeps) {}
 
+  /**
+   * @returns el sink, y `settled`: resuelve cuando el cobro en vuelo terminó —pagado, o ya anulado—.
+   * El resultado de la partida lo espera antes de leer el aumento del estado: leído antes, puede ser
+   * un aumento que nadie pagó, y el premio saldría multiplicado igual.
+   */
   sinkFor(
     matchId: string,
     emit: (events: readonly NetworkMatchEvent[]) => void,
     revoke: () => readonly NetworkMatchEvent[],
-  ): MatchEventSink {
+  ): { readonly sink: MatchEventSink; readonly settled: () => Promise<void> } {
     // EL CONTADOR ES DE LA MESA Y CUENTA LOS ACORDADOS, también los que después se anularon: es lo
     // que hace que el segundo aumento de una partida no reuse la clave del primero.
     let step = 0;
-    return (events) => {
+    // Uno solo a la vez: el segundo aumento se acuerda recién con el primero anulado, o sea terminado.
+    // `collect` no rechaza nunca.
+    let inFlight: Promise<void> = Promise.resolve();
+    const sink: MatchEventSink = (events) => {
       for (const event of events) {
         if (event.type !== "MULTIPLIER_AGREED") continue;
         if (event.additionalEntryFee <= 0) continue;
         const current = step;
         step += 1;
-        void this.collect(matchId, current, event.level, emit, revoke);
+        inFlight = this.collect(matchId, current, event.level, emit, revoke);
       }
     };
+    return { sink, settled: () => inFlight };
   }
 
   private async collect(
