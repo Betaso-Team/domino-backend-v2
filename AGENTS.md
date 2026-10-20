@@ -2338,6 +2338,29 @@ cliente HTTP (Insomnia o similar). No se porta el `auth/me` de truco.
 | `545fdc4` techo de winrate y orden de la relajación | **NO APLICA**: emparejador y core-loop, que el dominó no tiene |
 | `60c2c41`, `a9f9f14`, `95aea3e`, `f050b68`, `cf527d5` | docs de truco |
 
+## Corrección — las salas de un proceso muerto (rama `fix/salas-huerfanas-al-arrancar`)
+
+Salió de un incidente del dominó **v1** en producción (2026-10-20): pm2 y `/health` en verde, y todo
+`joinOrCreate/lobby` colgado sin error. Las 23 salas de Redis eran de un proceso que había muerto a
+mitad del apagado. **El v2 tiene el mismo hueco**, porque es de Colyseus (0.16 y 0.18 por igual):
+`gracefullyShutdown` se saca de `roomcount`, espera que cierren las salas y RECIÉN AL FINAL borra las
+suyas de `roomcaches`. Un `kill -9`, un OOM o el `kill_timeout` en el medio las deja con un dueño que
+no figura en `roomcount`, y `healthCheckAllProcesses` del arranque solo recorre `roomcount`: nunca las
+ve.
+
+- **`transports/colyseus/stale-rooms.ts`**: al arrancar, con el servidor ya escuchando, se le hace
+  `healthCheckProcessId` a cada proceso ajeno que figura como dueño de alguna sala. El que no contesta
+  (2 s) queda excluido y sus salas borradas, que es lo que Colyseus ya hace con los de `roomcount`.
+  No frena el arranque. Verificado contra Redis real: una sala plantada de un proceso inexistente
+  sobrevivió al `accept()` de Colyseus y el barrido la borró en 2 s.
+- **En el v2 el daño era menor que en el v1**: no hay `joinOrCreate` contra un lobby, y la reconexión
+  (`seatBack` → `joinById`) se cura sola al tocar la sala, porque la reserva vence y Colyseus chequea al
+  dueño. Lo que quedaba era la sala anunciada para siempre hasta que alguien la tocara.
+- El apagado del v2 ya borra sus salas antes de lo lento: `server.gracefullyShutdown` va antes que el
+  `drain()` de resultados (`src/main.ts`).
+- **Si vuelve a pasar en el v1** (no tiene este barrido), el arreglo a mano es borrar de `roomcaches`
+  las salas cuyo `processId` no figura en `roomcount`, y de `colyseus:nodes` los procesos muertos.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
