@@ -195,15 +195,17 @@ function routesRegisteredWith(adminApiKey: string | undefined): string[] {
   );
 }
 
-describe("gameModeHttp: las siete rutas", () => {
+describe("gameModeHttp: las rutas", () => {
   // `reactive/:uuid` ANTES de `/:uuid`, y `sync` después del `POST` de la colección. Es el orden que
   // hay que conservar: hoy Express no confunde `/game-modes/reactive/x` con `/game-modes/:uuid` —son
   // dos segmentos contra uno—, pero una ruta futura con dos segmentos sí lo haría, y este arreglo es
   // lo único que lo dice. Desde que las rutas son dos routers (`admin.ts` y `catalog.ts`), lo que lo
   // garantiza es que el admin se monte PRIMERO (`register.ts`): al revés, como en truco, la lectura
   // `/:uuid` quedaría adelante.
-  it("registra las siete rutas de v1 en orden", () => {
+  it("registra las siete rutas de v1 y las dos lecturas del panel en orden", () => {
     expect(routesRegisteredWith(KEY)).toEqual([
+      "GET /game-modes/admin",
+      "GET /game-modes/admin/:uuid",
       "GET /game-modes/reactive/:uuid",
       "POST /game-modes",
       "PUT /game-modes/:uuid",
@@ -249,6 +251,8 @@ describe("gameModeHttp: las siete rutas", () => {
     ["POST", "/game-modes/sync"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
+    ["GET", "/game-modes/admin"],
+    ["GET", "/game-modes/admin/mode-1"],
   ])("sin llave interna %s %s no existe", async (method, path) => {
     const app = harness({ adminApiKey: undefined });
 
@@ -568,6 +572,52 @@ describe("DELETE /game-modes/:uuid", () => {
   });
 });
 
+describe("GET /game-modes/admin", () => {
+  it("lista activos e inactivos, recientes primero, con la llave", async () => {
+    // Reloj propio para que `createdAt` difiera: con el mismo milisegundo el orden es el de inserción.
+    const clock = mutableClock();
+    const app = harness({ repository: new MemoryGameModeRepository(clock) });
+    const activa = await app.repository.create(clasica());
+    clock.set(clock.now() + 1000);
+    const creada = await app.repository.create(clasica({ name: "Retirada" }));
+    const retirada = await app.repository.update(creada.uuid, { isActive: false });
+
+    const response = await app.get("/game-modes/admin", KEY);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      status: "success",
+      data: [wireDtoOf(retirada as GameMode), wireDtoOf(activa)],
+    });
+    expect((response.body as { data: Array<{ isActive: boolean }> }).data[0]?.isActive).toBe(false);
+  });
+});
+
+describe("GET /game-modes/admin/:uuid", () => {
+  it("abre un modo dado de baja con la llave", async () => {
+    const app = harness();
+    const seeded = await app.repository.create(clasica());
+    const retirado = await app.repository.update(seeded.uuid, { isActive: false });
+
+    const response = await app.get(`/game-modes/admin/${seeded.uuid}`, KEY);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      status: "success",
+      data: wireDtoOf(retirado as GameMode),
+    });
+  });
+
+  it("contesta 404 sobre un uuid inexistente", async () => {
+    const app = harness();
+
+    expect(await app.get("/game-modes/admin/no-existe", KEY)).toEqual({
+      status: 404,
+      body: { status: "error", message: "Modo de juego no encontrado" },
+    });
+  });
+});
+
 describe("GET /game-modes/reactive/:uuid", () => {
   it("reactiva con el mensaje histórico", async () => {
     const app = harness();
@@ -639,6 +689,8 @@ describe("la llave interna", () => {
     ["POST", "/game-modes/sync"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
+    ["GET", "/game-modes/admin"],
+    ["GET", "/game-modes/admin/mode-1"],
   ];
 
   async function callWith(app: Harness, method: string, path: string, key?: string) {

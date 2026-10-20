@@ -7,6 +7,7 @@ import type { GameModeService } from "../../service";
 import {
   BASE,
   DELETED_MESSAGE,
+  NOT_FOUND_MESSAGE,
   REACTIVATED_MESSAGE,
   sendData,
   sendError,
@@ -21,7 +22,7 @@ import {
   updateInputOf,
 } from "./schemas";
 
-// LAS CINCO MUTACIONES DEL PANEL, detrás de su llave.
+// LAS CINCO MUTACIONES DEL PANEL Y SUS DOS LECTURAS, detrás de su llave.
 export function adminRoutes({
   service,
   logger,
@@ -48,6 +49,8 @@ export function adminRoutes({
       `POST ${BASE}/sync`,
       `DELETE ${BASE}/:uuid`,
       `GET ${BASE}/reactive/:uuid`,
+      `GET ${BASE}/admin`,
+      `GET ${BASE}/admin/:uuid`,
     ].join(", ");
     logger.warn(
       `API administrativa del catálogo deshabilitada: falta ADMIN_API_KEY, no se registran ${missing}`,
@@ -57,6 +60,31 @@ export function adminRoutes({
 
   // La llave, o un admin con su token.
   const admin = requireAdminKey(adminApiKey, adminTokens);
+
+  // LAS LECTURAS DEL PANEL, con los dados de baja incluidos. Van acá y no en `catalog.ts` porque
+  // son administrativas, y ANTES de `reactive/:uuid` y de todo lo demás por el mismo motivo que
+  // aquél: el admin se monta primero (`register.ts`), así que `/game-modes/admin` le gana al
+  // `/:uuid` público, que lo tomaría por el uuid de un modo llamado "admin".
+  router.get(
+    `${BASE}/admin`,
+    admin,
+    validated({}, async (_input, response) => {
+      sendData(response, 200, (await service.listAll()).map(toDTO));
+    }),
+  );
+
+  router.get(
+    `${BASE}/admin/:uuid`,
+    admin,
+    validated({ params: UUID_PARAMS }, async ({ params }, response) => {
+      const mode = await service.get(params.uuid);
+      if (!mode) {
+        response.status(404).json({ status: "error", message: NOT_FOUND_MESSAGE });
+        return;
+      }
+      sendData(response, 200, toDTO(mode));
+    }),
+  );
 
   // `reactive/:uuid` ES UNA MUTACIÓN aunque conserve el verbo GET por compatibilidad, así que va
   // detrás de la llave. Y VA ANTES DE `/:uuid`: hoy Express no las confunde —`/game-modes/reactive/x`
