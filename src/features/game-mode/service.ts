@@ -85,6 +85,17 @@ export class GameModeService {
     return this.repository.activeByUuid(uuid);
   }
 
+  // LAS DOS LECTURAS DEL PANEL: ven también a los dados de baja, porque reactivar exige poder
+  // listarlos y abrirlos primero. Igual que las públicas, sin lease ni outbox; la frontera HTTP las
+  // pone detrás de la llave, no el servicio.
+  listAll(): Promise<readonly GameMode[]> {
+    return this.repository.all();
+  }
+
+  get(uuid: string): Promise<GameMode | undefined> {
+    return this.repository.byUuid(uuid);
+  }
+
   create(input: CreateGameMode): Promise<GameMode> {
     return this.mutating(async () => {
       refuseChargedFreeRoom(input);
