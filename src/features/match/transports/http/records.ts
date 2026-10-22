@@ -3,7 +3,7 @@ import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { type Response, Router } from "express";
 import { z } from "zod";
-import type { MatchArchive } from "../../network/history";
+import { type MatchArchive, type MatchCursor, MatchListTimeoutError } from "../../network/history";
 
 // En consts para que el aviso de arranque y el registro no puedan divergir.
 export const MATCHES_ROUTE = "/internal/matches";
@@ -21,15 +21,74 @@ const id = z
 const MATCH_PARAMS = z.object({ matchId: id });
 const ROOM_PARAMS = z.object({ roomId: id });
 
-// LA PÁGINA LLEGA COMO TEXTO —es la query— y se valida como número entero: `?page=abc` o
-// `?pageSize=1000` son 400 y no una página vacía o la colección entera de una vez. El tope de 100 es
-// lo que impide que un panel pida todo el historial en un solo request.
-const PAGE_QUERY = z.object({
-  page: z.coerce.number().int().min(1).max(1_000_000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(25),
-});
+// EL `_id` DE UN DOCUMENTO: un `ObjectId` en texto. Se aceptan mayúsculas y se pasa a minúscula, que es
+// como lo escribe Mongo y como lo compara el listado.
+const objectId = z
+  .string()
+  .regex(/^[0-9a-fA-F]{24}$/, "`id` es un ObjectId: 24 hexadecimales")
+  .transform((value) => value.toLowerCase());
+
+// UN INSTANTE ISO 8601 con hora y zona (`Z` u offset): `2026-10-01T00:00:00.000Z`. Una fecha sola no,
+// porque "el 1 de octubre" en Caracas y en UTC son dos rangos distintos y el panel tiene que decir cuál.
+const instant = z.iso
+  .datetime({ offset: true, message: "fecha inválida: ISO 8601 con hora y zona" })
+  .transform((value) => new Date(value));
+
+// EL CURSOR ES OPACO PARA EL PANEL y es nuestro: base64url de `{ t, id }` —el `createdAt` en epoch ms y
+// el `_id` de la última fila—. Se valida entero al volver, porque lo que vuelve lo escribió el
+// cliente: cualquier cosa que no sea exactamente lo que emitimos es 400 y no una página arbitraria.
+const CURSOR_JSON = z
+  .object({ t: z.number().int().min(0).max(8.64e15), id: z.string().regex(/^[0-9a-f]{24}$/) })
+  .strict();
+
+function encodeCursor(cursor: MatchCursor): string {
+  return Buffer.from(JSON.stringify({ t: cursor.createdAt.getTime(), id: cursor.id })).toString(
+    "base64url",
+  );
+}
+
+const cursor = z
+  .string()
+  .max(200)
+  .regex(/^[A-Za-z0-9_-]+$/, "cursor inválido")
+  .transform((raw, context): MatchCursor => {
+    const parsed = CURSOR_JSON.safeParse(jsonOf(Buffer.from(raw, "base64url").toString("utf8")));
+    if (!parsed.success) {
+      context.addIssue({ code: "custom", message: "cursor inválido" });
+      return z.NEVER;
+    }
+    return { createdAt: new Date(parsed.data.t), id: parsed.data.id };
+  });
+
+function jsonOf(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+// EL LISTADO, todo opcional. Un parámetro que no está acá se ignora —es la regla de `validated`, que
+// valida lo que la ruta declara—, pero uno que está y no se entiende es 400: un filtro descartado en
+// silencio mostraría partidas que nadie pidió como si fueran las pedidas. El tope de 100 es lo que
+// impide que un panel pida todo el historial en un solo request.
+const LIST_QUERY = z
+  .object({
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+    after: cursor.optional(),
+    from: instant.optional(),
+    to: instant.optional(),
+    matchId: id.optional(),
+    roomId: id.optional(),
+    id: objectId.optional(),
+  })
+  .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
+    message: "`from` no puede ser posterior a `to`",
+    path: ["from"],
+  });
 
 const NOT_FOUND_MESSAGE = "Partida no encontrada";
+const TIMEOUT_MESSAGE = "La búsqueda tardó demasiado; acota el rango de fechas";
 
 // EL ENVELOPE DE LAS RUTAS DEL PANEL, el mismo de las lecturas administrativas del catálogo
 // (`features/game-mode/transports/http/admin.ts`): `{ status, data }` al encontrar y
@@ -68,13 +127,37 @@ export function recordRoutes({
   const admin = requireAdminKey(adminApiKey, adminTokens);
 
   // EL LISTADO, sólo `GET`: el `POST` del mismo path es del orquestador, con su propia llave
-  // (`./tables.ts`), y Express los separa por método. La más nueva primero, sin `timeline` ni `rounds`.
+  // (`./tables.ts`), y Express los separa por método. La más nueva primero, sin `timeline` ni `rounds`,
+  // paginado por cursor (`MatchCursor`) y con el total que se puede contar barato (`MatchListPage`).
   router.get(
     MATCHES_ROUTE,
     admin,
-    validated({ query: PAGE_QUERY }, async ({ query }, response) => {
-      const { items, total } = await archive.page(query.page, query.pageSize);
-      sendData(response, { items, page: query.page, pageSize: query.pageSize, total });
+    validated({ query: LIST_QUERY }, async ({ query }, response) => {
+      const { pageSize, after, from, to, matchId, roomId, id } = query;
+      try {
+        const page = await archive.list({
+          pageSize,
+          ...(after ? { after } : {}),
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {}),
+          ...(matchId === undefined ? {} : { matchId }),
+          ...(roomId === undefined ? {} : { roomId }),
+          ...(id === undefined ? {} : { id }),
+        });
+        sendData(response, {
+          items: page.items,
+          pageSize,
+          nextCursor: page.next ? encodeCursor(page.next) : null,
+          total: page.total,
+          totalExact: page.totalExact,
+        });
+      } catch (error) {
+        // EL PLAZO VENCIDO NO ES UN BUG NUESTRO —es una búsqueda demasiado ancha para la base de ese
+        // momento—, así que no es un 500: es 503 con qué hacer. Cualquier otro fallo sí sube.
+        if (!(error instanceof MatchListTimeoutError)) throw error;
+        logger.warn("listado de partidas: la base excedió el plazo", { query: { ...query } });
+        response.status(503).json({ status: "error", message: TIMEOUT_MESSAGE });
+      }
     }),
   );
 

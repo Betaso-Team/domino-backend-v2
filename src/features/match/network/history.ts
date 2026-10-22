@@ -279,9 +279,63 @@ export interface MatchSummary {
   readonly winnerIds?: readonly PlayerId[];
 }
 
-export interface MatchPage {
+/**
+ * DÓNDE SIGUE EL LISTADO: la última fila de una página, en el orden del listado —`createdAt`
+ * descendente y el `_id` de desempate—. La página siguiente empieza ESTRICTAMENTE después. Es un par y
+ * no un número de página porque un `skip` recorre todo lo salteado: la página mil leería cien mil
+ * documentos para tirarlos, y sobre una colección de millones eso es una consulta que no vuelve.
+ */
+export interface MatchCursor {
+  readonly createdAt: Date;
+  /** El `_id` como texto: veinticuatro hex en minúscula. */
+  readonly id: string;
+}
+
+/**
+ * LO QUE PIDE EL PANEL. Los filtros se combinan con AND; ninguno es obligatorio. `from` es inclusivo y
+ * `to` exclusivo, sobre `createdAt`. `matchId` e `id` son únicos: con cualquiera de los dos, la página
+ * tiene como mucho una fila.
+ */
+export interface MatchListQuery {
+  readonly pageSize: number;
+  readonly after?: MatchCursor;
+  readonly from?: Date;
+  readonly to?: Date;
+  readonly matchId?: string;
+  readonly roomId?: string;
+  /** El `_id` como texto: veinticuatro hex en minúscula. */
+  readonly id?: string;
+}
+
+/**
+ * UNA PÁGINA DEL LISTADO, y el total contado BARATO POR CONSTRUCCIÓN: sobre millones de documentos un
+ * `countDocuments` sin tope recorre el índice entero en cada pedido.
+ *
+ *   · sin filtros ni cursor  el estimado de la colección (metadatos, no recorre nada): no exacto.
+ *   · con algún filtro       contado hasta el tope; si lo alcanza, el tope y no exacto.
+ *   · con cursor             `null`: la primera página ya lo dijo, y contar de nuevo en cada página es
+ *                            pagar lo mismo N veces.
+ */
+export interface MatchListPage {
   readonly items: readonly MatchSummary[];
-  readonly total: number;
+  /** La última fila, si hay otra página; `undefined` en la última. */
+  readonly next?: MatchCursor;
+  readonly total: number | null;
+  readonly totalExact: boolean;
+}
+
+/** Hasta cuánto se cuenta un listado filtrado. */
+export const MATCH_COUNT_CAP = 10_000;
+
+/**
+ * LA BASE NO CONTESTÓ A TIEMPO: cada consulta del listado lleva su plazo (`maxTimeMS`), y vencerlo es
+ * esto y no una espera colgada. La ruta lo contesta como 503, con qué hacer: acotar las fechas.
+ */
+export class MatchListTimeoutError extends Error {
+  constructor(cause?: unknown) {
+    super("el listado de partidas excedió su plazo", { cause });
+    this.name = "MatchListTimeoutError";
+  }
 }
 
 // ── LOS PUERTOS ───────────────────────────────────────────────────────────────────────────────
@@ -352,8 +406,11 @@ export interface MatchArchive {
    * guardaban la sala, y quien pregunta puede tener cualquiera de los dos ids.
    */
   snapshotOf(roomId: string): Promise<StoredMatchRecord | undefined>;
-  /** Una página del listado, la más nueva primero por `createdAt`. `page` cuenta desde 1. */
-  page(page: number, pageSize: number): Promise<MatchPage>;
+  /**
+   * Una página del listado, la más nueva primero por `createdAt` y `_id`, sin `timeline` ni `rounds`.
+   * Rechaza con `MatchListTimeoutError` si la base no contesta en su plazo.
+   */
+  list(query: MatchListQuery): Promise<MatchListPage>;
 }
 
 // ── EL GRABADOR ───────────────────────────────────────────────────────────────────────────────

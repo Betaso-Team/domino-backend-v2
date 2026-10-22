@@ -1,26 +1,41 @@
 import type { Logger } from "@/logger";
-import type { Collection, Document, IndexDescription } from "mongodb";
+import {
+  type Collection,
+  type CountDocumentsOptions,
+  type Document,
+  type Filter,
+  type FindOptions,
+  type IndexDescription,
+  MongoServerError,
+  ObjectId,
+} from "mongodb";
 import {
   type ClosedRound,
   type HistoryEntry,
   type HistoryPort,
   type HistoryReader,
+  MATCH_COUNT_CAP,
   MATCH_RECORD_VERSION,
   type MatchArchive,
   type MatchClosing,
+  type MatchCursor,
+  type MatchListPage,
+  type MatchListQuery,
+  MatchListTimeoutError,
   type MatchOpening,
-  type MatchPage,
   type StoredMatchRecord,
 } from "../history";
 import {
+  type HistoryAdapterOptions,
   LARGE_LAST,
   SUMMARY_FIELDS,
   entriesOf,
   largeLast,
+  pageOf,
   storedClosingOf,
   storedEntryOf,
   storedOpeningOf,
-  summaryOf,
+  totalOf,
 } from "./stored-record";
 
 // EL HISTORIAL QUE SOBREVIVE AL REINICIO. `MemoryHistory` tiene tope de 200 partidas y muere
@@ -69,6 +84,8 @@ export type StoredEntry = Omit<HistoryEntry, "at"> & { readonly at: Date };
 // escritura. `createdAt` es además el orden del listado del panel.
 export type MatchHistoryDocument = {
   matchId: string;
+  // Opcional: la forma vieja no la guardaba. Se declara por el filtro del listado.
+  roomId?: string;
   // Opcional: los documentos de antes de la v2.1 no la llevan.
   version?: number;
   createdAt: Date;
@@ -80,20 +97,117 @@ export type MatchHistoryDocument = {
 };
 
 // LOS TRES ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
-// idempotente mientras nombre y clave coincidan.
+// idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
+// colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
+// `./mongo-history.int.test.ts`, forma por forma):
 //
 //   · `matchId` ÚNICO: el documento no puede nacer dos veces (truco `8d4001a`). La cola de abajo lo
-//     garantiza en el proceso; el índice lo garantiza en la base.
-//   · `roomId`: lo que pregunta `/game-data/:roomId`.
+//     garantiza en el proceso; el índice lo garantiza en la base. Sirve también el filtro `matchId`.
+//   · `roomId` con el orden del listado detrás: lo que pregunta `/game-data/:roomId` —por el prefijo— y
+//     el filtro por sala, con o sin fechas, ya ordenado. Era `roomId_1` a secas, y con él la página de
+//     una sala salía con una etapa SORT en memoria (medido): el índice traía las filas de la sala y el
+//     orden se hacía después.
 //   · `createdAt` DESCENDENTE con el `_id` de desempate: el orden exacto del listado, así que la página
-//     sale del índice y no de ordenar la colección entera en cada pedido.
-const HISTORY_INDEXES: IndexDescription[] = [
-  { key: { matchId: 1 }, name: "matchId_1", unique: true },
-  { key: { roomId: 1 }, name: "roomId_1" },
-  { key: { createdAt: -1, _id: -1 }, name: "createdAt_-1__id_-1" },
+//     sin filtros, la de un rango de fechas y la de un cursor salen del índice ya ordenadas.
+//
+// El filtro por `_id` no necesita uno: el de la colección ya está.
+//
+// EN DOS PEDIDOS Y NO EN UNO, porque `createIndexes` es todo o nada (medido contra Mongo 7): con dos
+// documentos viejos de la misma partida el único falla, y en el mismo pedido se llevaba a los otros
+// dos con él — el listado quedaba recorriendo la colección entera hasta que alguien limpiara las filas.
+const HISTORY_INDEXES: readonly IndexDescription[][] = [
+  [{ key: { matchId: 1 }, name: "matchId_1", unique: true }],
+  [
+    { key: { roomId: 1, createdAt: -1, _id: -1 }, name: "roomId_1_createdAt_-1__id_-1" },
+    { key: { createdAt: -1, _id: -1 }, name: "createdAt_-1__id_-1" },
+  ],
 ];
 
 const NEWEST_FIRST = { createdAt: -1, _id: -1 } as const;
+
+// EL PLAZO DE CADA CONSULTA DEL LISTADO. Todas tienen un índice detrás y contestan en milisegundos; el
+// plazo es para la que no —un índice que falta, una base saturada—, que sin él quedaría colgada con el
+// panel esperando. Vencerlo es `MatchListTimeoutError`, y la ruta lo contesta como 503.
+export const LIST_MAX_TIME_MS = 5_000;
+
+const SUMMARY_PROJECTION = Object.fromEntries(SUMMARY_FIELDS.map((field) => [field, 1]));
+
+type ListFilter = Filter<MatchHistoryDocument>;
+
+/** Los filtros pedidos, con AND. Sin cursor: es lo que se cuenta. */
+function filterOf(query: MatchListQuery): ListFilter {
+  const createdAt = {
+    ...(query.from ? { $gte: query.from } : {}),
+    ...(query.to ? { $lt: query.to } : {}),
+  };
+  return {
+    ...(query.from || query.to ? { createdAt } : {}),
+    ...(query.matchId === undefined ? {} : { matchId: query.matchId }),
+    ...(query.roomId === undefined ? {} : { roomId: query.roomId }),
+    ...(query.id === undefined ? {} : { _id: new ObjectId(query.id) }),
+  };
+}
+
+// ESTRICTAMENTE DESPUÉS DEL CURSOR: `createdAt < c OR (createdAt = c AND _id < id)`, con los filtros
+// REPETIDOS EN CADA RAMA del `$or` y no al lado. Lo decidió el `explain`: con el `$or` a la par de los
+// filtros, el planificador recorre el índice desde el cursor y descarta en el FETCH las filas del mismo
+// milisegundo ya mostradas —un documento leído de más por página, más uno por cada empate—; con el
+// `$or` en la raíz planifica cada rama por separado y las une ya ordenadas (`SORT_MERGE`, que no
+// bloquea), así que lee exactamente las filas que devuelve.
+function afterOf(filter: ListFilter, cursor: MatchCursor): ListFilter {
+  const { createdAt, _id, ...rest } = filter as Record<string, unknown> & {
+    createdAt?: Record<string, Date>;
+    _id?: ObjectId;
+  };
+  const last = new ObjectId(cursor.id);
+  return {
+    $or: [
+      { ...rest, ...(_id ? { _id } : {}), createdAt: { ...createdAt, $lt: cursor.createdAt } },
+      {
+        ...rest,
+        createdAt: { ...createdAt, $eq: cursor.createdAt },
+        _id: _id ? { $eq: _id, $lt: last } : { $lt: last },
+      },
+    ],
+  } as ListFilter;
+}
+
+/**
+ * LA CONSULTA EXACTA DE UNA PÁGINA, exportada para que el `explain` de la suite mida la que corre y no
+ * una copia. Se pide una fila de más: es la que dice si hay otra página.
+ *
+ * CON `matchId` O `id` NO SE ORDENA EN LA BASE: los dos son únicos, así que la página tiene como mucho
+ * una fila, y pedirle a Mongo que ordene una fila le agrega una etapa SORT sobre el índice único
+ * (medido). El orden lo pone igual `pageOf`, por si el índice único no se pudo crear y hay dos.
+ */
+export function pageQueryOf(query: MatchListQuery): {
+  readonly filter: ListFilter;
+  readonly options: FindOptions;
+} {
+  const filter = filterOf(query);
+  const unique = query.matchId !== undefined || query.id !== undefined;
+  return {
+    filter: query.after ? afterOf(filter, query.after) : filter,
+    options: {
+      projection: SUMMARY_PROJECTION,
+      ...(unique ? {} : { sort: NEWEST_FIRST }),
+      limit: query.pageSize + 1,
+      maxTimeMS: LIST_MAX_TIME_MS,
+    },
+  };
+}
+
+/** La consulta exacta del total filtrado, hasta `limit`. */
+export function countQueryOf(
+  query: MatchListQuery,
+  limit: number,
+): { readonly filter: ListFilter; readonly options: CountDocumentsOptions } {
+  return { filter: filterOf(query), options: { limit, maxTimeMS: LIST_MAX_TIME_MS } };
+}
+
+// `MaxTimeMSExpired`: la base cortó la consulta por el plazo.
+const isTimeout = (error: unknown) =>
+  error instanceof MongoServerError && (error.code === 50 || error.codeName === "MaxTimeMSExpired");
 
 // LO QUE EL DOCUMENTO TIENE MENOS SUS ARREGLOS, y los arreglos aparte: las dos mitades con que la
 // cabecera y el cierre reescriben el documento dejando lo grande AL FINAL. Mongo guarda los campos en
@@ -134,16 +248,23 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
   // LA COLECCIÓN YA PREPARADA, con los índices pedidos una vez por proceso (el criterio del catálogo).
   private prepared?: Promise<Collection<MatchHistoryDocument>>;
 
+  private readonly now: () => Date;
+  private readonly countCap: number;
+
   constructor(
     private readonly store: HistoryStore,
     private readonly logger: Logger,
-  ) {}
+    options: HistoryAdapterOptions = {},
+  ) {
+    this.now = options.now ?? (() => new Date());
+    this.countCap = options.countCap ?? MATCH_COUNT_CAP;
+  }
 
   // EL PRIMER ARMADO GANA, campo por campo: el documento existente va DESPUÉS de la cabecera en el
   // `$mergeObjects`, así que lo que ya está se queda —una partida cerrada no vuelve a `started`— y lo
   // que falta se completa.
   open(matchId: string, opening: MatchOpening): void {
-    const now = new Date();
+    const now = this.now();
     this.write(matchId, "no se pudo grabar el inicio", {}, (collection) =>
       collection.updateOne(
         { matchId },
@@ -180,7 +301,7 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
     // caso que la clase de arriba no puede producir.
     const matchId = entries[0]?.matchId;
     if (!matchId) return;
-    const now = new Date();
+    const now = this.now();
     this.write(matchId, "no se pudo grabar el lote", { entries: entries.length }, (collection) =>
       collection.updateOne(
         { matchId },
@@ -202,7 +323,7 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
   }
 
   round(matchId: string, round: ClosedRound): void {
-    const now = new Date();
+    const now = this.now();
     this.write(matchId, "no se pudo grabar la mano", { roundNumber: round.roundNumber }, (c) =>
       c.updateOne(
         { matchId },
@@ -221,7 +342,7 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
    * sobre un documento ya cerrado el pipeline devuelve `$$ROOT` tal cual.
    */
   close(matchId: string, closing: MatchClosing): void {
-    const now = new Date();
+    const now = this.now();
     this.write(matchId, "no se pudo grabar el cierre", { status: closing.status }, (collection) =>
       collection.updateOne(
         { matchId },
@@ -293,22 +414,27 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
     return document ? largeLast(document) : undefined;
   }
 
-  async page(page: number, pageSize: number): Promise<MatchPage> {
+  // LA PÁGINA Y SU TOTAL A LA VEZ, cada uno con su índice y su plazo (ver `pageQueryOf` y `totalOf`).
+  async list(query: MatchListQuery): Promise<MatchListPage> {
     const collection = await this.collection();
-    const projection = Object.fromEntries(SUMMARY_FIELDS.map((field) => [field, 1]));
-    const [found, total] = await Promise.all([
-      collection
-        .find({}, { projection })
-        .sort(NEWEST_FIRST)
-        .skip((page - 1) * pageSize)
-        .limit(pageSize)
-        .toArray(),
-      collection.countDocuments({}),
-    ]);
-    return {
-      items: found.map((document) => summaryOf(String(document._id), document)),
-      total,
-    };
+    const page = pageQueryOf(query);
+    try {
+      const [found, total] = await Promise.all([
+        collection.find(page.filter, page.options).toArray(),
+        totalOf(query, this.countCap, {
+          estimated: () => collection.estimatedDocumentCount({ maxTimeMS: LIST_MAX_TIME_MS }),
+          upTo: (limit) => {
+            const count = countQueryOf(query, limit);
+            return collection.countDocuments(count.filter, count.options);
+          },
+        }),
+      ]);
+      const rows = found.map((document) => ({ id: String(document._id), document }));
+      return pageOf(rows, query.pageSize, total);
+    } catch (error) {
+      if (isTimeout(error)) throw new MatchListTimeoutError(error);
+      throw error;
+    }
   }
 
   // Todo verbo pasa por acá: encolado por partida, anotado para el drenado y con el fallo logueado y
@@ -364,11 +490,16 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
   // arranque.
   private async prepare(): Promise<Collection<MatchHistoryDocument>> {
     const collection = await this.store.collection<MatchHistoryDocument>(HISTORY_COLLECTION);
-    await collection.createIndexes(HISTORY_INDEXES).catch((error: unknown) =>
-      this.logger.error("historial: no se pudieron crear los índices; se graba igual", {
-        collection: HISTORY_COLLECTION,
-        error: String(error),
-      }),
+    await Promise.all(
+      HISTORY_INDEXES.map((indexes) =>
+        collection.createIndexes(indexes).catch((error: unknown) =>
+          this.logger.error("historial: no se pudieron crear los índices; se graba igual", {
+            collection: HISTORY_COLLECTION,
+            indexes: indexes.map(({ name }) => name),
+            error: String(error),
+          }),
+        ),
+      ),
     );
     return collection;
   }

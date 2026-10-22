@@ -1,10 +1,11 @@
 import type { Logger } from "@/logger";
-import type { Collection } from "mongodb";
+import { type Collection, MongoServerError } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
-import type { HistoryEntry } from "../history";
+import { type HistoryEntry, MatchListTimeoutError } from "../history";
 import {
   HISTORY_COLLECTION,
   type HistoryStore,
+  LIST_MAX_TIME_MS,
   type MatchHistoryDocument,
   MongoHistory,
 } from "./mongo-history";
@@ -331,7 +332,7 @@ describe("MongoHistory: la cabecera y el cierre", () => {
 
   it("los índices se piden una vez por proceso, y un fallo no frena la escritura", async () => {
     const { store, updateOne, createIndexes } = storeWith();
-    createIndexes.mockRejectedValue(new Error("E11000 duplicate key"));
+    createIndexes.mockRejectedValueOnce(new Error("E11000 duplicate key"));
     const logger = fakeLogger();
     const history = new MongoHistory(store, logger);
 
@@ -339,16 +340,91 @@ describe("MongoHistory: la cabecera y el cierre", () => {
     history.record([entry(2)]);
     await history.drain();
 
-    expect(createIndexes).toHaveBeenCalledTimes(1);
-    expect(createIndexes.mock.calls[0]?.[0].map((index: { name: string }) => index.name)).toEqual([
-      "matchId_1",
-      "roomId_1",
+    // EL ÚNICO VA SOLO: `createIndexes` es todo o nada, y su fallo no puede llevarse los del listado.
+    const names = (call: unknown[] | undefined) =>
+      (call?.[0] as { name: string }[]).map((index) => index.name);
+    expect(createIndexes).toHaveBeenCalledTimes(2);
+    expect(names(createIndexes.mock.calls[0])).toEqual(["matchId_1"]);
+    expect(names(createIndexes.mock.calls[1])).toEqual([
+      "roomId_1_createdAt_-1__id_-1",
       "createdAt_-1__id_-1",
     ]);
     expect(updateOne).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining("índices"),
-      expect.objectContaining({ collection: HISTORY_COLLECTION }),
+      expect.objectContaining({ collection: HISTORY_COLLECTION, indexes: ["matchId_1"] }),
     );
+  });
+});
+
+// EL PLAZO DEL LISTADO, contra un doble porque un Mongo de verdad no vence a pedido: lo que se mide es
+// la DECISIÓN —cada consulta lleva `maxTimeMS`, y vencerlo es `MatchListTimeoutError` y no un error
+// cualquiera—. Los planes y los índices se miden contra Mongo en `./mongo-history.int.test.ts`.
+describe("MongoHistory: el listado", () => {
+  function listingStore(fail?: unknown) {
+    const toArray = fail ? vi.fn().mockRejectedValue(fail) : vi.fn().mockResolvedValue([]);
+    const find = vi.fn(() => ({ toArray }));
+    const countDocuments = vi.fn().mockResolvedValue(0);
+    const estimatedDocumentCount = vi.fn().mockResolvedValue(0);
+    const createIndexes = vi.fn().mockResolvedValue([]);
+    const collection = vi.fn(
+      async (_name: string) =>
+        ({
+          find,
+          countDocuments,
+          estimatedDocumentCount,
+          createIndexes,
+        }) as unknown as Collection<never>,
+    );
+    return {
+      store: { collection } as unknown as HistoryStore,
+      find,
+      countDocuments,
+      estimatedDocumentCount,
+    };
+  }
+
+  const expired = () =>
+    new MongoServerError({
+      message: "operation exceeded time limit",
+      code: 50,
+      codeName: "MaxTimeMSExpired",
+    });
+
+  it("cada consulta lleva su plazo", async () => {
+    const { store, find, countDocuments, estimatedDocumentCount } = listingStore();
+    const history = new MongoHistory(store, fakeLogger());
+
+    await history.list({ pageSize: 20 });
+    await history.list({ pageSize: 20, roomId: "sala" });
+
+    for (const [, options] of find.mock.calls as unknown as [unknown, { maxTimeMS: number }][])
+      expect(options.maxTimeMS).toBe(LIST_MAX_TIME_MS);
+    expect(estimatedDocumentCount).toHaveBeenCalledWith({ maxTimeMS: LIST_MAX_TIME_MS });
+    expect(countDocuments).toHaveBeenCalledWith(
+      { roomId: "sala" },
+      { limit: 10_001, maxTimeMS: LIST_MAX_TIME_MS },
+    );
+  });
+
+  it("un plazo vencido es `MatchListTimeoutError`; otro fallo sube tal cual", async () => {
+    await expect(
+      new MongoHistory(listingStore(expired()).store, fakeLogger()).list({ pageSize: 20 }),
+    ).rejects.toBeInstanceOf(MatchListTimeoutError);
+
+    const other = new Error("conexión cerrada");
+    await expect(
+      new MongoHistory(listingStore(other).store, fakeLogger()).list({ pageSize: 20 }),
+    ).rejects.toBe(other);
+  });
+
+  it("también vence el conteo, no sólo la página", async () => {
+    const { store, countDocuments } = listingStore();
+    countDocuments.mockRejectedValue(expired());
+
+    await expect(
+      new MongoHistory(store, fakeLogger()).list({ pageSize: 20, from: new Date(0) }),
+    ).rejects.toBeInstanceOf(MatchListTimeoutError);
   });
 });

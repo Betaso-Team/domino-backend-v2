@@ -5,7 +5,13 @@ import { httpErrorHandler } from "@/shared/http/error-handler";
 import { routesOf } from "@/tests/routes";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HistoryReader, MatchArchive } from "../../network/history";
+import {
+  type HistoryReader,
+  type MatchArchive,
+  type MatchListPage,
+  type MatchListQuery,
+  MatchListTimeoutError,
+} from "../../network/history";
 import { MemoryHistory } from "../../network/transports/memory-history";
 import { CLOSING, SETUP, entry } from "../../network/transports/tests/history-contract";
 import { recordRoutes } from "./records";
@@ -24,8 +30,21 @@ function fakeLogger(): Logger {
 const untouched: MatchArchive = {
   recordOf: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
   snapshotOf: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
-  page: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
+  list: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
 };
+
+interface ListBody {
+  items: Record<string, unknown>[];
+  pageSize: number;
+  nextCursor: string | null;
+  total: number | null;
+  totalExact: boolean;
+}
+
+// UN CURSOR ARMADO A MANO, con la forma que la ruta emite: base64url de un JSON chico. Lo que se mide
+// con él es que la ruta rechace lo que no es suyo, no la codificación —ésa la mide el recorrido—.
+const cursorOf = (value: Record<string, unknown>) =>
+  Buffer.from(JSON.stringify(value)).toString("base64url");
 
 describe("recordRoutes: el registro de las rutas", () => {
   // FAIL CLOSED, como el historial: sin llave las rutas del panel no existen.
@@ -108,18 +127,24 @@ async function seeded(): Promise<MemoryHistory> {
 }
 
 describe("recordRoutes: lo que contestan", () => {
-  it("el listado: la más nueva primero, paginado, con el envelope del panel", async () => {
+  it("el listado: la más nueva primero, por cursor, con el envelope del panel", async () => {
     const base = await serve(await seeded());
 
-    const response = await get(`${base}/internal/matches?page=1&pageSize=2`);
+    const response = await get(`${base}/internal/matches?pageSize=2`);
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      status: string;
-      data: { items: Record<string, unknown>[]; page: number; pageSize: number; total: number };
-    };
+    const body = (await response.json()) as { status: string; data: ListBody };
     expect(body.status).toBe("success");
-    expect(body.data).toMatchObject({ page: 1, pageSize: 2, total: 3 });
+    expect(Object.keys(body.data)).toEqual([
+      "items",
+      "pageSize",
+      "nextCursor",
+      "total",
+      "totalExact",
+    ]);
+    // SIN FILTROS el total es el estimado de la colección: no exacto, aunque acá coincida.
+    expect(body.data).toMatchObject({ pageSize: 2, total: 3, totalExact: false });
+    expect(typeof body.data.nextCursor).toBe("string");
     expect(body.data.items.map((item) => item.matchId)).toEqual(["m-3", "m-2"]);
     expect(body.data.items[0]).toMatchObject({
       matchId: "m-3",
@@ -135,9 +160,9 @@ describe("recordRoutes: lo que contestan", () => {
       expect(item).not.toHaveProperty("rounds");
     }
 
-    const last = (await (await get(`${base}/internal/matches?page=2&pageSize=2`)).json()) as {
-      data: { items: Record<string, unknown>[] };
-    };
+    const last = (await (
+      await get(`${base}/internal/matches?pageSize=2&after=${body.data.nextCursor}`)
+    ).json()) as { data: ListBody };
     expect(last.data.items).toHaveLength(1);
     expect(last.data.items[0]).toMatchObject({
       matchId: "m-1",
@@ -145,29 +170,130 @@ describe("recordRoutes: lo que contestan", () => {
       matchEndReason: "SCORE",
       winnerIds: ["seat-1"],
     });
+    // LA ÚLTIMA PÁGINA no promete otra, y con cursor no se cuenta.
+    expect(last.data).toMatchObject({ nextCursor: null, total: null, totalExact: false });
   });
 
-  it("sin página, la primera de 25", async () => {
-    const page = vi.fn(async () => ({ items: [], total: 0 }));
-    const base = await serve({ ...untouched, page });
+  it("los filtros llegan al archivo ya tipados, y el total filtrado es exacto", async () => {
+    const base = await serve(await seeded());
+    const record = (await (await get(`${base}/internal/matches/m-2`)).json()) as {
+      data: { _id: string; createdAt: string };
+    };
+    const query = new URLSearchParams({
+      roomId: "room-m-2",
+      matchId: "m-2",
+      // EN MAYÚSCULAS: el `_id` se compara en minúscula, como lo escribe Mongo.
+      id: record.data._id.toUpperCase(),
+      from: record.data.createdAt,
+      to: new Date(Date.parse(record.data.createdAt) + 1).toISOString(),
+    });
+
+    const body = (await (await get(`${base}/internal/matches?${query}`)).json()) as {
+      data: ListBody;
+    };
+
+    expect(body.data.items.map((item) => item.matchId)).toEqual(["m-2"]);
+    expect(body.data).toMatchObject({ nextCursor: null, total: 1, totalExact: true });
+  });
+
+  it("sin nada, la primera página de 20; cada parámetro, convertido", async () => {
+    const list = vi.fn(
+      async (_query: MatchListQuery): Promise<MatchListPage> => ({
+        items: [],
+        total: 0,
+        totalExact: true,
+      }),
+    );
+    const base = await serve({ ...untouched, list });
 
     const body = await (await get(`${base}/internal/matches`)).json();
 
-    expect(page).toHaveBeenCalledWith(1, 25);
+    expect(list).toHaveBeenLastCalledWith({ pageSize: 20 });
     expect(body).toEqual({
       status: "success",
-      data: { items: [], page: 1, pageSize: 25, total: 0 },
+      data: { items: [], pageSize: 20, nextCursor: null, total: 0, totalExact: true },
+    });
+
+    const after = cursorOf({ t: Date.parse("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) });
+    await get(
+      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}`,
+    );
+    expect(list).toHaveBeenLastCalledWith({
+      pageSize: 5,
+      after: { createdAt: new Date("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) },
+      from: new Date("2026-10-01T04:00:00.000Z"),
+      to: new Date("2026-10-02T00:00:00.000Z"),
+      id: "b".repeat(24),
     });
   });
 
-  // MÁS DE 100 NO ES UNA PÁGINA, ES LA COLECCIÓN: se rechaza en vez de recortarse en silencio.
-  it.each(["pageSize=101", "pageSize=0", "page=0", "page=abc", "pageSize=2.5"])(
-    "una página imposible es 400 (%s)",
-    async (query) => {
-      const base = await serve(untouched);
-      expect((await get(`${base}/internal/matches?${query}`)).status).toBe(400);
-    },
-  );
+  // MÁS DE 100 NO ES UNA PÁGINA, ES LA COLECCIÓN: se rechaza en vez de recortarse en silencio. Y un
+  // filtro que no se entiende es 400, no un listado sin ese filtro: el panel mostraría partidas que no
+  // pidió como si fueran las que pidió.
+  it.each([
+    "pageSize=101",
+    "pageSize=0",
+    "pageSize=abc",
+    "pageSize=2.5",
+    "id=xyz",
+    `id=${"g".repeat(24)}`,
+    `id=${"a".repeat(25)}`,
+    "from=ayer",
+    "to=2026-13-01T00:00:00.000Z",
+    "from=2026-10-01",
+    "from=2026-10-02T00:00:00.000Z&to=2026-10-01T00:00:00.000Z",
+    "after=",
+    "after=no*es*base64",
+    `after=${Buffer.from("no es json").toString("base64url")}`,
+    `after=${cursorOf({ t: "ayer", id: "a".repeat(24) })}`,
+    `after=${cursorOf({ t: 1, id: "corto" })}`,
+    `after=${cursorOf({ t: 1, id: "a".repeat(24), extra: true })}`,
+    `after=${cursorOf({ t: 1.5, id: "a".repeat(24) })}`,
+    "matchId=",
+    `matchId=${"x".repeat(129)}`,
+    "roomId=%07",
+    "matchId=a&matchId=b",
+  ])("un pedido imposible es 400 MALFORMED (%s)", async (query) => {
+    const base = await serve(untouched);
+
+    const response = await get(`${base}/internal/matches?${query}`);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "MALFORMED" });
+  });
+
+  it("`from` igual a `to` es un rango vacío, no un error", async () => {
+    const base = await serve(await seeded());
+
+    const response = await get(
+      `${base}/internal/matches?from=2026-10-01T00:00:00.000Z&to=2026-10-01T00:00:00.000Z`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { data: ListBody }).data.items).toEqual([]);
+  });
+
+  // LA BASE NO CONTESTÓ EN SU PLAZO: un 503 que dice qué hacer, y no un request colgado ni un 500.
+  it("un listado que excede su plazo es 503, con qué hacer", async () => {
+    const base = await serve({
+      ...untouched,
+      list: () => Promise.reject(new MatchListTimeoutError()),
+    });
+
+    const response = await get(`${base}/internal/matches?from=2020-01-01T00:00:00.000Z`);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      status: "error",
+      message: "La búsqueda tardó demasiado; acota el rango de fechas",
+    });
+  });
+
+  it("un fallo del listado que no es el plazo sigue siendo 500", async () => {
+    const base = await serve({ ...untouched, list: () => Promise.reject(new Error("caído")) });
+
+    expect((await get(`${base}/internal/matches`)).status).toBe(500);
+  });
 
   it("el detalle: el documento entero, con su `_id` como texto", async () => {
     const base = await serve(await seeded());
@@ -223,6 +349,7 @@ describe("recordRoutes: lo que contestan", () => {
   it.each([
     "/internal/matches",
     "/internal/matches?pageSize=999",
+    "/internal/matches?id=no-es-un-id",
     "/internal/matches/m-1",
     "/game-data/room-m-1",
   ])("sin credencial, %s es 401", async (path) => {
