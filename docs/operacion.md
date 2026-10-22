@@ -97,10 +97,58 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 ## Registro de partidas
 
 `match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y tres
-índices que el proceso crea al primer uso: `matchId_1` (único), `roomId_1` y `createdAt_-1__id_-1`
-(el orden del listado del panel). Si el único no se puede crear —dos documentos viejos de la misma
-partida— el proceso graba igual y lo dice con un `error`:
-`«historial: no se pudieron crear los índices; se graba igual»`. Para encontrarlos y dejar uno:
+índices que el proceso crea al primer uso:
+
+| Índice | Sirve a |
+|---|---|
+| `matchId_1` (único) | que el documento no nazca dos veces; el filtro `matchId` del listado |
+| `roomId_1_createdAt_-1__id_-1` | `/game-data/:roomId` (por el prefijo); el filtro `roomId` del listado, con o sin fechas, ya ordenado |
+| `createdAt_-1__id_-1` | el orden del listado: sin filtros, por fechas y con cursor |
+
+El filtro `id` usa el `_id_` de la colección. Cada combinación de filtros del listado sale de uno de
+estos sin recorrer la colección ni ordenar en memoria, y lee como mucho `pageSize + 1` documentos en
+cualquier página; lo mide `mongo-history.int.test.ts` con `explain` contra un Mongo de verdad.
+
+**Al desplegar sobre una colección grande.** `createIndexes` corre con la primera escritura del proceso
+y, sobre millones de documentos, tarda: las escrituras de ese proceso esperan en memoria hasta que
+termina. Conviene crear los índices a mano antes, con los mismos nombres (si coinciden, el proceso no
+hace nada):
+
+```js
+db.match_history.createIndex({ roomId: 1, createdAt: -1, _id: -1 }, { name: "roomId_1_createdAt_-1__id_-1" })
+db.match_history.createIndex({ createdAt: -1, _id: -1 }, { name: "createdAt_-1__id_-1" })
+db.match_history.createIndex({ matchId: 1 }, { name: "matchId_1", unique: true })
+```
+
+El `roomId_1` que creaba la versión anterior quedó cubierto por el compuesto (su prefijo): no estorba,
+pero ocupa memoria y frena cada escritura. Una vez creado el compuesto, se puede borrar:
+`db.match_history.dropIndex("roomId_1")`.
+
+**Para ver el plan de un listado**, la consulta es la que arma `pageQueryOf` (`mongo-history.ts`): los
+filtros, `sort: { createdAt: -1, _id: -1 }` (salvo con `matchId` o `id`, que son únicos) y
+`limit: pageSize + 1`. Por ejemplo, una sala en un rango de fechas:
+
+```js
+db.match_history.find(
+  { roomId: "ZYIVoz6TQ", createdAt: { $gte: ISODate("2026-10-01T00:00:00Z"), $lt: ISODate("2026-10-02T00:00:00Z") } },
+  { matchId: 1, roomId: 1, status: 1, createdAt: 1 },
+).sort({ createdAt: -1, _id: -1 }).limit(21).explain("executionStats")
+```
+
+En `queryPlanner.winningPlan` tiene que haber un `IXSCAN` (o `IDHACK` para `id`) y **ni `COLLSCAN` ni
+`SORT`**; en `executionStats`, `totalDocsExamined` no pasa de `limit`. Una página con cursor tiene el
+`$or` en la raíz y su plan es `SUBPLAN` → `SORT_MERGE` sobre dos `IXSCAN` del mismo índice: el
+`SORT_MERGE` une dos ramas ya ordenadas y no bloquea. Si aparece un `COLLSCAN` o un `SORT`, falta un
+índice (`db.match_history.getIndexes()`).
+
+Cada consulta del listado lleva `maxTimeMS: 5000`. Una que lo excede contesta 503 al panel y deja un
+`warn` `«listado de partidas: la base excedió el plazo»`: con los índices en su lugar no debería pasar,
+así que es la señal de un índice que falta o de una base saturada.
+
+Si el único no se puede crear —dos documentos viejos de la misma partida— el proceso graba igual y lo
+dice con un `error`: `«historial: no se pudieron crear los índices; se graba igual»` (el campo `indexes`
+dice cuáles). Los dos del listado se crean igual: van en otro pedido, porque `createIndexes` es todo o
+nada. Para encontrar los repetidos y dejar uno:
 
 ```js
 db.match_history.aggregate([

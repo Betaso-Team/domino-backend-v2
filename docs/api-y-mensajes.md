@@ -71,7 +71,7 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 | Método y ruta | Uso |
 |---|---|
 | `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte (lee `timeline` y, en los documentos viejos, `entries`) |
-| `GET /internal/matches?page=&pageSize=` | Listado de partidas para el panel, la más nueva primero (ver «El registro de cada partida») |
+| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
 | `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `POST /game-modes` | Crea un modo |
@@ -96,8 +96,21 @@ arrancó nace en el cierre. Los instantes son fechas (ISO en el JSON); las durac
 documentos de antes de la v2.1 (`{ matchId, entries, createdAt, updatedAt }`) se siguen leyendo en las
 cuatro rutas.
 
-**`GET /internal/matches?page=1&pageSize=25`** — `page` desde 1, `pageSize` de 1 a 100 (default 25);
-otra cosa es 400. Orden: `createdAt` descendente.
+**`GET /internal/matches`** — el listado del panel, la más nueva primero (`createdAt` descendente y
+`_id` de desempate), paginado **por cursor**. Todos los parámetros son opcionales y los filtros se
+combinan con AND:
+
+| Parámetro | Qué es | Inválido (400 `MALFORMED`) |
+|---|---|---|
+| `pageSize` | Filas por página, entero de 1 a 100; default 20 | fuera de rango, no entero |
+| `after` | El `nextCursor` de la página anterior, tal cual | cualquier cosa que no sea un cursor emitido por esta ruta |
+| `from`, `to` | Instantes ISO 8601 **con hora y zona** (`2026-10-01T00:00:00.000Z`, `…-04:00`): `createdAt >= from` y `createdAt < to` | una fecha sin hora, un instante imposible, `from` posterior a `to` |
+| `matchId` | Igual a | vacío, más de 128 caracteres, caracteres de control |
+| `roomId` | Igual a | ídem |
+| `id` | El `_id` del documento: 24 hexadecimales | otra cosa |
+
+Un parámetro que no está en la tabla se ignora (`page` incluido: ya no existe). `from` igual a `to` es
+un rango vacío, no un error.
 
 ```json
 {
@@ -119,15 +132,26 @@ otra cosa es 400. Orden: `createdAt` descendente.
         "winnerIds": ["seat-1"]
       }
     ],
-    "page": 1,
-    "pageSize": 25,
-    "total": 1
+    "pageSize": 20,
+    "nextCursor": "eyJ0IjoxNzkyNjc3NjAwMDAwLCJpZCI6IjY3MTdhMmYwYzNiZjNlNzEwNTcyZjk0MSJ9",
+    "total": 1234,
+    "totalExact": true
   }
 }
 ```
 
+- **`nextCursor`** es opaco (base64url de `{ t, id }`: el `createdAt` en epoch ms y el `_id` de la última
+  fila) y es `null` en la última página. La página siguiente se pide con `after=<nextCursor>` **y los
+  mismos filtros**; empieza estrictamente después de esa fila, así que un empate en el mismo
+  milisegundo no repite ni pierde filas, y una página honda cuesta lo mismo que la primera.
+- **`total`** se cuenta barato: sin filtros es el estimado de la colección (`totalExact: false`); con
+  algún filtro se cuenta hasta 10 000 (`totalExact: true`, o `total: 10000` y `totalExact: false` si
+  hay más); con `after` no se cuenta (`total: null`, `totalExact: false`).
+- **Plazo**: cada consulta tiene 5 s. Si la base no contesta a tiempo:
+  `503 { status: "error", message: "La búsqueda tardó demasiado; acota el rango de fechas" }`.
+
 Cada fila es un resumen: sin `timeline` ni `rounds`. Un documento viejo aparece con lo que tiene
-(`_id`, `matchId`, `game`, `createdAt`, `updatedAt`).
+(`_id`, `matchId`, `game`, `createdAt`, `updatedAt`) y sale en todo listado que no filtre por sala.
 
 **`GET /internal/matches/:matchId`** — `200 { status: "success", data: <documento> }`, con el `_id`
 como texto y `rounds`/`timeline` al final; `404 { status: "error", message: "Partida no encontrada" }`.
