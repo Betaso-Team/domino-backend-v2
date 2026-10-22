@@ -1,6 +1,8 @@
 import type {
   HistoryEntry,
   MatchClosing,
+  MatchListPage,
+  MatchListQuery,
   MatchOpening,
   MatchSummary,
   StoredMatchRecord,
@@ -107,4 +109,85 @@ export function summaryOf(id: string, document: StoredMatchRecord): MatchSummary
     game: "domino",
     ...rest,
   };
+}
+
+/** Lo que los dos adaptadores aceptan de afuera, para la suite. */
+export interface HistoryAdapterOptions {
+  /** El instante de cada escritura (`createdAt`/`updatedAt`). Default: el reloj del sistema. */
+  readonly now?: () => Date;
+  /** Hasta cuánto se cuenta un listado filtrado. Default: `MATCH_COUNT_CAP`. */
+  readonly countCap?: number;
+}
+
+// ── EL LISTADO, lo que los dos adaptadores deciden igual ─────────────────────────────────────────
+
+/** Una fila de la página antes de proyectarla: su `_id` como texto y el documento. */
+export interface ListedRow {
+  readonly id: string;
+  readonly document: StoredMatchRecord;
+}
+
+/** ¿Pidió algún filtro? El tamaño de página y el cursor no cuentan: no achican lo que hay. */
+export const isFiltered = (query: MatchListQuery): boolean =>
+  query.from !== undefined ||
+  query.to !== undefined ||
+  query.matchId !== undefined ||
+  query.roomId !== undefined ||
+  query.id !== undefined;
+
+const createdAtOf = (document: StoredMatchRecord): number | undefined =>
+  document.createdAt instanceof Date ? document.createdAt.getTime() : undefined;
+
+/**
+ * EL ORDEN DEL LISTADO: `createdAt` descendente y, en el mismo milisegundo, el `_id` descendente. Los
+ * `_id` son veinticuatro hex en minúscula, así que comparar el texto es comparar los doce bytes del
+ * `ObjectId`, que es como los compara Mongo. Un documento sin `createdAt` va al final, como en Mongo.
+ */
+export function newestFirst(a: ListedRow, b: ListedRow): number {
+  const at = createdAtOf(a.document) ?? Number.NEGATIVE_INFINITY;
+  const bt = createdAtOf(b.document) ?? Number.NEGATIVE_INFINITY;
+  if (at !== bt) return bt - at;
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+}
+
+/**
+ * LA PÁGINA, de las filas ya ordenadas: se piden `pageSize + 1` y la de más sólo dice que hay otra.
+ * El cursor es la última fila que SE MUESTRA, no la de más: la siguiente página empieza después de ella.
+ *
+ * Una última fila sin `createdAt` no puede ser cursor —no hay instante del que seguir— y corta el
+ * recorrido. No pasa: todo escritor pone `createdAt` al nacer el documento, la forma vieja incluida.
+ */
+export function pageOf(
+  rows: readonly ListedRow[],
+  pageSize: number,
+  total: Pick<MatchListPage, "total" | "totalExact">,
+): MatchListPage {
+  const shown = [...rows].sort(newestFirst).slice(0, pageSize);
+  const last = shown.at(-1);
+  const lastAt = last ? createdAtOf(last.document) : undefined;
+  return {
+    items: shown.map(({ id, document }) => summaryOf(id, document)),
+    ...(rows.length > pageSize && last && lastAt !== undefined
+      ? { next: { createdAt: new Date(lastAt), id: last.id } }
+      : {}),
+    ...total,
+  };
+}
+
+/**
+ * EL TOTAL, con las tres reglas de `MatchListPage`. Se cuenta hasta el tope MÁS UNO: es lo que separa
+ * "exactamente el tope" de "más que el tope" sin contar el resto.
+ */
+export async function totalOf(
+  query: MatchListQuery,
+  cap: number,
+  count: {
+    readonly estimated: () => Promise<number>;
+    readonly upTo: (limit: number) => Promise<number>;
+  },
+): Promise<Pick<MatchListPage, "total" | "totalExact">> {
+  if (query.after) return { total: null, totalExact: false };
+  if (!isFiltered(query)) return { total: await count.estimated(), totalExact: false };
+  const counted = await count.upTo(cap + 1);
+  return counted > cap ? { total: cap, totalExact: false } : { total: counted, totalExact: true };
 }

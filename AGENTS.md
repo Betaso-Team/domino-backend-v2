@@ -33,6 +33,10 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
   (`GET /internal/matches`, `GET /internal/matches/:matchId`), el backend principal
   (`GET /game-data/:roomId`), el endpoint de soporte y el CLI de replay, que ya no pide argumentos.
   Ver «Incremento completo — el registro v2.1 de cada partida».
+- **El listado del panel filtra y pagina por cursor** (`after`, `from`/`to`, `matchId`, `roomId`, `id`)
+  con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
+  ordena en memoria, y una página honda cuesta lo mismo que la primera. Ver «Incremento completo — el
+  listado del panel con filtros y cursor».
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
@@ -2402,6 +2406,39 @@ guarden la misma forma y el panel de Tablea liste partidas. Antes el documento e
 - **Mongo de verdad en la suite**: `mongo-history.int.test.ts` corre el contrato compartido
   (`transports/tests/history-contract.ts`) contra Mongo con `MONGO_INT_URI`; `MemoryHistory` corre el
   mismo contrato siempre. Verificado contra un `mongo:7` en Docker.
+
+## Incremento completo — el listado del panel con filtros y cursor (rama `feat/match-list-filters`)
+
+`match_history` en producción tiene millones de documentos (~5 GB), y el listado de PR #5
+(`?page=&pageSize=`, `skip` + `countDocuments({})`) leía todo lo salteado y contaba la colección entera
+en cada pedido. El contrato nuevo lo fijó el panel de Tablea, que se construyó en paralelo contra él:
+**no se renombra ningún campo**.
+
+- **`GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=`** (`records.ts`), todo
+  opcional y con AND. Responde `{ items, pageSize, nextCursor, total, totalExact }`. `page` ya no existe
+  (se ignora, como todo parámetro no declarado); un parámetro declarado e inválido es 400 `MALFORMED`.
+- **Cursor, no páginas** (`MatchCursor`): la última fila `(createdAt, _id)`, y la siguiente página
+  empieza estrictamente después. En la ruta es base64url de `{ t, id }`, validado entero al volver. El
+  puerto no sabe de la codificación.
+- **El total se cuenta barato por construcción** (`totalOf`, `stored-record.ts`, compartido por los dos
+  adaptadores): estimado sin filtros, `countDocuments` con `limit` 10 001 con filtros (tope
+  `MATCH_COUNT_CAP`, inyectable para la suite) y `null` con cursor.
+- **Plazo**: `maxTimeMS` 5 000 en cada consulta (`LIST_MAX_TIME_MS`); vencerlo es
+  `MatchListTimeoutError` y la ruta lo contesta 503 con «La búsqueda tardó demasiado; acota el rango de
+  fechas».
+- **El plan es el que manda, y se mide**: `mongo-history.int.test.ts` corre `explain("executionStats")`
+  sobre la consulta exacta del adaptador (`pageQueryOf`, `countQueryOf`) para cada forma de filtro y
+  para páginas con cursor, y exige sin `COLLSCAN`, sin `SORT` y `totalDocsExamined ≤ pageSize + 1`. Tres
+  decisiones salieron de ahí: `roomId_1` pasó a `roomId_1_createdAt_-1__id_-1` (con el simple, la sala
+  se ordenaba en memoria); con `matchId` o `id`, que son únicos, no se pide `sort` (agregaba un `SORT`
+  sobre una fila); y el `$or` del cursor lleva los filtros repetidos en cada rama, en la raíz
+  (`SUBPLAN` → `SORT_MERGE`), porque al lado de los filtros leía una fila de más por página y una por
+  cada empate.
+- **El índice único va en su propio `createIndexes`**: es todo o nada, y con dos filas viejas de la
+  misma partida se llevaba con él a los del listado.
+- **`MemoryHistory` genera `ObjectId` de verdad** para el `_id`: el desempate del listado tiene que
+  ordenar igual que en Mongo, y veinticuatro hex al azar no lo hacen. Los dos adaptadores aceptan
+  `{ now, countCap }` para la suite (empates en el mismo milisegundo, el tope chico).
 
 ## Cómo se ejecuta una tarea
 

@@ -1,24 +1,31 @@
-import { randomBytes } from "node:crypto";
+import { ObjectId } from "mongodb";
 import {
   type ClosedRound,
   type HistoryEntry,
   type HistoryPort,
   type HistoryReader,
+  MATCH_COUNT_CAP,
   MATCH_RECORD_VERSION,
   type MatchArchive,
   type MatchClosing,
+  type MatchCursor,
+  type MatchListPage,
+  type MatchListQuery,
   type MatchOpening,
-  type MatchPage,
   type StoredMatchRecord,
 } from "../history";
 import {
+  type HistoryAdapterOptions,
   LARGE_LAST,
+  type ListedRow,
   entriesOf,
   largeLast,
+  newestFirst,
+  pageOf,
   storedClosingOf,
   storedEntryOf,
   storedOpeningOf,
-  summaryOf,
+  totalOf,
 } from "./stored-record";
 
 // Implementación de memoria. YA NO ES "la de antes de que haya base": el adaptador de Mongo
@@ -40,6 +47,13 @@ type Stored = Record<string, unknown>;
 
 export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive {
   private readonly byMatch = new Map<string, Stored>();
+  private readonly now: () => Date;
+  private readonly countCap: number;
+
+  constructor(options: HistoryAdapterOptions = {}) {
+    this.now = options.now ?? (() => new Date());
+    this.countCap = options.countCap ?? MATCH_COUNT_CAP;
+  }
 
   // El primer armado gana campo por campo, y una partida ya cerrada conserva su estado: es el
   // `$ifNull` del adaptador de Mongo escrito con el orden del spread —lo de la derecha gana—.
@@ -135,16 +149,21 @@ export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive {
     return Promise.resolve(largeLast(rest));
   }
 
-  // LA MÁS NUEVA PRIMERO, y a igual `createdAt` la última en llegar: es el `_id` descendente con que
-  // desempata el adaptador de Mongo.
-  page(page: number, pageSize: number): Promise<MatchPage> {
-    const ordered = [...this.byMatch.values()]
-      .reverse()
-      .sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt));
-    const items = ordered
-      .slice((page - 1) * pageSize, page * pageSize)
-      .map((document) => summaryOf(String(document._id), document));
-    return Promise.resolve({ items, total: ordered.length });
+  // LAS MISMAS REGLAS QUE MONGO, recorriendo el `Map`: con 200 partidas como mucho, filtrar y ordenar
+  // todo en cada pedido es lo que cuesta menos código y no cuesta nada más. El orden, la página y el
+  // total salen de `./stored-record.ts`, compartidos con el adaptador de Mongo.
+  async list(query: MatchListQuery): Promise<MatchListPage> {
+    const rows: ListedRow[] = [...this.byMatch.values()]
+      .filter((document) => matches(document, query))
+      .map((document) => ({ id: String(document._id), document }))
+      .sort(newestFirst);
+    const total = await totalOf(query, this.countCap, {
+      estimated: () => Promise.resolve(this.byMatch.size),
+      upTo: (limit) => Promise.resolve(Math.min(rows.length, limit)),
+    });
+    const { after } = query;
+    const page = after ? rows.filter((row) => isAfter(row, after)) : rows;
+    return pageOf(page.slice(0, query.pageSize + 1), query.pageSize, total);
   }
 
   private write(matchId: string, next: (current: Stored | undefined, now: Date) => Stored): void {
@@ -153,14 +172,16 @@ export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive {
       const oldest = this.byMatch.keys().next().value;
       if (oldest !== undefined) this.byMatch.delete(oldest);
     }
-    this.byMatch.set(matchId, next(current, new Date()));
+    this.byMatch.set(matchId, next(current, this.now()));
   }
 }
 
-// EL `_id` VA PRIMERO y es opaco: veinticuatro hex, como el `ObjectId` que Mongo pondría. El panel lo
-// muestra y lo usa de clave; no lo interpreta.
+// EL `_id` VA PRIMERO y ES un `ObjectId`, en texto: el panel lo muestra, lo usa de clave y filtra por
+// él, y el listado desempata por él. Un `ObjectId` crece con cada uno que el proceso genera, así que a
+// igual `createdAt` gana la última en nacer, como en Mongo; veinticuatro hex al azar desempatarían
+// también, pero en un orden que ninguna base daría.
 function born(matchId: string, current: Stored | undefined): Stored {
-  return { _id: current?._id ?? randomBytes(12).toString("hex"), matchId };
+  return { _id: current?._id ?? new ObjectId().toHexString(), matchId };
 }
 
 function stamps(current: Stored | undefined, now: Date): Stored {
@@ -186,4 +207,22 @@ function onlyLarge(current: Stored | undefined): Stored {
 const isClosed = (document: Stored) =>
   document.status === "finished" || document.status === "aborted";
 
-const timeOf = (value: unknown) => (value instanceof Date ? value.getTime() : 0);
+// LOS FILTROS DEL LISTADO, con la semántica de la consulta de Mongo: un documento sin el campo no
+// coincide con un filtro sobre él —sin `createdAt` no entra en un rango, sin sala no tiene sala—.
+function matches(document: Stored, query: MatchListQuery): boolean {
+  const at = document.createdAt instanceof Date ? document.createdAt.getTime() : undefined;
+  if (query.from && (at === undefined || at < query.from.getTime())) return false;
+  if (query.to && (at === undefined || at >= query.to.getTime())) return false;
+  if (query.matchId !== undefined && document.matchId !== query.matchId) return false;
+  if (query.roomId !== undefined && document.roomId !== query.roomId) return false;
+  if (query.id !== undefined && document._id !== query.id) return false;
+  return true;
+}
+
+// ESTRICTAMENTE DESPUÉS del cursor, en el orden del listado.
+function isAfter({ id, document }: ListedRow, cursor: MatchCursor): boolean {
+  if (!(document.createdAt instanceof Date)) return false;
+  const at = document.createdAt.getTime();
+  const cursorAt = cursor.createdAt.getTime();
+  return at < cursorAt || (at === cursorAt && id < cursor.id);
+}

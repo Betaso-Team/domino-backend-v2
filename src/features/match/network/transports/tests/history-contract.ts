@@ -6,8 +6,11 @@ import type {
   HistoryReader,
   MatchArchive,
   MatchClosing,
+  MatchListPage,
+  MatchListQuery,
   MatchSetup,
 } from "../../history";
+import type { HistoryAdapterOptions } from "../stored-record";
 
 // EL CONTRATO DEL REGISTRO, ESCRITO UNA SOLA VEZ Y CORRIDO CONTRA LOS DOS ADAPTADORES, por el criterio
 // del catálogo (`features/game-mode/transports/tests/repository-contract.ts`): `MemoryHistory` no es un
@@ -110,9 +113,81 @@ export const entry = (seq: number, over: Partial<HistoryEntry> = {}): HistoryEnt
   ...over,
 });
 
+// UN RELOJ QUE EL TEST MUEVE: `createdAt` es el instante de la escritura, y los empates en el mismo
+// milisegundo —lo que el desempate por `_id` tiene que resolver— no se le pueden pedir a uno de verdad.
+function testClock(start = T0) {
+  let now = start;
+  return {
+    now: () => new Date(now),
+    set: (epochMs: number) => {
+      now = epochMs;
+    },
+  };
+}
+
+const T0 = Date.parse("2026-10-01T00:00:00.000Z");
+const at = (seconds: number) => T0 + seconds * 1_000;
+
+interface Row {
+  readonly matchId: string;
+  readonly at: number;
+  /** `null`: un documento sin sala, como los de antes de la v2.1 (nace por la timeline, sin abrir). */
+  readonly roomId?: string | null;
+}
+
+async function seed(
+  history: HistoryHarness,
+  clock: ReturnType<typeof testClock>,
+  rows: readonly Row[],
+): Promise<void> {
+  for (const row of rows) {
+    clock.set(row.at);
+    if (row.roomId === null) history.record([entry(1, { matchId: row.matchId })]);
+    else
+      history.open(row.matchId, {
+        ...SETUP,
+        roomId: row.roomId ?? `room-${row.matchId}`,
+        matchStartedAt: 1_000,
+      });
+    await history.drain();
+  }
+}
+
+/** Recorre el listado siguiendo el cursor, y devuelve cada página. */
+async function walk(
+  history: HistoryHarness,
+  query: MatchListQuery,
+): Promise<readonly MatchListPage[]> {
+  const pages: MatchListPage[] = [];
+  let after = query.after;
+  do {
+    const page = await history.list({ ...query, ...(after ? { after } : {}) });
+    pages.push(page);
+    after = page.next;
+  } while (after && pages.length < 100);
+  return pages;
+}
+
+const idsOf = (pages: readonly MatchListPage[]) =>
+  pages.flatMap((page) => page.items.map((item) => item.matchId));
+
+// EL ORDEN DEL LISTADO, calculado desde los documentos y no supuesto: `createdAt` descendente y, en el
+// mismo milisegundo, el `_id` descendente.
+async function expectedOrder(history: HistoryHarness, matchIds: readonly string[]) {
+  const records = await Promise.all(matchIds.map((matchId) => history.recordOf(matchId)));
+  return records
+    .map((record) => ({
+      matchId: String(record?.matchId),
+      createdAt: (record?.createdAt as Date).getTime(),
+      id: String(record?._id),
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+    .map(({ matchId }) => matchId);
+}
+
 export function describeHistoryContract(
   name: string,
-  harness: () => Promise<HistoryHarness> | HistoryHarness,
+  harness: (options?: HistoryAdapterOptions) => Promise<HistoryHarness> | HistoryHarness,
 ): void {
   describe(`${name}: el contrato del registro`, () => {
     it("al abrir: la versión, el armado, el estado `started` y el arranque como fecha", async () => {
@@ -222,7 +297,7 @@ export function describeHistoryContract(
         matchEndReason: "SCORE",
         matchStartedAt: new Date(1_000),
       });
-      expect((await history.page(1, 25)).total).toBe(1);
+      expect((await history.list({ pageSize: 25 })).items).toHaveLength(1);
     });
 
     it("las entradas que llegan antes de abrir quedan en el mismo documento", async () => {
@@ -235,7 +310,7 @@ export function describeHistoryContract(
       expect(record).toMatchObject({ status: "started", roomId: "room-1" });
       expect(record?.timeline).toHaveLength(1);
       expect(Object.keys(record ?? {}).at(-1)).toBe("timeline");
-      expect((await history.page(1, 25)).total).toBe(1);
+      expect((await history.list({ pageSize: 25 })).items).toHaveLength(1);
     });
 
     it("el detalle trae el `_id` como texto; `/game-data` no lo trae", async () => {
@@ -266,24 +341,27 @@ export function describeHistoryContract(
       expect(await history.of("no-existe")).toEqual([]);
     });
 
-    it("el listado: la más nueva primero, paginado, con el total y sin los arreglos", async () => {
-      const history = await harness();
-      for (const id of ["m-a", "m-b", "m-c"]) {
-        history.open(id, { ...SETUP, roomId: `room-${id}`, matchStartedAt: 1_000 });
-        history.record([entry(1, { matchId: id })]);
-        await history.drain();
-        // `createdAt` es el instante real de la escritura: sin un milisegundo en el medio, el orden
-        // lo decide el desempate y no lo que este test quiere medir.
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+    it("el listado: la más nueva primero, el resumen sin los arreglos", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-a", at: at(1) },
+        { matchId: "m-b", at: at(2) },
+        { matchId: "m-c", at: at(3) },
+      ]);
+      history.record([entry(1, { matchId: "m-a" })]);
+      history.round("m-a", ROUND);
       history.close("m-a", { ...CLOSING, roomId: "room-m-a" });
       await history.drain();
 
-      const first = await history.page(1, 2);
-      expect(first.total).toBe(3);
+      const first = await history.list({ pageSize: 2 });
       expect(first.items.map((item) => item.matchId)).toEqual(["m-c", "m-b"]);
-      const second = await history.page(2, 2);
+      const second = await history.list({
+        pageSize: 2,
+        ...(first.next ? { after: first.next } : {}),
+      });
       expect(second.items.map((item) => item.matchId)).toEqual(["m-a"]);
+      expect(second.next).toBeUndefined();
       expect(second.items[0]).toMatchObject({
         game: "domino",
         roomId: "room-m-a",
@@ -295,14 +373,179 @@ export function describeHistoryContract(
         winnerIds: ["seat-1"],
       });
       expect(typeof second.items[0]?._id).toBe("string");
-      expect(second.items[0]?.createdAt).toBeInstanceOf(Date);
+      expect(second.items[0]?.createdAt).toEqual(new Date(at(1)));
       expect(second.items[0]?.updatedAt).toBeInstanceOf(Date);
+      // UN RESUMEN: nada de lo grande ni de lo que sólo el detalle muestra.
       for (const item of [...first.items, ...second.items]) {
-        expect(item).not.toHaveProperty("timeline");
-        expect(item).not.toHaveProperty("rounds");
-        expect(item).not.toHaveProperty("seats");
+        for (const field of ["timeline", "rounds", "seats", "players", "matchConfig", "entries"])
+          expect(item).not.toHaveProperty(field);
       }
-      expect((await history.page(3, 2)).items).toEqual([]);
+    });
+
+    // EL CURSOR, con empates: cuatro partidas en el MISMO milisegundo y páginas que las parten. Sin el
+    // `_id` de desempate —o con un `<=` donde va un `<`— una página repetiría o perdería una fila.
+    it("el cursor recorre todo sin repetir ni saltear, con empates en el mismo milisegundo", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      const rows: Row[] = [
+        { matchId: "m-1", at: at(1) },
+        { matchId: "m-2", at: at(2) },
+        { matchId: "m-3", at: at(2) },
+        { matchId: "m-4", at: at(2) },
+        { matchId: "m-5", at: at(2) },
+        { matchId: "m-6", at: at(3) },
+        { matchId: "m-7", at: at(4) },
+      ];
+      await seed(history, clock, rows);
+      const expected = await expectedOrder(
+        history,
+        rows.map((row) => row.matchId),
+      );
+      expect(expected.slice(0, 2)).toEqual(["m-7", "m-6"]);
+      expect(expected.at(-1)).toBe("m-1");
+
+      for (const pageSize of [1, 2, 3, 7, 10]) {
+        const pages = await walk(history, { pageSize });
+        expect(idsOf(pages), `pageSize ${pageSize}`).toEqual(expected);
+        expect(pages.every((page) => page.items.length <= pageSize)).toBe(true);
+        // LA ÚLTIMA NO PROMETE OTRA: se pide una fila de más para saberlo, también cuando la última
+        // página viene llena.
+        expect(pages.at(-1)?.next).toBeUndefined();
+        expect(pages.length).toBe(Math.max(1, Math.ceil(expected.length / pageSize)));
+      }
+    });
+
+    it("cada filtro solo, y combinados con AND", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(10), roomId: "sala-x" },
+        { matchId: "m-2", at: at(20), roomId: "sala-y" },
+        { matchId: "m-3", at: at(30), roomId: "sala-x" },
+        { matchId: "m-4", at: at(40), roomId: "sala-z" },
+        { matchId: "m-vieja", at: at(25), roomId: null },
+      ]);
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 2, ...query }));
+      const record = await history.recordOf("m-2");
+
+      // EL DOCUMENTO SIN SALA —la forma vieja— se lista igual; sólo el filtro por sala lo deja afuera.
+      expect(await ids({})).toEqual(["m-4", "m-3", "m-vieja", "m-2", "m-1"]);
+      expect(await ids({ matchId: "m-3" })).toEqual(["m-3"]);
+      expect(await ids({ matchId: "no-existe" })).toEqual([]);
+      expect(await ids({ roomId: "sala-x" })).toEqual(["m-3", "m-1"]);
+      expect(await ids({ id: String(record?._id) })).toEqual(["m-2"]);
+      expect(await ids({ id: "0".repeat(24) })).toEqual([]);
+      // `from` INCLUSIVO y `to` EXCLUSIVO: [20 s, 30 s) tiene la de los 20 y no la de los 30.
+      expect(await ids({ from: new Date(at(20)), to: new Date(at(30)) })).toEqual([
+        "m-vieja",
+        "m-2",
+      ]);
+      expect(await ids({ from: new Date(at(30)) })).toEqual(["m-4", "m-3"]);
+      expect(await ids({ to: new Date(at(20)) })).toEqual(["m-1"]);
+      expect(await ids({ from: new Date(at(20)), to: new Date(at(20)) })).toEqual([]);
+      // AND: la sala Y las fechas; la partida Y la sala; el `_id` Y una sala que no es la suya.
+      expect(await ids({ roomId: "sala-x", from: new Date(at(20)) })).toEqual(["m-3"]);
+      expect(await ids({ roomId: "sala-x", to: new Date(at(30)) })).toEqual(["m-1"]);
+      expect(await ids({ matchId: "m-3", roomId: "sala-x" })).toEqual(["m-3"]);
+      expect(await ids({ matchId: "m-3", roomId: "sala-y" })).toEqual([]);
+      expect(await ids({ matchId: "m-3", from: new Date(at(31)) })).toEqual([]);
+      expect(await ids({ id: String(record?._id), roomId: "sala-x" })).toEqual([]);
+      expect(
+        await ids({ id: String(record?._id), matchId: "m-2", from: new Date(at(20)) }),
+      ).toEqual(["m-2"]);
+    });
+
+    it("el cursor sigue los filtros: la sala y las fechas, en páginas de a una", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(1), roomId: "sala-x" },
+        { matchId: "m-2", at: at(2), roomId: "sala-x" },
+        { matchId: "m-3", at: at(2), roomId: "sala-x" },
+        { matchId: "m-4", at: at(2), roomId: "sala-y" },
+        { matchId: "m-5", at: at(3), roomId: "sala-x" },
+        { matchId: "m-6", at: at(9), roomId: "sala-x" },
+      ]);
+      // La de los 9 s queda afuera por el `to` exclusivo; la de otra sala, por la sala.
+      const expected = await expectedOrder(history, ["m-1", "m-2", "m-3", "m-5"]);
+
+      const pages = await walk(history, {
+        pageSize: 1,
+        roomId: "sala-x",
+        from: new Date(at(1)),
+        to: new Date(at(9)),
+      });
+      expect(idsOf(pages)).toEqual(expected);
+      expect(pages).toHaveLength(4);
+    });
+
+    it("el total: estimado sin filtros, exacto con filtros, `null` con cursor", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(1), roomId: "sala-x" },
+        { matchId: "m-2", at: at(2), roomId: "sala-x" },
+        { matchId: "m-3", at: at(3) },
+      ]);
+
+      const all = await history.list({ pageSize: 2 });
+      expect({ total: all.total, totalExact: all.totalExact }).toEqual({
+        total: 3,
+        totalExact: false,
+      });
+      const room = await history.list({ pageSize: 1, roomId: "sala-x" });
+      expect({ total: room.total, totalExact: room.totalExact }).toEqual({
+        total: 2,
+        totalExact: true,
+      });
+      const none = await history.list({ pageSize: 1, matchId: "no-existe" });
+      expect({ total: none.total, totalExact: none.totalExact }).toEqual({
+        total: 0,
+        totalExact: true,
+      });
+      // CON CURSOR NO SE CUENTA, con o sin filtros: la primera página ya lo dijo.
+      for (const query of [{}, { roomId: "sala-x" }]) {
+        const first = await history.list({ pageSize: 1, ...query });
+        const next = await history.list({
+          pageSize: 1,
+          ...query,
+          ...(first.next ? { after: first.next } : {}),
+        });
+        expect(next.items).toHaveLength(1);
+        expect({ total: next.total, totalExact: next.totalExact }).toEqual({
+          total: null,
+          totalExact: false,
+        });
+      }
+    });
+
+    // EL TOPE, con uno chico inyectado: contar más allá cuesta lo mismo que la colección entera.
+    it("el total filtrado se corta en el tope y deja de ser exacto", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now, countCap: 3 });
+      await seed(
+        history,
+        clock,
+        ["m-1", "m-2", "m-3", "m-4", "m-5", "m-6", "m-7"].map((matchId, index) => ({
+          matchId,
+          at: at(index + 1),
+          roomId: index < 3 ? "sala-tres" : "sala-cuatro",
+        })),
+      );
+
+      const capped = await history.list({ pageSize: 10, roomId: "sala-cuatro" });
+      expect(capped.items).toHaveLength(4);
+      expect({ total: capped.total, totalExact: capped.totalExact }).toEqual({
+        total: 3,
+        totalExact: false,
+      });
+      // JUSTO EN EL TOPE todavía es exacto: se cuenta hasta el tope más uno para distinguirlo.
+      const exact = await history.list({ pageSize: 10, roomId: "sala-tres" });
+      expect({ total: exact.total, totalExact: exact.totalExact }).toEqual({
+        total: 3,
+        totalExact: true,
+      });
     });
   });
 }

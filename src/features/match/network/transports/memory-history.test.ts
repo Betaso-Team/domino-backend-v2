@@ -4,7 +4,7 @@ import { SETUP, describeHistoryContract, entry } from "./tests/history-contract"
 
 // EL MISMO CONTRATO QUE EL ADAPTADOR DE MONGO (`./mongo-history.int.test.ts`), corrido contra el que
 // usa la instancia sin base y la suite entera.
-describeHistoryContract("MemoryHistory", () => new MemoryHistory());
+describeHistoryContract("MemoryHistory", (options) => new MemoryHistory(options));
 
 describe("MemoryHistory: lo propio de no tener base", () => {
   // EL TOPE ES LO QUE SE PIERDE ELIGIÉNDOLA, y se mide: sin él un proceso que vive semanas guardaría
@@ -15,7 +15,7 @@ describe("MemoryHistory: lo propio de no tener base", () => {
       history.record([entry(1, { matchId: `m-${index}` })]);
     }
 
-    expect((await history.page(1, 1)).total).toBe(200);
+    expect((await history.list({ pageSize: 1 })).total).toBe(200);
     expect(await history.of("m-0")).toEqual([]);
     expect(await history.of("m-200")).toHaveLength(1);
   });
@@ -25,7 +25,7 @@ describe("MemoryHistory: lo propio de no tener base", () => {
     history.open("m-1", { ...SETUP, matchStartedAt: 1 });
     history.open("m-2", { ...SETUP, roomId: "room-2", matchStartedAt: 1 });
 
-    expect((await history.page(1, 25)).total).toBe(2);
+    expect((await history.list({ pageSize: 25 })).items).toHaveLength(2);
     expect(await history.snapshotOf("room-2")).toMatchObject({ matchId: "m-2" });
   });
 });
