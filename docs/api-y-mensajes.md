@@ -70,7 +70,10 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 
 | Método y ruta | Uso |
 |---|---|
-| `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte |
+| `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte (lee `timeline` y, en los documentos viejos, `entries`) |
+| `GET /internal/matches?page=&pageSize=` | Listado de partidas para el panel, la más nueva primero (ver «El registro de cada partida») |
+| `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
+| `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `POST /game-modes` | Crea un modo |
 | `PUT /game-modes/:uuid` | Aplica un patch al modo |
 | `DELETE /game-modes/:uuid` | Baja lógica |
@@ -80,6 +83,61 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 | `GET /internal/settings/:section` | Una sección |
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
 | `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
+
+### El registro de cada partida
+
+Cada partida deja **un documento** en `match_history`, con la forma v2.1 de truco (`version: 2.1`). Se
+abre al primer reparto (`status: "started"`, con `roomId`, `table`, `matchConfig` —seed y parejas
+incluidos—, `seats` y `matchStartedAt`), se alimenta durante la partida (`timeline`, la secuencia de
+actos y hechos; `rounds`, lo que las reglas concluyeron de cada mano) y se cierra al terminar
+(`status: "finished" | "aborted"`, `matchEndedAt`, `matchDurationInMs`, `matchEndReason`, ganadores,
+`players` con su salida y su plata, `rateId`, `betMultiplier` y `rankingMultiplier`). Una mesa que nunca
+arrancó nace en el cierre. Los instantes son fechas (ISO en el JSON); las duraciones, números. Los
+documentos de antes de la v2.1 (`{ matchId, entries, createdAt, updatedAt }`) se siguen leyendo en las
+cuatro rutas.
+
+**`GET /internal/matches?page=1&pageSize=25`** — `page` desde 1, `pageSize` de 1 a 100 (default 25);
+otra cosa es 400. Orden: `createdAt` descendente.
+
+```json
+{
+  "status": "success",
+  "data": {
+    "items": [
+      {
+        "_id": "6717a2f0c3bf3e710572f941",
+        "matchId": "orq-8f2c",
+        "roomId": "ZYIVoz6TQ",
+        "game": "domino",
+        "status": "finished",
+        "table": { "gameModeId": "…", "name": "Clásica 1v1", "entryFeeInUC": 10, "prizeInUC": 18, "isFree": false },
+        "createdAt": "2026-10-22T14:00:00.000Z",
+        "updatedAt": "2026-10-22T14:09:31.000Z",
+        "matchStartedAt": "2026-10-22T14:00:03.000Z",
+        "matchEndedAt": "2026-10-22T14:09:00.000Z",
+        "matchEndReason": "SCORE",
+        "winnerIds": ["seat-1"]
+      }
+    ],
+    "page": 1,
+    "pageSize": 25,
+    "total": 1
+  }
+}
+```
+
+Cada fila es un resumen: sin `timeline` ni `rounds`. Un documento viejo aparece con lo que tiene
+(`_id`, `matchId`, `game`, `createdAt`, `updatedAt`).
+
+**`GET /internal/matches/:matchId`** — `200 { status: "success", data: <documento> }`, con el `_id`
+como texto y `rounds`/`timeline` al final; `404 { status: "error", message: "Partida no encontrada" }`.
+
+**`GET /game-data/:roomId`** — el contrato del backend principal, igual que en truco: `200` con el
+documento pelado (sin envelope y sin `_id`) y `404 { error: "MATCH_NOT_FOUND" }`. Busca por `roomId` y,
+si no, por `matchId` (los documentos viejos no guardaban la sala).
+
+Las tres van con la llave o el token de admin; sin credencial, `401 { error: "UNAUTHORIZED" }` antes de
+mirar la forma. El `POST /internal/matches` del orquestador es otra ruta, con su llave.
 
 **Niveles de aumento de un modo.** `POST` y `PUT /game-modes` aceptan `betLevels`:
 `[{ level, extra, additionalPoints }]`. `level` es el multiplicador de la entrada y el premio (entero
