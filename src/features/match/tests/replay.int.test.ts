@@ -1,8 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG, type DominoMatchConfig } from "../core/config";
+import { createMatchState } from "../core/engine/genesis";
+import { recordedReplayOf } from "../history/recorded";
 import { replay } from "../history/replay";
 import type { HistoryEntry } from "../network/history";
+import { matchSetupOf } from "../network/match-record";
+import { MemoryHistory } from "../network/transports/memory-history";
+import { entriesOf } from "../network/transports/stored-record";
 import { replayConfigOf } from "../transports/match-contract";
 import golden from "./fixtures/golden-2p.json" with { type: "json" };
 
@@ -132,6 +137,60 @@ describe("replay", () => {
   });
 });
 
+// EL REPLAY DESDE EL REGISTRO, que es lo que el CLI hace cuando se le pasa sólo el `matchId`: la
+// cabecera v2.1 trae el seed, las parejas, los plazos y el arranque, y con eso y la timeline la
+// partida golden se reconstruye EXACTA, sin un solo dato que no saliera del documento.
+describe("replay desde el registro guardado", () => {
+  const goldenMeta = replayConfigOf(golden.meta);
+  const goldenGlobal = { ...DEFAULT_GLOBAL_CONFIG, ...golden.globalConfig };
+
+  it("la cabecera v2.1 alcanza para rebobinar la partida golden", async () => {
+    const history = new MemoryHistory();
+    const setup = matchSetupOf(goldenMeta, goldenGlobal, createMatchState(goldenMeta), {
+      roomId: "room-golden",
+      gameModeName: "Clásica",
+    });
+    history.open(goldenMeta.matchId, { ...setup, matchStartedAt: golden.startedAt });
+    history.record(golden.entries as HistoryEntry[]);
+
+    const record = await history.recordOf(goldenMeta.matchId);
+    const recorded = record ? recordedReplayOf(record) : undefined;
+    expect(recorded).toBeDefined();
+    if (!recorded) return;
+    expect(recorded.meta).toMatchObject({
+      seed: goldenMeta.seed,
+      teamAssignment: goldenMeta.teamAssignment,
+      pointsToWin: goldenMeta.pointsToWin,
+      seats: goldenMeta.seats,
+    });
+    expect(recorded.globalConfig).toEqual(goldenGlobal);
+    expect(recorded.startedAt).toBe(golden.startedAt);
+
+    const state = replay({ ...recorded, entries: await history.of(goldenMeta.matchId) });
+    expect(state.toJSON()).toEqual(golden.finalState);
+  });
+
+  // LA FORMA VIEJA no tiene cabecera: el CLI sigue pidiendo los argumentos, y la secuencia —con el
+  // `at` como número— se rebobina igual.
+  it("un documento de antes de la v2.1 no trae cabecera, y su `entries` se rebobina igual", () => {
+    const old = {
+      matchId: goldenMeta.matchId,
+      entries: golden.entries,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    expect(recordedReplayOf(old)).toBeUndefined();
+    const state = replay({
+      meta: goldenMeta,
+      globalConfig: goldenGlobal,
+      startedAt: golden.startedAt,
+      entries: entriesOf(old),
+    });
+    expect(state.toJSON()).toEqual(golden.finalState);
+  });
+});
+
 // EL REPLAY NO CONSULTA EL CATÁLOGO, Y SE MIDE SOBRE LA LISTA EXACTA DE IMPORTS del entrypoint.
 //
 // "Nunca consulta `GameModeReader`" es una propiedad NEGATIVA, y un test de comportamiento no la
@@ -157,6 +216,7 @@ describe("el CLI de replay: sus dependencias", () => {
       "./di-container",
       "./logger",
       "@/features/match/core/config",
+      "@/features/match/history/recorded",
       "@/features/match/history/replay",
       "@/features/match/network/history",
       "@/features/match/transports/match-contract",
