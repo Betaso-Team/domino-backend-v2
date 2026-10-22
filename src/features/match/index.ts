@@ -30,7 +30,7 @@ export { NO_STARTING_SCORE, type StartingScore } from "./core/engine/genesis";
 export type { DevPresetSource } from "./transports/colyseus/commands/di-wiring";
 export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
-export type { HistoryReader } from "./network/history";
+export type { HistoryReader, MatchArchive } from "./network/history";
 // La proyección monetaria sale por acá porque su consumidor está AFUERA de la feature: hoy
 // el smoke, mañana el adaptador que efectivamente pague. Sale la función y salen sus tipos:
 // una instrucción que nadie puede nombrar no se puede recibir, ni loguear, ni auditar.
