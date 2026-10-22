@@ -26,6 +26,7 @@ import { wasAbortedAtDeal } from "../../core/rules";
 import type { MatchState } from "../../core/state";
 import { BotTurnTaker, MatchEventNotifier, type MatchHistory } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
+import { recordEndingSink } from "../../network/match-record";
 import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
 import {
   OrchestratorBetCharger,
@@ -208,8 +209,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const match = child.resolve<MatchState>("MatchState");
     const catalog = buildCatalog(child);
 
-    const pieces = buildPieces(child, (events: readonly NetworkMatchEvent[]) =>
-      this.notifier.notify(events),
+    const pieces = buildPieces(
+      child,
+      (events: readonly NetworkMatchEvent[]) => this.notifier.notify(events),
+      { roomId: this.roomId, gameModeName: mode.name },
     );
     this.history = pieces.history;
     // LA REVANCHA: la sala solo la cierra cuando alguien se va (`onLeave`). La compuerta nadie la
@@ -234,6 +237,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       rootContainer
         .resolve(MatchResultRecorder)
         .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason, bet?.settled),
+      // EL CIERRE DEL REGISTRO, detrás del resultado y con las mismas tres cosas que sólo la sala
+      // sabe: si el orquestador cobró la entrada, por qué se cerró sin arrancar y el cobro del aumento
+      // en vuelo. Va después del historial (`pieces.sinks`), así que el desenlace llega a la base
+      // detrás de la entrada que lo cuenta.
+      recordEndingSink(this.history, config, match, {
+        entryCharged: () => this.entryCharge === "charged",
+        abortReason: () => this.orchestratorAbortReason,
+        settledBet: bet?.settled,
+      }),
     ];
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
