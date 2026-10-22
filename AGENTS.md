@@ -28,6 +28,11 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
 - **La revancha**: el motor abre la ventana (`isRematchEnabled: true` en `configOf`), pero nadie abre
   la compuerta, así que sale siempre con `eligible: false`. Revancha de verdad pide que el orquestador
   vuelva a cobrar.
+- **Cada partida deja UN documento v2.1 en `match_history`** (la forma de truco): cabecera al primer
+  reparto, `timeline` y `rounds` durante, desenlace con la plata al cerrar. Lo leen el panel
+  (`GET /internal/matches`, `GET /internal/matches/:matchId`), el backend principal
+  (`GET /game-data/:roomId`), el endpoint de soporte y el CLI de replay, que ya no pide argumentos.
+  Ver «Incremento completo — el registro v2.1 de cada partida».
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
@@ -2360,6 +2365,43 @@ ve.
   `drain()` de resultados (`src/main.ts`).
 - **Si vuelve a pasar en el v1** (no tiene este barrido), el arreglo a mano es borrar de `roomcaches`
   las salas cuyo `processId` no figura en `roomcount`, y de `colyseus:nodes` los procesos muertos.
+
+## Incremento completo — el registro v2.1 de cada partida (rama `feat/match-record-v2-1`)
+
+Portado de truco (`bed0d33`, `e4e630c`, `7498991`, `4472332`, `8d4001a`) para que los dos juegos
+guarden la misma forma y el panel de Tablea liste partidas. Antes el documento era
+`{ matchId, entries, createdAt, updatedAt }`: sin sala, sin modo, sin plata, sin desenlace.
+
+- **El puerto tiene cuatro verbos** (`open`/`record`/`round`/`close`, `network/history.ts`) y los cuatro
+  caen en UN documento por partida, escritos en fila por partida y con `matchId` único en la base. El
+  primer armado y el primer cierre GANAN —en Mongo por pipeline (`$ifNull`, `$cond` sobre `status`), en
+  memoria por el orden del spread— y una partida cerrada no vuelve a `started`.
+- **Se abre al primer `ROUND_STARTED`**, adentro del grabador: es el único momento en que la mesa ya
+  cobró, el motor ya sembró y nadie jugó. **Se cierra desde la sala** (`recordEndingSink`, detrás del
+  resultado): la plata necesita lo que sólo la sala sabe —si el orquestador cobró la entrada, el
+  `CHARGE_REJECTED`— y una terminada espera al cobro del aumento en vuelo, igual que el resultado. El
+  apagado no lo espera aparte: `shutdown()` drena primero los resultados, que esperan al mismo cobro.
+- **La cabecera guarda lo que el replay necesita y truco no**: `matchConfig.seed`, `teamAssignment`,
+  `isDealWindowEnabled`, `tilesPerPlayer`, `betLevels`, `enableBots`, `isRematchEnabled`, los plazos
+  (`timeoutsInMs`, la reconexión convertida a ms) y el marcador inicial. Con eso `npm run replay --
+  <matchId>` rebobina desde el documento (`history/recorded.ts`); medido contra el golden: idéntico. Los
+  argumentos quedan para los documentos viejos.
+- **La plata es la que el dominó SABE**: `chargedInUC` (la entrada que el orquestador confirmó, por el
+  nivel del aumento que quedó) y `prizePaidInUC` (lo que el resultado publicado le asigna, de
+  `settlementOf`). Fuera, porque no hay fuente: `rate`, los `*InPlayerCurrency`, `refundedInUC` (el
+  reembolso lo decide el orquestador por su ficha), `rakeWaived`, la identidad `firstName`/`lastName`,
+  `rematch` (no hay cadena) y `tournament`.
+- **`matchEndReason` usa el vocabulario del dominó** (`SCORE`, `ABANDONMENT`, los `AbortReason`,
+  `CHARGE_REJECTED`), el mismo de la timeline y del resultado del orquestador, no el de truco.
+- **La timeline conserva `matchId` por entrada** (truco lo sacó en `e4e630c`): lo llevan los goldens y
+  la respuesta del endpoint de soporte.
+- **Los índices no frenan el historial**: si el único no se puede crear (dos documentos viejos de la
+  misma partida) se loguea y se graba igual (`docs/operacion.md`, «Registro de partidas»).
+- **La forma vieja se sigue leyendo** en los cuatro lectores: `timeline ?? entries`, con el `at` de
+  vuelta a epoch ms para el replay.
+- **Mongo de verdad en la suite**: `mongo-history.int.test.ts` corre el contrato compartido
+  (`transports/tests/history-contract.ts`) contra Mongo con `MONGO_INT_URI`; `MemoryHistory` corre el
+  mismo contrato siempre. Verificado contra un `mongo:7` en Docker.
 
 ## Cómo se ejecuta una tarea
 

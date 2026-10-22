@@ -9,6 +9,7 @@ import {
 } from "../core/config";
 import type { Clock } from "../core/engine/clock";
 import { deadlineKindOf } from "../core/engine/deadline-kind";
+import type { StartingScore } from "../core/engine/genesis";
 import type { TimeoutScheduler } from "../core/engine/timeout-scheduler";
 import type { SchemaVisibilityController } from "../core/engine/visibility";
 import type { MatchEvent } from "../core/events";
@@ -28,6 +29,12 @@ export interface ReplayInput {
    * Cuando falta se usa el instante de la primera entrada, que es la mejor cota superior.
    */
   readonly startedAt?: number;
+  /**
+   * El marcador con que nació la mesa. Cero salvo en local y dev (`starting-score`), y desde la v2.1
+   * está en la cabecera del registro: sin él una partida preparada se rebobina desde cero y el
+   * veredicto llega en otra mano.
+   */
+  readonly startingScore?: StartingScore;
 }
 
 export function replay(input: ReplayInput): MatchState {
@@ -69,6 +76,7 @@ export function replay(input: ReplayInput): MatchState {
     clock,
     scheduler,
     visibility,
+    ...(input.startingScore ? { startingScore: input.startingScore } : {}),
   });
   // El catálogo por nombre, con el verbo concreto olvidado a propósito: acá el nombre
   // llega como dato del historial, así que la clave es `string` y el resultado puede

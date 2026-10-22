@@ -1,7 +1,9 @@
 import type { GlobalDominoConfig, TeamAssignmentMode } from "@/features/match/core/config";
-import { replay } from "@/features/match/history/replay";
-import type { HistoryEntry, HistoryReader } from "@/features/match/network/history";
+import { recordedReplayOf } from "@/features/match/history/recorded";
+import { type ReplayInput, replay } from "@/features/match/history/replay";
+import type { HistoryEntry, HistoryReader, MatchArchive } from "@/features/match/network/history";
 import { replayConfigOf } from "@/features/match/transports/match-contract";
+// npm run replay -- <matchId>
 // npm run replay -- <matchId> <seed> <pointsToWin> <teamAssignment> <asiento...>
 //
 // Rebobina la partida desde el historial e IMPRIME el estado final reconstruido. Es la
@@ -12,33 +14,34 @@ import { replayConfigOf } from "@/features/match/transports/match-contract";
 // esperado vive en el propio fixture (`finalState`), versionado en el repo y aprobado a
 // ojo una vez. Ése es el test de regresión del motor.
 //
-// Por qué el snapshot no está en `match_history`: una entrada del historial es un ACTO o
-// un HECHO, las dos cosas inmutables y de tamaño acotado. Un snapshot del árbol es otra
-// clase de cosa —un volcado, grande, y solo interesante al cierre—, así que si alguna vez
-// hace falta va en `match_meta` al cerrar la partida, no colgado de una entrada. Un campo
+// Por qué el snapshot del árbol no está en `match_history`: una entrada del historial es un ACTO o
+// un HECHO, las dos cosas inmutables y de tamaño acotado, y la cabecera del registro es el ARMADO.
+// Un volcado del árbol es otra clase de cosa —grande, y solo interesante al cierre—. Un campo
 // opcional que nadie escribe es peor que no tenerlo: hace creer que el replay puede
 // autoverificarse contra producción cuando no puede.
 import { mongo, rootContainer } from "./di-container";
 import { flushLogs, logger } from "./logger";
 
 const USAGE =
-  "uso: npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER> <asiento...>";
+  "uso: npm run replay -- <matchId> [<seed> <pointsToWin> <SHUFFLED|SEAT_ORDER> <asiento...>]";
 
-// El meta VA POR ARGUMENTOS, y ya no es porque falte la persistencia: la persistencia
-// existe, pero graba una sola colección —`match_history`, las entradas— y NO una
-// `match_meta`. Es una decisión, no un pendiente: el `seed` no está en el historial a
-// propósito (una entrada es un acto o un hecho, y el seed no es ninguno de los dos), y una
-// colección de cabeceras que hoy nadie escribiría al cerrar la partida sería un lugar vacío
-// donde el operador va a buscar. Mientras el único productor de partidas sea el arnés, los
-// cinco valores se saben.
+// EL META SALE DEL REGISTRO cuando se pasa sólo el `matchId`. Desde la v2.1 el documento de
+// `match_history` guarda la cabecera de la mesa al arrancar —el seed, las parejas, los asientos,
+// los plazos, el marcador inicial y las reglas— (`features/match/history/recorded.ts`), que es lo
+// que antes este CLI tenía que pedir por argumentos: el `seed` no es un acto ni un hecho, así que
+// no estaba en ninguna entrada, y una colección de cabeceras aparte habría sido un lugar vacío
+// donde el operador iba a buscar.
 //
-// Los cuatro son OBLIGATORIOS y no tienen default. El `pointsToWin` sobre todo: el
-// veredicto de la partida depende de él —entrar en PRESENTING_MATCH es alcanzarlo—, así
-// que un valor inventado no reproduce el final. Con 0, además, `teamA >= 0` es verdadero
-// desde el arranque y la partida cerraría en la primera comprobación. El `teamAssignment`
-// tampoco es adorno: con `SHUFFLED` las parejas salen de sortear los asientos con el
-// seed, así que asumir `SEAT_ORDER` reparte los puntos al equipo equivocado.
+// LOS ARGUMENTOS SIGUEN, para los documentos de la forma vieja —`{ matchId, entries }`, sin
+// cabecera— y para la partida que nunca llegó a abrir. Ahí los cuatro son OBLIGATORIOS y no tienen
+// default. El `pointsToWin` sobre todo: el veredicto de la partida depende de él —entrar en
+// PRESENTING_MATCH es alcanzarlo—, así que un valor inventado no reproduce el final. Con 0,
+// además, `teamA >= 0` es verdadero desde el arranque y la partida cerraría en la primera
+// comprobación. El `teamAssignment` tampoco es adorno: con `SHUFFLED` las parejas salen de
+// sortear los asientos con el seed, así que asumir `SEAT_ORDER` reparte los puntos al equipo
+// equivocado.
 const matchId = process.argv[2];
+const byArgs = process.argv.length > 3;
 const seed = process.argv[3];
 const pointsToWin = Number(process.argv[4]);
 const teamAssignment = process.argv[5];
@@ -48,38 +51,13 @@ function isTeamAssignment(value: string | undefined): value is TeamAssignmentMod
   return value === "SHUFFLED" || value === "SEAT_ORDER";
 }
 
-// Se acumulan TODOS los argumentos inválidos y se listan juntos. Con el `if` booleano que
-// había, cinco argumentos mal daban el mismo USAGE genérico que uno solo, y el operador
-// —que llega acá con una partida que no puede rebobinar— los descubría de a uno por
-// corrida. No hay parser de argumentos de por medio a propósito: son cinco posiciones
-// fijas, y una dependencia para esto es más superficie de la que ahorra.
-const invalidos: string[] = [];
-if (!matchId) invalidos.push("matchId: falta");
-if (!seed) invalidos.push("seed: falta");
-if (!Number.isInteger(pointsToWin) || pointsToWin <= 0) {
-  invalidos.push(`pointsToWin: se esperaba un entero > 0, llegó "${process.argv[4] ?? ""}"`);
-}
-if (!isTeamAssignment(teamAssignment)) {
-  invalidos.push(
-    `teamAssignment: se esperaba SHUFFLED|SEAT_ORDER, llegó "${teamAssignment ?? ""}"`,
-  );
-}
-// DOS asientos como mínimo, no uno: el dominó no tiene modo solitario, y con un solo
-// asiento el reparto y el `teamAssignment` describen una mesa que nunca existió. El CLI
-// aceptaba `seats.length === 0` como único rechazo, así que un asiento suelto llegaba
-// hasta el motor y rebobinaba contra un config imposible.
-if (seats.length < 2) invalidos.push(`asientos: se esperaban al menos 2, llegaron ${seats.length}`);
-
-// `process.exit` devuelve `never`, así que salir por acá ESTRECHA los tipos abajo — pero
-// solo para las condiciones escritas EN el `if`. `invalidos.length > 0` es opaco para tsc:
-// no le dice nada sobre `matchId` ni sobre `teamAssignment`. Por eso las tres condiciones
-// que estrechan se repiten: no es defensa duplicada —son inalcanzables con el arreglo
-// vacío—, es lo que permite que el config de abajo se arme sin un solo cast.
-if (invalidos.length > 0 || !matchId || !seed || !isTeamAssignment(teamAssignment)) {
-  logger.error(USAGE, { invalidos });
+function fail(message: string, detail: Record<string, unknown>): never {
+  logger.error(message, detail);
   flushLogs();
   process.exit(1);
 }
+
+if (!matchId) fail(USAGE, { invalidos: ["matchId: falta"] });
 
 // DE DÓNDE SALE el historial lo decide el entorno del proceso, no este archivo: con
 // `MONGO_URI` configurada el container cablea el adaptador de Mongo y esto rebobina una
@@ -93,80 +71,122 @@ const entries: readonly HistoryEntry[] = await rootContainer
   .resolve<HistoryReader>("HistoryReader")
   .of(matchId);
 
-if (entries.length === 0) {
-  logger.error("no hay historial para esa partida", { matchId });
-  flushLogs();
-  process.exit(1);
+if (entries.length === 0) fail("no hay historial para esa partida", { matchId });
+
+async function fromRecord(id: string): Promise<Omit<ReplayInput, "entries">> {
+  const record = await rootContainer.resolve<MatchArchive>("MatchArchive").recordOf(id);
+  const recorded = record ? recordedReplayOf(record) : undefined;
+  if (!recorded) {
+    fail("la partida no tiene cabecera (registro anterior a la v2.1): pasá los argumentos", {
+      matchId: id,
+      uso: USAGE,
+    });
+  }
+  return recorded;
 }
 
-// EL CONFIG SALE DE `replayConfigOf` Y NO SE ARMA A MANO. Escrito a mano decía "igual que en
-// `configOf`" en un comentario, que es la misma regla en dos lugares obligada a coincidir
-// sin que nada lo verifique. Un campo nuevo en `DominoMatchConfig`, o el día que
-// `isDealWindowEnabled` deje de estar siempre encendida, le daban al CLI una partida
-// distinta de la que la sala jugó, en silencio y sin que tsc dijera nada.
-//
-// ⛔ Y ES `replayConfigOf` Y NO `configOf`, QUE ES LA MITAD DE LA TAREA 10. Desde que el catálogo
-// es la autoridad, `configOf` pide el `GameMode` resuelto: usarlo acá obligaría al CLI de soporte
-// a consultar Mongo —o peor, a consultarlo y encontrar el modo YA EDITADO—, y entonces rebobinar
-// una partida vieja la reconstruiría con los puntos y el premio de hoy. Una partida se rebobina
-// con el snapshot que TENÍA. Por eso este archivo no importa nada de `features/game-mode`, y hay
-// un test que lo mide sobre la lista exacta de imports.
-//
-// LOS ASIENTOS SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
-// siendo IDS DE ASIENTO —el vocabulario con el que el historial grabó la partida—, y el
-// resto del snapshot no está grabado en ninguna parte: `match_history` guarda actos y
-// hechos, no la cabecera de la mesa. `currency: "REPLAY"` es
-// etiquetas que gritan de dónde salieron, y los montos van en cero con la tasa nula.
-//
-// ⛔ NADA DE ESTO SIRVE PARA LIQUIDAR. Estos campos completan un `DominoMatchConfig` que el
-// motor necesita entero pero cuyo dinero NO consume: la reconstrucción del árbol no lee
-// moneda, tasa ni montos. Usar este config para calcular una recompensa pagaría en una
-// moneda que no existe, a una tasa que nadie aceptó.
-//
-// EL `playerId` SE NUMERA ACÁ, y es exactamente lo que `configOf` hacía antes: `seat-1`, `seat-2`,
-// … EN ORDEN DE ARGUMENTO. Es el id OPACO con el que el motor y el historial nombran a cada
-// jugador, así que tomarlo del argumento en vez de numerarlo cambiaría de asiento a cualquiera que
-// invoque el CLI con otra etiqueta y rebobinaría la partida con las manos cruzadas.
-const snapshot = {
-  matchId,
-  gameModeId: "replay",
-  seats: seats.map((userId, index) => ({
-    userId,
-    displayName: userId,
-    currency: "REPLAY",
-    playerId: `seat-${index + 1}`,
-  })),
-  seed,
-  pointsToWin,
-  teamAssignment,
-  isDealWindowEnabled: true,
-  rateId: "00000000-0000-4000-8000-000000000000",
-  entryFee: 0,
-  prize: 0,
-};
+function fromArgs(id: string): Omit<ReplayInput, "entries"> {
+  // Se acumulan TODOS los argumentos inválidos y se listan juntos. Con el `if` booleano que
+  // había, cinco argumentos mal daban el mismo USAGE genérico que uno solo, y el operador
+  // —que llega acá con una partida que no puede rebobinar— los descubría de a uno por
+  // corrida. No hay parser de argumentos de por medio a propósito: son cinco posiciones
+  // fijas, y una dependencia para esto es más superficie de la que ahorra.
+  const invalidos: string[] = [];
+  if (!seed) invalidos.push("seed: falta");
+  if (!Number.isInteger(pointsToWin) || pointsToWin <= 0) {
+    invalidos.push(`pointsToWin: se esperaba un entero > 0, llegó "${process.argv[4] ?? ""}"`);
+  }
+  if (!isTeamAssignment(teamAssignment)) {
+    invalidos.push(
+      `teamAssignment: se esperaba SHUFFLED|SEAT_ORDER, llegó "${teamAssignment ?? ""}"`,
+    );
+  }
+  // DOS asientos como mínimo, no uno: el dominó no tiene modo solitario, y con un solo
+  // asiento el reparto y el `teamAssignment` describen una mesa que nunca existió. El CLI
+  // aceptaba `seats.length === 0` como único rechazo, así que un asiento suelto llegaba
+  // hasta el motor y rebobinaba contra un config imposible.
+  if (seats.length < 2) {
+    invalidos.push(`asientos: se esperaban al menos 2, llegaron ${seats.length}`);
+  }
+  // `fail` devuelve `never`, así que salir por acá ESTRECHA los tipos abajo — pero solo para las
+  // condiciones escritas EN el `if`. `invalidos.length > 0` es opaco para tsc: no le dice nada
+  // sobre `seed` ni sobre `teamAssignment`. Por eso las dos condiciones que estrechan se repiten:
+  // no es defensa duplicada —son inalcanzables con el arreglo vacío—, es lo que permite que el
+  // config de abajo se arme sin un solo cast.
+  if (invalidos.length > 0 || !seed || !isTeamAssignment(teamAssignment)) {
+    fail(USAGE, { invalidos });
+  }
 
-logger.info("rebobinando", { matchId, entries: entries.length });
-const state = replay({
-  meta: replayConfigOf(snapshot),
-  // El MISMO `globalConfig` que el container del proceso derivó de `env`. Sin esto el
-  // replay caía a `DEFAULT_GLOBAL_CONFIG` y le estampaba a una partida real plazos que
-  // nunca tuvo —y un `extraTimeRemainingMs` inventado, que es estado observable del árbol
-  // impreso—. Es el mismo riesgo que `writeGolden` ya había cerrado guardando el
-  // `globalConfig` en el fixture; acá estaba abierto.
+  // EL CONFIG SALE DE `replayConfigOf` Y NO SE ARMA A MANO. Escrito a mano decía "igual que en
+  // `configOf`" en un comentario, que es la misma regla en dos lugares obligada a coincidir
+  // sin que nada lo verifique. Un campo nuevo en `DominoMatchConfig`, o el día que
+  // `isDealWindowEnabled` deje de estar siempre encendida, le daban al CLI una partida
+  // distinta de la que la sala jugó, en silencio y sin que tsc dijera nada.
   //
-  // ⚠ ES LA BASE, SIN LAS EDICIONES EN CALIENTE (`features/settings`). Una mesa nacida con un plazo
-  // editado se rebobina con el del entorno: el desenlace sale igual —los vencimientos están grabados
-  // como entradas del SISTEMA, no se recalculan—, pero los `activeDeadline` y el
-  // `extraTimeRemainingMs` del árbol impreso son los de la base. La config con la que nació cada mesa
-  // no se graba en ningún lado, por la misma razón que el `seed` (ver arriba).
-  globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
-  // Sin `startedAt`: el instante de arranque no está grabado en ninguna parte —`begin()` no
-  // emite, así que la primera entrada del historial ya es posterior—, y la persistencia no
-  // lo cambió: graba `match_history` y no una `match_meta` (ver arriba). El replay cae al
-  // `at` de la primera entrada, así que `startedAt` sigue siendo lo único del árbol impreso
-  // que no es el de la partida real.
-  entries,
+  // ⛔ Y ES `replayConfigOf` Y NO `configOf`, QUE ES LA MITAD DE LA TAREA 10. Desde que el catálogo
+  // es la autoridad, `configOf` pide el `GameMode` resuelto: usarlo acá obligaría al CLI de soporte
+  // a consultar Mongo —o peor, a consultarlo y encontrar el modo YA EDITADO—, y entonces rebobinar
+  // una partida vieja la reconstruiría con los puntos y el premio de hoy. Una partida se rebobina
+  // con el snapshot que TENÍA. Por eso este archivo no importa nada de `features/game-mode`, y hay
+  // un test que lo mide sobre la lista exacta de imports.
+  //
+  // LOS ASIENTOS SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
+  // siendo IDS DE ASIENTO —el vocabulario con el que el historial grabó la partida—, y un
+  // documento de la forma vieja no guarda la cabecera de la mesa. `currency: "REPLAY"` es
+  // una etiqueta que grita de dónde salió, y los montos van en cero con la tasa nula.
+  //
+  // ⛔ NADA DE ESTO SIRVE PARA LIQUIDAR. Estos campos completan un `DominoMatchConfig` que el
+  // motor necesita entero pero cuyo dinero NO consume: la reconstrucción del árbol no lee
+  // moneda, tasa ni montos. Usar este config para calcular una recompensa pagaría en una
+  // moneda que no existe, a una tasa que nadie aceptó.
+  //
+  // EL `playerId` SE NUMERA ACÁ, y es exactamente lo que `configOf` hacía antes: `seat-1`, `seat-2`,
+  // … EN ORDEN DE ARGUMENTO. Es el id OPACO con el que el motor y el historial nombran a cada
+  // jugador, así que tomarlo del argumento en vez de numerarlo cambiaría de asiento a cualquiera que
+  // invoque el CLI con otra etiqueta y rebobinaría la partida con las manos cruzadas.
+  const snapshot = {
+    matchId: id,
+    gameModeId: "replay",
+    seats: seats.map((userId, index) => ({
+      userId,
+      displayName: userId,
+      currency: "REPLAY",
+      playerId: `seat-${index + 1}`,
+    })),
+    seed,
+    pointsToWin,
+    teamAssignment,
+    isDealWindowEnabled: true,
+    rateId: "00000000-0000-4000-8000-000000000000",
+    entryFee: 0,
+    prize: 0,
+  };
+  return {
+    meta: replayConfigOf(snapshot),
+    // El MISMO `globalConfig` que el container del proceso derivó de `env`. Sin esto el
+    // replay caía a `DEFAULT_GLOBAL_CONFIG` y le estampaba a una partida real plazos que
+    // nunca tuvo —y un `extraTimeRemainingMs` inventado, que es estado observable del árbol
+    // impreso—.
+    //
+    // ⚠ ES LA BASE, SIN LAS EDICIONES EN CALIENTE (`features/settings`): un documento de la forma
+    // vieja no guarda con qué plazos nació su mesa. El desenlace sale igual —los vencimientos están
+    // grabados como entradas del SISTEMA, no se recalculan—, pero los `activeDeadline` y el
+    // `extraTimeRemainingMs` del árbol impreso son los de la base. Con cabecera, son los de la mesa.
+    globalConfig: rootContainer.resolve<GlobalDominoConfig>("GlobalDominoConfig"),
+    // Sin `startedAt`: un documento de la forma vieja no lo guarda —`begin()` no emite, así que la
+    // primera entrada del historial ya es posterior—. El replay cae al `at` de la primera entrada,
+    // así que `startedAt` sigue siendo lo único del árbol impreso que no es el de la partida real.
+    // Con cabecera, sale de `matchStartedAt`.
+  };
+}
+
+const setup = byArgs ? fromArgs(matchId) : await fromRecord(matchId);
+logger.info("rebobinando", {
+  matchId,
+  entries: entries.length,
+  desde: byArgs ? "argumentos" : "registro",
 });
+const state = replay({ ...setup, entries });
 logger.info("estado final reconstruido", { matchId, state: state.toJSON() });
 
 // CERRAR LA CONEXIÓN ES LO QUE HACE QUE EL CLI TERMINE. El cliente de Mongo mantiene

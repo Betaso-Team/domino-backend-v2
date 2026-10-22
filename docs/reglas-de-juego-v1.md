@@ -578,7 +578,7 @@ combinación ilegal que representar.
 | `type` | `kind` | `source` | `payload` | Existe porque |
 |---|---|---|---|---|
 | `PLAY_TILE` | COMMAND | PLAYER | `{ playerId, left, right, side }` | el acto. El `side` lo manda el cliente; el número de engarce **no** —lo deriva el servidor— |
-| `DRAW_TILE` | COMMAND | PLAYER | `{ playerId }` | qué ficha salió es reconstruible del `seed` (que vive en `match_meta`), así que no va en el payload |
+| `DRAW_TILE` | COMMAND | PLAYER | `{ playerId }` | qué ficha salió es reconstruible del `seed` (que vive en la cabecera del registro, `matchConfig.seed`), así que no va en el payload |
 | `PASS` | COMMAND | PLAYER | `{ playerId }` | el acto |
 | `REVEAL_TILES` | COMMAND | PLAYER | `{ playerId }` | levantó sus fichas en la ventana de reparto (§3.1). Es la prueba de presencia, y para un reclamo de "me sacaron sin avisar" es la primera línea que se mira |
 | `ABANDON` | COMMAND | PLAYER | `{ playerId }` | se fue por su voluntad |
@@ -587,8 +587,9 @@ combinación ilegal que representar.
 | `ROUND_RESOLVED` | EVENT | SYSTEM | `{ roundNumber, winnerId, winnerTeamId, points, reason }` | consecuencia computada: no se reconstruye del comando |
 | `MATCH_RESOLVED` | EVENT | SYSTEM | `{ winnerTeamId, reason }` | hito terminal. Se emite al **entrar** a la pausa de cierre, no al vencerla — el pago cuelga de acá |
 
-**Fuera del historial**, a propósito: las jugadas **rechazadas** (rastro antifraude → va al log), el
-`seed`, y cualquier volcado del estado.
+**Fuera de la timeline**, a propósito: las jugadas **rechazadas** (rastro antifraude → va al log) y
+cualquier volcado del estado. El `seed` no es una entrada: desde la v2.1 va en la cabecera del
+documento de la partida (`matchConfig.seed`), que es lo que el replay lee.
 
 **Agregar un caso es agregar una fila a esta tabla**, no un flag a una fila existente. Eso es todo lo
 que hay que recordar del §9.1.

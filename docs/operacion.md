@@ -94,6 +94,28 @@ sequenceDiagram
 Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos durante el deploy. Un
 `kill -9` no ejecuta este flujo: las claves huérfanas desaparecen por TTL.
 
+## Registro de partidas
+
+`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y tres
+índices que el proceso crea al primer uso: `matchId_1` (único), `roomId_1` y `createdAt_-1__id_-1`
+(el orden del listado del panel). Si el único no se puede crear —dos documentos viejos de la misma
+partida— el proceso graba igual y lo dice con un `error`:
+`«historial: no se pudieron crear los índices; se graba igual»`. Para encontrarlos y dejar uno:
+
+```js
+db.match_history.aggregate([
+  { $group: { _id: "$matchId", n: { $sum: 1 }, ids: { $push: "$_id" } } },
+  { $match: { n: { $gt: 1 } } },
+])
+```
+
+El índice se vuelve a pedir en el próximo arranque.
+
+Para rebobinar una partida alcanza con su id: `npm run replay -- <matchId>` lee la cabecera del
+documento (seed, parejas, plazos, marcador inicial). Los documentos de antes de la v2.1 no la tienen y
+siguen pidiendo los argumentos: `npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER>
+<asiento...>`.
+
 ## Resultados de partida
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange

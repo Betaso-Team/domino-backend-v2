@@ -4,6 +4,7 @@ import { routesOf } from "@/tests/routes";
 import express from "express";
 import { describe, expect, it, vi } from "vitest";
 import type { HistoryEntry } from "../../network/history";
+import { type HistoryStore, MongoHistory } from "../../network/transports/mongo-history";
 import { historyRoutes } from "./history";
 
 // El logger entra por parámetro, así que el doble se arma acá y no hay container que
@@ -102,6 +103,58 @@ describe("historyRoutes", () => {
 
       expect(body.entries.map(({ seq }) => seq)).toEqual([1, 2, 3]);
       expect(entries.map(({ seq }) => seq)).toEqual([3, 1, 2]);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+// UN DOCUMENTO DE ANTES DE LA v2.1 —`entries` en vez de `timeline`, sin versión— sigue contestando en
+// el endpoint de soporte, leído por el adaptador de Mongo de verdad sobre un doble de la conexión.
+describe("historyRoutes: los documentos viejos", () => {
+  it("contesta la `entries` de la forma vieja, ordenada por seq", async () => {
+    const old = {
+      matchId: "m-vieja",
+      entries: [2, 1].map(
+        (seq): HistoryEntry => ({
+          matchId: "m-vieja",
+          seq,
+          at: 1_700_000_000_000 + seq,
+          roundNumber: 1,
+          source: "PLAYER",
+          kind: "COMMAND",
+          type: "PASS",
+          payload: { playerId: "seat-1" },
+        }),
+      ),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const store = {
+      collection: async () => ({ findOne: async () => old, createIndexes: async () => [] }),
+    } as unknown as HistoryStore;
+    const app = express().use(
+      historyRoutes({
+        logger: fakeLogger(),
+        history: new MongoHistory(store, fakeLogger()),
+        adminApiKey: "k".repeat(16),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+
+    try {
+      const { port } = server.address() as AddressInfo;
+      const response = await fetch(`http://127.0.0.1:${port}/internal/matches/m-vieja/history`, {
+        headers: { "x-internal-api-key": "k".repeat(16) },
+      });
+      const body = (await response.json()) as { entries: readonly HistoryEntry[] };
+
+      expect(response.status).toBe(200);
+      expect(body.entries.map(({ seq, at }) => [seq, at])).toEqual([
+        [1, 1_700_000_000_001],
+        [2, 1_700_000_000_002],
+      ]);
     } finally {
       server.close();
     }

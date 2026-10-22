@@ -31,7 +31,7 @@ import {
   globalConfigWith,
 } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
-import type { HistoryPort, HistoryReader } from "@/features/match/network/history";
+import type { HistoryPort, HistoryReader, MatchArchive } from "@/features/match/network/history";
 import {
   MATCH_RESULT_EXCHANGE,
   type MatchResultKey,
@@ -167,6 +167,9 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
 rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
 rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
+// Y UN TERCERO, el del DOCUMENTO entero: el listado y el detalle del panel, y `/game-data` del
+// backend principal. Los mismos argumentos que los dos de arriba.
+rootContainer.register<MatchArchive>("MatchArchive", { useValue: history });
 rootContainer.register("PlayerLog", { useValue: history });
 
 // EL PUBLICADOR DEL BROKER, que es la ÚNICA instancia del proceso: `AmqpPublisher` memoiza una

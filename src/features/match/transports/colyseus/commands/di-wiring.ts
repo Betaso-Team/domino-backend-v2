@@ -18,6 +18,7 @@ import {
   logSink,
 } from "../../../network";
 import type { NetworkMatchEvent } from "../../../network/events";
+import { matchSetupOf } from "../../../network/match-record";
 import { MessageRouter } from "../messages";
 import { CommandCatalog } from "./catalog";
 import { CommandHandler } from "./command-handler";
@@ -160,12 +161,25 @@ function registerVerb<N extends CommandName>(
   );
 }
 
-export function buildPieces(child: DependencyContainer, emit: MatchEventSink): MatchPieces {
+/**
+ * @param table lo que la SALA sabe de la mesa y el snapshot no —su `roomId` y el nombre del modo como
+ * el catálogo lo tenía al sentarla—, para la cabecera del registro (`matchSetupOf`).
+ */
+export function buildPieces(
+  child: DependencyContainer,
+  emit: MatchEventSink,
+  table: { readonly roomId: string; readonly gameModeName: string },
+): MatchPieces {
   const config = child.resolve<DominoMatchConfig>("Config");
   const match = child.resolve<MatchState>("MatchState");
   const clock = child.resolve<Clock>("Clock");
   const port = child.resolve<HistoryPort>("HistoryPort");
-  const history = new MatchHistory(config.matchId, match, clock, port);
+  // EL ARMADO SE TOMA ACÁ, con el árbol recién sembrado y la config global que ESTA mesa fotografió:
+  // es lo que la cabecera del registro tiene que decir aunque el catálogo o los plazos se editen
+  // mientras se juega.
+  const globalConfig = child.resolve<GlobalDominoConfig>("GlobalDominoConfig");
+  const setup = matchSetupOf(config, globalConfig, match, table);
+  const history = new MatchHistory(config.matchId, match, clock, port, setup);
 
   // `emit` es el canal para un listener que PRODUZCA eventos, y hoy no hay ninguno: lo que una mesa
   // cuenta afuera al cerrar es el resultado al orquestador, que es un sink de la sala.
