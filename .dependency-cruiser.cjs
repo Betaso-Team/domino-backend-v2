@@ -164,6 +164,13 @@ module.exports = {
     },
   ],
   options: {
+    // EL FIXTURE DE `env-single-reader.test.ts` NO ES CÓDIGO: ese test lo escribe y lo borra
+    // dentro de `src/` mientras otros archivos de test corren EN PARALELO. Si `depcruise` lo
+    // lista justo antes del borrado, se cae con ENOENT y el gate "el codebase las cumple" sale
+    // rojo por una carrera, no por una regla. Las features desechables de `architecture.test.ts`
+    // SÍ se cruzan —violar las reglas es su razón de ser— y no compiten: corren en serie dentro
+    // de su propio archivo.
+    exclude: { path: "^src/features/scratch-env-guardrail/" },
     doNotFollow: { path: "node_modules" },
     tsConfig: { fileName: "tsconfig.json" },
     tsPreCompilationDeps: true,
