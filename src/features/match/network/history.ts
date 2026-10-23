@@ -305,6 +305,11 @@ export interface MatchListQuery {
   readonly roomId?: string;
   /** El `_id` como texto: veinticuatro hex en minúscula. */
   readonly id?: string;
+  /**
+   * Un jugador: el `userId` de CUALQUIERA de los asientos (`seats[].userId`), exacto. Los documentos de
+   * la forma vieja no tienen asientos y no coinciden nunca.
+   */
+  readonly userId?: string;
 }
 
 /**

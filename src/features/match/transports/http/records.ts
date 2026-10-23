@@ -81,6 +81,7 @@ const LIST_QUERY = z
     matchId: id.optional(),
     roomId: id.optional(),
     id: objectId.optional(),
+    userId: id.optional(),
   })
   .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
     message: "`from` no puede ser posterior a `to`",
@@ -133,7 +134,7 @@ export function recordRoutes({
     MATCHES_ROUTE,
     admin,
     validated({ query: LIST_QUERY }, async ({ query }, response) => {
-      const { pageSize, after, from, to, matchId, roomId, id } = query;
+      const { pageSize, after, from, to, matchId, roomId, id, userId } = query;
       try {
         const page = await archive.list({
           pageSize,
@@ -143,6 +144,7 @@ export function recordRoutes({
           ...(matchId === undefined ? {} : { matchId }),
           ...(roomId === undefined ? {} : { roomId }),
           ...(id === undefined ? {} : { id }),
+          ...(userId === undefined ? {} : { userId }),
         });
         sendData(response, {
           items: page.items,

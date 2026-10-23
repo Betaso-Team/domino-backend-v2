@@ -84,8 +84,9 @@ export type StoredEntry = Omit<HistoryEntry, "at"> & { readonly at: Date };
 // escritura. `createdAt` es además el orden del listado del panel.
 export type MatchHistoryDocument = {
   matchId: string;
-  // Opcional: la forma vieja no la guardaba. Se declara por el filtro del listado.
+  // Opcionales: la forma vieja no los guardaba. Se declaran por los filtros del listado.
   roomId?: string;
+  seats?: { userId: string }[];
   // Opcional: los documentos de antes de la v2.1 no la llevan.
   version?: number;
   createdAt: Date;
@@ -96,7 +97,7 @@ export type MatchHistoryDocument = {
   entries?: HistoryEntry[];
 };
 
-// LOS TRES ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS CUATRO ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -109,6 +110,10 @@ export type MatchHistoryDocument = {
 //     orden se hacía después.
 //   · `createdAt` DESCENDENTE con el `_id` de desempate: el orden exacto del listado, así que la página
 //     sin filtros, la de un rango de fechas y la de un cursor salen del índice ya ordenadas.
+//   · `seats.userId` con el orden del listado detrás: el filtro por jugador. Es MULTIKEY —una clave por
+//     asiento—, y aun así la página sale ordenada y sin SORT: el arreglo es sólo el prefijo, que el
+//     filtro fija por igualdad, y `createdAt`/`_id` no son arreglos (medido). Un usuario en dos
+//     asientos genera la misma clave dos veces, que Mongo guarda una sola: la partida sale una vez.
 //
 // El filtro por `_id` no necesita uno: el de la colección ya está.
 //
@@ -120,6 +125,10 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
   [
     { key: { roomId: 1, createdAt: -1, _id: -1 }, name: "roomId_1_createdAt_-1__id_-1" },
     { key: { createdAt: -1, _id: -1 }, name: "createdAt_-1__id_-1" },
+    {
+      key: { "seats.userId": 1, createdAt: -1, _id: -1 },
+      name: "seats.userId_1_createdAt_-1__id_-1",
+    },
   ],
 ];
 
@@ -145,6 +154,8 @@ function filterOf(query: MatchListQuery): ListFilter {
     ...(query.matchId === undefined ? {} : { matchId: query.matchId }),
     ...(query.roomId === undefined ? {} : { roomId: query.roomId }),
     ...(query.id === undefined ? {} : { _id: new ObjectId(query.id) }),
+    // Cualquier asiento: sobre un arreglo, la igualdad de Mongo pregunta por algún elemento.
+    ...(query.userId === undefined ? {} : { "seats.userId": query.userId }),
   };
 }
 
