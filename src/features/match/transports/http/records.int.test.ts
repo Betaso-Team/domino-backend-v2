@@ -180,6 +180,7 @@ describe("recordRoutes: lo que contestan", () => {
       data: { _id: string; createdAt: string };
     };
     const query = new URLSearchParams({
+      userId: "u2",
       roomId: "room-m-2",
       matchId: "m-2",
       // EN MAYÚSCULAS: el `_id` se compara en minúscula, como lo escribe Mongo.
@@ -216,7 +217,7 @@ describe("recordRoutes: lo que contestan", () => {
 
     const after = cursorOf({ t: Date.parse("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) });
     await get(
-      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}`,
+      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana`,
     );
     expect(list).toHaveBeenLastCalledWith({
       pageSize: 5,
@@ -224,6 +225,7 @@ describe("recordRoutes: lo que contestan", () => {
       from: new Date("2026-10-01T04:00:00.000Z"),
       to: new Date("2026-10-02T00:00:00.000Z"),
       id: "b".repeat(24),
+      userId: "u-ana",
     });
   });
 
@@ -253,6 +255,10 @@ describe("recordRoutes: lo que contestan", () => {
     `matchId=${"x".repeat(129)}`,
     "roomId=%07",
     "matchId=a&matchId=b",
+    "userId=",
+    `userId=${"u".repeat(129)}`,
+    "userId=%00",
+    "userId=ana&userId=beto",
   ])("un pedido imposible es 400 MALFORMED (%s)", async (query) => {
     const base = await serve(untouched);
 

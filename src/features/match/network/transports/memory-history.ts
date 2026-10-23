@@ -216,7 +216,18 @@ function matches(document: Stored, query: MatchListQuery): boolean {
   if (query.matchId !== undefined && document.matchId !== query.matchId) return false;
   if (query.roomId !== undefined && document.roomId !== query.roomId) return false;
   if (query.id !== undefined && document._id !== query.id) return false;
+  if (query.userId !== undefined && !seatedIn(document, query.userId)) return false;
   return true;
+}
+
+// `{ "seats.userId": x }` de Mongo: alguno de los asientos, exacto. Sin `seats` —la forma vieja— no hay
+// nadie sentado. Un usuario en dos asientos sigue siendo UN documento: esto es un `some`.
+function seatedIn(document: Stored, userId: string): boolean {
+  const seats = document.seats;
+  return (
+    Array.isArray(seats) &&
+    seats.some((seat) => (seat as { userId?: unknown } | null)?.userId === userId)
+  );
 }
 
 // ESTRICTAMENTE DESPUÉS del cursor, en el orden del listado.

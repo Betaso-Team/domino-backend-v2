@@ -46,7 +46,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
 
   describeHistoryContract("MongoHistory", (options) => fresh(undefined, options));
 
-  it("crea sus tres índices, con el de `matchId` único", async () => {
+  it("crea sus cuatro índices, con el de `matchId` único", async () => {
     const history = await fresh();
     history.record([entry(1)]);
     await history.drain();
@@ -57,6 +57,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       "createdAt_-1__id_-1",
       "matchId_1",
       "roomId_1_createdAt_-1__id_-1",
+      "seats.userId_1_createdAt_-1__id_-1",
     ]);
     expect(indexes.find(({ name }) => name === "matchId_1")?.unique).toBe(true);
     // EL DOCUMENTO NO PUEDE NACER DOS VECES, ni siquiera por fuera de la cola de este proceso.
@@ -143,6 +144,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       "_id_",
       "createdAt_-1__id_-1",
       "roomId_1_createdAt_-1__id_-1",
+      "seats.userId_1_createdAt_-1__id_-1",
     ]);
     await (await collection()).drop();
   });
@@ -191,7 +193,10 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       // Los índices se piden con el primer uso, como en producción.
       await history.list({ pageSize: 1 });
       // TRESCIENTAS PARTIDAS en quince salas, de a tres por segundo —empates en el mismo milisegundo—,
-      // con su timeline; más veinte de la forma vieja, sin sala.
+      // con su timeline y cuatro asientos: tres jugadores de diez, y en el cuarto `jugador-x` (que está
+      // en cuatro de cada cinco) o, cada cinco, el del primero repetido —el mismo usuario en dos
+      // asientos, dos claves del índice multikey para un documento—. Más veinte de la forma vieja, sin
+      // sala ni asientos.
       await (await collection()).insertMany([
         ...Array.from({ length: 300 }, (_, index) => ({
           matchId: `p-${index}`,
@@ -200,6 +205,12 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
           status: "finished",
           createdAt: new Date(T + Math.floor(index / 3) * 1_000),
           updatedAt: new Date(T + Math.floor(index / 3) * 1_000),
+          seats: [
+            `jugador-${index % 10}`,
+            `jugador-${(index + 3) % 10}`,
+            `jugador-${(index + 6) % 10}`,
+            index % 5 === 0 ? `jugador-${index % 10}` : "jugador-x",
+          ].map((userId, seat) => ({ id: `seat-${seat + 1}`, seat, userId })),
           timeline: [entry(1, { matchId: `p-${index}` })],
         })),
         ...Array.from({ length: 20 }, (_, index) => ({
@@ -223,6 +234,13 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["id", () => ({ pageSize: PAGE, id: String(some._id) })],
       ["fechas + roomId", () => ({ pageSize: PAGE, from, to, roomId: some.roomId })],
       ["fechas + matchId", () => ({ pageSize: PAGE, from, to, matchId: some.matchId })],
+      ["userId (dos asientos en un tercio)", () => ({ pageSize: PAGE, userId: "jugador-5" })],
+      ["userId del cuarto asiento", () => ({ pageSize: PAGE, userId: "jugador-x" })],
+      ["fechas + userId", () => ({ pageSize: PAGE, from, to, userId: "jugador-5" })],
+      [
+        "fechas + roomId + userId",
+        () => ({ pageSize: PAGE, from, roomId: "sala-5", userId: "jugador-5" }),
+      ],
       [
         "matchId + roomId + id",
         () => ({
@@ -243,6 +261,19 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         plan.stages.some((stage) => ["IXSCAN", "IDHACK", "EXPRESS_IXSCAN"].includes(stage)),
       ).toBe(true);
       expect(plan.docsExamined).toBeLessThanOrEqual(PAGE + 1);
+      // UN PLAN BARATO DE UN FILTRO IGNORADO también sería barato: la página tiene que ser la del
+      // jugador, cada partida una vez.
+      const { userId } = query();
+      if (userId !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        expect(new Set(items.map((item) => item._id)).size).toBe(items.length);
+        const seated = await (await collection()).countDocuments({
+          matchId: { $in: items.map((item) => item.matchId) },
+          "seats.userId": userId,
+        });
+        expect(seated).toBe(items.length);
+      }
     });
 
     // CON CURSOR, Y HONDO: la página sexta lee lo mismo que la segunda. Un `skip` leería las cien
@@ -253,6 +284,8 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["cursor + fechas", { from, to }, 2, PAGE],
       ["cursor + roomId", { roomId: "sala-3" }, 1, 4],
       ["cursor + fechas + roomId", { from: new Date(T), to, roomId: "sala-3" }, 1, 4],
+      ["cursor + userId", { userId: "jugador-5" }, 2, PAGE],
+      ["cursor + fechas + userId", { from: new Date(T), to, userId: "jugador-x" }, 2, PAGE],
     ] as const)(
       "%s: sin COLLSCAN, sin SORT y sin leer de más",
       async (_name, filters, depth, pageSize) => {
@@ -267,8 +300,58 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         expect(plan.stages).not.toContain("SORT");
         expect(plan.returned).toBe(pageSize + 1);
         expect(plan.docsExamined).toBeLessThanOrEqual(pageSize + 1);
+        if ("userId" in filters) {
+          const { items } = await history.list({
+            pageSize,
+            ...filters,
+            ...(after ? { after } : {}),
+          });
+          const seated = await (await collection()).countDocuments({
+            matchId: { $in: items.map((item) => item.matchId) },
+            "seats.userId": filters.userId,
+          });
+          expect(seated).toBe(items.length);
+        }
       },
     );
+
+    // EL MISMO USUARIO EN DOS ASIENTOS, contra la base: el índice multikey tiene una clave por asiento, y
+    // la partida tiene que salir una vez en el recorrido y contar una vez en el total.
+    it("un jugador en dos asientos sale una vez: el recorrido entero y el total", async () => {
+      const twice = await (await collection()).countDocuments({
+        $expr: {
+          $eq: [
+            {
+              $size: {
+                $filter: {
+                  input: { $ifNull: ["$seats", []] },
+                  cond: { $eq: ["$$this.userId", "jugador-5"] },
+                },
+              },
+            },
+            2,
+          ],
+        },
+      });
+      expect(twice).toBe(30);
+      const seated = await (await collection()).countDocuments({ "seats.userId": "jugador-5" });
+
+      const seen: string[] = [];
+      let after: MatchCursor | undefined;
+      do {
+        const page = await history.list({
+          pageSize: 7,
+          userId: "jugador-5",
+          ...(after ? { after } : {}),
+        });
+        seen.push(...page.items.map((item) => item._id));
+        after = page.next;
+      } while (after);
+
+      expect(seen).toHaveLength(seated);
+      expect(new Set(seen).size).toBe(seated);
+      expect((await history.list({ pageSize: 1, userId: "jugador-5" })).total).toBe(seated);
+    });
 
     // EL TOTAL FILTRADO, la otra consulta del listado: `countDocuments` es un `$match` + `$limit` +
     // `$group` (así lo arma el driver), y se mide ese pipeline con los mismos filtros y el mismo tope.

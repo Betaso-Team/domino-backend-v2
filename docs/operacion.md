@@ -96,7 +96,7 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 
 ## Registro de partidas
 
-`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y tres
+`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y cuatro
 índices que el proceso crea al primer uso:
 
 | Índice | Sirve a |
@@ -104,6 +104,7 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 | `matchId_1` (único) | que el documento no nazca dos veces; el filtro `matchId` del listado |
 | `roomId_1_createdAt_-1__id_-1` | `/game-data/:roomId` (por el prefijo); el filtro `roomId` del listado, con o sin fechas, ya ordenado |
 | `createdAt_-1__id_-1` | el orden del listado: sin filtros, por fechas y con cursor |
+| `seats.userId_1_createdAt_-1__id_-1` | el filtro `userId` del listado, con o sin fechas y cursor, ya ordenado. Es multikey (una clave por asiento) |
 
 El filtro `id` usa el `_id_` de la colección. Cada combinación de filtros del listado sale de uno de
 estos sin recorrer la colección ni ordenar en memoria, y lee como mucho `pageSize + 1` documentos en
@@ -117,12 +118,20 @@ hace nada):
 ```js
 db.match_history.createIndex({ roomId: 1, createdAt: -1, _id: -1 }, { name: "roomId_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ createdAt: -1, _id: -1 }, { name: "createdAt_-1__id_-1" })
+db.match_history.createIndex({ "seats.userId": 1, createdAt: -1, _id: -1 }, { name: "seats.userId_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ matchId: 1 }, { name: "matchId_1", unique: true })
 ```
 
 El `roomId_1` que creaba la versión anterior quedó cubierto por el compuesto (su prefijo): no estorba,
 pero ocupa memoria y frena cada escritura. Una vez creado el compuesto, se puede borrar:
 `db.match_history.dropIndex("roomId_1")`.
+
+**El de `seats.userId` es el más grande de los cuatro**: lleva una clave por asiento (dos o cuatro por
+partida; un usuario en dos asientos de la misma partida es una sola), así que sobre la colección de
+producción se crea **a mano y antes del despliegue** que lo trae, con la línea de arriba. Mientras no
+exista, el filtro por jugador funciona pero recorre el índice de fechas descartando partidas (o, para un
+jugador con pocas, las ordena en memoria), y una búsqueda ancha puede terminar en el 503 del plazo. Tiene
+que ser el compuesto: con `{ "seats.userId": 1 }` solo, el plan medido ordena en memoria (`SORT`).
 
 **Para ver el plan de un listado**, la consulta es la que arma `pageQueryOf` (`mongo-history.ts`): los
 filtros, `sort: { createdAt: -1, _id: -1 }` (salvo con `matchId` o `id`, que son únicos) y
@@ -138,8 +147,10 @@ db.match_history.find(
 En `queryPlanner.winningPlan` tiene que haber un `IXSCAN` (o `IDHACK` para `id`) y **ni `COLLSCAN` ni
 `SORT`**; en `executionStats`, `totalDocsExamined` no pasa de `limit`. Una página con cursor tiene el
 `$or` en la raíz y su plan es `SUBPLAN` → `SORT_MERGE` sobre dos `IXSCAN` del mismo índice: el
-`SORT_MERGE` une dos ramas ya ordenadas y no bloquea. Si aparece un `COLLSCAN` o un `SORT`, falta un
-índice (`db.match_history.getIndexes()`).
+`SORT_MERGE` une dos ramas ya ordenadas y no bloquea. El filtro por jugador es
+`{ "seats.userId": "<userId>" }` y su plan es un `IXSCAN` de `seats.userId_1_createdAt_-1__id_-1`, también
+sin `SORT` aunque el índice sea multikey. Si aparece un `COLLSCAN` o un `SORT`, falta un índice
+(`db.match_history.getIndexes()`).
 
 Cada consulta del listado lleva `maxTimeMS: 5000`. Una que lo excede contesta 503 al panel y deja un
 `warn` `«listado de partidas: la base excedió el plazo»`: con los índices en su lugar no debería pasar,

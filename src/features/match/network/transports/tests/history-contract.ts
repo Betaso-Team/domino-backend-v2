@@ -133,7 +133,20 @@ interface Row {
   readonly at: number;
   /** `null`: un documento sin sala, como los de antes de la v2.1 (nace por la timeline, sin abrir). */
   readonly roomId?: string | null;
+  /** El `userId` de cada asiento, en orden; sin esto, los de `SETUP`. */
+  readonly users?: readonly string[];
 }
+
+/** Los asientos de una mesa con estos usuarios, en orden: dos o cuatro. */
+const seatsOf = (users: readonly string[]): MatchSetup["seats"] =>
+  users.map((userId, seat) => ({
+    id: `seat-${seat + 1}`,
+    teamId: seat % 2 === 0 ? "A" : "B",
+    seat,
+    userId,
+    displayName: userId,
+    currency: "VES",
+  }));
 
 async function seed(
   history: HistoryHarness,
@@ -147,6 +160,7 @@ async function seed(
       history.open(row.matchId, {
         ...SETUP,
         roomId: row.roomId ?? `room-${row.matchId}`,
+        ...(row.users ? { seats: seatsOf(row.users) } : {}),
         matchStartedAt: 1_000,
       });
     await history.drain();
@@ -544,6 +558,88 @@ export function describeHistoryContract(
       const exact = await history.list({ pageSize: 10, roomId: "sala-tres" });
       expect({ total: exact.total, totalExact: exact.totalExact }).toEqual({
         total: 3,
+        totalExact: true,
+      });
+    });
+
+    // EL JUGADOR, por la identidad de cualquiera de sus ASIENTOS (`seats[].userId`): en la mesa de cuatro
+    // el que busca puede estar en el cuarto. Un documento de la forma vieja no tiene asientos y no
+    // coincide nunca; el que nace en el cierre —la mesa que no arrancó— sí los tiene.
+    it("por jugador: cualquier asiento, con fechas, y la forma vieja nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"] },
+        { matchId: "m-2", at: at(20), users: ["carla", "dani", "eva", "ana"] },
+        { matchId: "m-3", at: at(30), users: ["beto", "carla"] },
+        { matchId: "m-vieja", at: at(40), roomId: null },
+        { matchId: "m-5", at: at(50), users: ["beto", "ana"] },
+      ]);
+      clock.set(at(60));
+      const { matchStartedAt, matchDurationInMs, ...neverStarted } = CLOSING;
+      history.close("m-6", {
+        ...neverStarted,
+        seats: seatsOf(["fede", "ana"]),
+        status: "aborted",
+        matchEndReason: "NEVER_STARTED",
+      });
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 2, ...query }));
+
+      expect(await ids({ userId: "ana" })).toEqual(["m-6", "m-5", "m-2", "m-1"]);
+      expect(await ids({ userId: "eva" })).toEqual(["m-2"]);
+      expect(await ids({ userId: "beto", from: new Date(at(20)), to: new Date(at(50)) })).toEqual([
+        "m-3",
+      ]);
+      expect(await ids({ userId: "ana", roomId: "room-m-2" })).toEqual(["m-2"]);
+      expect(await ids({ userId: "beto", matchId: "m-2" })).toEqual([]);
+      // EXACTO: ni prefijo, ni mayúsculas, ni el `id` del asiento.
+      for (const userId of ["an", "ANA", "seat-1", "u1"]) expect(await ids({ userId })).toEqual([]);
+      // La forma vieja tiene `entries` con un `playerId`, no asientos: no coincide con nada.
+      expect(await ids({ userId: "seat-1" })).toEqual([]);
+
+      const page = await history.list({ pageSize: 10, userId: "ana" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
+        total: 4,
+        totalExact: true,
+      });
+    });
+
+    // EL MISMO USUARIO EN DOS ASIENTOS (bots, pruebas): un índice multikey tiene una clave por elemento,
+    // y una partida no puede salir dos veces ni contar doble. Con el cursor y empates en el mismo
+    // milisegundo, el recorrido entero no repite ni saltea.
+    it("por jugador con cursor: sin repetir aunque esté en dos asientos, y con empates", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now, countCap: 4 });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(1), users: ["bot", "bot"] },
+        { matchId: "m-2", at: at(2), users: ["ana", "bot", "bot", "beto"] },
+        { matchId: "m-3", at: at(2), users: ["bot", "ana"] },
+        { matchId: "m-4", at: at(2), users: ["beto", "carla"] },
+        { matchId: "m-5", at: at(2), users: ["bot", "bot", "bot", "bot"] },
+        { matchId: "m-6", at: at(3), users: ["carla", "bot"] },
+        { matchId: "m-7", at: at(4), users: ["bot", "dani"] },
+      ]);
+      const expected = await expectedOrder(history, ["m-1", "m-2", "m-3", "m-5", "m-6", "m-7"]);
+
+      for (const pageSize of [1, 2, 4, 6]) {
+        const pages = await walk(history, { pageSize, userId: "bot" });
+        expect(idsOf(pages), `pageSize ${pageSize}`).toEqual(expected);
+        expect(pages.at(-1)?.next).toBeUndefined();
+      }
+      const fromTwo = await walk(history, { pageSize: 1, userId: "bot", from: new Date(at(2)) });
+      expect(idsOf(fromTwo)).toEqual(expected.slice(0, 5));
+      // SEIS PARTIDAS, no once claves: sobre el tope de cuatro, cortado y no exacto.
+      const capped = await history.list({ pageSize: 10, userId: "bot" });
+      expect(capped.items).toHaveLength(6);
+      expect({ total: capped.total, totalExact: capped.totalExact }).toEqual({
+        total: 4,
+        totalExact: false,
+      });
+      const exact = await history.list({ pageSize: 10, userId: "bot", from: new Date(at(3)) });
+      expect({ total: exact.total, totalExact: exact.totalExact }).toEqual({
+        total: 2,
         totalExact: true,
       });
     });

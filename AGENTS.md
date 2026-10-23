@@ -33,7 +33,8 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
   (`GET /internal/matches`, `GET /internal/matches/:matchId`), el backend principal
   (`GET /game-data/:roomId`), el endpoint de soporte y el CLI de replay, que ya no pide argumentos.
   Ver «Incremento completo — el registro v2.1 de cada partida».
-- **El listado del panel filtra y pagina por cursor** (`after`, `from`/`to`, `matchId`, `roomId`, `id`)
+- **El listado del panel filtra y pagina por cursor** (`after`, `from`/`to`, `matchId`, `roomId`, `id`,
+  `userId` —cualquier asiento, `seats[].userId`—)
   con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
   ordena en memoria, y una página honda cuesta lo mismo que la primera. Ver «Incremento completo — el
   listado del panel con filtros y cursor».
@@ -2439,6 +2440,19 @@ en cada pedido. El contrato nuevo lo fijó el panel de Tablea, que se construyó
 - **`MemoryHistory` genera `ObjectId` de verdad** para el `_id`: el desempate del listado tiene que
   ordenar igual que en Mongo, y veinticuatro hex al azar no lo hacen. Los dos adaptadores aceptan
   `{ now, countCap }` para la suite (empates en el mismo milisegundo, el tope chico).
+
+## Incremento completo — el filtro por jugador del listado (rama `feat/match-list-user-filter`)
+
+- **`userId`** en `GET /internal/matches`: igualdad contra `seats[].userId`, el `userId` de cualquier
+  asiento del registro v2.1 (dos o cuatro). La misma regla de texto que `matchId`/`roomId`; se combina con
+  AND con todo, cursor incluido, y cuenta con el mismo tope. La forma vieja no tiene asientos y no
+  coincide nunca. Se mira `seats` y no `players`: `seats` lo tiene todo documento v2.1 desde que abre (y
+  el que nace en el cierre también); `players` sólo el cerrado.
+- **Índice `seats.userId_1_createdAt_-1__id_-1`**, multikey, en el pedido de los del listado. Medido con
+  `explain`: el arreglo es sólo el prefijo y lo fija la igualdad, así que la página sale ordenada, sin
+  `SORT`, y lee `pageSize + 1`; el conteo es cubierto (cero documentos leídos). Con `{ "seats.userId": 1 }`
+  solo, el plan ordenaba en memoria. Un usuario en dos asientos da una sola clave: la partida sale y cuenta
+  una vez (contrato de los dos adaptadores y suite contra Mongo).
 
 ## Cómo se ejecuta una tarea
 

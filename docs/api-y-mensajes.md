@@ -71,7 +71,7 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 | Método y ruta | Uso |
 |---|---|
 | `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte (lee `timeline` y, en los documentos viejos, `entries`) |
-| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
+| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
 | `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `POST /game-modes` | Crea un modo |
@@ -108,6 +108,7 @@ combinan con AND:
 | `matchId` | Igual a | vacío, más de 128 caracteres, caracteres de control |
 | `roomId` | Igual a | ídem |
 | `id` | El `_id` del documento: 24 hexadecimales | otra cosa |
+| `userId` | Un jugador: igual al `userId` de **alguno** de los asientos (`seats[].userId`), en mesas de dos o de cuatro. Una partida en la que el mismo usuario ocupa dos asientos sale una vez. Los documentos de antes de la v2.1 no tienen asientos y no coinciden nunca | ídem `matchId`, o repetido |
 
 Un parámetro que no está en la tabla se ignora (`page` incluido: ya no existe). `from` igual a `to` es
 un rango vacío, no un error.
