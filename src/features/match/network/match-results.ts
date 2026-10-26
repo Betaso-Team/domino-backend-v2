@@ -169,35 +169,63 @@ const RETRY_MAX_MS = 60_000;
  * el outbox no: el sink arranca el trabajo y no lo espera, como el cobro del aumento.
  */
 export class MatchResultRecorder {
+  // Lo que todavía no llegó a su primer encolado: el apagado lo espera antes de cerrar Mongo.
+  private readonly pending = new Set<Promise<void>>();
+
   constructor(private readonly deps: MatchResultRecorderDeps) {}
 
   /**
    * @param abortReason el motivo que la SALA sabe y el evento no (`CHARGE_REJECTED`). Se consulta al
    * cerrar, no al armar el sink: el cobro rechazado ocurre después de que la mesa nació.
+   * @param settledBet resuelve cuando el cobro del aumento en vuelo terminó. El desenlace lo espera
+   * ANTES de leer el aumento del estado: con el cobro todavía en vuelo, el estado dice x2 aunque el
+   * orquestador vaya a contestar que no, y el premio saldría multiplicado sin que nadie lo pagara.
+   * Para cuando resuelve, un cobro fallido ya anuló el trato.
    */
   sinkFor(
     config: DominoMatchConfig,
     match: MatchState,
     roomId: string,
     abortReason: () => MatchAbortReason | undefined = () => undefined,
+    settledBet: () => Promise<void> = () => Promise.resolve(),
   ): MatchEventSink {
     return (events) => {
       for (const event of events) {
-        const result = matchResultOf(
-          event,
-          match,
-          config,
-          roomId,
-          new Date(this.deps.now()),
-          abortReason(),
+        // El instante y el motivo son los del cierre, no los de después de la espera. Se proyecta YA
+        // aunque haya que esperar: una invariante rota (`settlementOf`) sigue lanzando adentro del
+        // comando, que es lo que cierra la mesa, y no como una promesa rechazada que nadie mira.
+        const at = new Date(this.deps.now());
+        const reason = abortReason();
+        const result = matchResultOf(event, match, config, roomId, at, reason);
+        if (!result) continue;
+        // Una mesa abortada no lleva montos, así que no tiene nada que esperar.
+        if (event.type !== "MATCH_RESOLVED") {
+          this.track(this.record(result, 0));
+          continue;
+        }
+        this.track(
+          settledBet().then(() => {
+            // Releído con el cobro ya resuelto: si no se pudo, el trato ya está anulado en el estado.
+            const settled = matchResultOf(event, match, config, roomId, at, reason) ?? result;
+            return this.record(settled, 0);
+          }),
         );
-        if (result) this.record(result, 0);
       }
     };
   }
 
-  private record(result: MatchResult, attempt: number): void {
-    this.deps.outbox.enqueue(result.key, result.routingKey, result.payload).then(
+  /** Espera a lo que todavía aguarda un cobro o su primer encolado. No espera los reintentos. */
+  async drain(): Promise<void> {
+    await Promise.all(this.pending);
+  }
+
+  private track(work: Promise<void>): void {
+    this.pending.add(work);
+    void work.finally(() => this.pending.delete(work));
+  }
+
+  private record(result: MatchResult, attempt: number): Promise<void> {
+    return this.deps.outbox.enqueue(result.key, result.routingKey, result.payload).then(
       () => this.deps.wake(),
       (error: unknown) => {
         const base = this.deps.retryBaseMs ?? RETRY_BASE_MS;

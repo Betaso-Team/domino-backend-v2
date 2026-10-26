@@ -26,6 +26,7 @@ import { wasAbortedAtDeal } from "../../core/rules";
 import type { MatchState } from "../../core/state";
 import { BotTurnTaker, MatchEventNotifier, type MatchHistory } from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
+import { recordEndingSink } from "../../network/match-record";
 import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
 import {
   OrchestratorBetCharger,
@@ -208,8 +209,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const match = child.resolve<MatchState>("MatchState");
     const catalog = buildCatalog(child);
 
-    const pieces = buildPieces(child, (events: readonly NetworkMatchEvent[]) =>
-      this.notifier.notify(events),
+    const pieces = buildPieces(
+      child,
+      (events: readonly NetworkMatchEvent[]) => this.notifier.notify(events),
+      { roomId: this.roomId, gameModeName: mode.name },
     );
     this.history = pieces.history;
     // LA REVANCHA: la sala solo la cierra cuando alguien se va (`onLeave`). La compuerta nadie la
@@ -219,19 +222,30 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // LOS DOS SINKS DE LA PLATA, y ninguno la mueve: el aumento se le pide cobrar al ORQUESTADOR y
     // el resultado se le PUBLICA. Dominó dice qué pasó y pide que se cobre; un juego nunca mueve
     // dinero.
+    const bet = rootContainer.isRegistered(OrchestratorBetCharger)
+      ? rootContainer.resolve(OrchestratorBetCharger).sinkFor(
+          config.matchId,
+          (events) => this.notifier.notify(events),
+          () => revokeMultiplier(),
+        )
+      : undefined;
+    // EL COBRO DEL AUMENTO VA ANTES QUE EL RESULTADO, y el resultado espera a que termine: con el
+    // cobro en vuelo el estado todavía dice x2, y el premio no puede salir multiplicado por un aumento
+    // que el orquestador después rechaza.
     const orchestratorSinks = [
+      ...(bet ? [bet.sink] : []),
       rootContainer
         .resolve(MatchResultRecorder)
-        .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason),
-      ...(rootContainer.isRegistered(OrchestratorBetCharger)
-        ? [
-            rootContainer.resolve(OrchestratorBetCharger).sinkFor(
-              config.matchId,
-              (events) => this.notifier.notify(events),
-              () => revokeMultiplier(),
-            ),
-          ]
-        : []),
+        .sinkFor(config, match, this.roomId, () => this.orchestratorAbortReason, bet?.settled),
+      // EL CIERRE DEL REGISTRO, detrás del resultado y con las mismas tres cosas que sólo la sala
+      // sabe: si el orquestador cobró la entrada, por qué se cerró sin arrancar y el cobro del aumento
+      // en vuelo. Va después del historial (`pieces.sinks`), así que el desenlace llega a la base
+      // detrás de la entrada que lo cuenta.
+      recordEndingSink(this.history, config, match, {
+        entryCharged: () => this.entryCharge === "charged",
+        abortReason: () => this.orchestratorAbortReason,
+        settledBet: bet?.settled,
+      }),
     ];
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
@@ -302,7 +316,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     });
     this.setState(match);
     // El modo queda en el listing compartido de Colyseus (lo muestra el monitor). La metadata lleva
-    // solo el identificador público; perfil, moneda, tasa y seed no salen.
+    // solo el identificador público; perfil, userId, moneda, tasa y seed no salen.
     await this.setMetadata({ gameModeId: config.gameModeId });
 
     // SE ANOTA ENTRE LAS PARTIDAS VIVAS DEL CLÚSTER, y SE ESPERA. A partir de que `onCreate`
@@ -343,9 +357,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   }
 
   override async onJoin(client: Client): Promise<void> {
-    // ACÁ SE CRUZA LA IDENTIDAD EXTERNA CON EL ASIENTO OPACO, y es el único lugar donde
-    // pasa. De estas cuatro líneas para abajo nadie vuelve a ver una plataforma ni un
-    // UUID: el motor, el historial y el wire hablan de `seat-N`.
+    // ACÁ SE CRUZA EL `userId` DEL TOKEN CON EL ASIENTO OPACO, y es el único lugar donde pasa.
+    // De estas líneas para abajo el motor, el historial y el wire hablan de `seat-N`; el
+    // `userId` solo sale en `PlayerState.userId`, para que cada cliente encuentre su asiento.
     const identity = client.auth as SeatCredentials;
     const playerId = this.config.seats.find((seat) => seat.userId === identity.userId)?.playerId;
     // Primero pertenece a la mesa; recién después se pregunta si sigue jugando. Invertir

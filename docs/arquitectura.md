@@ -16,7 +16,7 @@ resultado de cada partida.
 flowchart LR
   Client["Cliente de juego"]
   Orch["Orquestador\n(domino-orchestrator)"]
-  Panel["Panel / operador"]
+  Panel["Panel / admin"]
   Proxy["Nginx\nWebSocket + HTTP"]
 
   subgraph Process["Proceso Node + Colyseus"]
@@ -196,7 +196,7 @@ son fases distintas: cada una espera una clase diferente de input o timeout.
 |---|---|---|
 | Registro de salas y presence | Redis compartido entre procesos | Implementación local de Colyseus; clúster de un proceso |
 | `MatchRegistry` | Redis, TTL y censo compartido | `MemoryKeyValueStore`; válido para una sola instancia |
-| Historial | MongoDB, persiste reinicios | `MemoryHistory`, limitado al proceso |
+| Historial (un registro v2.1 por partida) | MongoDB, persiste reinicios | `MemoryHistory`, el mismo documento, limitado a 200 partidas y al proceso |
 | Catálogo y outbox | MongoDB, escritura durable | Repositorio y outbox de memoria |
 | Publicación del catálogo | RabbitMQ `betaso` con confirmaciones | El outbox conserva pendientes si Mongo existe |
 | Resultado de partida | RabbitMQ `betaso_games` con confirmaciones | El outbox de resultados acumula; sin Mongo, muere con el proceso |
@@ -229,6 +229,7 @@ La API que este backend le expone al orquestador está en `docs/api-y-mensajes.m
 2. `src/features/match/core/engine/`: génesis, comandos, conductores y scoring.
 3. `src/features/match/transports/colyseus/domino-room.ts`: ciclo de vida de la sala.
 4. `src/features/match/transports/colyseus/commands/`: entrada de mensajes.
-5. `src/features/match/network/`: historial y efectos hacia la plataforma.
+5. `src/features/match/network/`: historial y efectos hacia la plataforma. El registro de cada
+   partida —cabecera, timeline, manos y desenlace— está en `history.ts` y `match-record.ts`.
 6. `src/features/game-mode/`: catálogo, outbox y publicación.
 7. `src/di-container.ts` y `src/app.config.ts`: decisiones de infraestructura.

@@ -1,10 +1,11 @@
 import type { Logger } from "@/logger";
-import type { Collection } from "mongodb";
+import { type Collection, MongoServerError } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
-import type { HistoryEntry } from "../history";
+import { type HistoryEntry, MatchListTimeoutError } from "../history";
 import {
   HISTORY_COLLECTION,
   type HistoryStore,
+  LIST_MAX_TIME_MS,
   type MatchHistoryDocument,
   MongoHistory,
 } from "./mongo-history";
@@ -55,10 +56,18 @@ function fakeLogger(): Logger {
 function storeWith(document: MatchHistoryDocument | null = null) {
   const updateOne = vi.fn().mockResolvedValue({ acknowledged: true });
   const findOne = vi.fn().mockResolvedValue(document);
+  const createIndexes = vi.fn().mockResolvedValue([]);
   const collection = vi.fn(
-    async (_name: string) => ({ updateOne, findOne }) as unknown as Collection<never>,
+    async (_name: string) =>
+      ({ updateOne, findOne, createIndexes }) as unknown as Collection<never>,
   );
-  return { store: { collection } as unknown as HistoryStore, updateOne, findOne, collection };
+  return {
+    store: { collection } as unknown as HistoryStore,
+    updateOne,
+    findOne,
+    createIndexes,
+    collection,
+  };
 }
 
 // Le da al `void this.append(...)` de dentro de `record` la vuelta de microtasks que
@@ -86,7 +95,7 @@ describe("MongoHistory: escritura", () => {
   // ES EL TEST QUE JUSTIFICA EL DISEÑO: un documento por partida con las entradas en un
   // arreglo solo sirve si los lotes se ACUMULAN. El `seq` es el orden y perder un lote es
   // perder la mitad de una jugada.
-  it("los lotes se acumulan con $push/$each, no se pisan", async () => {
+  it("los lotes se acumulan en la timeline con $push/$each, no se pisan", async () => {
     const { store, updateOne } = storeWith();
     const history = new MongoHistory(store, fakeLogger());
 
@@ -100,13 +109,16 @@ describe("MongoHistory: escritura", () => {
     expect(updateOne).toHaveBeenCalledTimes(2);
     const first = updateOne.mock.calls[0]?.[1];
     const second = updateOne.mock.calls[1]?.[1];
-    expect(first.$push.entries.$each.map((e: HistoryEntry) => e.seq)).toEqual([1, 2]);
-    expect(first.$push.entries.$each[1].source).toBe("SYSTEM");
-    expect(second.$push.entries.$each.map((e: HistoryEntry) => e.seq)).toEqual([3]);
-    // Nadie escribe `entries` fuera del `$push`: un `$set` sobre el mismo campo lo dejaría
+    expect(first.$push.timeline.$each.map((e: HistoryEntry) => e.seq)).toEqual([1, 2]);
+    expect(first.$push.timeline.$each[1].source).toBe("SYSTEM");
+    expect(second.$push.timeline.$each.map((e: HistoryEntry) => e.seq)).toEqual([3]);
+    // EL INSTANTE COMO FECHA (truco `7498991`): se lee como fecha en cualquier cliente.
+    expect(first.$push.timeline.$each[0].at).toEqual(new Date(1_700_000_000_001));
+    // Nadie escribe la timeline fuera del `$push`: un `$set` sobre el mismo campo la dejaría
     // en el último lote y el historial sería siempre la última jugada.
-    expect(first.$set.entries).toBeUndefined();
-    expect(first.$setOnInsert.entries).toBeUndefined();
+    expect(first.$set.timeline).toBeUndefined();
+    expect(first.$setOnInsert.timeline).toBeUndefined();
+    expect(first.$setOnInsert.version).toBe(2.1);
   });
 
   it("cada partida escribe contra su propio filtro", async () => {
@@ -153,9 +165,25 @@ describe("MongoHistory: escritura", () => {
 });
 
 describe("MongoHistory: lectura", () => {
-  it("devuelve las entradas grabadas de esa partida", async () => {
+  it("devuelve la timeline de esa partida, con los instantes de vuelta en epoch ms", async () => {
     const entries = [entry(1), entry(2)];
     const { store, findOne } = storeWith({
+      matchId: "m-1",
+      version: 2.1,
+      timeline: entries.map((e) => ({ ...e, at: new Date(e.at) })),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    expect(await new MongoHistory(store, fakeLogger()).of("m-1")).toEqual(entries);
+    expect(findOne).toHaveBeenCalledWith({ matchId: "m-1" }, expect.anything());
+  });
+
+  // LA FORMA VIEJA, de antes de la v2.1: `entries` en vez de `timeline`, el `at` como número y sin
+  // versión. El endpoint de soporte y el replay la siguen leyendo.
+  it("lee también la forma vieja: `entries`, sin versión", async () => {
+    const entries = [entry(1), entry(2)];
+    const { store } = storeWith({
       matchId: "m-1",
       entries,
       createdAt: new Date(),
@@ -163,7 +191,6 @@ describe("MongoHistory: lectura", () => {
     });
 
     expect(await new MongoHistory(store, fakeLogger()).of("m-1")).toEqual(entries);
-    expect(findOne).toHaveBeenCalledWith({ matchId: "m-1" });
   });
 
   // VACÍO Y NO UN FALLO: es lo que ya distinguen sus dos llamadores. El endpoint interno
@@ -241,5 +268,164 @@ describe("MongoHistory: el drenado del apagado", () => {
     const { store } = storeWith();
 
     await expect(new MongoHistory(store, fakeLogger()).drain()).resolves.toBeUndefined();
+  });
+});
+
+// LA CABECERA Y EL CIERRE VAN POR PIPELINE. Lo que la base hace con él lo mide el contrato contra un
+// Mongo de verdad (`./mongo-history.int.test.ts`); acá se miden las DECISIONES que un doble sí ve.
+describe("MongoHistory: la cabecera y el cierre", () => {
+  const SETUP = {
+    roomId: "room-1",
+    table: { gameModeId: "g", name: "$peligro", entryFeeInUC: 1, prizeInUC: 2, isFree: false },
+    matchConfig: {
+      playersQuantity: 2,
+      pointsToWin: 100,
+      startingScore: { teamA: 0, teamB: 0 },
+      timeoutsInMs: {},
+      seed: "s",
+      teamAssignment: "SHUFFLED" as const,
+      isDealWindowEnabled: true,
+      tilesPerPlayer: 7,
+      betLevels: [],
+      enableBots: false,
+      isRematchEnabled: true,
+    },
+    seats: [],
+  };
+
+  it("abre con un upsert por partida, el armado como literal y el arranque como fecha", async () => {
+    const { store, updateOne } = storeWith();
+    new MongoHistory(store, fakeLogger()).open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+    await settle();
+
+    const [filter, pipeline, options] = updateOne.mock.calls[0] ?? [];
+    expect(filter).toEqual({ matchId: "m-1" });
+    expect(options).toEqual({ upsert: true });
+    // `$literal`: un nombre de modo que empiece con `$` se leería como un campo del documento.
+    const literal = pipeline[0].$replaceWith.$mergeObjects[1].$literal;
+    expect(literal).toMatchObject({ status: "started", table: { name: "$peligro" } });
+    expect(literal.matchStartedAt).toEqual(new Date(1_000));
+  });
+
+  // EL PRIMER CIERRE GANA: sobre un documento ya cerrado el pipeline devuelve el documento como está.
+  it("cierra sólo lo que no está cerrado", async () => {
+    const { store, updateOne } = storeWith();
+    new MongoHistory(store, fakeLogger()).close("m-1", {
+      ...SETUP,
+      status: "finished",
+      matchEndedAt: 2_000,
+      matchEndReason: "SCORE",
+      winnerIds: [],
+      players: [],
+      rateId: "r",
+      betMultiplier: { offeredValues: [], finalValue: 1, proposals: [] },
+      rankingMultiplier: { base: 1, extra: 0, final: 1 },
+    });
+    await settle();
+
+    const replaceWith = updateOne.mock.calls[0]?.[1][0].$replaceWith;
+    const [closedAlready, keep, merged] = replaceWith.$cond;
+    expect(closedAlready.$in[1]).toEqual(["finished", "aborted"]);
+    expect(keep).toBe("$$ROOT");
+    expect(merged.$mergeObjects[2].$literal.matchEndedAt).toEqual(new Date(2_000));
+  });
+
+  it("los índices se piden una vez por proceso, y un fallo no frena la escritura", async () => {
+    const { store, updateOne, createIndexes } = storeWith();
+    createIndexes.mockRejectedValueOnce(new Error("E11000 duplicate key"));
+    const logger = fakeLogger();
+    const history = new MongoHistory(store, logger);
+
+    history.record([entry(1)]);
+    history.record([entry(2)]);
+    await history.drain();
+
+    // EL ÚNICO VA SOLO: `createIndexes` es todo o nada, y su fallo no puede llevarse los del listado.
+    const names = (call: unknown[] | undefined) =>
+      (call?.[0] as { name: string }[]).map((index) => index.name);
+    expect(createIndexes).toHaveBeenCalledTimes(2);
+    expect(names(createIndexes.mock.calls[0])).toEqual(["matchId_1"]);
+    expect(names(createIndexes.mock.calls[1])).toEqual([
+      "roomId_1_createdAt_-1__id_-1",
+      "createdAt_-1__id_-1",
+      "seats.userId_1_createdAt_-1__id_-1",
+    ]);
+    expect(updateOne).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("índices"),
+      expect.objectContaining({ collection: HISTORY_COLLECTION, indexes: ["matchId_1"] }),
+    );
+  });
+});
+
+// EL PLAZO DEL LISTADO, contra un doble porque un Mongo de verdad no vence a pedido: lo que se mide es
+// la DECISIÓN —cada consulta lleva `maxTimeMS`, y vencerlo es `MatchListTimeoutError` y no un error
+// cualquiera—. Los planes y los índices se miden contra Mongo en `./mongo-history.int.test.ts`.
+describe("MongoHistory: el listado", () => {
+  function listingStore(fail?: unknown) {
+    const toArray = fail ? vi.fn().mockRejectedValue(fail) : vi.fn().mockResolvedValue([]);
+    const find = vi.fn(() => ({ toArray }));
+    const countDocuments = vi.fn().mockResolvedValue(0);
+    const estimatedDocumentCount = vi.fn().mockResolvedValue(0);
+    const createIndexes = vi.fn().mockResolvedValue([]);
+    const collection = vi.fn(
+      async (_name: string) =>
+        ({
+          find,
+          countDocuments,
+          estimatedDocumentCount,
+          createIndexes,
+        }) as unknown as Collection<never>,
+    );
+    return {
+      store: { collection } as unknown as HistoryStore,
+      find,
+      countDocuments,
+      estimatedDocumentCount,
+    };
+  }
+
+  const expired = () =>
+    new MongoServerError({
+      message: "operation exceeded time limit",
+      code: 50,
+      codeName: "MaxTimeMSExpired",
+    });
+
+  it("cada consulta lleva su plazo", async () => {
+    const { store, find, countDocuments, estimatedDocumentCount } = listingStore();
+    const history = new MongoHistory(store, fakeLogger());
+
+    await history.list({ pageSize: 20 });
+    await history.list({ pageSize: 20, roomId: "sala" });
+
+    for (const [, options] of find.mock.calls as unknown as [unknown, { maxTimeMS: number }][])
+      expect(options.maxTimeMS).toBe(LIST_MAX_TIME_MS);
+    expect(estimatedDocumentCount).toHaveBeenCalledWith({ maxTimeMS: LIST_MAX_TIME_MS });
+    expect(countDocuments).toHaveBeenCalledWith(
+      { roomId: "sala" },
+      { limit: 10_001, maxTimeMS: LIST_MAX_TIME_MS },
+    );
+  });
+
+  it("un plazo vencido es `MatchListTimeoutError`; otro fallo sube tal cual", async () => {
+    await expect(
+      new MongoHistory(listingStore(expired()).store, fakeLogger()).list({ pageSize: 20 }),
+    ).rejects.toBeInstanceOf(MatchListTimeoutError);
+
+    const other = new Error("conexión cerrada");
+    await expect(
+      new MongoHistory(listingStore(other).store, fakeLogger()).list({ pageSize: 20 }),
+    ).rejects.toBe(other);
+  });
+
+  it("también vence el conteo, no sólo la página", async () => {
+    const { store, countDocuments } = listingStore();
+    countDocuments.mockRejectedValue(expired());
+
+    await expect(
+      new MongoHistory(store, fakeLogger()).list({ pageSize: 20, from: new Date(0) }),
+    ).rejects.toBeInstanceOf(MatchListTimeoutError);
   });
 });

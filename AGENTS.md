@@ -28,6 +28,16 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
 - **La revancha**: el motor abre la ventana (`isRematchEnabled: true` en `configOf`), pero nadie abre
   la compuerta, así que sale siempre con `eligible: false`. Revancha de verdad pide que el orquestador
   vuelva a cobrar.
+- **Cada partida deja UN documento v2.1 en `match_history`** (la forma de truco): cabecera al primer
+  reparto, `timeline` y `rounds` durante, desenlace con la plata al cerrar. Lo leen el panel
+  (`GET /internal/matches`, `GET /internal/matches/:matchId`), el backend principal
+  (`GET /game-data/:roomId`), el endpoint de soporte y el CLI de replay, que ya no pide argumentos.
+  Ver «Incremento completo — el registro v2.1 de cada partida».
+- **El listado del panel filtra y pagina por cursor** (`after`, `from`/`to`, `matchId`, `roomId`, `id`,
+  `userId` —cualquier asiento, `seats[].userId`—)
+  con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
+  ordena en memoria, y una página honda cuesta lo mismo que la primera. Ver «Incremento completo — el
+  listado del panel con filtros y cursor».
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
@@ -233,9 +243,16 @@ Lo que dejó la Tarea 1, y que conviene saber antes de tocar nada de acá:
 - **`playerId` es OPACO y posicional** (`seat-1`, `seat-2`, …). Adentro de la partida —motor,
   historial, wire, registro público— no hay plataformas ni UUIDs. El cruce entre la pareja
   autenticada y el asiento pasa en UN solo lugar: `onJoin`.
-- **`PlayerState` sincroniza presentación y NO identidad.** `platformId`/`userUuid`/`currency` son
-  `noSync()`: no entran a la metadata del Schema, así que ni se codifican ni aparecen en
-  `toJSON()`. `displayName`/`username`/`profilePicture` sí viajan.
+- **`PlayerState` es lo que se juega y se dibuja, y todo viaja; la moneda NO está.** `currency` ya no
+  es un campo del estado: es dato de infraestructura y vive en el `seat` de la config congelada
+  (`config.seats`), de donde la lee la liquidación. `displayName`/`username`/`profilePicture` viajan, y `userId` también (desde `feat/userid-publico-en-asiento`):
+  es el `sub` del token (el `players.id` de billing-auth, estable entre lanzamientos) y es como el cliente
+  encuentra SU asiento, `players.find(p => p.userId === sub)`, porque `seat-N` es posicional y no hay otra
+  forma de saber cuál es el suyo, ni siquiera antes de `REVEAL_TILES`. Es el modelo de truco, donde el
+  `playerId` es el `userId`. No es una credencial: el `sid` no entra al estado. **Es campo nuevo AL FINAL
+  de `PlayerState`** (antes era `noSync()` y no ocupaba índice): un cliente con el schema pre-generado
+  tiene que regenerarlo. Los comentarios de más abajo que dicen que el `userId`/la pareja/la moneda es `noSync()`
+  describen el diseño anterior (ya no queda ningún campo `noSync()` en `PlayerState`).
   **OJO con el golden**: `golden-2p.json` **sí** contiene `betaso` y `VES`, y no es una filtración
   —están en `meta`, que es el `DominoMatchConfig` de ENTRADA que el replay necesita para rebobinar;
   `finalState`, que es el árbol serializado, no los tiene—. Es el primer archivo donde se va a
@@ -1256,7 +1273,8 @@ contra 5 de `userUuid`).
 - **`idempotencyKey` CONSERVA el `JSON.stringify`**, y no es inercia: sigue concatenando `matchId` y
   `kind` con la identidad, que son los que reintroducen la colisión.
 - **`PlayerState` perdió un campo `noSync()` y ninguno sincronizado**, así que esto NO es una
-  ruptura de wire — a diferencia de la que los agregó.
+  ruptura de wire — a diferencia de la que los agregó. (Después, `userId` se hizo sincronizable, al final
+  del schema: eso sí rompe el wire. Ver la entrada de `PlayerState` en "Lo que dejó la Tarea 1".)
 - **`configOf` rechaza el `userId` repetido** donde antes rechazaba la pareja repetida: es
   estrictamente más estricto.
 - Verificado por MUTACIÓN: `assertSameTable` sin comparar el `userId` (1 rojo de 12) y la unicidad
@@ -2209,8 +2227,8 @@ abiertas por el dominó mismo (las creadas CON `roomOptions`):
 - **La suite firma como billing-auth**: `src/tests/billing-auth-keys.ts` tiene una pareja P-256 fija y
   publicada a propósito (`mintBillingToken`); `vitest.setup.ts` y `compose.smoke.yaml` usan su pública.
   Ningún entorno de verdad confía en ella.
-- **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume), y
-  `JWT_ISSUER` vale `betaso-auth`.
+- **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume).
+  ~~`JWT_ISSUER` vale `betaso-auth`.~~ Desde 2026-10-14 es uno solo, `betaso-games-auth`.
 - **Los niveles de aumento son parte del modo** (`43d89a0`): `betLevels: [{ level, extra,
   additionalPoints }]`, la misma forma del `CreateMatchRequest`. Vacío = no ofrece aumentar. Se
   validan niveles únicos (≥ 2) y el `extra` creciente; el `PUT` reemplaza la lista. El `GET` público
@@ -2293,7 +2311,14 @@ Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` e
 | `d576fbe` el interruptor de mantenimiento desde v2 | **NO APLICA**: el mantenimiento del dominó se borró entero, el interruptor lo tiene el orquestador |
 | `3627021` | docs de truco |
 
-### Deuda abierta: el panel no puede entrar con su sesión
+### ~~Deuda abierta: el panel no puede entrar con su sesión~~
+
+Resuelta en `feat/emisor-betaso-games` (2026-10-13), sin el backend de Betaso: billing-auth emite el
+token del admin cuando inicia sesión (`POST /v1/admins/login`), y las rutas de admin aceptan
+`Authorization: Bearer` con ese token además de `ADMIN_API_KEY` (`requireAdminKey`,
+`features/auth/transports/admin-token-verifier.ts`). ~~Las mutaciones piden el rol `catalog`~~: desde el
+2026-10-14 no hay roles, y un admin abre lo mismo que la llave. Lo de abajo queda como contexto de por
+qué no se portó lo de truco.
 
 ⚠ **El día que el panel apunte al catálogo de v2, todas las mutaciones dan 401.** El panel corre en el
 navegador, así que no puede mandar `ADMIN_API_KEY` sin publicarla, y hoy esa llave es la única puerta.
@@ -2306,6 +2331,128 @@ vuelve: el token de sesión es del backend de Betaso y no de billing-auth, así 
 puede verificar, y es `auth/me` el que lo valida. Se dejó afuera a propósito hasta decidir quién
 administra el catálogo del dominó (la deuda 3 de «sin credenciales»): si es el orquestador, esto no
 hace falta.
+
+**Decidido el 14/10:** el catálogo y los ajustes son del dominó, y el panel que los administre será
+uno propio de Betaso Games, con un login del sistema (billing-auth u otro) y no el de Betaso. **No es
+del MVP.** Hasta entonces se administran con `ADMIN_API_KEY` en `x-internal-api-key`, desde un
+cliente HTTP (Insomnia o similar). No se porta el `auth/me` de truco.
+
+## Port de truco — del 15 al 17/10 (`3d8dbdb` … `cf527d5`, rama `fix/premio-espera-cobro-del-aumento`)
+
+| truco | acá |
+|---|---|
+| `a384487` cada movimiento de plata con su clave | **PORTADO lo que aplica.** La clave por aumento ya estaba (`step` en `OrchestratorBetCharger`, desde el principio). Lo que faltaba era que **el premio espere al cobro del aumento en vuelo**: `MatchResultRecorder` leía `acceptedBetLevel` en el acto del veredicto, y el cobro tarda hasta 15 s. Si la partida terminaba antes —un abandono alcanza— y el orquestador después rechazaba, el resultado ya había salido con el premio x2 que nadie pagó. Ahora el desenlace espera `settled()` y relee el estado; el apagado espera esos resultados (`drain()`) antes de cerrar Mongo, y `kill_timeout` pasó de 5 a 20 s (⚠ un `pm2 reload` no lo aplica: hace falta `./restart` o `pm2 delete` + `start`). El resto —ledger, reversiones por clave, reintento de la entrada— es de quien mueve la plata, o sea del orquestador |
+| `3d8dbdb` montos del historial en centavos | **NO APLICA**: no hay `/me/matches` |
+| `f589e0d` fecha de creación de la cuenta | **NO APLICA**: el dominó no lee cuentas |
+| `ba49623` avisos por jugador en el lobby | **NO APLICA**: no hay lobby. Si hacen falta, son del orquestador |
+| `545fdc4` techo de winrate y orden de la relajación | **NO APLICA**: emparejador y core-loop, que el dominó no tiene |
+| `60c2c41`, `a9f9f14`, `95aea3e`, `f050b68`, `cf527d5` | docs de truco |
+
+## Corrección — las salas de un proceso muerto (rama `fix/salas-huerfanas-al-arrancar`)
+
+Salió de un incidente del dominó **v1** en producción (2026-10-20): pm2 y `/health` en verde, y todo
+`joinOrCreate/lobby` colgado sin error. Las 23 salas de Redis eran de un proceso que había muerto a
+mitad del apagado. **El v2 tiene el mismo hueco**, porque es de Colyseus (0.16 y 0.18 por igual):
+`gracefullyShutdown` se saca de `roomcount`, espera que cierren las salas y RECIÉN AL FINAL borra las
+suyas de `roomcaches`. Un `kill -9`, un OOM o el `kill_timeout` en el medio las deja con un dueño que
+no figura en `roomcount`, y `healthCheckAllProcesses` del arranque solo recorre `roomcount`: nunca las
+ve.
+
+- **`transports/colyseus/stale-rooms.ts`**: al arrancar, con el servidor ya escuchando, se le hace
+  `healthCheckProcessId` a cada proceso ajeno que figura como dueño de alguna sala. El que no contesta
+  (2 s) queda excluido y sus salas borradas, que es lo que Colyseus ya hace con los de `roomcount`.
+  No frena el arranque. Verificado contra Redis real: una sala plantada de un proceso inexistente
+  sobrevivió al `accept()` de Colyseus y el barrido la borró en 2 s.
+- **En el v2 el daño era menor que en el v1**: no hay `joinOrCreate` contra un lobby, y la reconexión
+  (`seatBack` → `joinById`) se cura sola al tocar la sala, porque la reserva vence y Colyseus chequea al
+  dueño. Lo que quedaba era la sala anunciada para siempre hasta que alguien la tocara.
+- El apagado del v2 ya borra sus salas antes de lo lento: `server.gracefullyShutdown` va antes que el
+  `drain()` de resultados (`src/main.ts`).
+- **Si vuelve a pasar en el v1** (no tiene este barrido), el arreglo a mano es borrar de `roomcaches`
+  las salas cuyo `processId` no figura en `roomcount`, y de `colyseus:nodes` los procesos muertos.
+
+## Incremento completo — el registro v2.1 de cada partida (rama `feat/match-record-v2-1`)
+
+Portado de truco (`bed0d33`, `e4e630c`, `7498991`, `4472332`, `8d4001a`) para que los dos juegos
+guarden la misma forma y el panel de Tablea liste partidas. Antes el documento era
+`{ matchId, entries, createdAt, updatedAt }`: sin sala, sin modo, sin plata, sin desenlace.
+
+- **El puerto tiene cuatro verbos** (`open`/`record`/`round`/`close`, `network/history.ts`) y los cuatro
+  caen en UN documento por partida, escritos en fila por partida y con `matchId` único en la base. El
+  primer armado y el primer cierre GANAN —en Mongo por pipeline (`$ifNull`, `$cond` sobre `status`), en
+  memoria por el orden del spread— y una partida cerrada no vuelve a `started`.
+- **Se abre al primer `ROUND_STARTED`**, adentro del grabador: es el único momento en que la mesa ya
+  cobró, el motor ya sembró y nadie jugó. **Se cierra desde la sala** (`recordEndingSink`, detrás del
+  resultado): la plata necesita lo que sólo la sala sabe —si el orquestador cobró la entrada, el
+  `CHARGE_REJECTED`— y una terminada espera al cobro del aumento en vuelo, igual que el resultado. El
+  apagado no lo espera aparte: `shutdown()` drena primero los resultados, que esperan al mismo cobro.
+- **La cabecera guarda lo que el replay necesita y truco no**: `matchConfig.seed`, `teamAssignment`,
+  `isDealWindowEnabled`, `tilesPerPlayer`, `betLevels`, `enableBots`, `isRematchEnabled`, los plazos
+  (`timeoutsInMs`, la reconexión convertida a ms) y el marcador inicial. Con eso `npm run replay --
+  <matchId>` rebobina desde el documento (`history/recorded.ts`); medido contra el golden: idéntico. Los
+  argumentos quedan para los documentos viejos.
+- **La plata es la que el dominó SABE**: `chargedInUC` (la entrada que el orquestador confirmó, por el
+  nivel del aumento que quedó) y `prizePaidInUC` (lo que el resultado publicado le asigna, de
+  `settlementOf`). Fuera, porque no hay fuente: `rate`, los `*InPlayerCurrency`, `refundedInUC` (el
+  reembolso lo decide el orquestador por su ficha), `rakeWaived`, la identidad `firstName`/`lastName`,
+  `rematch` (no hay cadena) y `tournament`.
+- **`matchEndReason` usa el vocabulario del dominó** (`SCORE`, `ABANDONMENT`, los `AbortReason`,
+  `CHARGE_REJECTED`), el mismo de la timeline y del resultado del orquestador, no el de truco.
+- **La timeline conserva `matchId` por entrada** (truco lo sacó en `e4e630c`): lo llevan los goldens y
+  la respuesta del endpoint de soporte.
+- **Los índices no frenan el historial**: si el único no se puede crear (dos documentos viejos de la
+  misma partida) se loguea y se graba igual (`docs/operacion.md`, «Registro de partidas»).
+- **La forma vieja se sigue leyendo** en los cuatro lectores: `timeline ?? entries`, con el `at` de
+  vuelta a epoch ms para el replay.
+- **Mongo de verdad en la suite**: `mongo-history.int.test.ts` corre el contrato compartido
+  (`transports/tests/history-contract.ts`) contra Mongo con `MONGO_INT_URI`; `MemoryHistory` corre el
+  mismo contrato siempre. Verificado contra un `mongo:7` en Docker.
+
+## Incremento completo — el listado del panel con filtros y cursor (rama `feat/match-list-filters`)
+
+`match_history` en producción tiene millones de documentos (~5 GB), y el listado de PR #5
+(`?page=&pageSize=`, `skip` + `countDocuments({})`) leía todo lo salteado y contaba la colección entera
+en cada pedido. El contrato nuevo lo fijó el panel de Tablea, que se construyó en paralelo contra él:
+**no se renombra ningún campo**.
+
+- **`GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=`** (`records.ts`), todo
+  opcional y con AND. Responde `{ items, pageSize, nextCursor, total, totalExact }`. `page` ya no existe
+  (se ignora, como todo parámetro no declarado); un parámetro declarado e inválido es 400 `MALFORMED`.
+- **Cursor, no páginas** (`MatchCursor`): la última fila `(createdAt, _id)`, y la siguiente página
+  empieza estrictamente después. En la ruta es base64url de `{ t, id }`, validado entero al volver. El
+  puerto no sabe de la codificación.
+- **El total se cuenta barato por construcción** (`totalOf`, `stored-record.ts`, compartido por los dos
+  adaptadores): estimado sin filtros, `countDocuments` con `limit` 10 001 con filtros (tope
+  `MATCH_COUNT_CAP`, inyectable para la suite) y `null` con cursor.
+- **Plazo**: `maxTimeMS` 5 000 en cada consulta (`LIST_MAX_TIME_MS`); vencerlo es
+  `MatchListTimeoutError` y la ruta lo contesta 503 con «La búsqueda tardó demasiado; acota el rango de
+  fechas».
+- **El plan es el que manda, y se mide**: `mongo-history.int.test.ts` corre `explain("executionStats")`
+  sobre la consulta exacta del adaptador (`pageQueryOf`, `countQueryOf`) para cada forma de filtro y
+  para páginas con cursor, y exige sin `COLLSCAN`, sin `SORT` y `totalDocsExamined ≤ pageSize + 1`. Tres
+  decisiones salieron de ahí: `roomId_1` pasó a `roomId_1_createdAt_-1__id_-1` (con el simple, la sala
+  se ordenaba en memoria); con `matchId` o `id`, que son únicos, no se pide `sort` (agregaba un `SORT`
+  sobre una fila); y el `$or` del cursor lleva los filtros repetidos en cada rama, en la raíz
+  (`SUBPLAN` → `SORT_MERGE`), porque al lado de los filtros leía una fila de más por página y una por
+  cada empate.
+- **El índice único va en su propio `createIndexes`**: es todo o nada, y con dos filas viejas de la
+  misma partida se llevaba con él a los del listado.
+- **`MemoryHistory` genera `ObjectId` de verdad** para el `_id`: el desempate del listado tiene que
+  ordenar igual que en Mongo, y veinticuatro hex al azar no lo hacen. Los dos adaptadores aceptan
+  `{ now, countCap }` para la suite (empates en el mismo milisegundo, el tope chico).
+
+## Incremento completo — el filtro por jugador del listado (rama `feat/match-list-user-filter`)
+
+- **`userId`** en `GET /internal/matches`: igualdad contra `seats[].userId`, el `userId` de cualquier
+  asiento del registro v2.1 (dos o cuatro). La misma regla de texto que `matchId`/`roomId`; se combina con
+  AND con todo, cursor incluido, y cuenta con el mismo tope. La forma vieja no tiene asientos y no
+  coincide nunca. Se mira `seats` y no `players`: `seats` lo tiene todo documento v2.1 desde que abre (y
+  el que nace en el cierre también); `players` sólo el cerrado.
+- **Índice `seats.userId_1_createdAt_-1__id_-1`**, multikey, en el pedido de los del listado. Medido con
+  `explain`: el arreglo es sólo el prefijo y lo fija la igualdad, así que la página sale ordenada, sin
+  `SORT`, y lee `pageSize + 1`; el conteo es cubierto (cero documentos leídos). Con `{ "seats.userId": 1 }`
+  solo, el plan ordenaba en memoria. Un usuario en dos asientos da una sola clave: la partida sale y cuenta
+  una vez (contrato de los dos adaptadores y suite contra Mongo).
 
 ## Cómo se ejecuta una tarea
 

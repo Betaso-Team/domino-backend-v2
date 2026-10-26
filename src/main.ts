@@ -1,3 +1,4 @@
+import { sweepStaleRoomsNow } from "@/features/match/transports/colyseus/stale-rooms";
 import { listen } from "@colyseus/tools";
 import app from "./app.config";
 import { settingsSignal, shutdown, startServices, stopAcceptingMatches } from "./di-container";
@@ -100,6 +101,17 @@ logger.info("servidor escuchando", {
   puerto: env.listeningPort,
   anuncia: env.publicAddress ?? "(nada: el cliente vuelve al host al que ya le habló)",
 });
+
+// LAS SALAS QUE DEJÓ UN PROCESO MUERTO (`stale-rooms.ts`). Va con el servidor ya escuchando —el
+// chequeo usa el canal de procesos, que `listen()` recién abre— y no frena nada: es limpieza.
+sweepStaleRoomsNow().then(
+  (checked) => {
+    if (checked.length > 0)
+      logger.info("se chequearon los dueños de salas ajenas", { procesos: checked });
+  },
+  (error: unknown) =>
+    logger.warn("no se pudieron chequear las salas de otros procesos", { error: String(error) }),
+);
 
 // EL APAGADO ORDENADO, y la razón es de plata: una partida que muere sin veredicto es un
 // reembolso que nunca se anuncia. El orden es el contrato:

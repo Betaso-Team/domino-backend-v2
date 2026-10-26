@@ -18,17 +18,17 @@ describe("createMatchState", () => {
     expect(match.players.map((p) => p.seatIndex)).toEqual([0, 1]);
   });
 
-  // El snapshot se COPIA entero al árbol, perfil y todo. La moneda viaja con el asiento
-  // —es la que ya se cobró— y no se re-deriva de nada: congelarla acá es lo que impide que
-  // una recompensa salga en una moneda distinta de la de la inscripción.
-  it("copia perfil e identidad financiera sin cambiar moneda", () => {
+  // El árbol copia del snapshot lo que se juega y se dibuja: perfil y `userId`. La moneda NO se
+  // copia: es la que ya se cobró y se queda congelada en `config.seats`, de donde la lee la
+  // liquidación (`settlement.test.ts`), así que una recompensa no puede salir en otra moneda.
+  it("copia perfil y userId, y no la moneda", () => {
     const match = createMatchState(config(["u1", "u2"]));
     expect(match.players[0]).toMatchObject({
       playerId: "u1",
       displayName: "Jugador u1",
       userId: "u1",
-      currency: "VES",
     });
+    expect(match.players[0]).not.toHaveProperty("currency");
   });
 
   // La génesis NO decide los equipos: los delega en la política (spec §4.3). Lo que
@@ -95,15 +95,16 @@ describe("createMatchState", () => {
     expect(JSON.stringify(match.toJSON())).not.toContain(SEED);
   });
 
-  // LA OTRA MITAD DEL SNAPSHOT: lo que se copia al árbol pero NO se sincroniza. Los campos
-  // `noSync()` no entran a la metadata del Schema, así que `toJSON()` —que recorre la
-  // metadata— no puede filtrarlos ni al wire ni al fixture golden.
-  it("la identidad externa y la moneda no entran al árbol serializado", () => {
+  // LA OTRA MITAD DEL SNAPSHOT: lo de infraestructura no entra al árbol. La moneda vive en el
+  // `seat` de la config, no en el estado, así que no puede llegar al wire ni al fixture golden.
+  // El `userId` sí entra: es como el cliente encuentra su asiento.
+  it("el userId entra al árbol serializado y la moneda no", () => {
     const match = createMatchState(config(["u1", "u2"]));
     const wire = JSON.stringify(match.toJSON());
 
     expect(wire).toContain("Jugador u1");
-    for (const privateValue of ["betaso", "VES"]) expect(wire).not.toContain(privateValue);
+    expect(match.toJSON().players.map((p: { userId: string }) => p.userId)).toEqual(["u1", "u2"]);
+    expect(wire).not.toContain("VES");
   });
 });
 

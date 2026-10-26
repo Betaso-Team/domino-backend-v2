@@ -95,3 +95,38 @@ describe("la puerta de la llave interna", () => {
     expect(knock(abierta, undefined).sent.status).toBe(401);
   });
 });
+
+// EL PANEL CON SESIÓN: el admin presenta el token que billing-auth le emitió al iniciar sesión.
+// Este archivo no verifica tokens (eso es `features/auth`): recibe quién es, o nadie.
+describe("la puerta con un token de admin", () => {
+  const adminTokens = async (token: string) =>
+    token === "token-de-ana" ? { name: "ana" } : undefined;
+
+  const knockWithBearer = async (handler: RequestHandler, token: string) => {
+    const { res, sent } = fakeRes();
+    (res as unknown as { locals: Record<string, unknown> }).locals = {};
+    const next = vi.fn();
+    const req = {
+      get: (name: string) => (name === "authorization" ? `Bearer ${token}` : undefined),
+    } as unknown as Request;
+    handler(req, res, next);
+    await new Promise((resolve) => setImmediate(resolve));
+    return { sent, next, locals: (res as unknown as { locals: Record<string, unknown> }).locals };
+  };
+
+  it("deja pasar a un admin, y lo nombra", async () => {
+    const { next, locals } = await knockWithBearer(
+      requireAdminKey("la-llave", adminTokens),
+      "token-de-ana",
+    );
+    expect(next).toHaveBeenCalledOnce();
+    expect(locals.admin).toBe("ana");
+  });
+
+  it("un token que no es de admin es 401, y sin verificador ningún token abre", async () => {
+    const bad = await knockWithBearer(requireAdminKey("la-llave", adminTokens), "basura");
+    expect(bad.sent).toEqual({ status: 401, body: { error: "UNAUTHORIZED" } });
+    const keyOnly = await knockWithBearer(requireAdminKey("la-llave"), "token-de-ana");
+    expect(keyOnly.sent).toEqual({ status: 401, body: { error: "UNAUTHORIZED" } });
+  });
+});

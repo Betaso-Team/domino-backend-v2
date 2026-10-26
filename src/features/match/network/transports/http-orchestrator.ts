@@ -21,11 +21,11 @@ export class HttpOrchestratorCharges implements OrchestratorCharges {
   }
 
   async chargeEntry(matchId: string): Promise<void> {
-    await this.post(`internal/matches/${encodeURIComponent(matchId)}/charges`, {});
+    await this.post(`v1/matches/${encodeURIComponent(matchId)}/charges`, {});
   }
 
   async chargeBet(matchId: string, step: number, level: number): Promise<void> {
-    await this.post(`internal/matches/${encodeURIComponent(matchId)}/bets`, { step, level });
+    await this.post(`v1/matches/${encodeURIComponent(matchId)}/bets`, { step, level });
   }
 
   private async post(path: string, body: unknown): Promise<void> {

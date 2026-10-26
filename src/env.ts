@@ -149,7 +149,8 @@ const schema = z.object({
     .string("BILLING_AUTH_PUBLIC_KEY: obligatoria, es la clave pública de billing-auth")
     .min(1, "BILLING_AUTH_PUBLIC_KEY: obligatoria, es la clave pública de billing-auth")
     .transform((pem) => pem.replace(/\\n/g, "\n")),
-  JWT_ISSUER: z.string().min(1).default("betaso-auth"),
+  /** Quién firma los tokens que se aceptan: billing-auth. */
+  JWT_ISSUER: z.string().min(1).default("betaso-games-auth"),
   JWT_AUDIENCE: z.string().min(1).default("domino"),
   /**
    * DE ENTRADA: lo que presenta NUESTRA administración (panel o soporte; no la de un cliente) para

@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { JwtVerifier } from "@/features/auth";
+import { JwtVerifier, adminTokenCheck } from "@/features/auth";
 import {
   type GameModeReader,
   GameModeService,
@@ -31,7 +31,7 @@ import {
   globalConfigWith,
 } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
-import type { HistoryPort, HistoryReader } from "@/features/match/network/history";
+import type { HistoryPort, HistoryReader, MatchArchive } from "@/features/match/network/history";
 import {
   MATCH_RESULT_EXCHANGE,
   type MatchResultKey,
@@ -55,6 +55,7 @@ import {
 } from "@/features/settings";
 import { AmqpPublisher } from "@/shared/amqp";
 import { HttpClient } from "@/shared/http";
+import type { AdminTokenCheck } from "@/shared/http/api-key";
 import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
 import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
@@ -88,6 +89,11 @@ rootContainer.register<Clock>("Clock", { useValue: clock });
 rootContainer.register<Logger>("Logger", { useValue: logger });
 rootContainer.register("TokenVerifier", {
   useValue: new JwtVerifier(env.billingAuth),
+});
+// LOS OPERADORES DEL PANEL, con el token que billing-auth les emite al iniciar sesión: la misma clave
+// pública y los mismos emisores que los jugadores, otra audiencia.
+rootContainer.register<AdminTokenCheck>("AdminTokenCheck", {
+  useValue: adminTokenCheck(env.billingAuth),
 });
 
 // EL PRESENCE Y EL DRIVER DE COLYSEUS, que son infraestructura del SERVIDOR y no de una feature:
@@ -161,6 +167,9 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
 rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
 rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
+// Y UN TERCERO, el del DOCUMENTO entero: el listado y el detalle del panel, y `/game-data` del
+// backend principal. Los mismos argumentos que los dos de arriba.
+rootContainer.register<MatchArchive>("MatchArchive", { useValue: history });
 rootContainer.register("PlayerLog", { useValue: history });
 
 // EL PUBLICADOR DEL BROKER, que es la ÚNICA instancia del proceso: `AmqpPublisher` memoiza una
@@ -242,14 +251,13 @@ export const matchResultDispatcher = betasoGamesAmqp
     })
   : undefined;
 matchResultDispatcher?.start();
-rootContainer.register(MatchResultRecorder, {
-  useValue: new MatchResultRecorder({
-    outbox: matchResultOutbox,
-    wake: () => matchResultDispatcher?.wake(),
-    now: () => clock.now(),
-    log: logger,
-  }),
+const matchResultRecorder = new MatchResultRecorder({
+  outbox: matchResultOutbox,
+  wake: () => matchResultDispatcher?.wake(),
+  now: () => clock.now(),
+  log: logger,
 });
+rootContainer.register(MatchResultRecorder, { useValue: matchResultRecorder });
 // Para la suite: lo encolado, sin broker. Se exporta como el catálogo exporta `gameModes`.
 export const matchResults = matchResultOutbox;
 
@@ -413,6 +421,10 @@ export function stopAcceptingMatches(): void {
 // el historial de las otras cuarenta que siguen jugando.
 export async function shutdown(): Promise<void> {
   stopAcceptingMatches();
+  // LOS RESULTADOS QUE TODAVÍA NO ENTRARON AL OUTBOX, antes que nada: uno de una partida que terminó
+  // con el cobro del aumento en vuelo espera a ese cobro (hasta 15 s). Al revés se cierra Mongo debajo
+  // y el resultado se pierde, que es un premio que no se paga.
+  await matchResultRecorder.drain();
   // 0. PARAR EL DESPACHADOR, y va PRIMERO por lo mismo que el historial va antes que Mongo: tiene
   //    una entrega EN VUELO. `close()` cancela el temporizador y espera el `inFlight`, así que lo
   //    que estaba publicado y confirmado alcanza a marcarse `SENT`. Cortarle la base debajo dejaría

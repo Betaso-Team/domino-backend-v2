@@ -121,6 +121,8 @@ describe("reconexión — los tres caminos", () => {
     const seatId = playerIdOf(match, "t1");
     const own = [...(back.state.players.find((p) => p.playerId === seatId)?.hand.tiles ?? [])];
     expect(own).toHaveLength(7);
+    // Y se reconoce: el `userId` de su asiento es el suyo, sin que el servidor mande nada aparte.
+    expect(back.state.players.find((p) => p.userId === "t1")?.playerId).toBe(seatId);
   });
 
   // CAMINO 3: la ventana venció. Cerrar el socket NO es rendirse: al jugador lo

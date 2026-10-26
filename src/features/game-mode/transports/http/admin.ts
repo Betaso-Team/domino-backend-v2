@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Logger } from "@/logger";
-import { requireAdminKey } from "@/shared/http/api-key";
+import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import type { GameModeService } from "../../service";
 import {
   BASE,
   DELETED_MESSAGE,
+  NOT_FOUND_MESSAGE,
   REACTIVATED_MESSAGE,
   sendData,
   sendError,
@@ -21,15 +22,17 @@ import {
   updateInputOf,
 } from "./schemas";
 
-// LAS CINCO MUTACIONES DEL PANEL, detrás de su llave.
+// LAS CINCO MUTACIONES DEL PANEL Y SUS DOS LECTURAS, detrás de su llave.
 export function adminRoutes({
   service,
   logger,
   adminApiKey,
+  adminTokens,
 }: {
   readonly service: GameModeService;
   readonly logger: Logger;
   readonly adminApiKey: string | undefined;
+  readonly adminTokens?: AdminTokenCheck;
 }): Router {
   const router = Router();
 
@@ -46,12 +49,42 @@ export function adminRoutes({
       `POST ${BASE}/sync`,
       `DELETE ${BASE}/:uuid`,
       `GET ${BASE}/reactive/:uuid`,
+      `GET ${BASE}/admin`,
+      `GET ${BASE}/admin/:uuid`,
     ].join(", ");
     logger.warn(
       `API administrativa del catálogo deshabilitada: falta ADMIN_API_KEY, no se registran ${missing}`,
     );
     return router;
   }
+
+  // La llave, o un admin con su token.
+  const admin = requireAdminKey(adminApiKey, adminTokens);
+
+  // LAS LECTURAS DEL PANEL, con los dados de baja incluidos. Van acá y no en `catalog.ts` porque
+  // son administrativas, y ANTES de `reactive/:uuid` y de todo lo demás por el mismo motivo que
+  // aquél: el admin se monta primero (`register.ts`), así que `/game-modes/admin` le gana al
+  // `/:uuid` público, que lo tomaría por el uuid de un modo llamado "admin".
+  router.get(
+    `${BASE}/admin`,
+    admin,
+    validated({}, async (_input, response) => {
+      sendData(response, 200, (await service.listAll()).map(toDTO));
+    }),
+  );
+
+  router.get(
+    `${BASE}/admin/:uuid`,
+    admin,
+    validated({ params: UUID_PARAMS }, async ({ params }, response) => {
+      const mode = await service.get(params.uuid);
+      if (!mode) {
+        response.status(404).json({ status: "error", message: NOT_FOUND_MESSAGE });
+        return;
+      }
+      sendData(response, 200, toDTO(mode));
+    }),
+  );
 
   // `reactive/:uuid` ES UNA MUTACIÓN aunque conserve el verbo GET por compatibilidad, así que va
   // detrás de la llave. Y VA ANTES DE `/:uuid`: hoy Express no las confunde —`/game-modes/reactive/x`
@@ -64,7 +97,7 @@ export function adminRoutes({
     // LA CREDENCIAL PRIMERO Y EL SCHEMA DESPUÉS, en las cinco mutaciones: al revés, un anónimo
     // puede distinguir "forma inválida" de "forma válida" en una ruta que no tiene derecho a
     // tocar.
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         await service.reactivate(params.uuid);
@@ -77,7 +110,7 @@ export function adminRoutes({
 
   router.post(
     BASE,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ body: CREATE_BODY }, async ({ body }, response) => {
       try {
         // 201 y no 200, igual que v1 (`routes.ts:94`).
@@ -90,7 +123,7 @@ export function adminRoutes({
 
   router.put(
     `${BASE}/:uuid`,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ params: UUID_PARAMS, body: UPDATE_BODY }, async ({ params, body }, response) => {
       try {
         sendData(response, 200, toDTO(await service.update(params.uuid, updateInputOf(body))));
@@ -104,7 +137,7 @@ export function adminRoutes({
   // `POST /game-modes/:uuid` que pueda absorberlo. El orden es el del plan y el del archivo de v1.
   router.post(
     `${BASE}/sync`,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({}, async (_input, response) => {
       try {
         // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
@@ -124,7 +157,7 @@ export function adminRoutes({
 
   router.delete(
     `${BASE}/:uuid`,
-    requireAdminKey(adminApiKey),
+    admin,
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         // SIN `data`, igual que v1 (`routes.ts:167-170`): la baja devuelve el mensaje y nada más.

@@ -37,7 +37,10 @@ decoder estricto antes de alcanzar el comando.
 - Cada jugador ve sus fichas y sólo el conteo de las fichas rivales.
 - Nadie ve el contenido del pozo; sí ve cuántas quedan.
 - `displayName`, `username` y `profilePicture` son presentación sincronizada.
-- `platformId`, `userUuid` y `currency` están en el snapshot del servidor, pero no viajan por wire.
+- `userId` (el `sub` del token) viaja en cada asiento: así el cliente reconoce el suyo con
+  `players.find((p) => p.userId === sub)`, también antes de revelar las fichas. Es el último campo de
+  `PlayerState`.
+- La moneda no es del estado: vive en el `seat` de la config del servidor y no viaja por wire.
 - Las fichas colocadas, el turno, puntajes, fases y deadlines son públicos.
 
 ## HTTP público
@@ -56,12 +59,21 @@ cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 
 ## HTTP interno
 
-Estas rutas requieren el header `x-internal-api-key` con la llave de administración. Si `ADMIN_API_KEY` no existe, no se registran y responden
-404: fallan cerradas.
+Estas rutas requieren una de dos credenciales:
+
+- el header `x-internal-api-key` con la llave de administración (scripts y soporte);
+- `Authorization: Bearer <token>` con el token de admin que billing-auth emite cuando un admin inicia
+  sesión (`POST /v1/admins/login` de billing-auth): ES256, audiencia `betaso-games-admin` y
+  `typ: admin`. Abre lo mismo que la llave: no hay roles.
+
+Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 
 | Método y ruta | Uso |
 |---|---|
-| `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte |
+| `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte (lee `timeline` y, en los documentos viejos, `entries`) |
+| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
+| `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
+| `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `POST /game-modes` | Crea un modo |
 | `PUT /game-modes/:uuid` | Aplica un patch al modo |
 | `DELETE /game-modes/:uuid` | Baja lógica |
@@ -71,6 +83,86 @@ Estas rutas requieren el header `x-internal-api-key` con la llave de administrac
 | `GET /internal/settings/:section` | Una sección |
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
 | `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
+
+### El registro de cada partida
+
+Cada partida deja **un documento** en `match_history`, con la forma v2.1 de truco (`version: 2.1`). Se
+abre al primer reparto (`status: "started"`, con `roomId`, `table`, `matchConfig` —seed y parejas
+incluidos—, `seats` y `matchStartedAt`), se alimenta durante la partida (`timeline`, la secuencia de
+actos y hechos; `rounds`, lo que las reglas concluyeron de cada mano) y se cierra al terminar
+(`status: "finished" | "aborted"`, `matchEndedAt`, `matchDurationInMs`, `matchEndReason`, ganadores,
+`players` con su salida y su plata, `rateId`, `betMultiplier` y `rankingMultiplier`). Una mesa que nunca
+arrancó nace en el cierre. Los instantes son fechas (ISO en el JSON); las duraciones, números. Los
+documentos de antes de la v2.1 (`{ matchId, entries, createdAt, updatedAt }`) se siguen leyendo en las
+cuatro rutas.
+
+**`GET /internal/matches`** — el listado del panel, la más nueva primero (`createdAt` descendente y
+`_id` de desempate), paginado **por cursor**. Todos los parámetros son opcionales y los filtros se
+combinan con AND:
+
+| Parámetro | Qué es | Inválido (400 `MALFORMED`) |
+|---|---|---|
+| `pageSize` | Filas por página, entero de 1 a 100; default 20 | fuera de rango, no entero |
+| `after` | El `nextCursor` de la página anterior, tal cual | cualquier cosa que no sea un cursor emitido por esta ruta |
+| `from`, `to` | Instantes ISO 8601 **con hora y zona** (`2026-10-01T00:00:00.000Z`, `…-04:00`): `createdAt >= from` y `createdAt < to` | una fecha sin hora, un instante imposible, `from` posterior a `to` |
+| `matchId` | Igual a | vacío, más de 128 caracteres, caracteres de control |
+| `roomId` | Igual a | ídem |
+| `id` | El `_id` del documento: 24 hexadecimales | otra cosa |
+| `userId` | Un jugador: igual al `userId` de **alguno** de los asientos (`seats[].userId`), en mesas de dos o de cuatro. Una partida en la que el mismo usuario ocupa dos asientos sale una vez. Los documentos de antes de la v2.1 no tienen asientos y no coinciden nunca | ídem `matchId`, o repetido |
+
+Un parámetro que no está en la tabla se ignora (`page` incluido: ya no existe). `from` igual a `to` es
+un rango vacío, no un error.
+
+```json
+{
+  "status": "success",
+  "data": {
+    "items": [
+      {
+        "_id": "6717a2f0c3bf3e710572f941",
+        "matchId": "orq-8f2c",
+        "roomId": "ZYIVoz6TQ",
+        "game": "domino",
+        "status": "finished",
+        "table": { "gameModeId": "…", "name": "Clásica 1v1", "entryFeeInUC": 10, "prizeInUC": 18, "isFree": false },
+        "createdAt": "2026-10-22T14:00:00.000Z",
+        "updatedAt": "2026-10-22T14:09:31.000Z",
+        "matchStartedAt": "2026-10-22T14:00:03.000Z",
+        "matchEndedAt": "2026-10-22T14:09:00.000Z",
+        "matchEndReason": "SCORE",
+        "winnerIds": ["seat-1"]
+      }
+    ],
+    "pageSize": 20,
+    "nextCursor": "eyJ0IjoxNzkyNjc3NjAwMDAwLCJpZCI6IjY3MTdhMmYwYzNiZjNlNzEwNTcyZjk0MSJ9",
+    "total": 1234,
+    "totalExact": true
+  }
+}
+```
+
+- **`nextCursor`** es opaco (base64url de `{ t, id }`: el `createdAt` en epoch ms y el `_id` de la última
+  fila) y es `null` en la última página. La página siguiente se pide con `after=<nextCursor>` **y los
+  mismos filtros**; empieza estrictamente después de esa fila, así que un empate en el mismo
+  milisegundo no repite ni pierde filas, y una página honda cuesta lo mismo que la primera.
+- **`total`** se cuenta barato: sin filtros es el estimado de la colección (`totalExact: false`); con
+  algún filtro se cuenta hasta 10 000 (`totalExact: true`, o `total: 10000` y `totalExact: false` si
+  hay más); con `after` no se cuenta (`total: null`, `totalExact: false`).
+- **Plazo**: cada consulta tiene 5 s. Si la base no contesta a tiempo:
+  `503 { status: "error", message: "La búsqueda tardó demasiado; acota el rango de fechas" }`.
+
+Cada fila es un resumen: sin `timeline` ni `rounds`. Un documento viejo aparece con lo que tiene
+(`_id`, `matchId`, `game`, `createdAt`, `updatedAt`) y sale en todo listado que no filtre por sala.
+
+**`GET /internal/matches/:matchId`** — `200 { status: "success", data: <documento> }`, con el `_id`
+como texto y `rounds`/`timeline` al final; `404 { status: "error", message: "Partida no encontrada" }`.
+
+**`GET /game-data/:roomId`** — el contrato del backend principal, igual que en truco: `200` con el
+documento pelado (sin envelope y sin `_id`) y `404 { error: "MATCH_NOT_FOUND" }`. Busca por `roomId` y,
+si no, por `matchId` (los documentos viejos no guardaban la sala).
+
+Las tres van con la llave o el token de admin; sin credencial, `401 { error: "UNAUTHORIZED" }` antes de
+mirar la forma. El `POST /internal/matches` del orquestador es otra ruta, con su llave.
 
 **Niveles de aumento de un modo.** `POST` y `PUT /game-modes` aceptan `betLevels`:
 `[{ level, extra, additionalPoints }]`. `level` es el multiplicador de la entrada y el premio (entero
@@ -131,7 +223,7 @@ los niveles de aumento que ofrece la mesa los decide el orquestador, que es quie
 **Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
 
-- **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}internal/matches/:matchId/charges`
+- **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
   (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
   cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
   `CHARGE_REJECTED`.

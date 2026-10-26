@@ -42,23 +42,23 @@ export type Hand = SchemaType<typeof Hand>;
 // `REVEAL_TILES`, y NO se resetea entre rondas —la ventana de reparto es solo la de la
 // ronda 1—. Es **público** a propósito: el front tiene que poder decir *a quién se está
 // esperando*, que es la mitad del valor de la ventana.
-// EL CORTE ENTRE PRESENTACIÓN E IDENTIDAD, y es el motivo por el que los seis campos de
-// abajo no son un solo bloque. `displayName`/`username`/`profilePicture` son lo que el
-// front dibuja y viajan al wire; el `userId` de plataforma y la moneda ya
-// cobrada son `noSync()` —viven en la instancia del servidor y NO entran a la metadata,
-// así que no se codifican, no se sincronizan y ni siquiera aparecen en `toJSON()`—.
+// EL ESTADO ES LO QUE SE JUEGA Y SE DIBUJA, y todo lo que está acá viaja al wire. Los datos de
+// infraestructura —la moneda con que se cobró la inscripción, la tasa— no son del juego: viven en
+// el `seat` de la config congelada (`config.seats`), que es de donde los lee la liquidación.
+// `displayName`/`username`/`profilePicture` son lo que el front dibuja.
 //
-// Están en el árbol igual, y no en un mapa aparte de la sala, porque son del ASIENTO:
-// quien tenga el `PlayerState` tiene todo lo que hace falta para liquidarlo, sin un
-// segundo lugar obligado a mantenerse en sincronía con éste.
+// `userId` viaja a propósito: es el `sub` del token (el `players.id` de billing-auth,
+// estable entre lanzamientos), y es como el cliente encuentra SU asiento: el `playerId` es
+// posicional (`seat-N`) y no hay otra forma de saber cuál es el suyo, ni siquiera antes de
+// `REVEAL_TILES`. Es el mismo modelo de truco, donde `playerId` es el `userId`. No es identidad
+// de plataforma ni una credencial: el jugador ya conoce el suyo, y el `sid` (que sí lo es) no
+// entra al estado.
 export const PlayerState = schema(
   {
     playerId: t.string(),
     displayName: t.string(),
     username: t.string().optional(),
     profilePicture: t.string().optional(),
-    userId: t.string().noSync(),
-    currency: t.string().noSync(),
     teamId: t.string(),
     seatIndex: t.number(),
     connected: t.boolean().default(true),
@@ -81,6 +81,9 @@ export const PlayerState = schema(
     // los dos dicen "acá no hay nadie" pero uno deja la mesa andando y el otro la cierra. Y
     // separa además quién COBRA — el bot no, ver `network/settlement.ts`.
     isBot: t.boolean().default(false),
+    // ⚠ VA AL FINAL por lo mismo que `isBot`: antes era `noSync()` y no ocupaba índice, así que
+    // sincronizarlo en su lugar habría corrido `teamId` y todo lo que sigue. Ver arriba por qué viaja.
+    userId: t.string(),
   },
   "PlayerState",
 );

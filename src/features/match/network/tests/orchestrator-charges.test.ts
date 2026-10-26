@@ -36,12 +36,12 @@ const REVOKED: NetworkMatchEvent[] = [{ type: "MULTIPLIER_REVOKED", level: 2 }];
 function charger(chargeBet: OrchestratorCharges["chargeBet"], timeoutMs = 1_000) {
   const emitted: NetworkMatchEvent[][] = [];
   const revoke = vi.fn(() => REVOKED);
-  const sink = new OrchestratorBetCharger({
+  const { sink, settled } = new OrchestratorBetCharger({
     orchestrator: { chargeEntry: vi.fn(), chargeBet: vi.fn(chargeBet) },
     timeoutMs,
     log: silentLogger(),
   }).sinkFor("m-1", (events) => emitted.push([...events]), revoke);
-  return { sink, emitted, revoke };
+  return { sink, settled, emitted, revoke };
 }
 
 describe("OrchestratorBetCharger", () => {
@@ -87,6 +87,28 @@ describe("OrchestratorBetCharger", () => {
     ]);
   });
 
+  it("settled espera al cobro en vuelo y resuelve con el trato ya anulado si no se pudo", async () => {
+    let answer = () => {};
+    const { sink, settled, revoke } = charger(
+      () =>
+        new Promise<void>((_, reject) => {
+          answer = () => reject(new ChargeRejectedError("INSUFFICIENT_FUNDS"));
+        }),
+    );
+
+    sink([agreed(2)]);
+    let done = false;
+    const waiting = settled().then(() => {
+      done = true;
+    });
+    await new Promise((resume) => setTimeout(resume, 0));
+    expect(done).toBe(false);
+
+    answer();
+    await waiting;
+    expect(revoke).toHaveBeenCalledOnce();
+  });
+
   it("un aumento que no cuesta nada no se cobra", async () => {
     const chargeBet = vi.fn(async () => undefined);
     const { sink } = charger(chargeBet);
@@ -130,9 +152,9 @@ describe("HttpOrchestratorCharges", () => {
     await client().chargeBet("m-1", 1, 3);
 
     expect(seen.slice(-2)).toEqual([
-      { url: "/internal/matches/m%2F1/charges", key: "callback-key-123456", body: "{}" },
+      { url: "/v1/matches/m%2F1/charges", key: "callback-key-123456", body: "{}" },
       {
-        url: "/internal/matches/m-1/bets",
+        url: "/v1/matches/m-1/bets",
         key: "callback-key-123456",
         body: '{"step":1,"level":3}',
       },

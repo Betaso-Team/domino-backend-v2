@@ -1,5 +1,5 @@
 import type { Logger } from "@/logger";
-import { requireAdminKey } from "@/shared/http/api-key";
+import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import { z } from "zod";
@@ -38,11 +38,13 @@ export function historyRoutes({
   logger,
   history,
   adminApiKey,
+  adminTokens,
 }: {
   readonly logger: Logger;
   readonly history: HistoryReader;
   /** `undefined` ⇒ la ruta NO se registra. */
   readonly adminApiKey: string | undefined;
+  readonly adminTokens?: AdminTokenCheck;
 }): Router {
   const router = Router();
   // FAIL CLOSED: sin llave configurada la ruta interna NO EXISTE. La alternativa —
@@ -78,7 +80,8 @@ export function historyRoutes({
   // verde de vitest, que borra los tipos sin chequearlos.
   router.get(
     HISTORY_ROUTE,
-    requireAdminKey(adminApiKey),
+    // Una lectura de soporte: la llave, o cualquier operador con sesión en el panel.
+    requireAdminKey(adminApiKey, adminTokens),
     validated({ params: HISTORY_PARAMS }, async ({ params }, response) => {
       // Contra `HistoryReader` y no contra la implementación: el cast a `MemoryHistory`
       // que estaba acá compilaba una promesa que el token no hacía.

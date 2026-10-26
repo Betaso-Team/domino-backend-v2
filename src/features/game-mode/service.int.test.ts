@@ -164,6 +164,36 @@ describe("GameModeService: lectura", () => {
     expect(await drain(outbox, clock)).toEqual([]);
     expect(wake).not.toHaveBeenCalled();
   });
+
+  // LO QUE VE EL PANEL: reactivar exige poder listar al retirado primero. Mismo armado que
+  // `listActive`, pero acá el orden es el del repositorio (recientes primero).
+  it("listAll devuelve activos e inactivos y no toma el lease ni encola nada", async () => {
+    const { service, repository, outbox, clock, taken, wake } = harness();
+    const activa = await repository.create(clasica());
+    clock.set(clock.now() + 1000);
+    const retirada = await repository.create(clasica({ name: "Retirada" }));
+    await repository.update(retirada.uuid, { isActive: false });
+
+    expect(await service.listAll()).toEqual([await repository.byUuid(retirada.uuid), activa]);
+
+    expect(taken).toEqual([]);
+    expect(await drain(outbox, clock)).toEqual([]);
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it("get ve al modo dado de baja y tampoco toma el lease ni encola", async () => {
+    const { service, repository, outbox, clock, taken, wake } = harness();
+    const modo = await repository.create(clasica());
+    await repository.update(modo.uuid, { isActive: false });
+
+    expect(await service.get(modo.uuid)).toEqual(await repository.byUuid(modo.uuid));
+    expect((await service.get(modo.uuid))?.isActive).toBe(false);
+    expect(await service.get("no-existe")).toBeUndefined();
+
+    expect(taken).toEqual([]);
+    expect(await drain(outbox, clock)).toEqual([]);
+    expect(wake).not.toHaveBeenCalled();
+  });
 });
 
 describe("GameModeService: create", () => {
@@ -602,6 +632,8 @@ describe("GameModeService: el lease del catálogo", () => {
     await service.syncAll("lote-1");
     await service.listActive();
     await service.getActive(creada.uuid);
+    await service.listAll();
+    await service.get(creada.uuid);
 
     expect(taken).toEqual(
       Array.from({ length: 5 }, () => ({ name: CATALOG_LEASE, ttlMs: CATALOG_LEASE_TTL_MS })),

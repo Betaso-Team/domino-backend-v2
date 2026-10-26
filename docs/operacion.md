@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor `JWT_ISSUER` (default `betaso-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y los dos
+`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y los dos
 brokers de RabbitMQ son capacidades opcionales elegidas por la presencia de sus URLs.
 
 El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
@@ -93,6 +93,87 @@ sequenceDiagram
 
 Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos durante el deploy. Un
 `kill -9` no ejecuta este flujo: las claves huérfanas desaparecen por TTL.
+
+## Registro de partidas
+
+`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y cuatro
+índices que el proceso crea al primer uso:
+
+| Índice | Sirve a |
+|---|---|
+| `matchId_1` (único) | que el documento no nazca dos veces; el filtro `matchId` del listado |
+| `roomId_1_createdAt_-1__id_-1` | `/game-data/:roomId` (por el prefijo); el filtro `roomId` del listado, con o sin fechas, ya ordenado |
+| `createdAt_-1__id_-1` | el orden del listado: sin filtros, por fechas y con cursor |
+| `seats.userId_1_createdAt_-1__id_-1` | el filtro `userId` del listado, con o sin fechas y cursor, ya ordenado. Es multikey (una clave por asiento) |
+
+El filtro `id` usa el `_id_` de la colección. Cada combinación de filtros del listado sale de uno de
+estos sin recorrer la colección ni ordenar en memoria, y lee como mucho `pageSize + 1` documentos en
+cualquier página; lo mide `mongo-history.int.test.ts` con `explain` contra un Mongo de verdad.
+
+**Al desplegar sobre una colección grande.** `createIndexes` corre con la primera escritura del proceso
+y, sobre millones de documentos, tarda: las escrituras de ese proceso esperan en memoria hasta que
+termina. Conviene crear los índices a mano antes, con los mismos nombres (si coinciden, el proceso no
+hace nada):
+
+```js
+db.match_history.createIndex({ roomId: 1, createdAt: -1, _id: -1 }, { name: "roomId_1_createdAt_-1__id_-1" })
+db.match_history.createIndex({ createdAt: -1, _id: -1 }, { name: "createdAt_-1__id_-1" })
+db.match_history.createIndex({ "seats.userId": 1, createdAt: -1, _id: -1 }, { name: "seats.userId_1_createdAt_-1__id_-1" })
+db.match_history.createIndex({ matchId: 1 }, { name: "matchId_1", unique: true })
+```
+
+El `roomId_1` que creaba la versión anterior quedó cubierto por el compuesto (su prefijo): no estorba,
+pero ocupa memoria y frena cada escritura. Una vez creado el compuesto, se puede borrar:
+`db.match_history.dropIndex("roomId_1")`.
+
+**El de `seats.userId` es el más grande de los cuatro**: lleva una clave por asiento (dos o cuatro por
+partida; un usuario en dos asientos de la misma partida es una sola), así que sobre la colección de
+producción se crea **a mano y antes del despliegue** que lo trae, con la línea de arriba. Mientras no
+exista, el filtro por jugador funciona pero recorre el índice de fechas descartando partidas (o, para un
+jugador con pocas, las ordena en memoria), y una búsqueda ancha puede terminar en el 503 del plazo. Tiene
+que ser el compuesto: con `{ "seats.userId": 1 }` solo, el plan medido ordena en memoria (`SORT`).
+
+**Para ver el plan de un listado**, la consulta es la que arma `pageQueryOf` (`mongo-history.ts`): los
+filtros, `sort: { createdAt: -1, _id: -1 }` (salvo con `matchId` o `id`, que son únicos) y
+`limit: pageSize + 1`. Por ejemplo, una sala en un rango de fechas:
+
+```js
+db.match_history.find(
+  { roomId: "ZYIVoz6TQ", createdAt: { $gte: ISODate("2026-10-01T00:00:00Z"), $lt: ISODate("2026-10-02T00:00:00Z") } },
+  { matchId: 1, roomId: 1, status: 1, createdAt: 1 },
+).sort({ createdAt: -1, _id: -1 }).limit(21).explain("executionStats")
+```
+
+En `queryPlanner.winningPlan` tiene que haber un `IXSCAN` (o `IDHACK` para `id`) y **ni `COLLSCAN` ni
+`SORT`**; en `executionStats`, `totalDocsExamined` no pasa de `limit`. Una página con cursor tiene el
+`$or` en la raíz y su plan es `SUBPLAN` → `SORT_MERGE` sobre dos `IXSCAN` del mismo índice: el
+`SORT_MERGE` une dos ramas ya ordenadas y no bloquea. El filtro por jugador es
+`{ "seats.userId": "<userId>" }` y su plan es un `IXSCAN` de `seats.userId_1_createdAt_-1__id_-1`, también
+sin `SORT` aunque el índice sea multikey. Si aparece un `COLLSCAN` o un `SORT`, falta un índice
+(`db.match_history.getIndexes()`).
+
+Cada consulta del listado lleva `maxTimeMS: 5000`. Una que lo excede contesta 503 al panel y deja un
+`warn` `«listado de partidas: la base excedió el plazo»`: con los índices en su lugar no debería pasar,
+así que es la señal de un índice que falta o de una base saturada.
+
+Si el único no se puede crear —dos documentos viejos de la misma partida— el proceso graba igual y lo
+dice con un `error`: `«historial: no se pudieron crear los índices; se graba igual»` (el campo `indexes`
+dice cuáles). Los dos del listado se crean igual: van en otro pedido, porque `createIndexes` es todo o
+nada. Para encontrar los repetidos y dejar uno:
+
+```js
+db.match_history.aggregate([
+  { $group: { _id: "$matchId", n: { $sum: 1 }, ids: { $push: "$_id" } } },
+  { $match: { n: { $gt: 1 } } },
+])
+```
+
+El índice se vuelve a pedir en el próximo arranque.
+
+Para rebobinar una partida alcanza con su id: `npm run replay -- <matchId>` lee la cabecera del
+documento (seed, parejas, plazos, marcador inicial). Los documentos de antes de la v2.1 no la tienen y
+siguen pidiendo los argumentos: `npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER>
+<asiento...>`.
 
 ## Resultados de partida
 

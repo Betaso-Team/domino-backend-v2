@@ -55,6 +55,10 @@ Sirve de referencia para medir lo que falta:
   "game_modes_domino"`, el nombre que declaró v1. Otro nombre daría un catálogo vacío.
 - `src/di-container.ts:301-308`: los ajustes se leen de `domino_settings`, también de v1.
 - Juntas suponen que v2 corre sobre la base de datos del dominó v1 de Betaso.
+- **Decidido el 2026-10-14: el catálogo de modos y los ajustes viven en el dominó.** El dominó es
+  dueño de los dos: los guarda, los modifica y los sirve; ni el orquestador ni un cliente los
+  administran. Lo que queda abierto de este punto es solo el nombre heredado de las colecciones, que
+  importa el día que el dominó tenga su propia base y no la del dominó v1.
 
 ### Torneos: escritos contra Betaso, todavía sin cablear
 
@@ -104,12 +108,16 @@ Betaso:
 - `betLevels[].additionalPoints`: los puntos de ranking de cada aumento.
 - `isFreeRoom` y `enableBots`: los dos vienen del modelo de v1.
 
-### El panel de admin y la sesión de Betaso
+### El panel de admin
 
-El panel corre en el navegador y no puede mandar `ADMIN_API_KEY`. Truco lo resolvió validando el
-Bearer del admin contra `GET auth/me` del backend de Betaso. En el dominó eso no está hecho y queda
-como deuda abierta en `AGENTS.md` («el panel no puede entrar con su sesión»). Portarlo así reviviría
-`BETASO_BACKEND_URL`.
+El admin inicia sesión en billing-auth, que le emite un token ES256 con audiencia
+`betaso-games-admin`. Las rutas de admin del dominó lo aceptan como `Bearer`, verificado con la misma
+clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a Betaso quién es un
+administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
+
+**Decidido el 2026-10-14:** no se porta. El panel será uno propio de Betaso Games, con login del
+sistema, y no es del MVP. Mientras tanto el catálogo y los ajustes se administran con `ADMIN_API_KEY`
+desde un cliente HTTP.
 
 ## 3. Reglas de negocio copiadas de Betaso v1
 
@@ -129,11 +137,6 @@ marca del sistema, o atan el servicio a Betaso de otra forma. Los nombres del br
 (`BETASO_GAMES_RABBITMQ_URL`, `betasoGamesAmqp` y el exchange `betaso_games`) llevan la marca y no
 figuran aquí.
 
-- **Emisor del JWT.** `JWT_ISSUER` vale `"betaso-auth"` por defecto (`env.ts:152`).
-  - El emisor es billing-auth, un servicio del sistema; el backend de Betaso no usa ese valor. Por la
-    regla de nombres le corresponde `betaso-games-auth`.
-  - Cambiarlo es un cambio de contrato: billing-auth, el orquestador y el dominó tienen que cambiar el
-    valor juntos.
 - **Paquete.** `package.json`: `"@betaso/domino-backend"`, «Backend del Dominó Betaso».
 - **Dominios y rutas.**
   - `.env.example:154`: `SERVER_ADDRESS=domino.betaso.com`.
