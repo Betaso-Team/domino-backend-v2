@@ -223,7 +223,7 @@ los niveles de aumento que ofrece la mesa los decide el orquestador, que es quie
 **Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
 
-- **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}internal/matches/:matchId/charges`
+- **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
   (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
   cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
   `CHARGE_REJECTED`.

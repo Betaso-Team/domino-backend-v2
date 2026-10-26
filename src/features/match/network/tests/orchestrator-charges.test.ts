@@ -152,9 +152,9 @@ describe("HttpOrchestratorCharges", () => {
     await client().chargeBet("m-1", 1, 3);
 
     expect(seen.slice(-2)).toEqual([
-      { url: "/internal/matches/m%2F1/charges", key: "callback-key-123456", body: "{}" },
+      { url: "/v1/matches/m%2F1/charges", key: "callback-key-123456", body: "{}" },
       {
-        url: "/internal/matches/m-1/bets",
+        url: "/v1/matches/m-1/bets",
         key: "callback-key-123456",
         body: '{"step":1,"level":3}',
       },
