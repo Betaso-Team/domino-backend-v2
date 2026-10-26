@@ -2454,6 +2454,27 @@ en cada pedido. El contrato nuevo lo fijó el panel de Tablea, que se construyó
   solo, el plan ordenaba en memoria. Un usuario en dos asientos da una sola clave: la partida sale y cuenta
   una vez (contrato de los dos adaptadores y suite contra Mongo).
 
+## Port de truco — del 19 al 26/10 (`1c8ec05` … `5f14f3e`): nada que portar
+
+Truco `develop` en `905c3dd`, docs en reglas v21 / negocio v50 / app-infra v51 / estructura v42.
+
+| truco | acá |
+|---|---|
+| `bed0d33`, `8b51bb4`, `e4e630c`, `7498991`, `4472332` el registro v2.1 | **YA ESTABA**: es «el registro v2.1 de cada partida». Lo único distinto es a propósito: la timeline conserva `matchId` por entrada |
+| `6e1fa86` muere `GET /matches/:roomId/history` | **NO APLICA**: el dominó nunca la tuvo. `GET /internal/matches/:matchId/history` es otra cosa, la del soporte, y se queda |
+| `6360da5`, `e713cf3` migración de los índices únicos de v1 | **NO APLICA**: el dominó escribe en `match_history`, colección suya. Las de v1 con `tokenId` único (`domino_two_players_game_states`, `domino_four_players_game_states`, `dominotransactions`) no las toca |
+| `1c8ec05` `betMultiplier` y `rankingMultiplier` | **NO APLICA**: acá no había ambigüedad. El aumento es `BetLevel`/`acceptedBetLevel` y `multiplier` es sólo el peso del ranking. El registro ya guarda los dos con los nombres de truco |
+| `89f723d` versión 2.1.0 del paquete | **NO PORTADO**: nadie lee la versión del `package.json`. La forma del registro la dice `MATCH_RECORD_VERSION` |
+| `1238acd` la pausa de cierre por tramos | **NO APLICA**: los tramos son de truco (mazo, cantos, cartas reveladas). `PRESENTING_ROUND` del dominó es un solo plazo de 4 s y su front no pidió cambiarlo |
+| `af5de25` … `0e97c6b` saltar la pausa de cierre cuando todos están listos | **NO PORTADO**: no está en `develop` de truco (ramas `feature/ready-for-next-round*`). Tampoco es una regresión: el `READY` de v1 es para ARRANCAR la partida (`on-ready.ts`), no para cortar la pausa entre manos. Si se mergea allá y el front del dominó lo pide, es un verbo nuevo en `PRESENTING_ROUND` |
+| `4f426a9` tasas congeladas por partida | **NO APLICA**: el dominó no convierte monedas ni tiene libro |
+| `5b65461`, `fbe52e1` core-loop: un `settle()` por partida, con `abandoned` por participante | **NO APLICA ACÁ, sí al orquestador** si él llama al `settle()` de Betaso: con monedas mixtas la segunda llamada se descartaba por `matchId` y esos jugadores perdían cofre y racha |
+| `88906b1` un segundo de pausa en el e2e de la revancha | **NO APLICA**: la compuerta del dominó contesta `eligible: false` sin consultar nada, no hay carrera contra la pausa |
+| `4e836b1`, `23ee174` logs de la cola (`en cola`, `grupo formado` con `vetoBroken`, `salió de la cola` con motivo) | **NO APLICA ACÁ, sí al orquestador**, que es quien empareja. `69c8462` es la investigación que los motivó: el veto SÍ cede a los 20 s, y lo que falla en stage está antes, en el front que no manda el pedido |
+| `142aa06`, `905c3dd`, `5f14f3e` el lobby recuenta la cola al cambiar (como mucho cada 250 ms) y no sólo en el pulso de 5 s | **NO APLICA ACÁ, sí al orquestador**: no hay lobby |
+| `678ca23`, `ca89830` envido por cantidad | reglas de truco |
+| `1e5dad8`, `96fccb2`, `68ca374`, `e02530d` | docs de truco |
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
