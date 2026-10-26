@@ -72,7 +72,8 @@ export function describePlayerLogContract(
       const [u1] = (await log.pageOf("u1", 1, 10)).items.filter((row) => row.id === "m-finished");
       const [u2] = (await log.pageOf("u2", 1, 10)).items.filter((row) => row.id === "m-finished");
 
-      expect(u1).toMatchObject({ result: "win", prize: 18, score: 104 });
+      // LA SALA ES LO QUE EL JUGADOR VE Y DICTA A SOPORTE: viaja aunque la base proyecte la fila.
+      expect(u1).toMatchObject({ roomId: "room-1", result: "win", prize: 18, score: 104 });
       expect(u2).toMatchObject({ result: "abandoned", prize: 0, score: 40 });
     });
 
