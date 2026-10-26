@@ -2454,6 +2454,86 @@ en cada pedido. El contrato nuevo lo fijó el panel de Tablea, que se construyó
   solo, el plan ordenaba en memoria. Un usuario en dos asientos da una sola clave: la partida sale y cuenta
   una vez (contrato de los dos adaptadores y suite contra Mongo).
 
+## Port de truco — del 19 al 26/10 (`1c8ec05` … `5f14f3e`): nada que portar
+
+Truco `develop` en `905c3dd`, docs en reglas v21 / negocio v50 / app-infra v51 / estructura v42.
+
+| truco | acá |
+|---|---|
+| `bed0d33`, `8b51bb4`, `e4e630c`, `7498991`, `4472332` el registro v2.1 | **YA ESTABA**: es «el registro v2.1 de cada partida». Lo único distinto es a propósito: la timeline conserva `matchId` por entrada |
+| `6e1fa86` muere `GET /matches/:roomId/history` | **NO APLICA**: el dominó nunca la tuvo. `GET /internal/matches/:matchId/history` es otra cosa, la del soporte, y se queda |
+| `6360da5`, `e713cf3` migración de los índices únicos de v1 | **NO APLICA**: el dominó escribe en `match_history`, colección suya. Las de v1 con `tokenId` único (`domino_two_players_game_states`, `domino_four_players_game_states`, `dominotransactions`) no las toca |
+| `1c8ec05` `betMultiplier` y `rankingMultiplier` | **NO APLICA**: acá no había ambigüedad. El aumento es `BetLevel`/`acceptedBetLevel` y `multiplier` es sólo el peso del ranking. El registro ya guarda los dos con los nombres de truco |
+| `89f723d` versión 2.1.0 del paquete | **NO PORTADO**: nadie lee la versión del `package.json`. La forma del registro la dice `MATCH_RECORD_VERSION` |
+| `1238acd` la pausa de cierre por tramos | **NO APLICA**: los tramos son de truco (mazo, cantos, cartas reveladas). `PRESENTING_ROUND` del dominó es un solo plazo de 4 s y su front no pidió cambiarlo |
+| `af5de25` … `0e97c6b` saltar la pausa de cierre cuando todos están listos | **NO PORTADO**: no está en `develop` de truco (ramas `feature/ready-for-next-round*`). Tampoco es una regresión: el `READY` de v1 es para ARRANCAR la partida (`on-ready.ts`), no para cortar la pausa entre manos. Si se mergea allá y el front del dominó lo pide, es un verbo nuevo en `PRESENTING_ROUND` |
+| `4f426a9` tasas congeladas por partida | **NO APLICA**: el dominó no convierte monedas ni tiene libro |
+| `5b65461`, `fbe52e1` core-loop: un `settle()` por partida, con `abandoned` por participante | **NO APLICA ACÁ, sí al orquestador** si él llama al `settle()` de Betaso: con monedas mixtas la segunda llamada se descartaba por `matchId` y esos jugadores perdían cofre y racha |
+| `88906b1` un segundo de pausa en el e2e de la revancha | **NO APLICA**: la compuerta del dominó contesta `eligible: false` sin consultar nada, no hay carrera contra la pausa |
+| `4e836b1`, `23ee174` logs de la cola (`en cola`, `grupo formado` con `vetoBroken`, `salió de la cola` con motivo) | **NO APLICA ACÁ, sí al orquestador**, que es quien empareja. `69c8462` es la investigación que los motivó: el veto SÍ cede a los 20 s, y lo que falla en stage está antes, en el front que no manda el pedido |
+| `142aa06`, `905c3dd`, `5f14f3e` el lobby recuenta la cola al cambiar (como mucho cada 250 ms) y no sólo en el pulso de 5 s | **NO APLICA ACÁ, sí al orquestador**: no hay lobby |
+| `678ca23`, `ca89830` envido por cantidad | reglas de truco |
+| `1e5dad8`, `96fccb2`, `68ca374`, `e02530d` | docs de truco |
+
+## Incremento completo — la conexión de cada asiento (rama `feat/conexion-de-cada-asiento`)
+
+Diseño: `docs/superpowers/specs/2026-10-26-conexion-ping-y-culpa-de-las-caidas-design.md`. Plan:
+`docs/superpowers/plans/2026-10-26-conexion-ping-y-culpa-de-las-caidas.md`. Pieza NUEVA, sin
+equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline **981 unit (en `src`) /
+338 int / 112 e2e**, con `typecheck`, lint y `depcruise` en verde.
+
+- **El registro decía `DISCONNECTED` y nada más.** Ahora cada jugador del cierre lleva
+  `players[].connection`: el ping medido por el servidor y cada caída, vuelta y salida con su evidencia
+  y un veredicto (`OURS` / `NETWORK` / `INTENTIONAL` / `UNKNOWN`). Es diagnóstico: no mueve plata.
+  Cómo leerlo: `docs/operacion.md`, «Por qué se desconectó alguien».
+- **El ping lo mide el SERVIDOR** (`transports/colyseus/connection-monitor.ts`): un `ws.ping(nonce)`
+  propio cada 2 s y al conectar el socket. Los pings del transporte van sin payload, así que se
+  distinguen. El navegador y React Native contestan solos; el jugador no puede falsearlo.
+- **La regla es pura y el orden es la decisión** (`network/connection.ts`): lo nuestro se pregunta
+  primero, porque culpar al jugador de lo que fue del servidor es lo único que no puede hacer.
+- **Tres cosas del SDK que cambiaron el diseño**, medidas en `node_modules`:
+  - el SDK cierra él mismo con `4010` cuando el navegador dispara `offline` (`Connection.mjs:28`): un
+    `4010` sin marca de apagado es RED, no apagado;
+  - `room.clock.rtt()/jitter()` no mide nada sin `defineInput()` (skill `colyseus`,
+    `references/netcode.md:162`), y el dominó no define input;
+  - la API de WebSocket no deja mandar `1001` a mano (`invalid code`) y el SDK no reintenta con `1000`.
+- **Un sondeo sin respuesta cuenta perdido sólo si llega uno posterior.** Los del final son la caída
+  misma, que el transporte tarda 6-9 s en notar; contarlos haría de toda caída «mala conexión».
+- **El desplazamiento cuenta como caída y vuelta** (`replacedBySession`): el jugador vuelve con otra
+  sesión antes de que el servidor note muerta la vieja. Antes no dejaba rastro.
+- **La sala marca lo que sólo ella sabe**: `onBeforeShutdown` prende `shuttingDown`, y sus propios
+  `disconnect()` (ocupación vencida, cobro rechazado) prenden `closingByRoom` para que su `4000` no se
+  lea como el jugador apretando salir.
+- **Lo que encontró la revisión final**, cada uno con su test en rojo primero:
+  - ⚠ **el socket desplazado que muere tarde**: la sala le pide cerrar con `4000` y el socket muerto no
+    contesta; 6-9 s después el transporte lo corta con `1006` y Colyseus llama `onDrop` por él aunque
+    el asiento siga jugando por la sesión nueva. Anotaba una segunda caída sin vuelta y, de paso —esto
+    ya pasaba antes del incremento—, marcaba `connected: false` a un jugador conectado y le abría una
+    reconexión. `onDrop` ahora sale temprano si el asiento tiene otra conexión, como ya hacía `onLeave`.
+    Para simularlo en el e2e, `pause()` del socket no alcanza (`ws` vuelve a leer solo): se anula el
+    `close` del socket viejo;
+  - el tope guardaba los primeros 50 hechos y tiraba justo el último; ahora guarda los últimos;
+  - desde el veredicto no se anota nada: el cierre puede esperar 15 s al cobro del aumento y cerrar la
+    pantalla de resultados entraba como INTENCIONAL;
+  - el medidor del event loop arrancaba en la primera caída y esa leía `0`; ahora corre desde que se
+    importa.
+- **«A todos se les fue el ping» se mide sobre el PROCESO, no sobre la mesa** (`MonitorPeers`), y pide
+  al menos 3 otros jugadores conectados (`MIN_PEERS_FOR_OVERLOAD`). Con la mesa sola, en 2P el único
+  otro era el rival, y que él también tuviera mal internet alcanzaba para culpar al servidor. Si el que
+  falla es el servidor o su red, les pasa a los de todas las mesas a la vez. Los `seat-N` se repiten
+  entre mesas, así que se excluye al que se cayó por identidad, no por id.
+
+### Deudas abiertas de este incremento
+
+1. **El panel todavía no lo muestra legible**: el campo ya aparece en su árbol JSON. La segunda parte
+   del diseño (columna de ping, veredicto junto a la salida, sección «Conexión») es del repo
+   `Tablea-Gaming-Panel`.
+2. **Minimizar la app sale como `NETWORK`.** Separarlo pide que el front avise (fase 2 del diseño).
+3. **Los umbrales no están medidos con jugadores reales** (300 ms, 100 ms, 3 perdidos, 500 ms, 3
+   jugadores para «a todos»).
+4. **El contrato contra Mongo no se corrió**: Docker estaba apagado. `MemoryHistory` corre el mismo
+   contrato y la conversión a fechas es compartida.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.

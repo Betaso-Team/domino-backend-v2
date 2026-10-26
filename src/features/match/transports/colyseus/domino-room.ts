@@ -2,6 +2,7 @@ import { rootContainer } from "@/di-container";
 import { InvalidTokenError, type TokenVerifier } from "@/features/auth";
 import type { GameModeReader } from "@/features/game-mode";
 import type { Logger } from "@/logger";
+import { eventLoopP99Ms } from "@/shared/event-loop-lag";
 import { StateView } from "@colyseus/schema";
 import {
   type AuthContext,
@@ -24,7 +25,13 @@ import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
 import { wasAbortedAtDeal } from "../../core/rules";
 import type { MatchState } from "../../core/state";
-import { BotTurnTaker, MatchEventNotifier, type MatchHistory } from "../../network";
+import {
+  BotTurnTaker,
+  type ConnectionEvent,
+  MatchEventNotifier,
+  type MatchHistory,
+  PROBE_INTERVAL_MS,
+} from "../../network";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
 import { recordEndingSink } from "../../network/match-record";
 import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
@@ -46,6 +53,7 @@ import {
   buildRouter,
   registerIndividualCommands,
 } from "./commands/di-wiring";
+import { ConnectionMonitor, probeSocketOf, processPeers } from "./connection-monitor";
 import {
   PlayerAlreadyOutError,
   SeatNotReservedError,
@@ -97,6 +105,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // pie mientras el proceso se apaga.
   private matches!: MatchRegistry;
   private heartbeat?: Delayed;
+  // EL PING Y LAS CAÍDAS DE CADA ASIENTO, para que el registro diga de quién fue la culpa de una
+  // caída. La sonda va por el reloj de la sala, como el latido.
+  private connections!: ConnectionMonitor;
+  private probing?: Delayed;
+  // LO QUE SÓLO LA SALA SABE de por qué se cortó un socket: que el proceso se está apagando —un
+  // `1006` en pleno apagado es nuestro— y que el cierre lo hizo ella —su `4000` no es el jugador
+  // apretando salir—.
+  private shuttingDown = false;
+  private closingByRoom = false;
   // LOS LATIDOS, EN FILA. Escribir el registro es ir a la red, así que dos latidos que se pisan
   // pueden dejar sus escrituras intercaladas y el último en llegar no es el último que salió. La
   // cadena los ordena, y de paso le da al apagado algo que esperar: lo que se esté escribiendo
@@ -215,6 +232,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       { roomId: this.roomId, gameModeName: mode.name },
     );
     this.history = pieces.history;
+    this.connections = new ConnectionMonitor({
+      monotonicNow: () => performance.now(),
+      wallNow: () => Date.now(),
+      eventLoopP99Ms,
+      peers: processPeers,
+    });
+    this.history.trackConnections((playerId) => this.connections.connectionOf(playerId));
     // LA REVANCHA: la sala solo la cierra cuando alguien se va (`onLeave`). La compuerta nadie la
     // abre, así que la ventana sale siempre con `eligible: false` (ver `configOf`).
     this.closeRematch = child.resolve<RematchCloser>("RematchCloser");
@@ -334,9 +358,11 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // Y ADEMÁS HAY UN LATIDO POR HECHO (el último sink del notificador), como en truco: este
     // reloj renueva, aquél suelta en el acto al que dejó de jugar.
     this.heartbeat = this.clock.setInterval(() => this.beat(), HEARTBEAT_MS);
+    this.probing = this.clock.setInterval(() => this.connections.probe(), PROBE_INTERVAL_MS);
 
     this.seating = this.clock.setTimeout(() => {
       this.log.warn("plazo de ocupación vencido", { clients: this.clients.length });
+      this.closingByRoom = true;
       this.disconnect();
     }, global.seatingTimeoutMs);
     this.onMessage("*", (client, type, payload) =>
@@ -391,6 +417,18 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const previous = this.clients.filter(
       (other) => other !== client && this.playerIdOf(other) === playerId,
     );
+    // EL DESPLAZAMIENTO ES UNA CAÍDA QUE EL SERVIDOR NO LLEGÓ A VER: el jugador volvió con otra sesión
+    // antes de que el transporte notara muerta la vieja. En el celular es probablemente la caída más
+    // común, y sin esta línea no dejaba rastro: el `onLeave` del desplazado sale temprano.
+    if (previous.length > 0)
+      this.noteConnection(playerId, () =>
+        this.connections.dropped(playerId, {
+          closeCode: null,
+          roundNumber: this.roundNow(),
+          shuttingDown: this.shuttingDown,
+          replacedBySession: true,
+        }),
+      );
     for (const other of previous) other.leave(CloseCode.CONSENTED);
 
     // EL REGRESO SE ANUNCIA SOLO SI LA CAÍDA SE ANUNCIÓ: un desplazamiento no anuncia ninguna de las
@@ -398,6 +436,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const isBack = this.seated.has(playerId) && previous.length === 0;
     this.seated.add(playerId);
     if (isBack) this.notifier.notify([{ type: "PLAYER_RECONNECTED", playerId }]);
+    this.noteConnection(playerId, () => this.connections.reconnected(playerId, this.roundNow()));
+    this.probeSocket(playerId, client);
     this.log.info("jugador conectado", {
       playerId,
       reconnecting: isBack,
@@ -406,9 +446,20 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.startIfSeated();
   }
 
-  override onDrop(client: Client): void {
+  override onDrop(client: Client, code?: number): void {
     const playerId = this.playerIdOf(client);
-    if (!playerId) return;
+    // EL SOCKET DESPLAZADO QUE MUERE TARDE: el jugador volvió con otra sesión, la sala le pidió cerrar
+    // a la vieja con `4000` y la vieja, muerta, nunca contestó. El transporte la corta 6-9 s después
+    // con `1006` y Colyseus llama `onDrop` por ella. El asiento sigue jugando por la nueva: no hay
+    // caída que anotar, ni reconexión que esperar, ni jugador que marcar ausente.
+    if (!playerId || this.clientOf(playerId)) return;
+    this.noteConnection(playerId, () =>
+      this.connections.dropped(playerId, {
+        closeCode: code ?? null,
+        roundNumber: this.roundNow(),
+        shuttingDown: this.shuttingDown,
+      }),
+    );
     // Colyseus finaliza esta promesa cuando vence o se usa el token. Capturar solo su
     // rechazo evita un unhandled rejection al disponer la sala sin interceptar ese flujo.
     this.cancelPendingReconnection(playerId);
@@ -438,13 +489,23 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       return;
     }
     this.player(playerId).connected = true;
+    this.noteConnection(playerId, () => this.connections.reconnected(playerId, this.roundNow()));
+    this.probeSocket(playerId, client);
     this.notifier.notify([{ type: "PLAYER_RECONNECTED", playerId }]);
     this.log.info("jugador reconectado", { playerId });
   }
 
-  override onLeave(client: Client): void {
+  override onLeave(client: Client, code?: number): void {
     const playerId = this.playerIdOf(client);
     if (!playerId || this.clientOf(playerId)) return;
+    if (!this.closingByRoom)
+      this.noteConnection(playerId, () =>
+        this.connections.gone(playerId, {
+          closeCode: code ?? null,
+          roundNumber: this.roundNow(),
+          shuttingDown: this.shuttingDown,
+        }),
+      );
     this.player(playerId).connected = false;
     // LA REVANCHA SE CIERRA CUANDO ALGUIEN SE VA, y es lo único que la sala le dice al motor
     // sobre la revancha. Una desconexión es un hecho de PLATAFORMA y el juego no los mira; acá
@@ -458,8 +519,17 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.log.info("jugador salió", { playerId });
   }
 
+  // EL APAGADO SE MARCA ANTES de que Colyseus eche a todos: así una caída en el medio se juzga nuestra
+  // aunque el cliente cierre antes de recibir el `4001`.
+  override onBeforeShutdown(): void {
+    this.shuttingDown = true;
+    super.onBeforeShutdown();
+  }
+
   override async onDispose(): Promise<void> {
     this.disposed = true;
+    this.probing?.clear();
+    this.connections?.dispose();
     // PRIMERO SE CORTA EL LATIDO: lo que sigue es limpieza, y un latido posterior volvería a
     // escribir justo lo que estamos por borrar — dejando la sala anunciada dos minutos más.
     this.heartbeat?.clear();
@@ -639,6 +709,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       });
       this.orchestratorAbortReason = "CHARGE_REJECTED";
       if (!this.disposed) {
+        this.closingByRoom = true;
         for (const client of this.clients)
           client.send("matchCancelled", { reason: "CHARGE_REJECTED" });
         void this.disconnect().catch(() => undefined);
@@ -651,6 +722,33 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // corriendo sin dueño.
     if (this.disposed) return;
     this.notifier.notify(this.startMatch());
+  }
+
+  private probeSocket(playerId: PlayerId, client: Client): void {
+    const socket = probeSocketOf(client.ref);
+    if (socket) this.connections.attach(playerId, socket);
+  }
+
+  // Una línea por hecho, para verlo en vivo sin esperar al cierre del registro.
+  //
+  // DESDE EL VEREDICTO, IRSE ES IRSE: cerrar la pantalla de resultados no es una caída de la partida.
+  // Y el cierre del registro puede esperar hasta 15 s al cobro del aumento en vuelo, así que sin esta
+  // guarda esos cierres entraban al registro —y salían en el log como INTENCIONAL en cada final—.
+  private noteConnection(playerId: PlayerId, fact: () => ConnectionEvent | undefined): void {
+    if (this.hasOutcome()) return;
+    const event = fact();
+    if (!event) return;
+    this.log.info("conexión", {
+      playerId,
+      kind: event.kind,
+      closeCode: "closeCode" in event ? event.closeCode : undefined,
+      blame: "verdict" in event ? event.verdict?.blame : undefined,
+      cause: "verdict" in event ? event.verdict?.cause : undefined,
+    });
+  }
+
+  private roundNow(): number {
+    return this.state.currentRound?.roundNumber ?? 0;
   }
 
   private clientOf(playerId: PlayerId, except?: Client): Client | undefined {

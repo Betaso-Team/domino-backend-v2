@@ -20,6 +20,7 @@ import type { Clock } from "../core/engine/clock";
 import type { PlayerId, TeamId } from "../core/ids";
 import { handValue } from "../core/rules/tiles";
 import type { MatchState } from "../core/state";
+import type { SeatConnection } from "./connection";
 import type { AbortReason, NetworkMatchEvent } from "./events";
 
 // EL VOCABULARIO DEL HISTORIAL ES CERRADO, y eso es el punto entero de la corrección
@@ -214,6 +215,8 @@ export interface MatchClose {
 export interface StoredPlayer extends SeatSetup, Partial<SeatMoney> {
   readonly finalScore: number;
   readonly exit?: SeatExit;
+  /** El ping y las caídas del asiento, medidos por la sala. Sin socket nunca, no está. */
+  readonly connection?: SeatConnection;
 }
 
 /**
@@ -437,6 +440,7 @@ export class MatchHistory {
   private readonly exits = new Map<PlayerId, SeatExit>();
   private readonly proposals: BetMultiplierProposal[] = [];
   private agreements = 0;
+  private connectionOf: (playerId: PlayerId) => SeatConnection | undefined = () => undefined;
 
   constructor(
     private readonly matchId: string,
@@ -456,6 +460,13 @@ export class MatchHistory {
     const entry = this.wrap(source, "COMMAND", type, payload);
     this.follow(source, type, entry.payload);
     this.port.record([entry]);
+  }
+
+  // LA CONEXIÓN ES DE LA SALA —es la que ve los sockets— y el grabador sólo la pregunta al cerrar. Lo
+  // que pase después del cierre no entra: el cierre escribe una vez, y la caída que importa —la que
+  // terminó en retiro— ya se anotó en su instante.
+  trackConnections(source: (playerId: PlayerId) => SeatConnection | undefined): void {
+    this.connectionOf = source;
   }
 
   events(events: readonly NetworkMatchEvent[]): void {
@@ -500,10 +511,12 @@ export class MatchHistory {
     const board = this.match.scoreboard;
     const players: StoredPlayer[] = this.setup.seats.map((seat) => {
       const exit = this.exits.get(seat.id) ?? this.walkedOutUnseen(seat.id, endedAt);
+      const connection = this.connectionOf(seat.id);
       return {
         ...seat,
         finalScore: (seat.teamId === "A" ? board?.teamA : board?.teamB) ?? 0,
         ...(exit ? { exit } : {}),
+        ...(connection ? { connection } : {}),
         ...ending.money[seat.id],
       };
     });

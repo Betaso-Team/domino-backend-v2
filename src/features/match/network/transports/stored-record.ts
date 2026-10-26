@@ -30,9 +30,17 @@ export function storedClosingOf(closing: MatchClosing): Record<string, unknown> 
     ...rest,
     ...(matchStartedAt === undefined ? {} : { matchStartedAt: dateOf(matchStartedAt) }),
     matchEndedAt: dateOf(matchEndedAt),
-    players: players.map(({ exit, ...player }) => ({
+    players: players.map(({ exit, connection, ...player }) => ({
       ...player,
       ...(exit ? { exit: { ...exit, at: dateOf(exit.at) } } : {}),
+      ...(connection
+        ? {
+            connection: {
+              ...connection,
+              events: connection.events.map((event) => ({ ...event, at: dateOf(event.at) })),
+            },
+          }
+        : {}),
     })),
     betMultiplier: {
       ...betMultiplier,
