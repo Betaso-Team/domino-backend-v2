@@ -6,6 +6,7 @@ import {
   type HistoryReader,
   type MatchArchive,
   MatchRegistry,
+  type PlayerLog,
   matchHttp,
   selectProcessIdToCreateRoom,
 } from "@/features/match";
@@ -201,6 +202,7 @@ const registerHttp = (app: Application) => {
       logger,
       history: rootContainer.resolve<HistoryReader>("HistoryReader"),
       archive: rootContainer.resolve<MatchArchive>("MatchArchive"),
+      players: rootContainer.resolve<PlayerLog>("PlayerLog"),
       adminApiKey: env.adminApiKey,
       adminTokens: rootContainer.resolve<AdminTokenCheck>("AdminTokenCheck"),
       tables: rootContainer.resolve(ColyseusMatchGateway),

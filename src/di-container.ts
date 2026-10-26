@@ -42,6 +42,7 @@ import {
   OrchestratorBetCharger,
   type OrchestratorCharges,
 } from "@/features/match/network/orchestrator-charges";
+import type { PlayerLog } from "@/features/match/network/player-log";
 import { HttpOrchestratorCharges } from "@/features/match/network/transports/http-orchestrator";
 import { MemoryHistory } from "@/features/match/network/transports/memory-history";
 import { MongoHistory } from "@/features/match/network/transports/mongo-history";
@@ -170,7 +171,8 @@ rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
 // Y UN TERCERO, el del DOCUMENTO entero: el listado y el detalle del panel, y `/game-data` del
 // backend principal. Los mismos argumentos que los dos de arriba.
 rootContainer.register<MatchArchive>("MatchArchive", { useValue: history });
-rootContainer.register("PlayerLog", { useValue: history });
+// Y EL CUARTO, el del JUGADOR: `GET /me/matches`, lo que jugó el dueño del token.
+rootContainer.register<PlayerLog>("PlayerLog", { useValue: history });
 
 // EL PUBLICADOR DEL BROKER, que es la ÚNICA instancia del proceso: `AmqpPublisher` memoiza una
 // conexión y un canal confirm adentro, así que dos instancias serían dos conexiones al mismo

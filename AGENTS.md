@@ -20,7 +20,8 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
 - **Un juego nunca mueve dinero.** El dominó no tiene billetera, ledger ni credenciales de ninguna:
   le pide al orquestador que cobre la entrada (`chargeEntry`) y cada aumento
   (`OrchestratorBetCharger`), y le publica el resultado por el outbox de `betaso_games`
-  (`MatchResultRecorder`). Tampoco reporta ranking ni liga, ni sirve `/me/matches` o `/me/metrics`.
+  (`MatchResultRecorder`). Tampoco reporta ranking ni liga, ni sirve `/me/metrics`. Sí sirve
+  `GET /me/matches`, el historial del jugador (ver «Incremento completo — el historial del jugador»).
 - **Un solo emisor de tokens: billing-auth.** El `JwtVerifier` acepta solo ES256 contra
   `BILLING_AUTH_PUBLIC_KEY` (obligatoria); no hay HS256 ni secreto compartido con el backend de
   Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
@@ -2533,6 +2534,32 @@ equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline
    jugadores para «a todos»).
 4. **El contrato contra Mongo no se corrió**: Docker estaba apagado. `MemoryHistory` corre el mismo
    contrato y la conversión a fechas es compartida.
+
+## Incremento completo — el historial del jugador (rama `feature/player-match-history`)
+
+Portado de truco (`features/match/transports/http/history.ts` y `betaso/player-log.ts`) para el front
+de Tablea. Baseline **1025 unit / 409 int / 114 e2e**, con `typecheck`, lint, `depcruise` y `build` en
+verde; el contrato y el `explain` corrieron contra un Mongo 7 de verdad.
+
+- **`GET /me/matches?page=&limit=`** (`transports/http/me.ts`), con el bearer de billing-auth. La cuenta
+  es el `sub` del token: no hay forma de pedir la de otro. Sin verificador no se registra. La forma de
+  la página es la de truco (`items`, `page`, `perPage`, `totalPages`, `totalItems`, `hasNextPage`,
+  `hasPreviousPage`); `limit` de 1 a 50, 10 por defecto. El plazo vencido es 503, como el listado.
+- **Sólo las terminadas** (`finished` y `aborted`): la que está en curso no tiene resultado. Truco
+  acepta además `canceled`, que el dominó nunca escribe.
+- **La fila es la del asiento del que pregunta** (`network/player-log.ts`, `rowOf`): `result` es
+  `win | lose | abandoned | canceled`, y GANAR SE PREGUNTA ANTES QUE IRSE —en 4P uno se puede ir de una
+  partida que su pareja gana—. Los ganadores son ASIENTOS (`seat-N`): primero se cruza el `userId` con su
+  asiento. `bet` es `chargedInUC` (0 si la partida se canceló: el reembolso lo decide el orquestador) y
+  `prize` es `prizePaidInUC` sólo si ganó; los dos en UC. `playedAt` va en ISO, sin formatear.
+- **Usa el índice del filtro por jugador del panel** (`seats.userId_1_createdAt_-1__id_-1`): la página
+  sale ordenada del índice y el estado se descarta en el FETCH. Por página y no por cursor, como truco:
+  el `skip` recorre las partidas de UNA cuenta. Lo pinea el `explain` de `mongo-history.int.test.ts`.
+- **Un puerto propio, `PlayerLog`**, que implementan `MemoryHistory` y `MongoHistory` con un contrato
+  compartido (`transports/tests/player-log-contract.ts`). El container registraba un `"PlayerLog"` sin
+  tipo que había quedado del port de truco y nadie resolvía; ahora es el de este puerto.
+- Verificado por mutación: sin la ruta en `register.ts` el e2e de cableado sale rojo, y con "irse" antes
+  que "ganar" sale rojo el caso de 4P.
 
 ## Cómo se ejecuta una tarea
 

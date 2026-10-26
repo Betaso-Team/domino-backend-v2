@@ -15,6 +15,14 @@ import {
   type StoredMatchRecord,
 } from "../history";
 import {
+  ENDED_STATUSES,
+  type MatchRow,
+  type Paginated,
+  type PlayerLog,
+  paginated,
+  rowOf,
+} from "../player-log";
+import {
   type HistoryAdapterOptions,
   LARGE_LAST,
   type ListedRow,
@@ -45,7 +53,7 @@ const MAX_MATCHES = 200;
 
 type Stored = Record<string, unknown>;
 
-export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive {
+export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive, PlayerLog {
   private readonly byMatch = new Map<string, Stored>();
   private readonly now: () => Date;
   private readonly countCap: number;
@@ -164,6 +172,22 @@ export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive {
     const { after } = query;
     const page = after ? rows.filter((row) => isAfter(row, after)) : rows;
     return pageOf(page.slice(0, query.pageSize + 1), query.pageSize, total);
+  }
+
+  // EL MISMO FILTRO Y EL MISMO ORDEN QUE MONGO: sus asientos, sólo las terminadas, la más nueva primero.
+  async pageOf(userId: string, page: number, perPage: number): Promise<Paginated<MatchRow>> {
+    const ended: readonly string[] = ENDED_STATUSES;
+    const rows: ListedRow[] = [...this.byMatch.values()]
+      .filter((document) => seatedIn(document, userId) && ended.includes(String(document.status)))
+      .map((document) => ({ id: String(document._id), document }))
+      .sort(newestFirst);
+    const shown = rows.slice((page - 1) * perPage, page * perPage);
+    return paginated(
+      shown.map(({ document }) => rowOf(userId, document)),
+      rows.length,
+      page,
+      perPage,
+    );
   }
 
   private write(matchId: string, next: (current: Stored | undefined, now: Date) => Stored): void {
