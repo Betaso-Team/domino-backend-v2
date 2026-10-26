@@ -4,6 +4,7 @@ import type { Clock } from "../../core/engine/clock";
 import { createMatchState } from "../../core/engine/genesis";
 import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state";
 import { replayConfigOf } from "../../transports/match-contract";
+import type { SeatConnection } from "../connection";
 import type {
   ClosedRound,
   HistoryEntry,
@@ -12,7 +13,6 @@ import type {
   MatchClosing,
   MatchOpening,
 } from "../history";
-import type { SeatConnection } from "../connection";
 import { MatchHistory } from "../history";
 import { matchSetupOf } from "../match-record";
 
