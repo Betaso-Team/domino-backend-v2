@@ -31,6 +31,7 @@ export type { DevPresetSource } from "./transports/colyseus/commands/di-wiring";
 export type { MatchState } from "./core/state";
 export type { NetworkMatchEvent } from "./network/events";
 export type { HistoryReader, MatchArchive } from "./network/history";
+export type { PlayerLog } from "./network/player-log";
 // La proyección monetaria sale por acá porque su consumidor está AFUERA de la feature: hoy
 // el smoke, mañana el adaptador que efectivamente pague. Sale la función y salen sus tipos:
 // una instrucción que nadie puede nombrar no se puede recibir, ni loguear, ni auditar.

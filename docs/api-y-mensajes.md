@@ -51,6 +51,7 @@ decoder estricto antes de alcanzar el comando.
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
 | `GET /config/:roomId` | Config pública de una mesa (con `betLevels: [{ level, additionalPoints }]`, vacío si no ofrece aumentar) y `serverNow`; nunca devuelve el seed |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
+| `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`result`, `bet` y `prize` en UC, `score`, `playedAt`). Página de 1 a 50, 10 por defecto |
 | `GET /game-modes` | Modos activos del catálogo |
 | `GET /game-modes/:uuid` | Un modo activo; un modo dado de baja responde 404 |
 

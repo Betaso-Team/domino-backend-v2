@@ -4,10 +4,12 @@ import type { AdminTokenCheck } from "@/shared/http/api-key";
 import { Router } from "express";
 import type { Clock } from "../../core/engine/clock";
 import type { HistoryReader, MatchArchive } from "../../network/history";
+import type { PlayerLog } from "../../network/player-log";
 import type { ColyseusMatchGateway } from "../colyseus/gateway";
 import type { MatchRegistry } from "../match-registry";
 import { historyRoutes } from "./history";
 import { matchRoutes } from "./match";
+import { meRoutes } from "./me";
 import { recordRoutes } from "./records";
 import { tablesRoutes } from "./tables";
 
@@ -30,6 +32,8 @@ export interface MatchHttpDeps {
   readonly history: HistoryReader;
   /** El documento de cada partida, para el panel y `/game-data`. Ver `recordRoutes`. */
   readonly archive: MatchArchive;
+  /** Lo que jugó cada cuenta, para `GET /me/matches`. Ver `meRoutes`. */
+  readonly players: PlayerLog;
   /** `undefined` ⇒ las rutas internas NO se registran. Ver `historyRoutes` y `recordRoutes`. */
   readonly adminApiKey: string | undefined;
   /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
@@ -40,8 +44,8 @@ export interface MatchHttpDeps {
   readonly verifier?: TokenVerifier;
 }
 
-// EL HTTP DE LA PARTIDA, en cuatro responsabilidades y un solo router: UNA partida (`match.ts`), el
-// historial de soporte (`history.ts`), el registro de cada partida para el panel y el backend
+// EL HTTP DE LA PARTIDA, en cinco responsabilidades y un solo router: UNA partida (`match.ts`), lo que
+// jugó el dueño del token (`me.ts`), el historial de soporte (`history.ts`), el registro de cada partida para el panel y el backend
 // principal (`records.ts`) y la API interna del orquestador (`tables.ts`). Los paths son absolutos,
 // así que se monta en la raíz; las guardas van por ruta. Portado de truco (`0b0a467`).
 //
@@ -59,6 +63,7 @@ export interface MatchHttpDeps {
 export function matchHttp(deps: MatchHttpDeps): Router {
   return Router()
     .use(matchRoutes(deps))
+    .use(meRoutes(deps))
     .use(historyRoutes(deps))
     .use(recordRoutes(deps))
     .use(tablesRoutes(deps));

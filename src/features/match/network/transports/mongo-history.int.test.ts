@@ -10,9 +10,11 @@ import {
   MongoHistory,
   countQueryOf,
   pageQueryOf,
+  playerPageQueryOf,
 } from "./mongo-history";
 import type { HistoryAdapterOptions } from "./stored-record";
 import { SETUP, describeHistoryContract, entry } from "./tests/history-contract";
+import { describePlayerLogContract } from "./tests/player-log-contract";
 
 // EL CONTRATO CONTRA UN MONGO DE VERDAD, y es el único lugar donde se puede medir: la cabecera y el
 // cierre van por pipeline (`$replaceWith`), y lo que hay que ver —que el primero gane, que lo cerrado
@@ -45,6 +47,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
   });
 
   describeHistoryContract("MongoHistory", (options) => fresh(undefined, options));
+  describePlayerLogContract("MongoHistory", (options) => fresh(undefined, options));
 
   it("crea sus cuatro índices, con el de `matchId` único", async () => {
     const history = await fresh();
@@ -251,6 +254,29 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         }),
       ],
     ];
+
+    // EL HISTORIAL DEL JUGADOR USA EL ÍNDICE DEL FILTRO POR JUGADOR: ordenado por el índice y leyendo
+    // sólo lo que salta y lo que devuelve. Con `skip`, lo salteado se lee: la tercera página de diez lee
+    // treinta, que sobre las partidas de una cuenta es lo aceptado (`playerPageQueryOf`).
+    it.each([
+      ["primera página", 1],
+      ["tercera página", 3],
+    ])("historial del jugador, %s: sin COLLSCAN ni SORT", async (_name, page) => {
+      const perPage = 10;
+      const { filter, options } = playerPageQueryOf("jugador-5", page, perPage);
+      const explain = (await (
+        await collection()
+      )
+        .find(filter as Document, options)
+        .explain("executionStats")) as Document;
+      const stages = stagesOf(explain.queryPlanner.winningPlan);
+
+      expect(stages).not.toContain("COLLSCAN");
+      expect(stages).not.toContain("SORT");
+      expect(stages).toContain("IXSCAN");
+      expect(explain.executionStats.totalDocsExamined).toBeLessThanOrEqual(page * perPage);
+      expect(explain.executionStats.nReturned).toBe(perPage);
+    });
 
     it.each(shapes)("%s: sin COLLSCAN, sin SORT y sin leer de más", async (_name, query) => {
       const plan = await explained(query());

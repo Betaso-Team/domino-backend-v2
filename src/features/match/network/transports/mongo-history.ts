@@ -26,6 +26,14 @@ import {
   type StoredMatchRecord,
 } from "../history";
 import {
+  ENDED_STATUSES,
+  type MatchRow,
+  type Paginated,
+  type PlayerLog,
+  paginated,
+  rowOf,
+} from "../player-log";
+import {
   type HistoryAdapterOptions,
   LARGE_LAST,
   SUMMARY_FIELDS,
@@ -216,6 +224,46 @@ export function countQueryOf(
   return { filter: filterOf(query), options: { limit, maxTimeMS: LIST_MAX_TIME_MS } };
 }
 
+// LO QUE LA FILA DEL JUGADOR LEE, y nada más: sin `timeline` ni `rounds`, que son la mayor parte del
+// documento.
+const PLAYER_ROW_PROJECTION = {
+  matchId: 1,
+  status: 1,
+  winnerIds: 1,
+  table: 1,
+  "matchConfig.playersQuantity": 1,
+  matchEndedAt: 1,
+  createdAt: 1,
+  updatedAt: 1,
+  seats: 1,
+  players: 1,
+} as const;
+
+/**
+ * LA CONSULTA EXACTA DE UNA PÁGINA DEL JUGADOR, exportada para que el `explain` mida la que corre. Usa
+ * el índice del filtro por jugador del panel (`seats.userId` con el orden detrás): la página sale
+ * ordenada del índice y el estado se descarta en el FETCH, que sólo pierde las pocas en curso.
+ *
+ * POR PÁGINA Y NO POR CURSOR, a diferencia del panel: es la forma de truco que el cliente ya lee, y el
+ * `skip` recorre sólo las partidas de UNA cuenta, no la colección.
+ */
+export function playerPageQueryOf(
+  userId: string,
+  page: number,
+  perPage: number,
+): { readonly filter: ListFilter; readonly options: FindOptions } {
+  return {
+    filter: { "seats.userId": userId, status: { $in: [...ENDED_STATUSES] } },
+    options: {
+      projection: PLAYER_ROW_PROJECTION,
+      sort: NEWEST_FIRST,
+      skip: (page - 1) * perPage,
+      limit: perPage,
+      maxTimeMS: LIST_MAX_TIME_MS,
+    },
+  };
+}
+
 // `MaxTimeMSExpired`: la base cortó la consulta por el plazo.
 const isTimeout = (error: unknown) =>
   error instanceof MongoServerError && (error.code === 50 || error.codeName === "MaxTimeMSExpired");
@@ -242,7 +290,7 @@ const stampsAt = (now: Date) => ({
   updatedAt: now,
 });
 
-export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
+export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive, PlayerLog {
   // UNA ESCRITURA A LA VEZ POR PARTIDA. Cada verbo es fire-and-forget, así que sin esto llegan a la
   // base a la vez — y dos upserts que no encuentran el documento INSERTAN uno cada uno, partiendo la
   // partida en dos filas. Fija también el ORDEN de las escrituras, que es cómo se leen los arreglos.
@@ -442,6 +490,28 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
       ]);
       const rows = found.map((document) => ({ id: String(document._id), document }));
       return pageOf(rows, query.pageSize, total);
+    } catch (error) {
+      if (isTimeout(error)) throw new MatchListTimeoutError(error);
+      throw error;
+    }
+  }
+
+  // LA PÁGINA Y SU TOTAL A LA VEZ, sobre el mismo filtro. El total se cuenta entero: son las partidas
+  // de una cuenta, no la colección.
+  async pageOf(userId: string, page: number, perPage: number): Promise<Paginated<MatchRow>> {
+    const collection = await this.collection();
+    const query = playerPageQueryOf(userId, page, perPage);
+    try {
+      const [found, totalItems] = await Promise.all([
+        collection.find(query.filter, query.options).toArray(),
+        collection.countDocuments(query.filter, { maxTimeMS: LIST_MAX_TIME_MS }),
+      ]);
+      return paginated(
+        found.map((document) => rowOf(userId, document)),
+        totalItems,
+        page,
+        perPage,
+      );
     } catch (error) {
       if (isTimeout(error)) throw new MatchListTimeoutError(error);
       throw error;
