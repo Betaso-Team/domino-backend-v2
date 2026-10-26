@@ -106,7 +106,7 @@ Abrir una partida en el panel y, por cada jugador, ver:
 
 ### 1. La sonda (servidor, por asiento)
 
-Cada `PROBE_INTERVAL_MS` (2 000 ms) la sala manda `client.ref.ping(nonce)` a cada asiento
+Al conectarse el socket, y después cada `PROBE_INTERVAL_MS` (2 000 ms), la sala manda `client.ref.ping(nonce)` a cada asiento
 conectado, con un `nonce` propio (contador + id de sala, unos pocos bytes) y anota el instante. El
 `pong` con ese `nonce` da una muestra de RTT. Un sondeo sin `pong` antes del siguiente cuenta como
 **perdido**.

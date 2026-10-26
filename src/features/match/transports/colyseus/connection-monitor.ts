@@ -76,7 +76,10 @@ export class ConnectionMonitor {
 
   constructor(private readonly deps: ConnectionMonitorDeps) {}
 
-  /** El socket nuevo del asiento. Lo que se le mandó al anterior ya no cuenta. */
+  /**
+   * El socket nuevo del asiento. Lo que se le mandó al anterior ya no cuenta. SE SONDEA EN EL ACTO: una
+   * partida que se decide antes del primer intervalo —o una vuelta corta— queda con ping igual.
+   */
   attach(playerId: PlayerId, socket: ProbeSocket): void {
     const seat = this.seatOf(playerId);
     this.detach(seat);
@@ -85,18 +88,11 @@ export class ConnectionMonitor {
     seat.socket = socket;
     seat.listener = listener;
     seat.pending = [];
+    this.probeSeat(seat);
   }
 
   probe(): void {
-    for (const seat of this.seats.values()) {
-      if (!seat.socket) continue;
-      const nonce = this.nextNonce;
-      this.nextNonce = (this.nextNonce + 1) >>> 0;
-      const data = Buffer.alloc(NONCE_BYTES);
-      data.writeUInt32BE(nonce);
-      seat.pending.push({ nonce, sentAt: this.deps.monotonicNow() });
-      seat.socket.ping(data);
-    }
+    for (const seat of this.seats.values()) this.probeSeat(seat);
   }
 
   dropped(playerId: PlayerId, context: DropContext): ConnectionEvent {
@@ -213,6 +209,16 @@ export class ConnectionMonitor {
     seat.sumMs += rtt;
     seat.maxMs = Math.max(seat.maxMs, rtt);
     this.remember(seat, rtt);
+  }
+
+  private probeSeat(seat: Seat): void {
+    if (!seat.socket) return;
+    const nonce = this.nextNonce;
+    this.nextNonce = (this.nextNonce + 1) >>> 0;
+    const data = Buffer.alloc(NONCE_BYTES);
+    data.writeUInt32BE(nonce);
+    seat.pending.push({ nonce, sentAt: this.deps.monotonicNow() });
+    seat.socket.ping(data);
   }
 
   private remember(seat: Seat, rtt: number | null): void {

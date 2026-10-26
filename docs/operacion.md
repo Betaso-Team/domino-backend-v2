@@ -175,6 +175,24 @@ documento (seed, parejas, plazos, marcador inicial). Los documentos de antes de 
 siguen pidiendo los argumentos: `npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER>
 <asiento...>`.
 
+### Por qué se desconectó alguien
+
+Cada jugador del registro cerrado lleva `connection`: el ping que midió el servidor (`rtt`: promedio,
+peor, fluctuación y sondeos perdidos) y la lista de hechos (`events`): `DROPPED` (se cayó), `RECONNECTED`
+(volvió, con `awayMs`) y `GONE` (no volvió). Cada caída trae `verdict.blame`:
+
+| `blame` | qué fue | `cause` |
+|---|---|---|
+| `OURS` | el servidor | `SERVER_SHUTDOWN` (apagado o deploy), `SERVER_OVERLOAD` (el proceso trabado, o el ping alto para todos a la vez), `SERVER_ERROR` |
+| `NETWORK` | la conexión del jugador | `POOR_CONNECTION` (el ping venía alto o inestable), `CONNECTION_LOST` (se cortó de golpe), `WENT_OFFLINE` (el navegador avisó que perdió la red) |
+| `INTENTIONAL` | el jugador | `LEFT_THE_TABLE` (salió con el botón), `CLOSED_APP` (cerró o recargó; si hay un `RECONNECTED` justo después, recargó) |
+| `UNKNOWN` | un código de cierre que la regla no conoce | `UNKNOWN_CLOSE` |
+
+La evidencia viaja al lado (`closeCode`, `recentRttMs`, `sinceLastPongMs`, `server`), así que se puede
+discutir el veredicto con los mismos números. Un `GONE` con `afterDrop` vale lo que dijo su `DROPPED`.
+Minimizar la app en el celular hoy sale como `NETWORK`. Cada hecho sale además en el log como
+`conexión`, con `playerId`, `blame` y `cause`.
+
 ## Resultados de partida
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange

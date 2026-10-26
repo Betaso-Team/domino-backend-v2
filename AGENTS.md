@@ -2475,6 +2475,47 @@ Truco `develop` en `905c3dd`, docs en reglas v21 / negocio v50 / app-infra v51 /
 | `678ca23`, `ca89830` envido por cantidad | reglas de truco |
 | `1e5dad8`, `96fccb2`, `68ca374`, `e02530d` | docs de truco |
 
+## Incremento completo — la conexión de cada asiento (rama `feat/conexion-de-cada-asiento`)
+
+Diseño: `docs/superpowers/specs/2026-10-26-conexion-ping-y-culpa-de-las-caidas-design.md`. Plan:
+`docs/superpowers/plans/2026-10-26-conexion-ping-y-culpa-de-las-caidas.md`. Pieza NUEVA, sin
+equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline **975 unit (en `src`) /
+338 int / 110 e2e**, con `typecheck`, lint y `depcruise` en verde.
+
+- **El registro decía `DISCONNECTED` y nada más.** Ahora cada jugador del cierre lleva
+  `players[].connection`: el ping medido por el servidor y cada caída, vuelta y salida con su evidencia
+  y un veredicto (`OURS` / `NETWORK` / `INTENTIONAL` / `UNKNOWN`). Es diagnóstico: no mueve plata.
+  Cómo leerlo: `docs/operacion.md`, «Por qué se desconectó alguien».
+- **El ping lo mide el SERVIDOR** (`transports/colyseus/connection-monitor.ts`): un `ws.ping(nonce)`
+  propio cada 2 s y al conectar el socket. Los pings del transporte van sin payload, así que se
+  distinguen. El navegador y React Native contestan solos; el jugador no puede falsearlo.
+- **La regla es pura y el orden es la decisión** (`network/connection.ts`): lo nuestro se pregunta
+  primero, porque culpar al jugador de lo que fue del servidor es lo único que no puede hacer.
+- **Tres cosas del SDK que cambiaron el diseño**, medidas en `node_modules`:
+  - el SDK cierra él mismo con `4010` cuando el navegador dispara `offline` (`Connection.mjs:28`): un
+    `4010` sin marca de apagado es RED, no apagado;
+  - `room.clock.rtt()/jitter()` no mide nada sin `defineInput()` (skill `colyseus`,
+    `references/netcode.md:162`), y el dominó no define input;
+  - la API de WebSocket no deja mandar `1001` a mano (`invalid code`) y el SDK no reintenta con `1000`.
+- **Un sondeo sin respuesta cuenta perdido sólo si llega uno posterior.** Los del final son la caída
+  misma, que el transporte tarda 6-9 s en notar; contarlos haría de toda caída «mala conexión».
+- **El desplazamiento cuenta como caída y vuelta** (`replacedBySession`): el jugador vuelve con otra
+  sesión antes de que el servidor note muerta la vieja. Antes no dejaba rastro.
+- **La sala marca lo que sólo ella sabe**: `onBeforeShutdown` prende `shuttingDown`, y sus propios
+  `disconnect()` (ocupación vencida, cobro rechazado) prenden `closingByRoom` para que su `4000` no se
+  lea como el jugador apretando salir.
+
+### Deudas abiertas de este incremento
+
+1. **El panel todavía no lo muestra legible**: el campo ya aparece en su árbol JSON. La segunda parte
+   del diseño (columna de ping, veredicto junto a la salida, sección «Conexión») es del repo
+   `Tablea-Gaming-Panel`.
+2. **Minimizar la app sale como `NETWORK`.** Separarlo pide que el front avise (fase 2 del diseño).
+3. **Los umbrales no están medidos con jugadores reales** (300 ms, 100 ms, 3 perdidos, 500 ms). En 2P
+   un rival con mal internet alcanza para culpar al servidor (`ponytail:` en la regla).
+4. **El contrato contra Mongo no se corrió**: Docker estaba apagado. `MemoryHistory` corre el mismo
+   contrato y la conversión a fechas es compartida.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.

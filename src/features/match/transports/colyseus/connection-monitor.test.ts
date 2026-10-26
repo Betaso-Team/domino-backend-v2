@@ -39,13 +39,17 @@ function sample(
 }
 
 describe("ConnectionMonitor", () => {
-  it("una sonda contestada da una muestra con su tiempo de ida y vuelta", () => {
+  // UNA PARTIDA QUE TERMINA EN MENOS DE UN INTERVALO tiene que tener ping igual: el socket se sondea
+  // en el acto de conectarse, y esa respuesta es la primera muestra.
+  it("conectar el socket lo sondea en el acto, y la respuesta es una muestra", () => {
     const { monitor, time } = build();
     const socket = new FakeSocket();
     monitor.attach("seat-1", socket);
 
-    sample(monitor, time, socket, 80);
+    time.mono += 80;
+    socket.answerLast();
 
+    expect(socket.ping).toHaveBeenCalledTimes(1);
     expect(monitor.connectionOf("seat-1")?.rtt).toEqual({
       samples: 1,
       avgMs: 80,
@@ -60,7 +64,8 @@ describe("ConnectionMonitor", () => {
     const socket = new FakeSocket();
     monitor.attach("seat-1", socket);
 
-    sample(monitor, time, socket, 80);
+    time.mono += 80;
+    socket.answerLast();
     sample(monitor, time, socket, 112);
 
     expect(monitor.connectionOf("seat-1")?.rtt.jitterMs).toBe(2);
@@ -84,7 +89,8 @@ describe("ConnectionMonitor", () => {
     const { monitor, time } = build();
     const socket = new FakeSocket();
     monitor.attach("seat-1", socket);
-    sample(monitor, time, socket, 80);
+    time.mono += 80;
+    socket.answerLast();
 
     monitor.probe();
     monitor.probe();
