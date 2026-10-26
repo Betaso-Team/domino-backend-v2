@@ -2479,8 +2479,8 @@ Truco `develop` en `905c3dd`, docs en reglas v21 / negocio v50 / app-infra v51 /
 
 Diseño: `docs/superpowers/specs/2026-10-26-conexion-ping-y-culpa-de-las-caidas-design.md`. Plan:
 `docs/superpowers/plans/2026-10-26-conexion-ping-y-culpa-de-las-caidas.md`. Pieza NUEVA, sin
-equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline **975 unit (en `src`) /
-338 int / 110 e2e**, con `typecheck`, lint y `depcruise` en verde.
+equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline **976 unit (en `src`) /
+338 int / 112 e2e**, con `typecheck`, lint y `depcruise` en verde.
 
 - **El registro decía `DISCONNECTED` y nada más.** Ahora cada jugador del cierre lleva
   `players[].connection`: el ping medido por el servidor y cada caída, vuelta y salida con su evidencia
@@ -2504,6 +2504,19 @@ equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline
 - **La sala marca lo que sólo ella sabe**: `onBeforeShutdown` prende `shuttingDown`, y sus propios
   `disconnect()` (ocupación vencida, cobro rechazado) prenden `closingByRoom` para que su `4000` no se
   lea como el jugador apretando salir.
+- **Lo que encontró la revisión final**, cada uno con su test en rojo primero:
+  - ⚠ **el socket desplazado que muere tarde**: la sala le pide cerrar con `4000` y el socket muerto no
+    contesta; 6-9 s después el transporte lo corta con `1006` y Colyseus llama `onDrop` por él aunque
+    el asiento siga jugando por la sesión nueva. Anotaba una segunda caída sin vuelta y, de paso —esto
+    ya pasaba antes del incremento—, marcaba `connected: false` a un jugador conectado y le abría una
+    reconexión. `onDrop` ahora sale temprano si el asiento tiene otra conexión, como ya hacía `onLeave`.
+    Para simularlo en el e2e, `pause()` del socket no alcanza (`ws` vuelve a leer solo): se anula el
+    `close` del socket viejo;
+  - el tope guardaba los primeros 50 hechos y tiraba justo el último; ahora guarda los últimos;
+  - desde el veredicto no se anota nada: el cierre puede esperar 15 s al cobro del aumento y cerrar la
+    pantalla de resultados entraba como INTENCIONAL;
+  - el medidor del event loop arrancaba en la primera caída y esa leía `0`; ahora corre desde que se
+    importa.
 
 ### Deudas abiertas de este incremento
 

@@ -99,7 +99,9 @@ Abrir una partida en el panel y, por cada jugador, ver:
 - **`1001` no es «se fue»**: el SDK lo trata como caída y reintenta solo (`onDrop` del cliente con
   `1005`, `1006`, `1001` y `4010`, `references/client-sdk.md:1083-1088`). Un `1001` es cerrar la
   pestaña o la app, pero también **recargar la página**, que vuelve con su token.
-- **En el apagado ordenado `onLeave` llega con `4001` para todos** (`references/room.md:1027`), y
+- **En el apagado ordenado llega `4001` para todos**: por `onDrop` primero —todo código que no es
+  `4000` va ahí (`Room.mjs:1445`), aunque `references/room.md:1027` diga `onLeave`— y después por
+  `onLeave`. Y
   `onBeforeShutdown` es el hook que corre antes (`references/room.md:1130`).
 
 ## Cómo funciona
@@ -155,7 +157,13 @@ La sala anota un hecho por cada transición:
   marcan ANTES de cerrar el socket (`closedByRoom` con el motivo), así que su `onLeave` no se lee como
   intencional del jugador. El desplazamiento ya quedó como `DROPPED`; los otros dos pasan antes de que
   la partida arranque o después del veredicto, y no producen hecho.
-- **Sólo se anota hasta el cierre del registro.** `MatchHistory.close` escribe una vez
+- **Sólo se anota hasta el veredicto.** Desde ahí irse es irse, y el cierre del registro puede esperar
+  hasta 15 s al cobro del aumento en vuelo: sin esa guarda, cerrar la pantalla de resultados entraba
+  como una salida INTENCIONAL.
+- **El socket desplazado que muere tarde no es una caída**: la sala le pide cerrar con `4000`, el socket
+  muerto no contesta, y el transporte lo corta con `1006` 6-9 s después. Colyseus llama `onDrop` por
+  él aunque el asiento siga jugando por la sesión nueva; la sala lo ignora.
+- **Antes, sólo se anota hasta el cierre del registro.** `MatchHistory.close` escribe una vez
   (`history.ts:495-497`) y llega con el veredicto; lo que pase después —la gente que se va de la
   mesa ya resuelta— no le cambia nada a la partida y se pierde a propósito. Lo que importa, la caída
   que terminó en retiro, siempre pasa antes: el `DROPPED` se anota en el instante, y el retiro del
@@ -213,7 +221,7 @@ interface SeatConnection {
     readonly jitterMs: number;
     readonly lostProbes: number;
   };
-  readonly events: readonly ConnectionEvent[]; // tope: MAX_CONNECTION_EVENTS (50); se marca `truncated`
+  readonly events: readonly ConnectionEvent[]; // tope: los ÚLTIMOS MAX_CONNECTION_EVENTS (50); se marca `truncated`
   readonly truncated?: true;
 }
 

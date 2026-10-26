@@ -2,6 +2,7 @@ import { env } from "@/env";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { matchMaker } from "colyseus";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { ConnectionMonitor } from "../transports/colyseus/connection-monitor";
 import {
   type SeatedMatch,
   bootServer,
@@ -48,6 +49,18 @@ async function closeBy(match: SeatedMatch, selector: string): Promise<StoredPlay
 }
 const eventsOf = (players: StoredPlayer[], match: SeatedMatch, selector: string) =>
   players.find((player) => player.id === playerIdOf(match, selector))?.connection?.events ?? [];
+
+// EL SOCKET DE UN ASIENTO DEL LADO DEL SERVIDOR, que es donde se simula lo que el cliente no puede.
+function serverSocketOf(match: SeatedMatch, selector: string) {
+  const playerId = playerIdOf(match, selector);
+  const socket = matchMaker
+    .getLocalRoomById(match.roomId)
+    ?.clients.find(
+      (client) => (client.userData as { playerId?: string } | undefined)?.playerId === playerId,
+    );
+  if (!socket) throw new Error(`sin socket para ${selector}`);
+  return socket.ref as unknown as { terminate(): void; close(code?: number): void };
+}
 
 let server: ColyseusTestServer;
 
@@ -122,12 +135,7 @@ describe("la conexión de cada asiento en el registro", () => {
     clientOf(match, "d1").reconnection.enabled = false;
 
     // Del lado del SERVIDOR, como hace el transporte con el que dejó de contestar los pings.
-    const room = matchMaker.getLocalRoomById(match.roomId);
-    const playerId = playerIdOf(match, "d1");
-    const socket = room?.clients.find(
-      (client) => (client.userData as { playerId?: string } | undefined)?.playerId === playerId,
-    );
-    (socket?.ref as unknown as { terminate(): void }).terminate();
+    serverSocketOf(match, "d1").terminate();
     await waitUntil(() => connectedOf(match, "d1") === false, 3_000);
 
     const [drop] = eventsOf(await closeBy(match, "d2"), match, "d1");
@@ -143,5 +151,41 @@ describe("la conexión de cada asiento en el registro", () => {
     const events = eventsOf(await closeBy(match, "r2"), match, "r1");
     expect(events.map((event) => event.kind)).toEqual(["DROPPED", "RECONNECTED"]);
     expect(events[0]).toMatchObject({ closeCode: null, replacedBySession: true });
+  }, 10_000);
+
+  // EL CASO DEL CELULAR: el socket viejo está muerto pero el servidor no lo sabe; el jugador vuelve con
+  // otra sesión, la sala cierra la vieja con `4000` y esa vieja nunca contesta. Seis a nueve segundos
+  // después el transporte la corta con `1006`, y Colyseus llama `onDrop` por ella aunque el asiento
+  // siga jugando por la nueva.
+  it("el socket viejo de una sesión desplazada no anota una segunda caída", async () => {
+    const match = await seatPair(server, ["z1", "z2"]);
+    await revealHands(match);
+    clientOf(match, "z1").reconnection.enabled = false;
+    const zombie = serverSocketOf(match, "z1");
+    // El cierre que la sala le pida no llega a ningún lado, que es lo que pasa contra un socket muerto.
+    zombie.close = () => undefined;
+
+    await rejoinAs(server, match, "z1");
+    zombie.terminate();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(connectedOf(match, "z1")).toBe(true);
+    const events = eventsOf(await closeBy(match, "z2"), match, "z1");
+    expect(events.map((event) => event.kind)).toEqual(["DROPPED", "RECONNECTED"]);
+  }, 10_000);
+
+  // DESDE EL VEREDICTO, IRSE ES IRSE: cerrar la pantalla de resultados no es una caída de la partida.
+  it("lo que pasa después del veredicto no se anota", async () => {
+    const match = await seatPair(server, ["v1", "v2"]);
+    await revealHands(match);
+    const room = matchMaker.getLocalRoomById(match.roomId) as unknown as {
+      connections: ConnectionMonitor;
+    };
+    await closeBy(match, "v2");
+
+    clientOf(match, "v1").connection.close(1000);
+    await waitUntil(() => connectedOf(match, "v1") === false, 3_000);
+
+    expect(room.connections.connectionOf(playerIdOf(match, "v1"))?.events).toEqual([]);
   }, 10_000);
 });

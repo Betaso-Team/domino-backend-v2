@@ -225,8 +225,13 @@ describe("ConnectionMonitor", () => {
       monitor.reconnected("seat-1", 1);
     }
 
+    monitor.dropped("seat-1", { ...dropCtx, closeCode: 4010 });
+
+    // SE QUEDAN LOS ÚLTIMOS: la caída que el panel necesita es la que terminó en retiro, o sea la
+    // última, y es justo la del jugador que llega al tope.
     const connection = monitor.connectionOf("seat-1");
     expect(connection?.events).toHaveLength(50);
+    expect(connection?.events.at(-1)).toMatchObject({ kind: "DROPPED", closeCode: 4010 });
     expect(connection?.truncated).toBe(true);
   });
 

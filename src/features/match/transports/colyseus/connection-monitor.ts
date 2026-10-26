@@ -237,9 +237,14 @@ export class ConnectionMonitor {
     };
   }
 
+  // SE QUEDAN LOS ÚLTIMOS: la caída que el panel necesita es la que terminó en retiro, o sea la
+  // última, y es justo la del jugador inestable que llega al tope.
   private note(seat: Seat, event: ConnectionEvent): ConnectionEvent {
-    if (seat.events.length >= MAX_CONNECTION_EVENTS) seat.truncated = true;
-    else seat.events.push(event);
+    seat.events.push(event);
+    if (seat.events.length > MAX_CONNECTION_EVENTS) {
+      seat.events.shift();
+      seat.truncated = true;
+    }
     return event;
   }
 

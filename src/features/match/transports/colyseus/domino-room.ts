@@ -420,8 +420,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // antes de que el transporte notara muerta la vieja. En el celular es probablemente la caída más
     // común, y sin esta línea no dejaba rastro: el `onLeave` del desplazado sale temprano.
     if (previous.length > 0)
-      this.noteConnection(
-        playerId,
+      this.noteConnection(playerId, () =>
         this.connections.dropped(playerId, {
           closeCode: null,
           roundNumber: this.roundNow(),
@@ -436,7 +435,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const isBack = this.seated.has(playerId) && previous.length === 0;
     this.seated.add(playerId);
     if (isBack) this.notifier.notify([{ type: "PLAYER_RECONNECTED", playerId }]);
-    this.noteConnection(playerId, this.connections.reconnected(playerId, this.roundNow()));
+    this.noteConnection(playerId, () => this.connections.reconnected(playerId, this.roundNow()));
     this.probeSocket(playerId, client);
     this.log.info("jugador conectado", {
       playerId,
@@ -448,9 +447,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
   override onDrop(client: Client, code?: number): void {
     const playerId = this.playerIdOf(client);
-    if (!playerId) return;
-    this.noteConnection(
-      playerId,
+    // EL SOCKET DESPLAZADO QUE MUERE TARDE: el jugador volvió con otra sesión, la sala le pidió cerrar
+    // a la vieja con `4000` y la vieja, muerta, nunca contestó. El transporte la corta 6-9 s después
+    // con `1006` y Colyseus llama `onDrop` por ella. El asiento sigue jugando por la nueva: no hay
+    // caída que anotar, ni reconexión que esperar, ni jugador que marcar ausente.
+    if (!playerId || this.clientOf(playerId)) return;
+    this.noteConnection(playerId, () =>
       this.connections.dropped(playerId, {
         closeCode: code ?? null,
         roundNumber: this.roundNow(),
@@ -486,7 +488,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       return;
     }
     this.player(playerId).connected = true;
-    this.noteConnection(playerId, this.connections.reconnected(playerId, this.roundNow()));
+    this.noteConnection(playerId, () => this.connections.reconnected(playerId, this.roundNow()));
     this.probeSocket(playerId, client);
     this.notifier.notify([{ type: "PLAYER_RECONNECTED", playerId }]);
     this.log.info("jugador reconectado", { playerId });
@@ -496,8 +498,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const playerId = this.playerIdOf(client);
     if (!playerId || this.clientOf(playerId)) return;
     if (!this.closingByRoom)
-      this.noteConnection(
-        playerId,
+      this.noteConnection(playerId, () =>
         this.connections.gone(playerId, {
           closeCode: code ?? null,
           roundNumber: this.roundNow(),
@@ -728,7 +729,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   }
 
   // Una línea por hecho, para verlo en vivo sin esperar al cierre del registro.
-  private noteConnection(playerId: PlayerId, event: ConnectionEvent | undefined): void {
+  //
+  // DESDE EL VEREDICTO, IRSE ES IRSE: cerrar la pantalla de resultados no es una caída de la partida.
+  // Y el cierre del registro puede esperar hasta 15 s al cobro del aumento en vuelo, así que sin esta
+  // guarda esos cierres entraban al registro —y salían en el log como INTENCIONAL en cada final—.
+  private noteConnection(playerId: PlayerId, fact: () => ConnectionEvent | undefined): void {
+    if (this.hasOutcome()) return;
+    const event = fact();
     if (!event) return;
     this.log.info("conexión", {
       playerId,
