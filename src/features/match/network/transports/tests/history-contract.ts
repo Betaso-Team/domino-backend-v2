@@ -274,6 +274,71 @@ export function describeHistoryContract(
       expect(await history.of("m-1")).toHaveLength(2);
     });
 
+    it("al cerrar: la conexión de cada asiento, con los instantes de sus hechos como fechas", async () => {
+      const history = await harness();
+      const verdict = {
+        blame: "NETWORK",
+        cause: "CONNECTION_LOST",
+        verdictVersion: 1,
+      } as const;
+      const server = {
+        eventLoopP99Ms: 12,
+        othersWithHighRtt: 0,
+        othersConnected: 1,
+        shuttingDown: false,
+      };
+      const rtt = { samples: 3, avgMs: 85, maxMs: 90, jitterMs: 4, lostProbes: 0 };
+      const [first, second] = CLOSING.players;
+      history.close("m-1", {
+        ...CLOSING,
+        players: [
+          {
+            ...(first as MatchClosing["players"][number]),
+            connection: {
+              rtt,
+              events: [
+                {
+                  kind: "DROPPED",
+                  at: 20_000,
+                  roundNumber: 1,
+                  closeCode: 1006,
+                  sinceLastPongMs: 4_000,
+                  recentRttMs: [80, null, 90],
+                  server,
+                  verdict,
+                },
+                { kind: "RECONNECTED", at: 25_000, roundNumber: 1, awayMs: 5_000 },
+              ],
+            },
+          },
+          second as MatchClosing["players"][number],
+        ],
+      });
+      await history.drain();
+
+      const record = await history.recordOf("m-1");
+      expect(record).toMatchObject({
+        players: [
+          {
+            connection: {
+              rtt,
+              events: [
+                {
+                  kind: "DROPPED",
+                  at: new Date(20_000),
+                  recentRttMs: [80, null, 90],
+                  server,
+                  verdict,
+                },
+                { kind: "RECONNECTED", at: new Date(25_000), awayMs: 5_000 },
+              ],
+            },
+          },
+          {},
+        ],
+      });
+    });
+
     // UNA MESA QUE NUNCA SE LLENÓ: el cierre es lo primero que llega, y trae el armado él mismo.
     it("un cierre sin nada antes crea el documento, con el armado y sin arreglos", async () => {
       const history = await harness();
