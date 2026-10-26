@@ -1,6 +1,11 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import { ConnectionMonitor, type ProbeSocket, probeSocketOf } from "./connection-monitor";
+import {
+  ConnectionMonitor,
+  MonitorPeers,
+  type ProbeSocket,
+  probeSocketOf,
+} from "./connection-monitor";
 
 // UN SOCKET DE MENTIRA que hace lo mismo que el `ws` de verdad en lo que importa: `ping(data)` y
 // `pong` con el mismo payload. Contestar es emitir el `pong` con lo que se mandó.
@@ -14,12 +19,13 @@ class FakeSocket extends EventEmitter implements ProbeSocket {
   }
 }
 
-function build(lagMs = 12) {
+function build(lagMs = 12, peers = new MonitorPeers()) {
   const time = { mono: 0, wall: 1_000_000 };
   const monitor = new ConnectionMonitor({
     monotonicNow: () => time.mono,
     wallNow: () => time.wall,
     eventLoopP99Ms: () => lagMs,
+    peers,
   });
   return { monitor, time };
 }
@@ -166,8 +172,42 @@ describe("ConnectionMonitor", () => {
 
     expect(drop).toMatchObject({
       server: { eventLoopP99Ms: 30, othersWithHighRtt: 1, othersConnected: 1, shuttingDown: false },
+      verdict: { blame: "NETWORK" },
+    });
+  });
+
+  // SI EL QUE FALLA ES EL SERVIDOR O SU RED, se les va el ping a los de TODAS las mesas a la vez: la
+  // salud se mide sobre todo el proceso, no sobre la mesa de dos donde el único otro es el rival.
+  it("la salud del servidor mira las otras mesas del proceso", () => {
+    const peers = new MonitorPeers();
+    const { monitor } = build(12, peers);
+    const other = build(12, peers);
+    monitor.attach("seat-1", new FakeSocket());
+    for (const seat of ["seat-1", "seat-2", "seat-3"]) {
+      const socket = new FakeSocket();
+      other.monitor.attach(seat, socket);
+      other.time.mono += 400;
+      socket.answerLast();
+    }
+
+    const drop = monitor.dropped("seat-1", dropCtx);
+
+    expect(drop).toMatchObject({
+      server: { othersWithHighRtt: 3, othersConnected: 3 },
       verdict: { blame: "OURS", cause: "SERVER_OVERLOAD" },
     });
+  });
+
+  it("una mesa que se dispone deja de contar para las otras", () => {
+    const peers = new MonitorPeers();
+    const { monitor } = build(12, peers);
+    const other = build(12, peers);
+    monitor.attach("seat-1", new FakeSocket());
+    other.monitor.attach("seat-1", new FakeSocket());
+
+    other.monitor.dispose();
+
+    expect(monitor.dropped("seat-1", dropCtx)).toMatchObject({ server: { othersConnected: 0 } });
   });
 
   it("caída, vuelta y salida definitiva", () => {

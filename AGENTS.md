@@ -2479,7 +2479,7 @@ Truco `develop` en `905c3dd`, docs en reglas v21 / negocio v50 / app-infra v51 /
 
 Diseño: `docs/superpowers/specs/2026-10-26-conexion-ping-y-culpa-de-las-caidas-design.md`. Plan:
 `docs/superpowers/plans/2026-10-26-conexion-ping-y-culpa-de-las-caidas.md`. Pieza NUEVA, sin
-equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline **976 unit (en `src`) /
+equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline **981 unit (en `src`) /
 338 int / 112 e2e**, con `typecheck`, lint y `depcruise` en verde.
 
 - **El registro decía `DISCONNECTED` y nada más.** Ahora cada jugador del cierre lleva
@@ -2517,6 +2517,11 @@ equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline
     pantalla de resultados entraba como INTENCIONAL;
   - el medidor del event loop arrancaba en la primera caída y esa leía `0`; ahora corre desde que se
     importa.
+- **«A todos se les fue el ping» se mide sobre el PROCESO, no sobre la mesa** (`MonitorPeers`), y pide
+  al menos 3 otros jugadores conectados (`MIN_PEERS_FOR_OVERLOAD`). Con la mesa sola, en 2P el único
+  otro era el rival, y que él también tuviera mal internet alcanzaba para culpar al servidor. Si el que
+  falla es el servidor o su red, les pasa a los de todas las mesas a la vez. Los `seat-N` se repiten
+  entre mesas, así que se excluye al que se cayó por identidad, no por id.
 
 ### Deudas abiertas de este incremento
 
@@ -2524,8 +2529,8 @@ equivalente en truco ni en v1: queda como el estándar para los juegos. Baseline
    del diseño (columna de ping, veredicto junto a la salida, sección «Conexión») es del repo
    `Tablea-Gaming-Panel`.
 2. **Minimizar la app sale como `NETWORK`.** Separarlo pide que el front avise (fase 2 del diseño).
-3. **Los umbrales no están medidos con jugadores reales** (300 ms, 100 ms, 3 perdidos, 500 ms). En 2P
-   un rival con mal internet alcanza para culpar al servidor (`ponytail:` en la regla).
+3. **Los umbrales no están medidos con jugadores reales** (300 ms, 100 ms, 3 perdidos, 500 ms, 3
+   jugadores para «a todos»).
 4. **El contrato contra Mongo no se corrió**: Docker estaba apagado. `MemoryHistory` corre el mismo
    contrato y la conversión a fechas es compartida.
 

@@ -183,7 +183,7 @@ peor, fluctuación y sondeos perdidos) y la lista de hechos (`events`): `DROPPED
 
 | `blame` | qué fue | `cause` |
 |---|---|---|
-| `OURS` | el servidor | `SERVER_SHUTDOWN` (apagado o deploy), `SERVER_OVERLOAD` (el proceso trabado, o el ping alto para todos a la vez), `SERVER_ERROR` |
+| `OURS` | el servidor | `SERVER_SHUTDOWN` (apagado o deploy), `SERVER_OVERLOAD` (el proceso trabado, o el ping alto a la vez para la mayoría de los conectados al proceso, con al menos 3), `SERVER_ERROR` |
 | `NETWORK` | la conexión del jugador | `POOR_CONNECTION` (el ping venía alto o inestable), `CONNECTION_LOST` (se cortó de golpe), `WENT_OFFLINE` (el navegador avisó que perdió la red) |
 | `INTENTIONAL` | el jugador | `LEFT_THE_TABLE` (salió con el botón), `CLOSED_APP` (cerró o recargó; si hay un `RECONNECTED` justo después, recargó) |
 | `UNKNOWN` | un código de cierre que la regla no conoce | `UNKNOWN_CLOSE` |

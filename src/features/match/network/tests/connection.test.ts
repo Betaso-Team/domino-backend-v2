@@ -24,9 +24,29 @@ const cases: [string, Partial<DropEvidence>, ConnectionBlame, ConnectionCause][]
   ["event loop trabado", server({ eventLoopP99Ms: 500 }), "OURS", "SERVER_OVERLOAD"],
   [
     "a todos se les fue el ping",
-    server({ othersWithHighRtt: 1, othersConnected: 1 }),
+    server({ othersWithHighRtt: 2, othersConnected: 3 }),
     "OURS",
     "SERVER_OVERLOAD",
+  ],
+  // EN UNA MESA DE DOS el único otro es el rival, y que él también tenga mal internet no prueba nada:
+  // hacen falta al menos tres para decir «a todos».
+  [
+    "un solo rival con el ping alto no es nuestro",
+    server({ othersWithHighRtt: 1, othersConnected: 1 }),
+    "NETWORK",
+    "CONNECTION_LOST",
+  ],
+  [
+    "dos de dos tampoco alcanza",
+    server({ othersWithHighRtt: 2, othersConnected: 2 }),
+    "NETWORK",
+    "CONNECTION_LOST",
+  ],
+  [
+    "uno de tres no es todos",
+    server({ othersWithHighRtt: 1, othersConnected: 3 }),
+    "NETWORK",
+    "CONNECTION_LOST",
   ],
   [
     "nadie más conectado no es sobrecarga",

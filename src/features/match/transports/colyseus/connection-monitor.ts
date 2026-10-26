@@ -35,12 +35,37 @@ export function probeSocketOf(ref: unknown): ProbeSocket | undefined {
     : undefined;
 }
 
+/**
+ * LAS MESAS VIVAS DEL PROCESO, para juzgar si a todos se les fue el ping a la vez: si el que falla es
+ * el servidor o su red, les pasa a los de todas las mesas, no sólo a los de una de dos.
+ */
+export class MonitorPeers {
+  private readonly monitors = new Set<ConnectionMonitor>();
+
+  add(monitor: ConnectionMonitor): void {
+    this.monitors.add(monitor);
+  }
+
+  delete(monitor: ConnectionMonitor): void {
+    this.monitors.delete(monitor);
+  }
+
+  /** La ventana reciente de cada asiento conectado del proceso, menos el que se cayó. */
+  recentsExcept(dropped: object): (readonly (number | null)[])[] {
+    return [...this.monitors].flatMap((monitor) => monitor.liveRecentsExcept(dropped));
+  }
+}
+
+/** Las del proceso: todas las salas comparten esta. */
+export const processPeers = new MonitorPeers();
+
 export interface ConnectionMonitorDeps {
   /** Reloj MONOTÓNICO para los RTT: un ajuste del reloj del sistema no fabrica un ping negativo. */
   readonly monotonicNow: () => number;
   /** Reloj de pared, para el `at` de cada hecho. */
   readonly wallNow: () => number;
   readonly eventLoopP99Ms: () => number;
+  readonly peers: MonitorPeers;
 }
 
 interface DropContext {
@@ -74,7 +99,9 @@ export class ConnectionMonitor {
   private readonly seats = new Map<PlayerId, Seat>();
   private nextNonce = 0;
 
-  constructor(private readonly deps: ConnectionMonitorDeps) {}
+  constructor(private readonly deps: ConnectionMonitorDeps) {
+    deps.peers.add(this);
+  }
 
   /**
    * El socket nuevo del asiento. Lo que se le mandó al anterior ya no cuenta. SE SONDEA EN EL ACTO: una
@@ -182,6 +209,14 @@ export class ConnectionMonitor {
 
   dispose(): void {
     for (const seat of this.seats.values()) this.detach(seat);
+    this.deps.peers.delete(this);
+  }
+
+  /** Para `MonitorPeers`: la ventana de cada asiento con socket, menos el indicado. */
+  liveRecentsExcept(dropped: object): (readonly (number | null)[])[] {
+    return [...this.seats.values()]
+      .filter((seat) => seat !== dropped && seat.socket)
+      .map((seat) => seat.recent);
   }
 
   // UN SONDEO SIN RESPUESTA CUENTA PERDIDO SÓLO SI LLEGÓ UNO POSTERIOR. Los del final, después del
@@ -226,12 +261,13 @@ export class ConnectionMonitor {
     if (seat.recent.length > RECENT_SAMPLES) seat.recent.shift();
   }
 
-  // Si a TODOS se les fue el ping a la vez, el problema no está en la casa de uno.
+  // Si a TODOS se les fue el ping a la vez, el problema no está en la casa de uno. Se mira el proceso
+  // entero y no la mesa: los `seat-N` se repiten entre mesas, así que se excluye por identidad.
   private serverHealth(playerId: PlayerId, shuttingDown: boolean): ServerHealth {
-    const others = [...this.seats].filter(([id, seat]) => id !== playerId && seat.socket);
+    const others = this.deps.peers.recentsExcept(this.seatOf(playerId));
     return {
       eventLoopP99Ms: this.deps.eventLoopP99Ms(),
-      othersWithHighRtt: others.filter(([, seat]) => isHighRtt(seat.recent)).length,
+      othersWithHighRtt: others.filter(isHighRtt).length,
       othersConnected: others.length,
       shuttingDown,
     };

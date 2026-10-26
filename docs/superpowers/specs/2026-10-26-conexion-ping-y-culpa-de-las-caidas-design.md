@@ -135,8 +135,8 @@ Un `perf_hooks.monitorEventLoopDelay()` por proceso, leído en el instante de ca
 máximo de la ventana, después `reset()` periódico). Un event loop trabado hace que el servidor
 conteste tarde a TODOS: eso es lag nuestro aunque el ping de un solo jugador lo muestre.
 
-Junto a cada caída se guarda además cuántos de los **otros** asientos conectados de la mesa tenían
-su ping reciente por encima de `HIGH_RTT_MS` en el mismo momento. Si a todos se les fue el ping a la
+Junto a cada caída se guarda además cuántos de los **otros** jugadores conectados **al proceso** —de
+esta mesa y de las demás— tenían su ping reciente por encima de `HIGH_RTT_MS` en el mismo momento. Si a todos se les fue el ping a la
 vez, el problema no está en la casa de uno.
 
 ### 3. Los hechos de conexión
@@ -184,7 +184,9 @@ para verlo en vivo sin esperar al cierre.
    el SDK también lo manda él mismo cuando el navegador dispara el evento `offline`
    (`@colyseus/sdk/build/Connection.mjs:28`), o sea cuando el jugador se quedó sin red.
 2. **NUESTRA / `SERVER_OVERLOAD`** — p99 del event loop ≥ `EVENT_LOOP_LAG_MS` (500), **o** al menos
-   la mitad de los otros asientos conectados con ping alto a la vez (y al menos uno).
+   la mitad de los otros jugadores conectados **al proceso** —de todas las mesas— con ping alto a la
+   vez, contando al menos 3 (`MIN_PEERS_FOR_OVERLOAD`). En una mesa de dos el único otro es el rival,
+   y que él también tenga mal internet no prueba nada.
 3. **NUESTRA / `SERVER_ERROR`** — código `4002`.
 4. **INTENCIONAL** — el cliente cerró prolijamente, en dos causas distintas:
    - `LEFT_THE_TABLE`: `4000` en un `onLeave` sin caída previa y sin marca `closedByRoom`. Apretó

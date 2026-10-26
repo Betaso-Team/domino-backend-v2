@@ -53,7 +53,7 @@ import {
   buildRouter,
   registerIndividualCommands,
 } from "./commands/di-wiring";
-import { ConnectionMonitor, probeSocketOf } from "./connection-monitor";
+import { ConnectionMonitor, probeSocketOf, processPeers } from "./connection-monitor";
 import {
   PlayerAlreadyOutError,
   SeatNotReservedError,
@@ -236,6 +236,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       monotonicNow: () => performance.now(),
       wallNow: () => Date.now(),
       eventLoopP99Ms,
+      peers: processPeers,
     });
     this.history.trackConnections((playerId) => this.connections.connectionOf(playerId));
     // LA REVANCHA: la sala solo la cierra cuando alguien se va (`onLeave`). La compuerta nadie la

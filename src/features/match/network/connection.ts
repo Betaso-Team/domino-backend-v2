@@ -15,6 +15,11 @@ export const HIGH_RTT_MS = 300;
 export const HIGH_JITTER_MS = 100;
 /** Sondeos perdidos en la ventana reciente desde los que una conexión se considera mala. */
 export const LOST_PROBES_POOR = 3;
+/**
+ * Cuántos OTROS jugadores conectados al proceso hacen falta para decir «a todos se les fue el ping».
+ * En una mesa de dos el único otro es el rival, y que él también tenga mal internet no prueba nada.
+ */
+export const MIN_PEERS_FOR_OVERLOAD = 3;
 /** p99 del event loop desde el que el servidor estaba trabado. */
 export const EVENT_LOOP_LAG_MS = 500;
 /** Tope de hechos por asiento: una partida con un jugador inestable no infla el registro. */
@@ -43,7 +48,10 @@ export interface ConnectionVerdict {
 /** Cómo estaba el servidor en el instante de la caída. */
 export interface ServerHealth {
   readonly eventLoopP99Ms: number;
-  /** Cuántos de los OTROS asientos conectados tenían el ping alto en ese momento. */
+  /**
+   * Cuántos de los OTROS jugadores conectados AL PROCESO —de esta mesa y de las demás— tenían el ping
+   * alto en ese momento. Si el que falla es el servidor o su red, les pasa a todos a la vez.
+   */
   readonly othersWithHighRtt: number;
   readonly othersConnected: number;
   readonly shuttingDown: boolean;
@@ -137,10 +145,9 @@ export function connectionVerdictOf(evidence: DropEvidence): ConnectionVerdict {
   // `4010` SOLO NO ALCANZA para decir apagado: el SDK lo manda él mismo cuando el navegador dispara
   // `offline` (`@colyseus/sdk/build/Connection.mjs:28`). Lo que dice apagado es la marca de la sala.
   if (server.shuttingDown || closeCode === 4001) return verdict("OURS", "SERVER_SHUTDOWN");
-  // ponytail: en 2P un solo rival con mal internet alcanza para culpar al servidor; si en el panel
-  // aparecen falsos NUESTRA, se sube el piso a dos asientos.
   const everyoneLagged =
-    server.othersConnected > 0 && server.othersWithHighRtt * 2 >= server.othersConnected;
+    server.othersConnected >= MIN_PEERS_FOR_OVERLOAD &&
+    server.othersWithHighRtt * 2 >= server.othersConnected;
   if (server.eventLoopP99Ms >= EVENT_LOOP_LAG_MS || everyoneLagged)
     return verdict("OURS", "SERVER_OVERLOAD");
   if (closeCode === 4002) return verdict("OURS", "SERVER_ERROR");
