@@ -47,6 +47,7 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
   it("el ganador ve lo que pagó, lo que cobró, sus puntos y cuándo terminó", () => {
     expect(rowOf("u1", finished)).toEqual({
       id: "m-1",
+      roomId: "room-1",
       playedAt: "2026-10-26T20:00:00.000Z",
       bet: 10,
       prize: 18,

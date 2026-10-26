@@ -7,7 +7,13 @@ import type { StoredMatchRecord } from "./history";
 
 /** Una partida vista desde el asiento del que pregunta. */
 export interface MatchRow {
+  /** El `matchId`: la clave estable de la fila. */
   readonly id: string;
+  /**
+   * La sala de Colyseus: lo que el jugador ve y le dicta a soporte. Truco no lo separa porque allá la
+   * partida ES su sala; acá el `matchId` lo genera el dominó y la sala la genera Colyseus.
+   */
+  readonly roomId: string;
   /**
    * Cuándo terminó, como instante ISO. NO se formatea acá: una fecha armada en el servidor lleva la zona
    * horaria del servidor, y la noche que importa es la del jugador.
@@ -100,6 +106,7 @@ export function rowOf(userId: string, document: StoredMatchRecord): MatchRow {
   const config = (document.matchConfig ?? {}) as { playersQuantity?: number };
   return {
     id: String(document.matchId ?? ""),
+    roomId: String(document.roomId ?? ""),
     playedAt:
       isoOf(document.matchEndedAt) ??
       isoOf(document.updatedAt) ??

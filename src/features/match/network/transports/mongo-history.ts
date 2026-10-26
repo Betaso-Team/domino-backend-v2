@@ -228,6 +228,7 @@ export function countQueryOf(
 // documento.
 const PLAYER_ROW_PROJECTION = {
   matchId: 1,
+  roomId: 1,
   status: 1,
   winnerIds: 1,
   table: 1,

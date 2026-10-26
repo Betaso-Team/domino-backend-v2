@@ -2551,7 +2551,9 @@ verde; el contrato y el `explain` corrieron contra un Mongo 7 de verdad.
   `win | lose | abandoned | canceled`, y GANAR SE PREGUNTA ANTES QUE IRSE —en 4P uno se puede ir de una
   partida que su pareja gana—. Los ganadores son ASIENTOS (`seat-N`): primero se cruza el `userId` con su
   asiento. `bet` es `chargedInUC` (0 si la partida se canceló: el reembolso lo decide el orquestador) y
-  `prize` es `prizePaidInUC` sólo si ganó; los dos en UC. `playedAt` va en ISO, sin formatear.
+  `prize` es `prizePaidInUC` sólo si ganó; los dos en UC. `playedAt` va en ISO, sin formatear. `id` es el
+  `matchId` y `roomId` la sala de Colyseus, que es la que el jugador ve: acá, a diferencia de truco, no son lo
+  mismo.
 - **Usa el índice del filtro por jugador del panel** (`seats.userId_1_createdAt_-1__id_-1`): la página
   sale ordenada del índice y el estado se descarta en el FETCH. Por página y no por cursor, como truco:
   el `skip` recorre las partidas de UNA cuenta. Lo pinea el `explain` de `mongo-history.int.test.ts`.
