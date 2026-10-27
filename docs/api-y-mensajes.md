@@ -51,8 +51,8 @@ decoder estricto antes de alcanzar el comando.
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
 | `GET /config/:roomId` | Config pública de una mesa (con `betLevels: [{ level, additionalPoints }]`, vacío si no ofrece aumentar) y `serverNow`; nunca devuelve el seed |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
-| `GET /game-modes` | Modos activos del catálogo |
-| `GET /game-modes/:uuid` | Un modo activo; un modo dado de baja responde 404 |
+| `GET /game-modes` | Modos **compartidos** activos del catálogo, con el DTO de siempre (sin dueño ni suscriptores) |
+| `GET /game-modes/:uuid` | Un modo compartido activo; uno dado de baja o propio de un operador responde 404 |
 
 Todas las respuestas HTTP exponen el header `Date`, que permite recalcular el desfase del reloj del
 cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
@@ -61,12 +61,36 @@ cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 
 Estas rutas requieren una de dos credenciales:
 
-- el header `x-internal-api-key` con la llave de administración (scripts y soporte);
+- el header `x-internal-api-key` con la llave de administración (scripts y soporte). Vale como un
+  admin de **Betaso Games** con rol `admin`;
 - `Authorization: Bearer <token>` con el token de admin que billing-auth emite cuando un admin inicia
   sesión (`POST /v1/admins/login` de billing-auth): ES256, audiencia `betaso-games-admin` y
-  `typ: admin`. Abre lo mismo que la llave: no hay roles.
+  `typ: admin`. Sus claims `prv` (el operador del admin; `null` es Betaso Games) y `role` (`admin` o
+  `support`) dicen qué abre. Se leen **tolerantes**: un token sin `prv` es de Betaso Games y uno sin
+  `role` es `admin`, que es lo que eran los tokens de antes. Un valor presente que no se entiende (un
+  rol desconocido, un `prv` que no es texto o vacío) es `401`.
 
 Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
+
+**Quién entra.** El default es el cerrado: una ruta es de Betaso Games y de escritura salvo que diga
+lo contrario. `support` sólo lee. Un admin de **operador** sólo entra a las rutas del catálogo que
+acotan su ámbito; en todas las demás recibe `403 {"error":"FORBIDDEN"}`.
+
+| Rutas | Betaso Games `admin` (y la llave) | Betaso Games `support` | Operador `admin` | Operador `support` |
+|---|---|---|---|---|
+| `/internal/matches…`, `/game-data/:roomId` | sí | sí | 403 | 403 |
+| `GET /internal/settings…` | sí | sí | 403 | 403 |
+| `PATCH`/`DELETE /internal/settings/:section` | sí | 403 | 403 | 403 |
+| `GET /game-modes/admin`, `/admin/:uuid` | todo | todo | los suyos y los compartidos que juega | ídem |
+| `POST /game-modes` | compartido o propio de cualquiera | 403 | sólo propio suyo | 403 |
+| `PUT`/`DELETE /game-modes/:uuid`, `GET /game-modes/reactive/:uuid` | todo | 403 | sólo los propios suyos | 403 |
+| `PUT`/`DELETE /game-modes/:uuid/subscriptions/:providerId` | cualquier operador | 403 | sólo a sí mismo | 403 |
+| `POST /game-modes/copy-shared` | para cualquiera | 403 | sólo para sí mismo | 403 |
+| `PUT /game-modes/:uuid/subscribers`, `POST /game-modes/sync` | sí | 403 | 403 | 403 |
+
+Dentro del catálogo, un modo **propio de otro operador** no existe para un operador: toda operación
+sobre él responde `404`. Un modo **compartido** no es secreto (lo lista el catálogo público): tocarlo
+sin poder responde `403 {"status":"error","message":…}`.
 
 | Método y ruta | Uso |
 |---|---|
@@ -74,15 +98,65 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 | `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
 | `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
-| `POST /game-modes` | Crea un modo |
-| `PUT /game-modes/:uuid` | Aplica un patch al modo |
-| `DELETE /game-modes/:uuid` | Baja lógica |
+| `GET /game-modes/admin` | Los modos que ve el admin, dados de baja incluidos |
+| `GET /game-modes/admin/:uuid` | Un modo que ve el admin; 404 si no existe o no lo ve |
+| `POST /game-modes` | Crea un modo; `ownerProviderId` opcional (ver abajo) |
+| `PUT /game-modes/:uuid` | Aplica un patch al modo (el dueño y los suscriptores no se editan acá) |
+| `DELETE /game-modes/:uuid` | Baja lógica: escribe sólo `isActive`, los suscriptores se conservan |
 | `GET /game-modes/reactive/:uuid` | Reactiva; conserva el verbo de v1 por compatibilidad |
-| `POST /game-modes/sync` | Encola una republicación completa del catálogo |
+| `POST /game-modes/sync` | Encola una republicación de los modos **compartidos** al exchange `betaso` |
+| `PUT /game-modes/:uuid/subscriptions/:providerId` | Suscribe un operador a un compartido activo |
+| `DELETE /game-modes/:uuid/subscriptions/:providerId` | Lo da de baja |
+| `PUT /game-modes/:uuid/subscribers` | Fija la lista entera de suscriptores: `{ providerIds: string[] }` |
+| `POST /game-modes/copy-shared` | Copia a modos propios los compartidos que un operador juega: `{ providerId }` |
 | `GET /internal/settings` | Las secciones de config en caliente (`match`; en local y dev también `deal` y `starting-score`): en vigor, overrides y editables |
 | `GET /internal/settings/:section` | Una sección |
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
 | `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
+
+### Modos con dueño y suscripciones
+
+Cada modo tiene un dueño, `ownerProviderId`: `null` es un modo **compartido** de Betaso Games; un id es
+un modo **propio** de ese operador, que sólo juegan sus jugadores. Los compartidos llevan además
+`subscribers`, los operadores que los juegan:
+
+- **`null` es legado**: un documento de antes de este campo, que se ofrece a **todos** los operadores,
+  igual que antes. No hay migración: el despliegue no le cambia el catálogo a nadie.
+- **Un arreglo es la lista explícita.** Un compartido nuevo nace con `[]` (no se ofrece a nadie hasta
+  que se suscriban). Un modo propio también lleva `[]`: no tiene suscriptores.
+- Suscribir o dar de baja a un operador de un legado responde `409` hasta que Betaso Games fije la
+  lista entera con `PUT /game-modes/:uuid/subscribers` (eso también convierte el legado en lista). La
+  suscripción vale sólo sobre compartidos **activos**; sobre uno inactivo o propio, `409`.
+- Las escrituras de suscriptores **no avanzan `__v` ni `updatedAt`**: `__v` es la revisión que mira el
+  outbox, y suscribirse no es una edición del modo.
+- La unicidad (`name + playersQuantity` al crear, `name` al renombrar, con el hueco heredado de v1)
+  vale **por dueño**: dos operadores pueden tener cada uno su «Clásica».
+
+Lo que ve cada uno en `GET /game-modes/admin` y `/admin/:uuid`: el DTO de v1 más `ownerProviderId`;
+Betaso Games ve también `subscribers`, un operador no (es información de los otros). Un operador ve
+sus modos propios y los compartidos legados o con él en la lista; para descubrir un compartido nuevo
+al que suscribirse tiene el catálogo público, `GET /game-modes`.
+
+**`POST /game-modes/copy-shared` `{ providerId }`** copia los compartidos **activos** que ese operador
+juega (legados incluidos) a modos propios suyos, con los mismos números y niveles. El uuid de cada copia
+es determinista (v5 de RFC 4122: espacio = uuid del origen, nombre = `providerId`), así que repetirla
+completa una copia a medias sin duplicar y no pisa lo que el operador ya editó. Responde `200`:
+
+```json
+{ "status": "success", "data": {
+  "created":  [{ "sourceUuid": "…", "uuid": "…" }],
+  "existing": [{ "sourceUuid": "…", "uuid": "…" }],
+  "skipped":  [{ "sourceUuid": "…", "name": "…", "playersQuantity": 2,
+                 "reason": "NAME_TAKEN", "conflictUuid": "…" }] } }
+```
+
+`NAME_TAKEN`: el operador ya tenía un modo propio con ese nombre y esa cantidad y otro uuid.
+`INVALID_SOURCE_UUID`: el uuid del origen no tiene forma de UUID y no se puede derivar el de la copia.
+
+Códigos del catálogo: `400 {code:"MALFORMED"}` forma inválida, `400 {status:"error"}` mesa gratis con
+entrada, `403` ámbito, `404` no existe o no lo ve, `409` duplicado o choque de estado (ya inactivo,
+legado, propio sin suscriptores), `503` el catálogo está ocupado (otro proceso tiene el lease;
+reintentar).
 
 ### El registro de cada partida
 
@@ -179,8 +253,8 @@ con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Tres rutas que sólo usa el orquestador de Betaso Juegos, y son la única puerta de entrada a una
-partida. Van con `x-internal-api-key` igual a
+Cuatro rutas que sólo usa el orquestador de Betaso Juegos; las tres de las mesas son la única puerta
+de entrada a una partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
 cuerpo.
@@ -216,6 +290,20 @@ orquestador lo muestra en los números de su lobby.
 |---|---|---|
 | `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }] } }` | Siempre; un modo sin nadie jugando no aparece |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+
+**`GET /internal/game-modes`** devuelve el catálogo para que el orquestador arme el catálogo efectivo
+de cada operador: los modos activos —compartidos y propios— con el DTO de v1 más `ownerProviderId` y
+`subscribers` (`null` en un legado, que se ofrece a todos). `?includeInactive=1` suma los dados de
+baja, para resolver el modo de una partida vieja; un valor que no sea `0` o `1` es `400`.
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status, data: [GameModeDTO & { ownerProviderId, subscribers }] }` | Siempre |
+| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada (la del panel tampoco la abre) |
+
+⚠ **El dominó no verifica el operador al abrir una mesa.** `POST /internal/matches` resuelve el modo
+activo por uuid sin mirar su dueño: que un jugador sólo use los modos de su operador lo garantiza el
+orquestador.
 
 `CreateMatchRequest` acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.

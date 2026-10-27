@@ -40,6 +40,17 @@ Sirve de referencia para medir lo que falta:
 - El payload (`events.ts:18-41`) es el de v1 y no se renombra porque Betaso tiene colas enlazadas a
   él: `id` = `uuid` del modo, `game: "domino"`, `prize`, `entryFee`, `multiplier`, `pointsToWin` y
   `playerCount`.
+- **Desde los modos con dueño (2026-10-27) sólo salen los modos COMPARTIDOS** (`ownerProviderId`
+  nulo). Un modo propio de un operador es configuración comercial de un competidor de Betaso y no
+  llega nunca al exchange: el filtro (`publishable`, `features/game-mode/outbox.ts`) lo aplican los dos
+  adaptadores del outbox en las cuatro puertas —crear, editar, `/sync` y la reconciliación—. Las
+  suscripciones no viajan y no generan eventos: no avanzan la revisión (`__v`). Para Betaso nada
+  cambia: sigue recibiendo los mismos eventos de los mismos modos.
+- **Se va a eliminar** (outbox, despachador, `/sync` y la exigencia de `RABBITMQ_URL`) cuando
+  Betaso-Backend lea el catálogo del orquestador (`GET /v1/game-modes`), que arma el catálogo efectivo
+  de cada operador con `GET /internal/game-modes` del dominó. Hasta entonces no se toca: cortarlo antes
+  deja a Betaso sin catálogo. Su reemplazo tiene que informar también las bajas, que Betaso usa en el
+  paywall y en la configuración de aumentos.
 
 ### Producción no arranca sin el broker de Betaso
 
@@ -114,6 +125,10 @@ El admin inicia sesión en billing-auth, que le emite un token ES256 con audienc
 `betaso-games-admin`. Las rutas de admin del dominó lo aceptan como `Bearer`, verificado con la misma
 clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a Betaso quién es un
 administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
+
+Desde el 2026-10-27 el token dice además de qué operador es el admin (`prv`) y con qué rol (`role`), y
+el dominó acota cada ruta (`docs/api-y-mensajes.md`, «HTTP interno»). Betaso es un operador más: un
+admin de Betaso entra al catálogo con su ámbito y a nada más.
 
 **Decidido el 2026-10-14:** no se porta. El panel será uno propio de Betaso Games, con login del
 sistema, y no es del MVP. Mientras tanto el catálogo y los ajustes se administran con `ADMIN_API_KEY`

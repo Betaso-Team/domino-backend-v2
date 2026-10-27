@@ -8,11 +8,23 @@ npm install
 npm run dev
 ```
 
-`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y los dos
+`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y los dos
 brokers de RabbitMQ son capacidades opcionales elegidas por la presencia de sus URLs.
 
 El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
 Las partidas ya abiertas terminan.
+
+**Admins de operador.** El dominó acota cada ruta de administración por el operador (`prv`) y el rol
+(`role`) del token de billing-auth: un admin de operador sólo entra al catálogo, con su ámbito, y
+`support` sólo lee (`docs/api-y-mensajes.md`, «HTTP interno»). La regla operativa del despliegue: **no
+se crea ningún usuario de operador** en un entorno hasta que billing-auth, el dominó, el orquestador y
+el panel con ámbito estén desplegados en ese entorno.
+
+**Modos y suscripciones, sin migración.** Los modos de antes no tienen `ownerProviderId` ni
+`subscribers` y se leen como compartidos legados, que se ofrecen a todos los operadores: el despliegue
+no le cambia el catálogo a nadie. Para pasar un modo a lista explícita, Betaso Games hace
+`PUT /game-modes/:uuid/subscribers` con los operadores que lo juegan; recién ahí cada operador puede
+suscribirse o darse de baja solo.
 
 `npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
 siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local, dev y stage, `info` en
