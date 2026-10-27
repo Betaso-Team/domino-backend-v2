@@ -92,13 +92,77 @@ describe("el ámbito de los admins (integración)", () => {
   it("las mesas son sólo del orquestador: ningún token de admin las abre", async () => {
     for (const who of ["games", "parley"] as const) {
       expect((await call(who, "GET", "/internal/census")).status).toBe(401);
+      expect((await call(who, "GET", "/internal/game-modes")).status).toBe(401);
     }
+    expect((await call("key", "GET", "/internal/game-modes")).status).toBe(401);
   });
 
-  // EL CATÁLOGO TODAVÍA NO ACOTA POR OPERADOR, así que es de Betaso Games como todo lo demás.
-  it("el catálogo administrativo es de Betaso Games mientras no acote por operador", async () => {
-    expect((await call("parley", "GET", "/game-modes/admin")).status).toBe(403);
-    expect((await call("support", "GET", "/game-modes/admin")).status).toBe(403);
-    expect((await call("games", "GET", "/game-modes/admin")).status).toBe(200);
+  // EL CATÁLOGO, CON EL OPERADOR DENTRO DE SU ÁMBITO: crea su modo propio, que no sale al público y
+  // que el orquestador ve con su dueño; el otro operador ni lo ve.
+  it("un operador crea un modo propio que sólo ven él, Betaso Games y el orquestador", async () => {
+    const created = await call("parley", "POST", "/game-modes", {
+      name: "Clásica de Parley",
+      prize: 18,
+      entryFee: 10,
+      playersQuantity: 2,
+    });
+    expect(created.status).toBe(201);
+    const mode = (created.body as { data: Record<string, unknown> }).data;
+    expect(mode).toMatchObject({ ownerProviderId: "parley" });
+    // UN OPERADOR NO VE LISTAS DE SUSCRIPTORES, ni siquiera la (vacía) de su propio modo.
+    expect(mode).not.toHaveProperty("subscribers");
+    const uuid = mode.uuid as string;
+
+    const publico = (await call("parley", "GET", "/game-modes")).body as {
+      data: Array<{ uuid: string }>;
+    };
+    expect(publico.data.map((m) => m.uuid)).not.toContain(uuid);
+    expect((await call("parley", "GET", `/game-modes/${uuid}`)).status).toBe(404);
+
+    expect((await call("rival", "GET", `/game-modes/admin/${uuid}`)).status).toBe(404);
+    expect((await call("rival", "PUT", `/game-modes/${uuid}`, { prize: 1 })).status).toBe(404);
+    expect((await call("parleySupport", "GET", `/game-modes/admin/${uuid}`)).status).toBe(200);
+    expect((await call("parleySupport", "PUT", `/game-modes/${uuid}`, { prize: 1 })).status).toBe(
+      403,
+    );
+    expect((await call("games", "GET", `/game-modes/admin/${uuid}`)).body).toMatchObject({
+      data: { uuid, ownerProviderId: "parley", subscribers: [] },
+    });
+
+    const internal = (await call("orchestrator", "GET", "/internal/game-modes")).body as {
+      data: Array<{ uuid: string; ownerProviderId: string | null }>;
+    };
+    expect(internal.data.find((m) => m.uuid === uuid)).toMatchObject({
+      ownerProviderId: "parley",
+      subscribers: [],
+    });
+  });
+
+  it("el republicado y la lista de suscriptores son sólo de Betaso Games", async () => {
+    const created = await call("games", "POST", "/game-modes", {
+      name: "Compartida e2e",
+      prize: 18,
+      entryFee: 10,
+      playersQuantity: 2,
+    });
+    const uuid = (created.body as { data: { uuid: string } }).data.uuid;
+
+    for (const who of ["parley", "support"] as const) {
+      expect((await call(who, "POST", "/game-modes/sync")).status).toBe(403);
+      expect(
+        (await call(who, "PUT", `/game-modes/${uuid}/subscribers`, { providerIds: [] })).status,
+      ).toBe(403);
+    }
+    // Parley se suscribe a sí mismo; el compartido no lo edita.
+    expect((await call("parley", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
+      200,
+    );
+    expect((await call("parley", "PUT", `/game-modes/${uuid}/subscriptions/rival`)).status).toBe(
+      403,
+    );
+    expect((await call("parley", "PUT", `/game-modes/${uuid}`, { prize: 1 })).status).toBe(403);
+    expect((await call("games", "GET", `/game-modes/admin/${uuid}`)).body).toMatchObject({
+      data: { subscribers: ["parley"] },
+    });
   });
 });

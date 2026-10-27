@@ -32,6 +32,8 @@ export function clasica(over: Partial<GameMode> = {}): GameMode {
     isFreeRoom: true,
     enableBots: true,
     betLevels: [],
+    ownerProviderId: null,
+    subscribers: [],
     createdAt: new Date(BASE_INSTANT),
     updatedAt: new Date(BASE_INSTANT),
     version: 0,
@@ -379,6 +381,44 @@ export function describeGameModeOutboxContract(
       await outbox.reconcile([]);
 
       expect(await outbox.next(new Date(clock.now()))).toBeUndefined();
+    });
+  });
+
+  // ⚠ UN MODO PROPIO DE UN OPERADOR NUNCA SALE AL EXCHANGE DE BETASO, por ninguna de las cuatro puertas.
+  // El consumidor es el backend de Betaso, que es un operador más: el modo propio de otro es la
+  // configuración comercial de un competidor. Y la reconciliación es la puerta que más importa,
+  // porque lee el catálogo ENTERO en cada tick: sin el filtro, "recuperaría" todo modo propio.
+  describe(`${label}: sólo los compartidos`, () => {
+    const propio = clasica({ uuid: "mode-propio", ownerProviderId: "parley", version: 2 });
+
+    it("crear, editar, sincronizar y reconciliar un modo propio no encolan nada", async () => {
+      const { outbox, clock } = harnessOf();
+      const now = new Date(clock.now());
+
+      await outbox.enqueueCreated({ ...propio, version: 0 });
+      await outbox.ensureUpdated(propio);
+      expect(await outbox.sync([propio], "batch-1")).toBe(0);
+      await outbox.reconcile([propio]);
+
+      expect(await outbox.next(now)).toBeUndefined();
+    });
+
+    it("al lado de un compartido, sólo sale el compartido y sólo él cuenta en el sync", async () => {
+      const { outbox, clock } = harnessOf();
+      const now = new Date(clock.now());
+
+      expect(await outbox.sync([propio, clasica()], "batch-1")).toBe(1);
+      await outbox.reconcile([propio, clasica({ version: 1 })]);
+
+      const keys: string[] = [];
+      for (let entry = await outbox.next(now); entry; entry = await outbox.next(now)) {
+        keys.push(entry.dedupeKey);
+        await outbox.sent(entry.id, now);
+      }
+      expect(keys).toEqual([
+        '["game_mode.sync","batch-1","mode-1"]',
+        '["game_mode.updated","mode-1",1]',
+      ]);
     });
   });
 }

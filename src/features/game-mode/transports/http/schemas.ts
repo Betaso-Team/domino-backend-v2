@@ -55,6 +55,17 @@ const betLevels = z
     });
   });
 
+// EL ID DE UN OPERADOR, con la misma forma que el uuid de la ruta y por lo mismo: entra del cliente y
+// termina en el log y en la base. El dominó no conoce los operadores —son de billing-auth—, así que no
+// se valida que exista: un id que nadie tiene es una suscripción que no ofrece nada a nadie.
+function providerIdOf(label: string) {
+  return z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^\P{Cc}+$/u, `${label} inválido`);
+}
+
 // LOS CAMPOS SIN DEFAULT, declarados UNA vez. El cuerpo de creación los envuelve con los defaults del
 // schema productivo y el de edición los vuelve opcionales; escribir las dos listas por separado es la
 // forma de que un campo nuevo entre en una y no en la otra.
@@ -105,6 +116,10 @@ export const CREATE_BODY = z.strictObject({
   // dos adaptadores; ponerle un default fijo acá lo apagaría en toda mesa de cuatro.
   enableBots: fields.enableBots.optional(),
   betLevels: fields.betLevels.default([]),
+  // DE QUIÉN ES EL MODO: ausente o `null` es un compartido de Betaso Games; un id es un modo propio de
+  // ese operador. Un admin de operador puede omitirlo (se lo pone el servicio) o mandar el suyo; el
+  // de otro, o `null`, es 403. No se edita: no está en `UPDATE_BODY`.
+  ownerProviderId: providerIdOf("ownerProviderId").nullable().optional(),
 });
 
 // ⚠ NO ES `CREATE_BODY.partial()`, Y ESA ES LA LÍNEA MÁS IMPORTANTE DEL ARCHIVO. Medido sobre la zod
@@ -148,6 +163,27 @@ export const UUID_PARAMS = z.object({
     .max(128)
     .regex(/^\P{Cc}+$/u, "uuid inválido"),
 });
+
+// LA SUSCRIPCIÓN DE UN OPERADOR: el modo y el operador van en el path, el cuerpo no lleva nada.
+export const SUBSCRIPTION_PARAMS = z.object({
+  uuid: UUID_PARAMS.shape.uuid,
+  providerId: providerIdOf("providerId"),
+});
+
+// LA LISTA ENTERA DE SUSCRIPTORES, que reemplaza la que hubiera (también un legado). `[]` deja el
+// modo sin nadie. Los repetidos se colapsan: la lista es un conjunto.
+export const SUBSCRIBERS_BODY = z.strictObject({
+  providerIds: z
+    .array(providerIdOf("providerIds"))
+    .max(1000)
+    .transform((ids) => [...new Set(ids)]),
+});
+
+export const COPY_SHARED_BODY = z.strictObject({ providerId: providerIdOf("providerId") });
+
+// `?includeInactive=1` para que el orquestador resuelva el modo de una partida ya jugada. Sólo `0`
+// y `1`: un `true` mal escrito tiene que ser 400 y no «sin inactivos» en silencio.
+export const INTERNAL_QUERY = z.object({ includeInactive: z.enum(["0", "1"]).optional() });
 
 export type CreateBody = z.infer<typeof CREATE_BODY>;
 export type UpdateBody = z.infer<typeof UPDATE_BODY>;
@@ -200,6 +236,31 @@ export function toDTO(mode: GameMode): GameModeDTO {
     updatedAt: mode.updatedAt,
     __v: mode.version,
   };
+}
+
+// LO QUE VE EL PANEL: el DTO de v1 más el dueño, y la lista de suscriptores SÓLO para Betaso Games.
+// Un operador no ve quién más juega un compartido: es información comercial de los otros.
+export interface AdminGameModeDTO extends GameModeDTO {
+  readonly ownerProviderId: string | null;
+  readonly subscribers?: readonly string[] | null;
+}
+
+export function toAdminDTO(
+  mode: GameMode,
+  viewer: { readonly provider: string | null },
+): AdminGameModeDTO {
+  const dto = { ...toDTO(mode), ownerProviderId: mode.ownerProviderId };
+  return viewer.provider === null ? { ...dto, subscribers: mode.subscribers } : dto;
+}
+
+// LO QUE VE EL ORQUESTADOR: todo, con `subscribers: null` en un legado —que se ofrece a todos—.
+export interface InternalGameModeDTO extends GameModeDTO {
+  readonly ownerProviderId: string | null;
+  readonly subscribers: readonly string[] | null;
+}
+
+export function toInternalDTO(mode: GameMode): InternalGameModeDTO {
+  return { ...toDTO(mode), ownerProviderId: mode.ownerProviderId, subscribers: mode.subscribers };
 }
 
 // EL CUERPO PARSEADO → LA ENTRADA DEL CASO DE USO, y lo único que hace es SACAR `isActive`. La

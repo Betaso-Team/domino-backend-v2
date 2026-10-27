@@ -221,6 +221,7 @@ const registerHttp = (app: Application) => {
       logger,
       adminApiKey: env.adminApiKey,
       adminTokens: rootContainer.resolve<AdminTokenCheck>("AdminTokenCheck"),
+      orchestratorApiKey: env.orchestratorApiKey,
     }),
   );
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no

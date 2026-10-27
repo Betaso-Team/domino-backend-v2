@@ -4,8 +4,9 @@ import { Router } from "express";
 import type { GameModeService } from "../../service";
 import { adminRoutes } from "./admin";
 import { catalogRoutes } from "./catalog";
+import { internalRoutes } from "./internal";
 
-// LAS SIETE RUTAS DEL CATÁLOGO DE v1, con sus métodos, sus paths y su envelope
+// LAS SIETE RUTAS DEL CATÁLOGO DE v1 (más las de los operadores y la del orquestador), con sus métodos, sus paths y su envelope
 // (`Betaso-Domino-Backend/src/game-modes/routes.ts`). Este archivo hace DOS cosas y ninguna más:
 // ruteo y traducción de errores a códigos HTTP. La forma de lo que entra y sale vive en
 // `schemas.ts`; qué es un duplicado y qué se puede reactivar lo decide el servicio.
@@ -23,6 +24,8 @@ export interface GameModeHttpDeps {
   readonly adminApiKey: string | undefined;
   /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
   readonly adminTokens?: AdminTokenCheck;
+  /** `undefined` ⇒ el catálogo del orquestador (`GET /internal/game-modes`) NO se registra. */
+  readonly orchestratorApiKey: string | undefined;
 }
 
 // EL HTTP DEL CATÁLOGO: las lecturas que ve el jugador (`catalog.ts`) y el CRUD que mueve el panel
@@ -34,5 +37,5 @@ export interface GameModeHttpDeps {
 // reactivación el día que aparezca un `GET /game-modes/:a/:b`. Lo pinea el test que lee el orden de
 // las rutas del router montado.
 export function gameModeHttp(deps: GameModeHttpDeps): Router {
-  return Router().use(adminRoutes(deps)).use(catalogRoutes(deps));
+  return Router().use(adminRoutes(deps)).use(internalRoutes(deps)).use(catalogRoutes(deps));
 }

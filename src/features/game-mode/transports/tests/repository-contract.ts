@@ -73,6 +73,10 @@ export function describeGameModeRepositoryContract(
         enableBots: false,
         // SIN NIVELES, el reposo: una mesa que nadie configuró no ofrece aumentar.
         betLevels: [],
+        // UN COMPARTIDO SIN NADIE: la lista explícita y vacía, no el legado (`null`), que se ofrecería
+        // a todos los operadores.
+        ownerProviderId: null,
+        subscribers: [],
         createdAt: new Date(BASE_INSTANT),
         updatedAt: new Date(BASE_INSTANT),
         version: 0,
@@ -354,6 +358,104 @@ export function describeGameModeRepositoryContract(
 
       expect(await repository.update("no-existe", { name: "Fantasma" })).toBeUndefined();
       expect(await repository.all()).toEqual([]);
+    });
+  });
+
+  describe(`${label}: dueño y suscriptores`, () => {
+    it("un modo propio nace con su dueño y sin suscriptores", async () => {
+      const { repository } = harnessOf();
+
+      const propio = await repository.create(clasica({ ownerProviderId: "parley" }));
+
+      expect(propio).toMatchObject({ ownerProviderId: "parley", subscribers: [] });
+      expect(await repository.byUuid(propio.uuid)).toEqual(propio);
+    });
+
+    // ⚠ SUSCRIBIRSE NO ES UNA REVISIÓN: ni `version` ni `updatedAt` se mueven. La revisión es lo que el
+    // outbox y su reconciliador miran, y si avanzara cada alta de un operador publicaría un
+    // `game_mode.updated` idéntico al exchange de Betaso.
+    it("sumar, sacar y fijar suscriptores no avanza la revisión ni la fecha", async () => {
+      const { repository, clock } = harnessOf();
+      const creado = await repository.create(clasica());
+      clock.set(BASE_INSTANT + 5_000);
+
+      const sumado = await repository.addSubscriber(creado.uuid, "parley");
+      const otra = await repository.addSubscriber(creado.uuid, "betaso");
+      const repetido = await repository.addSubscriber(creado.uuid, "parley");
+      const sacado = await repository.removeSubscriber(creado.uuid, "parley");
+      const fijado = await repository.setSubscribers(creado.uuid, ["uno", "dos", "uno"]);
+
+      expect(sumado?.subscribers).toEqual(["parley"]);
+      expect(otra?.subscribers).toEqual(["parley", "betaso"]);
+      expect(repetido?.subscribers).toEqual(["parley", "betaso"]);
+      expect(sacado?.subscribers).toEqual(["betaso"]);
+      expect(fijado?.subscribers).toEqual(["uno", "dos"]);
+      for (const mode of [sumado, otra, repetido, sacado, fijado]) {
+        expect(mode?.version).toBe(0);
+        expect(mode?.updatedAt).toEqual(new Date(BASE_INSTANT));
+      }
+      expect(await repository.byUuid(creado.uuid)).toEqual(fijado);
+    });
+
+    // UNA EDICIÓN NO TOCA A QUIÉN SE OFRECE: el `$set` del `PUT` lleva sólo los campos del modo.
+    it("editar el modo conserva los suscriptores y el dueño", async () => {
+      const { repository } = harnessOf();
+      const creado = await repository.create(clasica());
+      await repository.addSubscriber(creado.uuid, "parley");
+
+      const editado = await repository.update(creado.uuid, { prize: 20, isActive: false });
+
+      expect(editado).toMatchObject({ ownerProviderId: null, subscribers: ["parley"], version: 1 });
+    });
+
+    it("los suscriptores son sólo de los compartidos", async () => {
+      const { repository } = harnessOf();
+      const propio = await repository.create(clasica({ ownerProviderId: "parley" }));
+
+      expect(await repository.addSubscriber(propio.uuid, "otro")).toBeUndefined();
+      expect(await repository.removeSubscriber(propio.uuid, "otro")).toBeUndefined();
+      expect(await repository.setSubscribers(propio.uuid, ["otro"])).toBeUndefined();
+      expect((await repository.byUuid(propio.uuid))?.subscribers).toEqual([]);
+      expect(await repository.addSubscriber("no-existe", "otro")).toBeUndefined();
+    });
+
+    it("una lista fijada vacía deja el modo sin nadie", async () => {
+      const { repository } = harnessOf();
+      const creado = await repository.create(clasica());
+      await repository.addSubscriber(creado.uuid, "parley");
+
+      expect((await repository.setSubscribers(creado.uuid, []))?.subscribers).toEqual([]);
+    });
+  });
+
+  describe(`${label}: crear con un uuid dado`, () => {
+    it("crea con ese uuid, y la segunda vez devuelve el que estaba sin tocarlo", async () => {
+      const { repository, clock } = harnessOf();
+      const uuid = "bb041643-c230-559e-9082-526e5f05487b";
+
+      const primero = await repository.insertIfAbsent(
+        uuid,
+        clasica({ name: "Copia", ownerProviderId: "parley" }),
+      );
+      await repository.update(uuid, { prize: 99 });
+      clock.set(BASE_INSTANT + 1_000);
+      const segundo = await repository.insertIfAbsent(
+        uuid,
+        clasica({ name: "Otra cosa", ownerProviderId: "parley" }),
+      );
+
+      expect(primero.created).toBe(true);
+      expect(primero.mode).toMatchObject({
+        uuid,
+        name: "Copia",
+        ownerProviderId: "parley",
+        subscribers: [],
+        isActive: true,
+        version: 0,
+      });
+      expect(segundo.created).toBe(false);
+      expect(segundo.mode).toMatchObject({ uuid, name: "Copia", prize: 99, version: 1 });
+      expect(await repository.all()).toHaveLength(1);
     });
   });
 }

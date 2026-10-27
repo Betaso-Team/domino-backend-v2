@@ -44,6 +44,20 @@ export interface GameMode {
   // LOS AUMENTOS QUE OFRECE, ordenados por nivel. **Vacío = no ofrece aumentar**, y es el reposo:
   // un modo que nadie configuró (o un Novato) no cobra de más.
   readonly betLevels: readonly GameModeBetLevel[];
+  // EL DUEÑO DEL MODO. `null` es un modo COMPARTIDO, de Betaso Games, que se ofrece a los operadores
+  // suscritos; un id es un modo PROPIO de ese operador, que sólo juegan sus jugadores. Los documentos
+  // de antes de los operadores no tienen el campo y se leen como `null`: eran todos compartidos.
+  // NO SE EDITA: cambiarle el dueño a un modo es otro modo, con otro uuid.
+  readonly ownerProviderId: string | null;
+  // QUIÉNES JUEGAN UN MODO COMPARTIDO. `null` es LEGADO —un documento de antes de las suscripciones—
+  // y se ofrece a TODOS los operadores, que es exactamente lo que pasaba antes de este campo: sin eso,
+  // el día del despliegue el catálogo efectivo de cada operador quedaría vacío y nadie podría jugar.
+  // Un arreglo es la lista explícita: un compartido nuevo nace con `[]`, o sea sin nadie, y un modo
+  // propio también lleva `[]` porque no tiene suscriptores (lo juega su dueño). Presente-y-vacío y
+  // ausente son dos casos distintos a propósito (ramas nulas).
+  //
+  // NO ES PARTE DE LA REVISIÓN: suscribirse no mueve `version` (ver el puerto).
+  readonly subscribers: readonly string[] | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   // El `__v` de Mongoose, que este incremento usa como REVISIÓN y no como adorno: el
@@ -65,17 +79,27 @@ type DefaultedGameModeFields =
 
 // Lo que hace falta para CREAR un modo. Fuera quedan la identidad (`id`/`uuid`), las fechas y
 // la revisión —los pone el repositorio—, `isActive` —un modo nace activo; darlo de baja es
-// otra operación— y los cuatro defaulteables, que vuelven como opcionales.
+// otra operación—, `subscribers` —todo modo nace sin suscriptores: suscribir es otra operación— y
+// los defaulteables, que vuelven como opcionales. `ownerProviderId` ausente es `null`: compartido.
 export type CreateGameMode = Omit<
   GameMode,
-  "id" | "uuid" | "createdAt" | "updatedAt" | "version" | "isActive" | DefaultedGameModeFields
+  | "id"
+  | "uuid"
+  | "createdAt"
+  | "updatedAt"
+  | "version"
+  | "isActive"
+  | "ownerProviderId"
+  | "subscribers"
+  | DefaultedGameModeFields
 > &
-  Partial<Pick<GameMode, DefaultedGameModeFields>>;
+  Partial<Pick<GameMode, DefaultedGameModeFields | "ownerProviderId">>;
 
 // Lo que se puede EDITAR. Todo opcional y todo por separado: un campo ausente no se toca, que
 // es la diferencia entre un `PUT` parcial y un borrado silencioso de los campos que el panel
 // no mandó. `isActive` sí entra —la baja y la reactivación son ediciones de ese booleano, no
-// claves de evento propias— y la identidad, las fechas y la revisión no.
+// claves de evento propias— y la identidad, las fechas y la revisión no. Tampoco el dueño (no se
+// edita) ni los suscriptores, que tienen sus propias operaciones y no avanzan la revisión.
 export type UpdateGameMode = Partial<
   Pick<
     GameMode,

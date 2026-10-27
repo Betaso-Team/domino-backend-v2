@@ -12,6 +12,7 @@ import {
   type GameModeOutbox,
   type GameModeOutboxEntry,
   createdKeyOf,
+  publishable,
   revisionKeysOf,
   syncKeyOf,
   updatedKeyOf,
@@ -44,14 +45,17 @@ export class MongoGameModeOutbox implements GameModeOutbox {
   }
 
   async enqueueCreated(mode: GameMode): Promise<void> {
+    if (!publishable(mode)) return;
     await this.insert(createdKeyOf(mode), createdEventOf(mode));
   }
 
   async ensureUpdated(mode: GameMode): Promise<void> {
+    if (!publishable(mode)) return;
     await this.insert(updatedKeyOf(mode), updatedEventOf(mode));
   }
 
-  async sync(modes: readonly GameMode[], batchId: string): Promise<number> {
+  async sync(all: readonly GameMode[], batchId: string): Promise<number> {
+    const modes = all.filter(publishable);
     for (const mode of modes) {
       await this.insert(syncKeyOf(batchId, mode), updatedEventOf(mode));
     }
@@ -68,7 +72,9 @@ export class MongoGameModeOutbox implements GameModeOutbox {
   // de v1 es ruido; deja de ser adecuado del orden del millar, y ahí lo que hay que cambiar NO es esta
   // consulta sino la cadencia —reconciliar cada N ticks— o acotar los modos por una marca de agua
   // (`updatedAt` posterior a la última reconciliación). Las dos son cambios del llamador, no de acá.
-  async reconcile(modes: readonly GameMode[]): Promise<void> {
+  async reconcile(all: readonly GameMode[]): Promise<void> {
+    // Los propios no se reconcilian: nunca se encolaron, así que les "faltaría" el evento para siempre.
+    const modes = all.filter(publishable);
     const present = await this.store.present(modes.flatMap((mode) => revisionKeysOf(mode)));
     for (const mode of modes) {
       if (revisionKeysOf(mode).some((key) => present.has(key))) continue;

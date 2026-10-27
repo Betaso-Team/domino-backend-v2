@@ -59,9 +59,22 @@ export interface GameModeOutbox extends OutboxQueue<GameModeEventKey, GameModePa
   enqueueCreated(mode: GameMode): Promise<void>;
   ensureUpdated(mode: GameMode): Promise<void>;
   // El botón de "republicar todo" del operador. Devuelve cuántos modos encoló, que es lo que el
-  // `POST /sync` de v1 contesta como `synced`.
+  // `POST /sync` de v1 contesta como `synced`: los COMPARTIDOS, porque los propios no salen.
   sync(modes: readonly GameMode[], batchId: string): Promise<number>;
   reconcile(modes: readonly GameMode[]): Promise<void>;
+}
+
+// ⚠ SÓLO LOS MODOS COMPARTIDOS SALEN AL EXCHANGE `betaso`. El consumidor es el backend de Betaso, que
+// es UN operador más: un modo PROPIO de otro operador (`ownerProviderId` con valor) es configuración
+// comercial de un competidor y no puede llegarle nunca. La regla vive acá, una vez, y la aplican los
+// dos adaptadores en las cuatro puertas —crear, editar, el `/sync` y la reconciliación—: filtrarlo en
+// el servicio dejaría abierto al reconciliador, que lee el catálogo entero en cada tick y le
+// "recuperaría" a Betaso todos los modos propios como `updated`.
+//
+// El exchange y el outbox enteros se van en un PR siguiente, cuando el backend de Betaso lea el
+// catálogo del orquestador; hasta entonces, Betaso sigue recibiendo exactamente lo de siempre.
+export function publishable(mode: GameMode): boolean {
+  return mode.ownerProviderId === null;
 }
 
 // LAS TRES CLAVES DE DEDUPLICACIÓN, ESCRITAS ACÁ Y NO EN CADA ADAPTADOR. El formato ES el contrato:
