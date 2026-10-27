@@ -358,6 +358,25 @@ describe("MongoHistory: la cabecera y el cierre", () => {
       expect.objectContaining({ collection: HISTORY_COLLECTION, indexes: ["matchId_1"] }),
     );
   });
+
+  // UN ÍNDICE QUE TARDA NO FRENA EL HISTORIAL: sobre los millones de partidas de producción, crear uno
+  // nuevo lleva minutos, y si el proceso lo esperara antes de escribir, las partidas de ese rato
+  // quedarían en memoria hasta que termine. Mongo construye el índice sin trabar la colección.
+  it("los índices se crean en segundo plano: uno que nunca termina no frena la escritura", async () => {
+    const { store, updateOne, createIndexes } = storeWith();
+    createIndexes.mockReturnValue(new Promise(() => {}));
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1)]);
+    const outcome = await Promise.race([
+      history.drain().then(() => "grabado"),
+      new Promise((resolve) => setTimeout(() => resolve("colgado"), 200)),
+    ]);
+
+    expect(outcome).toBe("grabado");
+    expect(createIndexes).toHaveBeenCalledTimes(2);
+    expect(updateOne).toHaveBeenCalledTimes(1);
+  });
 });
 
 // EL PLAZO DEL LISTADO, contra un doble porque un Mongo de verdad no vence a pedido: lo que se mide es

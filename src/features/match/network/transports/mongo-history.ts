@@ -573,24 +573,29 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive, P
     return this.prepared;
   }
 
-  // UN ÍNDICE QUE NO SE PUEDE CREAR NO FRENA EL HISTORIAL. El caso real es el único: una colección
-  // vieja con dos documentos de la misma partida, que hace fallar el único. Rechazar acá dejaría a
-  // TODAS las partidas sin registro por un problema de dos filas; se loguea —es lo que el operador
-  // necesita para limpiarlas— y se graba igual, con la cola como única garantía hasta el próximo
-  // arranque.
+  // LOS ÍNDICES SE PIDEN Y NO SE ESPERAN. Sobre la colección de producción —millones de partidas— crear
+  // uno nuevo tarda minutos, y esperarlo dejaba todo ese rato las escrituras de este proceso en
+  // memoria. Mongo lo construye sin trabar la colección (desde la 4.2 sólo la bloquea un instante al
+  // empezar y otro al terminar), así que se graba mientras tanto, y un índice nuevo ya no hay que
+  // crearlo a mano antes del despliegue. Lo que cuesta esa ventana: el listado que lo necesita va lento
+  // —o vence su plazo, 503—, y el único de `matchId` todavía no protege; la cola de abajo sigue
+  // garantizándolo dentro del proceso.
+  //
+  // UN ÍNDICE QUE NO SE PUEDE CREAR TAMPOCO FRENA EL HISTORIAL. El caso real es el único: una colección
+  // vieja con dos documentos de la misma partida, que hace fallar el único. Se loguea —es lo que el
+  // operador necesita para limpiarlas— y se graba igual, con la cola como única garantía hasta el
+  // próximo arranque, que lo vuelve a pedir. Lo mismo si el proceso se apaga con uno a medio crear.
   private async prepare(): Promise<Collection<MatchHistoryDocument>> {
     const collection = await this.store.collection<MatchHistoryDocument>(HISTORY_COLLECTION);
-    await Promise.all(
-      HISTORY_INDEXES.map((indexes) =>
-        collection.createIndexes(indexes).catch((error: unknown) =>
-          this.logger.error("historial: no se pudieron crear los índices; se graba igual", {
-            collection: HISTORY_COLLECTION,
-            indexes: indexes.map(({ name }) => name),
-            error: String(error),
-          }),
-        ),
-      ),
-    );
+    for (const indexes of HISTORY_INDEXES) {
+      collection.createIndexes(indexes).catch((error: unknown) =>
+        this.logger.error("historial: no se pudieron crear los índices; se graba igual", {
+          collection: HISTORY_COLLECTION,
+          indexes: indexes.map(({ name }) => name),
+          error: String(error),
+        }),
+      );
+    }
     return collection;
   }
 }

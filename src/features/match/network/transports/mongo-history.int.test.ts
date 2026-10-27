@@ -2,7 +2,7 @@ import { Mongo } from "@/shared/mongo";
 import { MemoryLogger } from "@/shared/tests/memory-logger";
 import { MONGO_INT_URI } from "@/tests/int-services";
 import type { Document } from "mongodb";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MATCH_COUNT_CAP, type MatchCursor, type MatchListQuery } from "../history";
 import {
   HISTORY_COLLECTION,
@@ -27,6 +27,19 @@ import { describePlayerLogContract } from "./tests/player-log-contract";
 let mongo: Mongo;
 
 const collection = () => mongo.collection(HISTORY_COLLECTION);
+
+// LOS ÍNDICES SE CREAN EN SEGUNDO PLANO, así que quien los mira los espera. Ordenados por nombre.
+const ALL_INDEXES = [
+  "_id_",
+  "createdAt_-1__id_-1",
+  "matchEndReason_1_createdAt_-1__id_-1",
+  "matchId_1",
+  "roomId_1_createdAt_-1__id_-1",
+  "seats.userId_1_createdAt_-1__id_-1",
+];
+const INDEX_WAIT = { timeout: 5_000, interval: 20 };
+const indexNames = async () =>
+  (await (await collection()).indexes()).map(({ name }) => name as string).sort();
 
 async function fresh(
   logger = new MemoryLogger(),
@@ -54,15 +67,9 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     history.record([entry(1)]);
     await history.drain();
 
+    // EN SEGUNDO PLANO: la escritura no los espera (`prepare` en `./mongo-history.ts`).
+    await vi.waitFor(async () => expect(await indexNames()).toEqual(ALL_INDEXES), INDEX_WAIT);
     const indexes = await (await collection()).indexes();
-    expect(indexes.map(({ name }) => name).sort()).toEqual([
-      "_id_",
-      "createdAt_-1__id_-1",
-      "matchEndReason_1_createdAt_-1__id_-1",
-      "matchId_1",
-      "roomId_1_createdAt_-1__id_-1",
-      "seats.userId_1_createdAt_-1__id_-1",
-    ]);
     expect(indexes.find(({ name }) => name === "matchId_1")?.unique).toBe(true);
     // EL DOCUMENTO NO PUEDE NACER DOS VECES, ni siquiera por fuera de la cola de este proceso.
     await expect((await collection()).insertOne({ matchId: "m-1" })).rejects.toThrow(/duplicate/);
@@ -140,17 +147,14 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     await history.drain();
 
     expect(await history.recordOf("m-nueva")).toMatchObject({ status: "started" });
-    expect(logger.at_("error").map(({ msg }) => msg)).toEqual([
-      "historial: no se pudieron crear los índices; se graba igual",
-    ]);
-    // LOS DEL LISTADO SE CREAN IGUAL: sin ellos el panel recorrería la colección entera.
-    expect((await (await collection()).indexes()).map(({ name }) => name).sort()).toEqual([
-      "_id_",
-      "createdAt_-1__id_-1",
-      "matchEndReason_1_createdAt_-1__id_-1",
-      "roomId_1_createdAt_-1__id_-1",
-      "seats.userId_1_createdAt_-1__id_-1",
-    ]);
+    // LOS DEL LISTADO SE CREAN IGUAL: sin ellos el panel recorrería la colección entera. Los dos pedidos
+    // corren en segundo plano, así que se espera a los dos: el aviso del único y los del listado.
+    await vi.waitFor(async () => {
+      expect(logger.at_("error").map(({ msg }) => msg)).toEqual([
+        "historial: no se pudieron crear los índices; se graba igual",
+      ]);
+      expect(await indexNames()).toEqual(ALL_INDEXES.filter((name) => name !== "matchId_1"));
+    }, INDEX_WAIT);
     await (await collection()).drop();
   });
 
@@ -195,8 +199,10 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
 
     beforeAll(async () => {
       history = await fresh();
-      // Los índices se piden con el primer uso, como en producción.
+      // Los índices se piden con el primer uso, como en producción, y se crean en segundo plano: los
+      // planes de abajo se miden con los seis ya puestos.
       await history.list({ pageSize: 1 });
+      await vi.waitFor(async () => expect(await indexNames()).toEqual(ALL_INDEXES), INDEX_WAIT);
       // TRESCIENTAS PARTIDAS en quince salas, de a tres por segundo —empates en el mismo milisegundo—,
       // con su timeline y cuatro asientos: tres jugadores de diez, y en el cuarto `jugador-x` (que está
       // en cuatro de cada cinco) o, cada cinco, el del primero repetido —el mismo usuario en dos
