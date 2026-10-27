@@ -80,6 +80,7 @@ describe("recordRoutes: el registro de las rutas", () => {
       "GET /internal/matches",
       "GET /internal/matches/:matchId",
       "GET /game-data/:roomId",
+      "GET /internal/players/:userId/matches",
       "POST /internal/matches",
       "POST /internal/players/:userId/seat",
       "GET /internal/census",

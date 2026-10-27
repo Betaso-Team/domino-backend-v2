@@ -75,6 +75,7 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 | `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
 | `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
+| `GET /internal/players/:userId/matches?page=&limit=` | Historial de un jugador para el panel: la misma página que `GET /me/matches` le devuelve a ese `userId` (mismos parámetros y límites), dentro de `{ status: "success", data }`. El `userId` sigue la regla de texto del filtro del listado |
 | `POST /game-modes` | Crea un modo |
 | `PUT /game-modes/:uuid` | Aplica un patch al modo |
 | `DELETE /game-modes/:uuid` | Baja lógica |
