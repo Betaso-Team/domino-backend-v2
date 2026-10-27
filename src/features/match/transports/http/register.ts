@@ -10,6 +10,7 @@ import type { MatchRegistry } from "../match-registry";
 import { historyRoutes } from "./history";
 import { matchRoutes } from "./match";
 import { meRoutes } from "./me";
+import { playerRoutes } from "./players";
 import { recordRoutes } from "./records";
 import { tablesRoutes } from "./tables";
 
@@ -32,7 +33,7 @@ export interface MatchHttpDeps {
   readonly history: HistoryReader;
   /** El documento de cada partida, para el panel y `/game-data`. Ver `recordRoutes`. */
   readonly archive: MatchArchive;
-  /** Lo que jugó cada cuenta, para `GET /me/matches`. Ver `meRoutes`. */
+  /** Lo que jugó cada cuenta, para `GET /me/matches` y el panel. Ver `meRoutes` y `playerRoutes`. */
   readonly players: PlayerLog;
   /** `undefined` ⇒ las rutas internas NO se registran. Ver `historyRoutes` y `recordRoutes`. */
   readonly adminApiKey: string | undefined;
@@ -44,8 +45,8 @@ export interface MatchHttpDeps {
   readonly verifier?: TokenVerifier;
 }
 
-// EL HTTP DE LA PARTIDA, en cinco responsabilidades y un solo router: UNA partida (`match.ts`), lo que
-// jugó el dueño del token (`me.ts`), el historial de soporte (`history.ts`), el registro de cada partida para el panel y el backend
+// EL HTTP DE LA PARTIDA, en seis responsabilidades y un solo router: UNA partida (`match.ts`), lo que
+// jugó el dueño del token (`me.ts`) y lo que jugó cualquier cuenta, para el panel (`players.ts`), el historial de soporte (`history.ts`), el registro de cada partida para el panel y el backend
 // principal (`records.ts`) y la API interna del orquestador (`tables.ts`). Los paths son absolutos,
 // así que se monta en la raíz; las guardas van por ruta. Portado de truco (`0b0a467`).
 //
@@ -66,5 +67,6 @@ export function matchHttp(deps: MatchHttpDeps): Router {
     .use(meRoutes(deps))
     .use(historyRoutes(deps))
     .use(recordRoutes(deps))
+    .use(playerRoutes(deps))
     .use(tablesRoutes(deps));
 }

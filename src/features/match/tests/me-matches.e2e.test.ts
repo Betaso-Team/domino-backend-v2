@@ -1,3 +1,4 @@
+import { env } from "@/env";
 import { bootTestServer, mintToken } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -29,5 +30,17 @@ describe("GET /me/matches en el servidor de verdad", () => {
 
   it("sin token es 401", async () => {
     expect((await fetch(`http://localhost:${PORT}/me/matches`)).status).toBe(401);
+  });
+
+  it("el panel lee la misma página por `userId`, detrás de la llave de administración", async () => {
+    const url = `http://localhost:${PORT}/internal/players/sin-partidas/matches`;
+    const res = await fetch(url, { headers: { "x-internal-api-key": env.adminApiKey ?? "" } });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      status: "success",
+      data: { items: [], page: 1, perPage: 10, totalItems: 0 },
+    });
+    expect((await fetch(url)).status).toBe(401);
   });
 });

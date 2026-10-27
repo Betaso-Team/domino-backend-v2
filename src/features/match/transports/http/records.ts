@@ -12,8 +12,9 @@ export const GAME_DATA_ROUTE = "/game-data/:roomId";
 
 // LA FORMA DEL HISTORIAL DE SOPORTE (`./history.ts`): largo acotado y sin caracteres de control. El
 // `matchId` lo elige el orquestador y el `roomId` Colyseus, y `/game-data` acepta cualquiera de los
-// dos, así que no hay un alfabeto que fijar sin rechazar partidas legítimas.
-const id = z
+// dos, así que no hay un alfabeto que fijar sin rechazar partidas legítimas. La misma regla vale para el
+// `userId` del filtro y de `./players.ts`.
+export const id = z
   .string()
   .min(1)
   .max(128)
