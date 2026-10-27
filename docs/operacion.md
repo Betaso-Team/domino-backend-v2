@@ -96,8 +96,8 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 
 ## Registro de partidas
 
-`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y cuatro
-índices que el proceso crea al primer uso:
+`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y cinco
+índices que el proceso pide al primer uso, en segundo plano:
 
 | Índice | Sirve a |
 |---|---|
@@ -105,20 +105,27 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 | `roomId_1_createdAt_-1__id_-1` | `/game-data/:roomId` (por el prefijo); el filtro `roomId` del listado, con o sin fechas, ya ordenado |
 | `createdAt_-1__id_-1` | el orden del listado: sin filtros, por fechas y con cursor |
 | `seats.userId_1_createdAt_-1__id_-1` | el filtro `userId` del listado, con o sin fechas y cursor, ya ordenado. Es multikey (una clave por asiento) |
+| `matchEndReason_1_createdAt_-1__id_-1` | el filtro `matchEndReason` del listado (el motivo del cierre), con o sin fechas y cursor, ya ordenado |
 
 El filtro `id` usa el `_id_` de la colección. Cada combinación de filtros del listado sale de uno de
 estos sin recorrer la colección ni ordenar en memoria, y lee como mucho `pageSize + 1` documentos en
-cualquier página; lo mide `mongo-history.int.test.ts` con `explain` contra un Mongo de verdad.
+cualquier página; lo mide `mongo-history.int.test.ts` con `explain` contra un Mongo de verdad. La
+excepción es motivo + jugador juntos, que no tiene índice propio: usa uno de los dos y lee de más, hasta
+las partidas de ese jugador.
 
-**Al desplegar sobre una colección grande.** `createIndexes` corre con la primera escritura del proceso
-y, sobre millones de documentos, tarda: las escrituras de ese proceso esperan en memoria hasta que
-termina. Conviene crear los índices a mano antes, con los mismos nombres (si coinciden, el proceso no
-hace nada):
+**Al desplegar un índice nuevo no hay que hacer nada a mano.** El proceso pide los índices con su
+primera escritura y no los espera: sobre millones de documentos uno nuevo tarda minutos, y Mongo lo
+construye sin trabar la colección (desde la 4.2 sólo la bloquea un instante al empezar y otro al
+terminar), así que las partidas se graban mientras tanto. En ese rato el filtro que lo usa va lento y
+puede contestar 503, y el único de `matchId` todavía no protege (la cola del proceso sí). Si se
+prefiere tenerlo listo antes de desplegar, se crea a mano con el mismo nombre (si coincide, el proceso
+no hace nada):
 
 ```js
 db.match_history.createIndex({ roomId: 1, createdAt: -1, _id: -1 }, { name: "roomId_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ createdAt: -1, _id: -1 }, { name: "createdAt_-1__id_-1" })
 db.match_history.createIndex({ "seats.userId": 1, createdAt: -1, _id: -1 }, { name: "seats.userId_1_createdAt_-1__id_-1" })
+db.match_history.createIndex({ matchEndReason: 1, createdAt: -1, _id: -1 }, { name: "matchEndReason_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ matchId: 1 }, { name: "matchId_1", unique: true })
 ```
 
@@ -126,10 +133,9 @@ El `roomId_1` que creaba la versión anterior quedó cubierto por el compuesto (
 pero ocupa memoria y frena cada escritura. Una vez creado el compuesto, se puede borrar:
 `db.match_history.dropIndex("roomId_1")`.
 
-**El de `seats.userId` es el más grande de los cuatro**: lleva una clave por asiento (dos o cuatro por
-partida; un usuario en dos asientos de la misma partida es una sola), así que sobre la colección de
-producción se crea **a mano y antes del despliegue** que lo trae, con la línea de arriba. Mientras no
-exista, el filtro por jugador funciona pero recorre el índice de fechas descartando partidas (o, para un
+**El de `seats.userId` es el más grande de los cinco**: lleva una clave por asiento (dos o cuatro por
+partida; un usuario en dos asientos de la misma partida es una sola), así que es el que más tarda en
+construirse. Mientras no exista, el filtro por jugador funciona pero recorre el índice de fechas descartando partidas (o, para un
 jugador con pocas, las ordena en memoria), y una búsqueda ancha puede terminar en el 503 del plazo. Tiene
 que ser el compuesto: con `{ "seats.userId": 1 }` solo, el plan medido ordena en memoria (`SORT`).
 
