@@ -49,7 +49,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
   describeHistoryContract("MongoHistory", (options) => fresh(undefined, options));
   describePlayerLogContract("MongoHistory", (options) => fresh(undefined, options));
 
-  it("crea sus cuatro índices, con el de `matchId` único", async () => {
+  it("crea sus cinco índices, con el de `matchId` único", async () => {
     const history = await fresh();
     history.record([entry(1)]);
     await history.drain();
@@ -58,6 +58,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     expect(indexes.map(({ name }) => name).sort()).toEqual([
       "_id_",
       "createdAt_-1__id_-1",
+      "matchEndReason_1_createdAt_-1__id_-1",
       "matchId_1",
       "roomId_1_createdAt_-1__id_-1",
       "seats.userId_1_createdAt_-1__id_-1",
@@ -146,6 +147,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     expect((await (await collection()).indexes()).map(({ name }) => name).sort()).toEqual([
       "_id_",
       "createdAt_-1__id_-1",
+      "matchEndReason_1_createdAt_-1__id_-1",
       "roomId_1_createdAt_-1__id_-1",
       "seats.userId_1_createdAt_-1__id_-1",
     ]);
@@ -206,6 +208,8 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
           roomId: `sala-${index % 15}`,
           version: 2.1,
           status: "finished",
+          // UNO DE CADA SIETE abandonó: un motivo minoritario, como en producción.
+          matchEndReason: index % 7 === 0 ? "ABANDONMENT" : "SCORE",
           createdAt: new Date(T + Math.floor(index / 3) * 1_000),
           updatedAt: new Date(T + Math.floor(index / 3) * 1_000),
           seats: [
@@ -243,6 +247,14 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       [
         "fechas + roomId + userId",
         () => ({ pageSize: PAGE, from, roomId: "sala-5", userId: "jugador-5" }),
+      ],
+      [
+        "matchEndReason (uno de cada siete)",
+        () => ({ pageSize: PAGE, matchEndReason: "ABANDONMENT" }),
+      ],
+      [
+        "fechas + matchEndReason",
+        () => ({ pageSize: PAGE, from, to, matchEndReason: "ABANDONMENT" }),
       ],
       [
         "matchId + roomId + id",
@@ -300,6 +312,12 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         });
         expect(seated).toBe(items.length);
       }
+      const { matchEndReason } = query();
+      if (matchEndReason !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        expect(items.every((item) => item.matchEndReason === matchEndReason)).toBe(true);
+      }
     });
 
     // CON CURSOR, Y HONDO: la página sexta lee lo mismo que la segunda. Un `skip` leería las cien
@@ -312,6 +330,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["cursor + fechas + roomId", { from: new Date(T), to, roomId: "sala-3" }, 1, 4],
       ["cursor + userId", { userId: "jugador-5" }, 2, PAGE],
       ["cursor + fechas + userId", { from: new Date(T), to, userId: "jugador-x" }, 2, PAGE],
+      ["cursor + matchEndReason", { matchEndReason: "ABANDONMENT" }, 2, 4],
     ] as const)(
       "%s: sin COLLSCAN, sin SORT y sin leer de más",
       async (_name, filters, depth, pageSize) => {
@@ -377,6 +396,28 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       expect(seen).toHaveLength(seated);
       expect(new Set(seen).size).toBe(seated);
       expect((await history.list({ pageSize: 1, userId: "jugador-5" })).total).toBe(seated);
+    });
+
+    // MOTIVO + JUGADOR NO TIENE ÍNDICE PROPIO, a propósito: Mongo usa uno de los dos y filtra el otro
+    // leyendo documentos (medido contra Mongo 7: 24 leídos para una página de 21). Un compuesto lo
+    // cubriría exacto, y sería un sexto índice sobre millones de filas para una sola combinación. El
+    // techo que sí se fija: nunca recorre la colección ni ordena en memoria, y lo leído no pasa de las
+    // partidas del jugador, que son pocas. Si alguna vez se pasa del plazo, la ruta contesta 503.
+    it("motivo + jugador: sin COLLSCAN ni SORT, y lo leído acotado por las del jugador", async () => {
+      const query: MatchListQuery = {
+        pageSize: PAGE,
+        userId: "jugador-x",
+        matchEndReason: "SCORE",
+      };
+      const plan = await explained(query);
+      const seated = await (await collection()).countDocuments({ "seats.userId": "jugador-x" });
+
+      expect(plan.stages).not.toContain("COLLSCAN");
+      expect(plan.stages).not.toContain("SORT");
+      expect(plan.docsExamined).toBeLessThanOrEqual(seated);
+      const { items } = await history.list(query);
+      expect(items.length).toBeGreaterThan(0);
+      expect(items.every((item) => item.matchEndReason === "SCORE")).toBe(true);
     });
 
     // EL TOTAL FILTRADO, la otra consulta del listado: `countDocuments` es un `$match` + `$limit` +

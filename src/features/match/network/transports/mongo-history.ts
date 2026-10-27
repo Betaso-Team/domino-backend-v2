@@ -105,7 +105,7 @@ export type MatchHistoryDocument = {
   entries?: HistoryEntry[];
 };
 
-// LOS CUATRO ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS CINCO ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -122,6 +122,9 @@ export type MatchHistoryDocument = {
 //     asiento—, y aun así la página sale ordenada y sin SORT: el arreglo es sólo el prefijo, que el
 //     filtro fija por igualdad, y `createdAt`/`_id` no son arreglos (medido). Un usuario en dos
 //     asientos genera la misma clave dos veces, que Mongo guarda una sola: la partida sale una vez.
+//   · `matchEndReason` con el orden del listado detrás: el filtro por motivo del cierre. Son siete
+//     valores sobre millones de filas, así que sin el orden detrás la página de «abandonos» leería y
+//     ordenaría todos los abandonos de la historia para mostrar veinte.
 //
 // El filtro por `_id` no necesita uno: el de la colección ya está.
 //
@@ -136,6 +139,10 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
     {
       key: { "seats.userId": 1, createdAt: -1, _id: -1 },
       name: "seats.userId_1_createdAt_-1__id_-1",
+    },
+    {
+      key: { matchEndReason: 1, createdAt: -1, _id: -1 },
+      name: "matchEndReason_1_createdAt_-1__id_-1",
     },
   ],
 ];
@@ -164,6 +171,7 @@ function filterOf(query: MatchListQuery): ListFilter {
     ...(query.id === undefined ? {} : { _id: new ObjectId(query.id) }),
     // Cualquier asiento: sobre un arreglo, la igualdad de Mongo pregunta por algún elemento.
     ...(query.userId === undefined ? {} : { "seats.userId": query.userId }),
+    ...(query.matchEndReason === undefined ? {} : { matchEndReason: query.matchEndReason }),
   };
 }
 

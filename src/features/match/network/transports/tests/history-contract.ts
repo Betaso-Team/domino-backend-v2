@@ -708,5 +708,56 @@ export function describeHistoryContract(
         totalExact: true,
       });
     });
+
+    // EL MOTIVO DEL CIERRE (`matchEndReason`), exacto. Lo escribe el cierre, así que una partida todavía
+    // abierta no tiene motivo y no coincide con ninguno, y la forma vieja tampoco: nunca lo grabó.
+    it("por motivo del cierre: exacto, con los demás filtros, y la abierta nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      const rows: readonly Row[] = [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"] },
+        { matchId: "m-2", at: at(20), users: ["ana", "carla"] },
+        { matchId: "m-3", at: at(30), users: ["beto", "carla"] },
+        { matchId: "m-abierta", at: at(40), users: ["ana", "dani"] },
+        { matchId: "m-vieja", at: at(50), roomId: null },
+        { matchId: "m-6", at: at(60), users: ["ana", "eva"] },
+      ];
+      await seed(history, clock, rows);
+      clock.set(at(70));
+      const closings: [string, MatchClosing["matchEndReason"], MatchClosing["status"]][] = [
+        ["m-1", "SCORE", "finished"],
+        ["m-2", "ABANDONMENT", "finished"],
+        ["m-3", "ABANDONMENT", "finished"],
+        ["m-6", "CHARGE_REJECTED", "aborted"],
+      ];
+      for (const [matchId, matchEndReason, status] of closings) {
+        const users = rows.find((row) => row.matchId === matchId)?.users ?? [];
+        history.close(matchId, {
+          ...CLOSING,
+          roomId: `room-${matchId}`,
+          seats: seatsOf(users),
+          status,
+          matchEndReason,
+        });
+      }
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ matchEndReason: "SCORE" })).toEqual(["m-1"]);
+      expect(await ids({ matchEndReason: "ABANDONMENT" })).toEqual(["m-3", "m-2"]);
+      expect(await ids({ matchEndReason: "CHARGE_REJECTED" })).toEqual(["m-6"]);
+      expect(await ids({ matchEndReason: "NEVER_STARTED" })).toEqual([]);
+      // CON LOS DEMÁS, por AND: el jugador, las fechas y la sala.
+      expect(await ids({ matchEndReason: "ABANDONMENT", userId: "ana" })).toEqual(["m-2"]);
+      expect(await ids({ matchEndReason: "ABANDONMENT", from: new Date(at(25)) })).toEqual(["m-3"]);
+      expect(await ids({ matchEndReason: "SCORE", roomId: "room-m-2" })).toEqual([]);
+
+      const page = await history.list({ pageSize: 10, matchEndReason: "ABANDONMENT" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
+        total: 2,
+        totalExact: true,
+      });
+    });
   });
 }

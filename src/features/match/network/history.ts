@@ -146,6 +146,20 @@ export interface MatchOpening extends MatchSetup {
  */
 export type MatchEndReason = "SCORE" | "ABANDONMENT" | AbortReason | "CHARGE_REJECTED";
 
+// LOS MOTIVOS EN UN ARREGLO, para el que tiene que validarlos en tiempo de ejecución: el filtro del
+// listado (`transports/http/records.ts`). Es un `Record` y no una lista a mano porque así un motivo
+// nuevo del tipo que falte acá NO COMPILA, y sin eso la ruta contestaría 400 a un filtro legítimo.
+const END_REASONS: Record<MatchEndReason, true> = {
+  SCORE: true,
+  ABANDONMENT: true,
+  NEVER_STARTED: true,
+  TILES_NOT_SEEN: true,
+  NEVER_PLAYED: true,
+  INTERRUPTED: true,
+  CHARGE_REJECTED: true,
+};
+export const MATCH_END_REASONS = Object.keys(END_REASONS) as [MatchEndReason, ...MatchEndReason[]];
+
 /**
  * Por qué un jugador ya no está en la mesa: lo dijo él (`LEFT`), o lo retiró el reloj — conectado
  * (`TIMEOUT`) o con la conexión caída (`DISCONNECTED`).
@@ -313,6 +327,11 @@ export interface MatchListQuery {
    * la forma vieja no tienen asientos y no coinciden nunca.
    */
   readonly userId?: string;
+  /**
+   * Por qué terminó, exacto. Lo escribe el cierre: una partida todavía abierta no tiene motivo y no
+   * coincide con ninguno, y la forma vieja tampoco.
+   */
+  readonly matchEndReason?: MatchEndReason;
 }
 
 /**

@@ -3,7 +3,12 @@ import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
 import { type Response, Router } from "express";
 import { z } from "zod";
-import { type MatchArchive, type MatchCursor, MatchListTimeoutError } from "../../network/history";
+import {
+  MATCH_END_REASONS,
+  type MatchArchive,
+  type MatchCursor,
+  MatchListTimeoutError,
+} from "../../network/history";
 
 // En consts para que el aviso de arranque y el registro no puedan divergir.
 export const MATCHES_ROUTE = "/internal/matches";
@@ -83,6 +88,7 @@ const LIST_QUERY = z
     roomId: id.optional(),
     id: objectId.optional(),
     userId: id.optional(),
+    matchEndReason: z.enum(MATCH_END_REASONS).optional(),
   })
   .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
     message: "`from` no puede ser posterior a `to`",
@@ -135,7 +141,7 @@ export function recordRoutes({
     MATCHES_ROUTE,
     admin,
     validated({ query: LIST_QUERY }, async ({ query }, response) => {
-      const { pageSize, after, from, to, matchId, roomId, id, userId } = query;
+      const { pageSize, after, from, to, matchId, roomId, id, userId, matchEndReason } = query;
       try {
         const page = await archive.list({
           pageSize,
@@ -146,6 +152,7 @@ export function recordRoutes({
           ...(roomId === undefined ? {} : { roomId }),
           ...(id === undefined ? {} : { id }),
           ...(userId === undefined ? {} : { userId }),
+          ...(matchEndReason === undefined ? {} : { matchEndReason }),
         });
         sendData(response, {
           items: page.items,

@@ -241,6 +241,9 @@ function matches(document: Stored, query: MatchListQuery): boolean {
   if (query.roomId !== undefined && document.roomId !== query.roomId) return false;
   if (query.id !== undefined && document._id !== query.id) return false;
   if (query.userId !== undefined && !seatedIn(document, query.userId)) return false;
+  if (query.matchEndReason !== undefined && document.matchEndReason !== query.matchEndReason) {
+    return false;
+  }
   return true;
 }
 
