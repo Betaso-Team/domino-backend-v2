@@ -26,3 +26,21 @@ export function mintBillingToken(userId: string, expiresIn: jwt.SignOptions["exp
     expiresIn,
   });
 }
+
+/**
+ * Un token de ADMIN como lo firma billing-auth: la audiencia de administración y `typ: admin`, más el
+ * ámbito (`prv`, `role`) cuando se lo pasa. Sin ámbito es un token de antes de los operadores, que el
+ * verificador lee como Betaso Games con rol `admin`.
+ */
+export function mintAdminToken(
+  name: string,
+  scope: { readonly prv?: string | null; readonly role?: "admin" | "support" } = {},
+) {
+  return jwt.sign({ typ: "admin", sid: `s-${name}`, ...scope }, TEST_BILLING_AUTH_PRIVATE_KEY, {
+    algorithm: "ES256",
+    subject: name,
+    issuer: "betaso-games-auth",
+    audience: "betaso-games-admin",
+    expiresIn: "5m",
+  });
+}
