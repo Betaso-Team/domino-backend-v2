@@ -66,9 +66,8 @@ Estas rutas requieren una de dos credenciales:
 - `Authorization: Bearer <token>` con el token de admin que billing-auth emite cuando un admin inicia
   sesión (`POST /v1/admins/login` de billing-auth): ES256, audiencia `betaso-games-admin` y
   `typ: admin`. Sus claims `prv` (el operador del admin; `null` es Betaso Games) y `role` (`admin` o
-  `support`) dicen qué abre. Se leen **tolerantes**: un token sin `prv` es de Betaso Games y uno sin
-  `role` es `admin`, que es lo que eran los tokens de antes. Un valor presente que no se entiende (un
-  rol desconocido, un `prv` que no es texto o vacío) es `401`.
+  `support`) dicen qué abre, y son **obligatorias**: un token sin `prv` (texto o `null` explícito) o
+  sin `role` es `401`, igual que un rol desconocido o un `prv` vacío o que no es texto.
 
 Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
 
@@ -86,7 +85,8 @@ acotan su ámbito; en todas las demás recibe `403 {"error":"FORBIDDEN"}`.
 | `PUT`/`DELETE /game-modes/:uuid`, `GET /game-modes/reactive/:uuid` | todo | 403 | sólo los propios suyos | 403 |
 | `PUT`/`DELETE /game-modes/:uuid/subscriptions/:providerId` | cualquier operador | 403 | sólo a sí mismo | 403 |
 | `POST /game-modes/copy-shared` | para cualquiera | 403 | sólo para sí mismo | 403 |
-| `PUT /game-modes/:uuid/subscribers`, `POST /game-modes/sync` | sí | 403 | 403 | 403 |
+| `GET /game-modes/catalogs/:providerId` | de cualquiera | de cualquiera | sólo el suyo | sólo el suyo |
+| `PUT /game-modes/catalogs/:providerId` | de cualquiera | 403 | sólo el suyo | 403 |
 
 Dentro del catálogo, un modo **propio de otro operador** no existe para un operador: toda operación
 sobre él responde `404`. Un modo **compartido** no es secreto (lo lista el catálogo público): tocarlo
@@ -104,11 +104,11 @@ sin poder responde `403 {"status":"error","message":…}`.
 | `PUT /game-modes/:uuid` | Aplica un patch al modo (el dueño y los suscriptores no se editan acá) |
 | `DELETE /game-modes/:uuid` | Baja lógica: escribe sólo `isActive`, los suscriptores se conservan |
 | `GET /game-modes/reactive/:uuid` | Reactiva; conserva el verbo de v1 por compatibilidad |
-| `POST /game-modes/sync` | Encola una republicación de los modos **compartidos** al exchange `betaso` |
 | `PUT /game-modes/:uuid/subscriptions/:providerId` | Suscribe un operador a un compartido activo |
 | `DELETE /game-modes/:uuid/subscriptions/:providerId` | Lo da de baja |
-| `PUT /game-modes/:uuid/subscribers` | Fija la lista entera de suscriptores: `{ providerIds: string[] }` |
-| `POST /game-modes/copy-shared` | Copia a modos propios los compartidos que un operador juega: `{ providerId }` |
+| `POST /game-modes/copy-shared` | Copia a modos propios los compartidos a los que un operador está suscrito: `{ providerId }` |
+| `GET /game-modes/catalogs/:providerId` | La fuente del catálogo del operador (ver abajo) |
+| `PUT /game-modes/catalogs/:providerId` | Cambia la fuente: `{ source: "shared" \| "own" }` |
 | `GET /internal/settings` | Las secciones de config en caliente (`match`; en local y dev también `deal` y `starting-score`): en vigor, overrides y editables |
 | `GET /internal/settings/:section` | Una sección |
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
@@ -120,25 +120,25 @@ Cada modo tiene un dueño, `ownerProviderId`: `null` es un modo **compartido** d
 un modo **propio** de ese operador, que sólo juegan sus jugadores. Los compartidos llevan además
 `subscribers`, los operadores que los juegan:
 
-- **`null` es legado**: un documento de antes de este campo, que se ofrece a **todos** los operadores,
-  igual que antes. No hay migración: el despliegue no le cambia el catálogo a nadie.
-- **Un arreglo es la lista explícita.** Un compartido nuevo nace con `[]` (no se ofrece a nadie hasta
-  que se suscriban). Un modo propio también lleva `[]`: no tiene suscriptores.
-- Suscribir o dar de baja a un operador de un legado responde `409` hasta que Betaso Games fije la
-  lista entera con `PUT /game-modes/:uuid/subscribers` (eso también convierte el legado en lista). La
-  suscripción vale sólo sobre compartidos **activos**; sobre uno inactivo o propio, `409`.
-- Las escrituras de suscriptores **no avanzan `__v` ni `updatedAt`**: `__v` es la revisión que mira el
-  outbox, y suscribirse no es una edición del modo.
+- **La lista es explícita.** Un compartido se ofrece sólo a los operadores de su lista; un documento
+  sin el campo se lee `[]`, igual que un compartido nuevo: no se ofrece a nadie hasta que se
+  suscriban. Un modo propio también lleva `[]`: no tiene suscriptores. Los compartidos de antes de las
+  suscripciones se suscriben una vez con `npm run modes:subscribe-existing` (`operacion.md`).
+- Cada operador se suscribe o se da de baja él mismo (Betaso Games puede hacerlo por cualquiera). La
+  suscripción vale sólo sobre compartidos **activos**; sobre uno inactivo o propio, `409`. No hay ruta
+  para fijar la lista entera.
+- Las escrituras de suscriptores **no avanzan `__v` ni `updatedAt`**: suscribirse no es una edición
+  del modo.
 - La unicidad (`name + playersQuantity` al crear, `name` al renombrar, con el hueco heredado de v1)
   vale **por dueño**: dos operadores pueden tener cada uno su «Clásica».
 
 Lo que ve cada uno en `GET /game-modes/admin` y `/admin/:uuid`: el DTO de v1 más `ownerProviderId`;
 Betaso Games ve también `subscribers`, un operador no (es información de los otros). Un operador ve
-sus modos propios y los compartidos legados o con él en la lista; para descubrir un compartido nuevo
+sus modos propios y los compartidos con él en la lista; para descubrir un compartido nuevo
 al que suscribirse tiene el catálogo público, `GET /game-modes`.
 
-**`POST /game-modes/copy-shared` `{ providerId }`** copia los compartidos **activos** que ese operador
-juega (legados incluidos) a modos propios suyos, con los mismos números y niveles. El uuid de cada copia
+**`POST /game-modes/copy-shared` `{ providerId }`** copia los compartidos **activos** a los que ese
+operador está suscrito a modos propios suyos, con los mismos números y niveles. El uuid de cada copia
 es determinista (v5 de RFC 4122: espacio = uuid del origen, nombre = `providerId`), así que repetirla
 completa una copia a medias sin duplicar y no pisa lo que el operador ya editó. Responde `200`:
 
@@ -153,9 +153,32 @@ completa una copia a medias sin duplicar y no pisa lo que el operador ya editó.
 `NAME_TAKEN`: el operador ya tenía un modo propio con ese nombre y esa cantidad y otro uuid.
 `INVALID_SOURCE_UUID`: el uuid del origen no tiene forma de UUID y no se puede derivar el de la copia.
 
+### La fuente del catálogo de cada operador
+
+Cada operador elige qué catálogo juega, **entero**: `shared` (los compartidos activos a los que está
+suscrito) u `own` (sólo sus modos propios activos). Un operador que nunca la cambió está en `shared`.
+La guarda el dominó (colección `provider_catalogs`) y la aplica el orquestador al armar el catálogo
+efectivo (un operador que juega contra todos usa siempre el compartido, decida lo que decida acá).
+El camino habitual para pasar a `own`: `copy-shared`, editar las copias, y recién ahí la fuente.
+
+**`GET /game-modes/catalogs/:providerId`** responde `200`:
+
+```json
+{ "status": "success", "data": {
+  "providerId": "parley", "source": "own",
+  "updatedAt": "2026-10-28T12:00:00.000Z", "updatedBy": "pia" } }
+```
+
+(`updatedAt` y `updatedBy` son `null` si nunca se cambió.)
+
+**`PUT /game-modes/catalogs/:providerId` `{ "source": "shared" | "own" }`** responde lo mismo con la
+fuente nueva. Pasar a `own` exige **al menos un modo propio activo** del operador: si no, `409`
+(quedaría sin lobby). Volver a `shared` siempre se puede. Un operador sólo lee y cambia la suya
+(`403` sobre otra); `support` lee y no cambia.
+
 Códigos del catálogo: `400 {code:"MALFORMED"}` forma inválida, `400 {status:"error"}` mesa gratis con
 entrada, `403` ámbito, `404` no existe o no lo ve, `409` duplicado o choque de estado (ya inactivo,
-legado, propio sin suscriptores), `503` el catálogo está ocupado (otro proceso tiene el lease;
+propio sin suscriptores, `own` sin modos propios activos), `503` el catálogo está ocupado (otro proceso tiene el lease;
 reintentar).
 
 ### El registro de cada partida
@@ -244,7 +267,7 @@ mirar la forma. El `POST /internal/matches` del orquestador es otra ruta, con su
 más. Los niveles son únicos y el `extra` crece con el nivel; si no, la respuesta es 400. Sin
 `betLevels`, un modo nuevo no ofrece aumentar (`[]`). En el `PUT`, la lista reemplaza a la anterior y
 `[]` apaga los aumentos. El `GET` público devuelve `betLevels` ordenados por nivel, y el orquestador los
-lee de ahí. Los eventos `game_mode.*` del exchange `betaso` **no** los llevan.
+lee de ahí (y de `GET /internal/game-modes`).
 
 **Config en caliente.** Una edición llega a las mesas que nacen DESPUÉS; una mesa ya abierta conserva
 los plazos con los que nació. El proceso que atiende el `PATCH` se refresca en el acto y el resto
@@ -291,14 +314,28 @@ orquestador lo muestra en los números de su lobby.
 | `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }] } }` | Siempre; un modo sin nadie jugando no aparece |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 
-**`GET /internal/game-modes`** devuelve el catálogo para que el orquestador arme el catálogo efectivo
-de cada operador: los modos activos —compartidos y propios— con el DTO de v1 más `ownerProviderId` y
-`subscribers` (`null` en un legado, que se ofrece a todos). `?includeInactive=1` suma los dados de
-baja, para resolver el modo de una partida vieja; un valor que no sea `0` o `1` es `400`.
+**`GET /internal/game-modes`** devuelve, en una sola lectura, lo que el orquestador necesita para
+armar el catálogo efectivo de cada operador: los modos activos —compartidos y propios— con el DTO de
+v1 más `ownerProviderId` y `subscribers` (siempre una lista; `[]` es nadie), y las **fuentes** que se
+apartan del default. `?includeInactive=1` suma los dados de baja (para el historial y para que un
+operador como Betaso vea las bajas); un valor que no sea `0` o `1` es `400`.
+
+```json
+{ "status": "success",
+  "data": [ { "_id": "…", "uuid": "…", "name": "Clásica", "multiplier": 1, "prize": 18,
+              "entryFee": 10, "playersQuantity": 2, "pointsToWin": 25, "isActive": true,
+              "isFreeRoom": false, "enableBots": false, "betLevels": [],
+              "createdAt": "…", "updatedAt": "…", "__v": 0,
+              "ownerProviderId": null, "subscribers": ["betaso"] } ],
+  "catalogs": { "parley": "own" } }
+```
+
+`catalogs` es un mapa `providerId → fuente` con **sólo** los operadores que no están en `shared`: un
+operador ausente del mapa juega el compartido suscrito. Hoy el único valor posible es `"own"`.
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status, data: [GameModeDTO & { ownerProviderId, subscribers }] }` | Siempre |
+| `200` | `{ status, data: [GameModeDTO & { ownerProviderId, subscribers }], catalogs: { [providerId]: "own" } }` | Siempre |
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada (la del panel tampoco la abre) |
 
 ⚠ **El dominó no verifica el operador al abrir una mesa.** `POST /internal/matches` resuelve el modo

@@ -8,8 +8,8 @@ npm install
 npm run dev
 ```
 
-`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y los dos
-brokers de RabbitMQ son capacidades opcionales elegidas por la presencia de sus URLs.
+`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y el
+broker de juegos (`BETASO_GAMES_RABBITMQ_URL`) son capacidades opcionales elegidas por la presencia de sus URLs; `RABBITMQ_URL` (el viejo broker de Betaso) ya no se lee.
 
 El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
 Las partidas ya abiertas terminan.
@@ -20,11 +20,39 @@ Las partidas ya abiertas terminan.
 se crea ningún usuario de operador** en un entorno hasta que billing-auth, el dominó, el orquestador y
 el panel con ámbito estén desplegados en ese entorno.
 
-**Modos y suscripciones, sin migración.** Los modos de antes no tienen `ownerProviderId` ni
-`subscribers` y se leen como compartidos legados, que se ofrecen a todos los operadores: el despliegue
-no le cambia el catálogo a nadie. Para pasar un modo a lista explícita, Betaso Games hace
-`PUT /game-modes/:uuid/subscribers` con los operadores que lo juegan; recién ahí cada operador puede
-suscribirse o darse de baja solo.
+**Suscripciones explícitas: una suscripción de una sola vez al desplegar.** Un compartido se ofrece
+sólo a los operadores de su lista (`subscribers`), y un modo de antes de las suscripciones —sin el
+campo— se lee `[]`: no se le ofrece a nadie. En el MISMO despliegue que trae esta versión, se
+suscriben los modos de antes a los operadores que ya los jugaban:
+
+```bash
+npm run modes:subscribe-existing -- betaso
+```
+
+Toca sólo los compartidos **sin** el campo `subscribers` (un compartido nuevo nace con `[]` escrito,
+un propio también), así que es idempotente: correrlo otra vez no cambia nada, tampoco lo que un
+operador haya cambiado entre las dos corridas. Loguea cuántos modos tocó (`modified`).
+
+Cómo correrlo contra un servidor. El release del VPS sólo trae `dist/`, así que se corre desde un
+checkout del repo con `npm ci` (en el VPS o en tu máquina con un túnel SSH a su Mongo). Necesita, por
+entorno o en un `.env` en la raíz del checkout:
+
+- `MONGO_URI`: la base del dominó v2 de ese entorno (en dev, `domino_v2_dev` del Mongo del VPS, que
+  escucha en `:27018`). Sin ella el script se niega.
+- `BILLING_AUTH_PUBLIC_KEY`: la que `src/env.ts` exige a todo proceso; vale la del `shared/.env`.
+
+```bash
+# desde tu máquina, con un túnel al Mongo del VPS de dev
+ssh -N -L 27019:127.0.0.1:27018 betaso@154.53.54.179 &
+MONGO_URI=mongodb://127.0.0.1:27019/domino_v2_dev \
+BILLING_AUTH_PUBLIC_KEY="$(grep ^BILLING_AUTH_PUBLIC_KEY= .env | cut -d= -f2-)" \
+npm run modes:subscribe-existing -- betaso
+```
+
+(Si la URI lleva usuario y clave, es la del `shared/.env` con el host cambiado al del túnel.)
+
+**La fuente del catálogo** (`shared` | `own`) de cada operador vive en la colección
+`provider_catalogs`; sin documento, el operador está en `shared`, así que no hace falta sembrar nada.
 
 `npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
 siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local, dev y stage, `info` en
@@ -222,7 +250,7 @@ npm run docs:build
 npm run depcruise
 ```
 
-El smoke real agrega Docker, dos procesos PM2, Nginx, Redis, Mongo y RabbitMQ:
+El smoke real agrega Docker, dos procesos PM2, Nginx, Redis, Mongo y RabbitMQ (el broker de juegos):
 
 ```powershell
 $env:RUN_ENGINE_SMOKE='1'; npm run test:deploy; Remove-Item Env:RUN_ENGINE_SMOKE
@@ -314,7 +342,6 @@ niegan a arrancar mientras el otro medio esté sirviendo, porque usan el mismo p
      `BILLING_AUTH_PUBLIC_KEY`;
    - `MONGO_URI` (el Mongo del VPS escucha en `:27018`);
    - `REDIS_URL`, con un índice propio;
-   - `RABBITMQ_URL`;
    - para las mesas del orquestador, `ORCHESTRATOR_URL` (la base del orquestador),
      `ORCHESTRATOR_CALLBACK_API_KEY` (= `DOMINO_CALLBACK_API_KEY` del orquestador) y
      `BETASO_GAMES_RABBITMQ_URL` (el vhost `betaso_games`, donde salen los resultados).
