@@ -28,7 +28,7 @@ export interface GameModeRepository extends GameModeReader {
   update(uuid: string, input: UpdateGameMode): Promise<GameMode | undefined>;
 
   // CREA CON UN UUID DADO, O DEVUELVE EL QUE YA ESTABA con ese uuid, sin tocarlo. Es la escritura de
-  // la copia de los compartidos a un operador (`copyShared`): el uuid es determinista, así que un
+  // la copia de los compartidos a un operador (`createCopies`): el uuid es determinista, así que un
   // reintento después de una copia a medias completa lo que faltó y no duplica nada. `created` dice
   // cuál de las dos pasó. Lo que había NO se pisa: el operador puede haber editado su copia.
   insertIfAbsent(

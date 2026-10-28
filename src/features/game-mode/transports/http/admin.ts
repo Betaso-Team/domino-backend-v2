@@ -1,7 +1,7 @@
 import type { Logger } from "@/logger";
 import { type AdminTokenCheck, adminOf, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
-import { Router } from "express";
+import { type Response, Router } from "express";
 import type { GameModeService } from "../../service";
 import {
   BASE,
@@ -14,10 +14,8 @@ import {
 } from "./responses";
 import {
   CATALOG_SOURCE_BODY,
-  COPY_SHARED_BODY,
   CREATE_BODY,
-  PROVIDER_PARAMS,
-  SUBSCRIPTION_PARAMS,
+  PROVIDER_QUERY,
   UPDATE_BODY,
   UUID_PARAMS,
   createInputOf,
@@ -37,10 +35,51 @@ import {
 // | GET  /game-modes/admin, /admin/:uuid      | todo         | los suyos + compartidos que juega | lee  |
 // | POST /game-modes                          | sí           | sólo propios suyos             | no      |
 // | PUT, DELETE, GET reactive/:uuid           | todo         | sólo los propios suyos         | no      |
-// | PUT|DELETE /:uuid/subscriptions/:provider | cualquiera   | sólo a sí mismo                | no      |
-// | POST /game-modes/copy-shared              | cualquiera   | sólo para sí mismo             | no      |
-// | GET  /game-modes/catalogs/:providerId     | cualquiera   | sólo el suyo                   | lee     |
-// | PUT  /game-modes/catalogs/:providerId     | cualquiera   | sólo el suyo                   | no      |
+// | PUT|DELETE /:uuid/subscription            | ?providerId= | él mismo                       | no      |
+// | POST /game-modes/copies                   | ?providerId= | para él mismo                  | no      |
+// | PUT  /game-modes/source                   | ?providerId= | la suya                        | no      |
+//
+// EL OPERADOR SOBRE EL QUE SE ACTÚA SALE DEL TOKEN, nunca del path ni del cuerpo: ver `providerOf`.
+// `GET /game-modes/admin` lo acepta opcional y, si hay uno resuelto, suma la fuente de su catálogo.
+
+/**
+ * SOBRE QUÉ OPERADOR ACTÚA el pedido, o `undefined` después de contestar por qué ninguno. Un admin de
+ * operador, el suyo (un `?providerId=` igual al suyo se acepta, uno distinto es 403); Betaso Games
+ * —token sin `prv`, o la llave— el que nombre con `?providerId=`, y sin él es 400. Es el mismo patrón
+ * que los webhooks del orquestador (`reports/transports/http/webhooks.ts`).
+ */
+function providerOf(response: Response, asked: string | undefined): string | undefined {
+  const { provider } = adminOf(response);
+  if (provider === null) {
+    if (asked !== undefined) return asked;
+    response.status(400).json({
+      status: "error",
+      code: "PROVIDER_REQUIRED",
+      message: "falta ?providerId=: Betaso Games indica sobre qué operador actúa",
+    });
+    return undefined;
+  }
+  if (asked !== undefined && asked !== provider) {
+    response.status(403).json({
+      status: "error",
+      code: "FORBIDDEN",
+      message: "un operador sólo actúa sobre sí mismo",
+    });
+    return undefined;
+  }
+  return provider;
+}
+
+// LO MISMO, PERO OPCIONAL PARA BETASO GAMES: el listado del panel sin `?providerId=` es el catálogo
+// entero. `null` = Betaso Games sin operador; `undefined` = ya se contestó el 403.
+function optionalProviderOf(
+  response: Response,
+  asked: string | undefined,
+): string | null | undefined {
+  if (adminOf(response).provider === null && asked === undefined) return null;
+  return providerOf(response, asked);
+}
+
 export function adminRoutes({
   service,
   logger,
@@ -63,10 +102,10 @@ export function adminRoutes({
     // encuentra.
     const missing = [
       `POST ${BASE}`,
+      `POST ${BASE}/copies`,
+      `PUT ${BASE}/source`,
       `PUT ${BASE}/:uuid`,
-      `POST ${BASE}/copy-shared`,
-      `GET|PUT ${BASE}/catalogs/:providerId`,
-      `PUT|DELETE ${BASE}/:uuid/subscriptions/:providerId`,
+      `PUT|DELETE ${BASE}/:uuid/subscription`,
       `DELETE ${BASE}/:uuid`,
       `GET ${BASE}/reactive/:uuid`,
       `GET ${BASE}/admin`,
@@ -86,17 +125,39 @@ export function adminRoutes({
   // son administrativas, y ANTES de `reactive/:uuid` y de todo lo demás por el mismo motivo que
   // aquél: el admin se monta primero (`register.ts`), así que `/game-modes/admin` le gana al
   // `/:uuid` público, que lo tomaría por el uuid de un modo llamado "admin".
+  //
+  // CON UN OPERADOR RESUELTO (el del token, o el `?providerId=` de Betaso Games) la respuesta suma
+  // `source`, la fuente de su catálogo: `{ status, data, source }`. Betaso Games sin `?providerId=`
+  // ve todos los modos y ninguna fuente, porque no hay un catálogo del que hablar.
   router.get(
     `${BASE}/admin`,
     scopedReader,
-    validated({}, async (_input, response) => {
+    validated({ query: PROVIDER_QUERY }, async ({ query }, response) => {
       const admin = adminOf(response);
-      const modes = await service.listFor(admin);
-      sendData(
-        response,
-        200,
-        modes.map((mode) => toAdminDTO(mode, admin)),
-      );
+      const providerId = optionalProviderOf(response, query.providerId);
+      if (providerId === undefined) return;
+      if (providerId === null) {
+        const modes = await service.listFor(admin);
+        sendData(
+          response,
+          200,
+          modes.map((mode) => toAdminDTO(mode, admin)),
+        );
+        return;
+      }
+      try {
+        const [modes, catalog] = await Promise.all([
+          service.listFor(admin, providerId),
+          service.catalogOf(admin, providerId),
+        ]);
+        response.status(200).json({
+          status: "success",
+          data: modes.map((mode) => toAdminDTO(mode, admin)),
+          source: catalog.source,
+        });
+      } catch (error) {
+        sendError(response, error);
+      }
     }),
   );
 
@@ -154,6 +215,50 @@ export function adminRoutes({
     }),
   );
 
+  // LA COPIA DE LOS COMPARTIDOS QUE EL OPERADOR JUEGA a modos propios suyos. Sin cuerpo: el operador
+  // es el resuelto. 200 y no 201 aunque cree: es idempotente, y el segundo llamado —el reintento de
+  // una copia a medias— no crea lo que ya estaba. No la tapa nada: no hay `POST /game-modes/:uuid`.
+  router.post(
+    `${BASE}/copies`,
+    scoped,
+    validated({ query: PROVIDER_QUERY }, async ({ query }, response) => {
+      const providerId = providerOf(response, query.providerId);
+      if (providerId === undefined) return;
+      try {
+        sendData(response, 200, await service.createCopies(adminOf(response), providerId));
+      } catch (error) {
+        sendError(response, error);
+      }
+    }),
+  );
+
+  // LA FUENTE DEL CATÁLOGO DEL OPERADOR (`shared` | `own`). Pasar a `own` exige un modo propio activo:
+  // 409 si no hay (`GameModeStateConflictError`). Se lee en `GET /game-modes/admin` (`source`).
+  //
+  // ⚠ VA ANTES DE `PUT /:uuid`: es un solo segmento, y al revés todo cambio de fuente sería la edición
+  // del modo llamado "source". Lo pinea el test que asserta la lista de registros en orden.
+  router.put(
+    `${BASE}/source`,
+    scoped,
+    validated(
+      { query: PROVIDER_QUERY, body: CATALOG_SOURCE_BODY },
+      async ({ query, body }, response) => {
+        const providerId = providerOf(response, query.providerId);
+        if (providerId === undefined) return;
+        try {
+          const catalog = await service.setCatalogSource(
+            adminOf(response),
+            providerId,
+            body.source,
+          );
+          sendData(response, 200, toCatalogDTO(catalog));
+        } catch (error) {
+          sendError(response, error);
+        }
+      },
+    ),
+  );
+
   router.put(
     `${BASE}/:uuid`,
     scoped,
@@ -168,53 +273,19 @@ export function adminRoutes({
     }),
   );
 
-  // LA COPIA DE LOS COMPARTIDOS QUE UN OPERADOR JUEGA a modos propios. 200 y no 201 aunque cree: es
-  // idempotente, y el segundo llamado —el reintento de una copia a medias— no crea lo que ya estaba.
-  // Tampoco la tapa nada: no hay `POST /game-modes/:uuid`.
-  router.post(
-    `${BASE}/copy-shared`,
-    scoped,
-    validated({ body: COPY_SHARED_BODY }, async ({ body }, response) => {
-      try {
-        sendData(response, 200, await service.copyShared(adminOf(response), body.providerId));
-      } catch (error) {
-        sendError(response, error);
-      }
-    }),
-  );
-
-  // LA FUENTE DEL CATÁLOGO DE UN OPERADOR (`shared` | `own`). Dos segmentos después de la base, así
-  // que no la tapa `/:uuid`; y va antes que las suscripciones, que tampoco la confunden.
-  router.get(
-    `${BASE}/catalogs/:providerId`,
-    scopedReader,
-    validated({ params: PROVIDER_PARAMS }, async ({ params }, response) => {
-      try {
-        sendData(
-          response,
-          200,
-          toCatalogDTO(await service.catalogOf(adminOf(response), params.providerId)),
-        );
-      } catch (error) {
-        sendError(response, error);
-      }
-    }),
-  );
-
-  // PASAR A `own` EXIGE UN MODO PROPIO ACTIVO: 409 si no hay (`GameModeStateConflictError`).
+  // LAS SUSCRIPCIONES DEL OPERADOR RESUELTO: tres segmentos, así que `/:uuid` no las tapa.
   router.put(
-    `${BASE}/catalogs/:providerId`,
+    `${BASE}/:uuid/subscription`,
     scoped,
     validated(
-      { params: PROVIDER_PARAMS, body: CATALOG_SOURCE_BODY },
-      async ({ params, body }, response) => {
+      { params: UUID_PARAMS, query: PROVIDER_QUERY },
+      async ({ params, query }, response) => {
+        const providerId = providerOf(response, query.providerId);
+        if (providerId === undefined) return;
         try {
-          const catalog = await service.setCatalogSource(
-            adminOf(response),
-            params.providerId,
-            body.source,
-          );
-          sendData(response, 200, toCatalogDTO(catalog));
+          const admin = adminOf(response);
+          const mode = await service.subscribe(admin, params.uuid, providerId);
+          sendData(response, 200, toAdminDTO(mode, admin));
         } catch (error) {
           sendError(response, error);
         }
@@ -222,33 +293,23 @@ export function adminRoutes({
     ),
   );
 
-  // LAS SUSCRIPCIONES: tres segmentos, así que `/:uuid` no las tapa.
-  router.put(
-    `${BASE}/:uuid/subscriptions/:providerId`,
-    scoped,
-    validated({ params: SUBSCRIPTION_PARAMS }, async ({ params }, response) => {
-      try {
-        const admin = adminOf(response);
-        const mode = await service.subscribe(admin, params.uuid, params.providerId);
-        sendData(response, 200, toAdminDTO(mode, admin));
-      } catch (error) {
-        sendError(response, error);
-      }
-    }),
-  );
-
   router.delete(
-    `${BASE}/:uuid/subscriptions/:providerId`,
+    `${BASE}/:uuid/subscription`,
     scoped,
-    validated({ params: SUBSCRIPTION_PARAMS }, async ({ params }, response) => {
-      try {
-        const admin = adminOf(response);
-        const mode = await service.unsubscribe(admin, params.uuid, params.providerId);
-        sendData(response, 200, toAdminDTO(mode, admin));
-      } catch (error) {
-        sendError(response, error);
-      }
-    }),
+    validated(
+      { params: UUID_PARAMS, query: PROVIDER_QUERY },
+      async ({ params, query }, response) => {
+        const providerId = providerOf(response, query.providerId);
+        if (providerId === undefined) return;
+        try {
+          const admin = adminOf(response);
+          const mode = await service.unsubscribe(admin, params.uuid, providerId);
+          sendData(response, 200, toAdminDTO(mode, admin));
+        } catch (error) {
+          sendError(response, error);
+        }
+      },
+    ),
   );
 
   router.delete(
