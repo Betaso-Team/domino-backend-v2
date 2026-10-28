@@ -9,6 +9,7 @@ import {
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
+  offeredTo,
 } from "./core/catalog";
 import type { GameMode } from "./core/game-mode";
 import { GameModeService } from "./service";
@@ -632,14 +633,14 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     return { ...h, viejo, suscrito, ajeno, propio, delRival };
   }
 
-  it("un operador ve los suyos y los compartidos que juega; Betaso Games ve todo", async () => {
+  it("un operador ve los suyos y todos los compartidos activos; Betaso Games ve todo", async () => {
     const { service } = await catalog();
 
     const names = async (actor: { provider: string | null }) =>
       (await service.listFor(actor)).map((modo) => modo.name).sort();
 
-    expect(await names(PARLEY)).toEqual(["De los dos", "Propio", "Suscrito"]);
-    expect(await names(RIVAL)).toEqual(["De los dos", "De otros", "Del rival"]);
+    expect(await names(PARLEY)).toEqual(["De los dos", "De otros", "Propio", "Suscrito"]);
+    expect(await names(RIVAL)).toEqual(["De los dos", "De otros", "Del rival", "Suscrito"]);
     expect(await names(GAMES)).toEqual([
       "De los dos",
       "De otros",
@@ -656,17 +657,22 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     const names = async (actor: { provider: string | null }, providerId: string) =>
       (await service.listFor(actor, providerId)).map((modo) => modo.name).sort();
 
-    expect(await names(GAMES, "parley")).toEqual(["De los dos", "Propio", "Suscrito"]);
-    expect(await names(PARLEY, "parley")).toEqual(["De los dos", "Propio", "Suscrito"]);
+    expect(await names(GAMES, "parley")).toEqual(["De los dos", "De otros", "Propio", "Suscrito"]);
+    expect(await names(PARLEY, "parley")).toEqual(["De los dos", "De otros", "Propio", "Suscrito"]);
     await expect(service.listFor(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
   });
 
-  it("getFor no le muestra a un operador lo que no ve", async () => {
-    const { service, delRival, ajeno, propio } = await catalog();
+  it("getFor no le muestra a un operador el propio de otro; sí cualquier compartido activo", async () => {
+    const { service, repository, delRival, ajeno, propio } = await catalog();
 
     expect(await service.getFor(PARLEY, delRival.uuid)).toBeUndefined();
-    expect(await service.getFor(PARLEY, ajeno.uuid)).toBeUndefined();
+    expect((await service.getFor(PARLEY, ajeno.uuid))?.name).toBe("De otros");
     expect((await service.getFor(PARLEY, propio.uuid))?.name).toBe("Propio");
+
+    // Un compartido dado de baja sólo lo sigue viendo quien estaba suscrito.
+    await repository.update(ajeno.uuid, { isActive: false });
+    expect(await service.getFor(PARLEY, ajeno.uuid)).toBeUndefined();
+    expect((await service.getFor(RIVAL, ajeno.uuid))?.name).toBe("De otros");
   });
 
   it("el público ve sólo los compartidos activos, y el orquestador todo", async () => {
@@ -738,16 +744,16 @@ describe("GameModeService: las suscripciones", () => {
 
   // LA LISTA ES EXPLÍCITA: un compartido sin suscriptores no se le ofrece a nadie, y suscribirse lo
   // suma sólo a ése.
-  it("un compartido sin lista no lo ve ningún operador hasta que se suscribe", async () => {
+  it("un compartido sin lista se ve en el panel pero no se le ofrece a nadie hasta que se suscribe", async () => {
     const { service } = harness();
     const modo = await service.create(GAMES, clasica());
 
-    expect(await service.getFor(PARLEY, modo.uuid)).toBeUndefined();
-    expect(await service.listFor(RIVAL)).toEqual([]);
+    expect(offeredTo(modo, "parley")).toBe(false);
+    expect((await service.listFor(RIVAL)).map((m) => m.uuid)).toEqual([modo.uuid]);
 
-    await service.subscribe(PARLEY, modo.uuid, "parley");
-    expect((await service.getFor(PARLEY, modo.uuid))?.subscribers).toEqual(["parley"]);
-    expect(await service.getFor(RIVAL, modo.uuid)).toBeUndefined();
+    const suscrito = await service.subscribe(PARLEY, modo.uuid, "parley");
+    expect(offeredTo(suscrito, "parley")).toBe(true);
+    expect(offeredTo(suscrito, "rival")).toBe(false);
   });
 
   it("un modo inactivo no admite suscripciones; uno propio no tiene suscriptores", async () => {

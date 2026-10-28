@@ -81,7 +81,7 @@ acotan su ámbito; en todas las demás recibe `403 {"error":"FORBIDDEN"}`.
 | `/internal/matches…`, `/game-data/:roomId` | sí | sí | 403 | 403 |
 | `GET /internal/settings…` | sí | sí | 403 | 403 |
 | `PATCH`/`DELETE /internal/settings/:section` | sí | 403 | 403 | 403 |
-| `GET /game-modes/admin`, `/admin/:uuid` | todo (o el catálogo de `?providerId=`) | ídem | los suyos y los compartidos que juega | ídem |
+| `GET /game-modes/admin`, `/admin/:uuid` | todo (o el catálogo de `?providerId=`) | ídem | los suyos y todos los compartidos activos (con `subscribed`) | ídem |
 | `POST /game-modes` | compartido o propio de cualquiera | 403 | sólo propio suyo | 403 |
 | `PUT`/`DELETE /game-modes/:uuid`, `GET /game-modes/reactive/:uuid` | todo | 403 | sólo los propios suyos | 403 |
 | `PUT`/`DELETE /game-modes/:uuid/subscription` | el de `?providerId=` | 403 | él mismo | 403 |
@@ -139,11 +139,13 @@ un modo **propio** de ese operador, que sólo juegan sus jugadores. Los comparti
 - La unicidad (`name + playersQuantity` al crear, `name` al renombrar, con el hueco heredado de v1)
   vale **por dueño**: dos operadores pueden tener cada uno su «Clásica».
 
-Lo que ve cada uno en `GET /game-modes/admin` y `/admin/:uuid`: el DTO de v1 más `ownerProviderId`;
-Betaso Games ve también `subscribers`, un operador no (es información de los otros). Un operador ve
-sus modos propios y los compartidos con él en la lista; para descubrir un compartido nuevo
-al que suscribirse tiene el catálogo público, `GET /game-modes`. Betaso Games ve todos los modos, o
-con `?providerId=` los que ve ese operador.
+Lo que ve cada uno en `GET /game-modes/admin` y `/admin/:uuid`: el DTO de v1 más `ownerProviderId`.
+Betaso Games ve también `subscribers`; un operador no (es información de los otros), sino
+`subscribed: true | false` en cada compartido: si él está suscrito. Un operador ve sus modos propios
+(también los dados de baja) y **todos los compartidos activos**, para elegir a cuáles suscribirse; un
+compartido dado de baja sólo lo sigue viendo si estaba suscrito. Lo que JUEGA no cambia: sus propios o
+los compartidos a los que está suscrito, según la fuente. Betaso Games ve todos los modos, o con
+`?providerId=` lo que ve ese operador.
 
 **`POST /game-modes/copies`** (sin cuerpo) copia los compartidos **activos** a los que el operador está
 suscrito a modos propios suyos, con los mismos números y niveles. El uuid de cada copia

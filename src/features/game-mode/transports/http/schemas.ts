@@ -257,11 +257,13 @@ export function toDTO(mode: GameMode): GameModeDTO {
   };
 }
 
-// LO QUE VE EL PANEL: el DTO de v1 más el dueño, y la lista de suscriptores SÓLO para Betaso Games.
-// Un operador no ve quién más juega un compartido: es información comercial de los otros.
+// LO QUE VE EL PANEL: el DTO de v1 más el dueño. Betaso Games ve la lista de suscriptores; un operador
+// no ve quién más juega un compartido (es información comercial de los otros), sólo `subscribed`: si
+// él está suscrito. En un modo propio `subscribed` no viene: nadie se suscribe a lo suyo.
 export interface AdminGameModeDTO extends GameModeDTO {
   readonly ownerProviderId: string | null;
   readonly subscribers?: readonly string[];
+  readonly subscribed?: boolean;
 }
 
 export function toAdminDTO(
@@ -269,7 +271,9 @@ export function toAdminDTO(
   viewer: { readonly provider: string | null },
 ): AdminGameModeDTO {
   const dto = { ...toDTO(mode), ownerProviderId: mode.ownerProviderId };
-  return viewer.provider === null ? { ...dto, subscribers: mode.subscribers } : dto;
+  if (viewer.provider === null) return { ...dto, subscribers: mode.subscribers };
+  if (mode.ownerProviderId !== null) return dto;
+  return { ...dto, subscribed: mode.subscribers.includes(viewer.provider) };
 }
 
 // LO QUE VE EL ORQUESTADOR: todo, con dueño y suscriptores (siempre una lista; `[]` es nadie).

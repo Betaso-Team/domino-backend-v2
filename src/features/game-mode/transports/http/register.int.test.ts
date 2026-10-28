@@ -801,25 +801,29 @@ async function playedOf(repository: GameModeRepository, name = "Jugado"): Promis
 }
 
 describe("el panel de un operador", () => {
-  it("lista los suyos y los compartidos que juega, sin la lista de suscriptores", async () => {
+  it("lista los suyos y todos los compartidos activos, con `subscribed` y sin la lista de suscriptores", async () => {
     const app = harness();
     const viejo = await playedOf(app.repository);
     const propio = await app.repository.create(
       clasica({ name: "Propio", ownerProviderId: "parley" }),
     );
     await app.repository.create(clasica({ name: "Del rival", ownerProviderId: "rival" }));
-    await app.repository.create(clasica({ name: "Sin suscriptores" }));
+    const libre = await app.repository.create(clasica({ name: "Sin suscriptores" }));
+    const retirado = await app.repository.create(clasica({ name: "Retirado" }));
+    await app.repository.update(retirado.uuid, { isActive: false });
 
     const response = await app.get("/game-modes/admin", as("parley"));
 
     expect(response.status).toBe(200);
     const data = (response.body as { data: Array<Record<string, unknown>> }).data;
-    expect(data.map((m) => m.uuid).sort()).toEqual([viejo.uuid, propio.uuid].sort());
+    expect(data.map((m) => m.uuid).sort()).toEqual([viejo.uuid, propio.uuid, libre.uuid].sort());
     for (const dto of data) expect(dto).not.toHaveProperty("subscribers");
     expect(data.find((m) => m.uuid === propio.uuid)).toEqual({
       ...wireDtoOf(propio),
       ownerProviderId: "parley",
     });
+    expect(data.find((m) => m.uuid === viejo.uuid)?.subscribed).toBe(true);
+    expect(data.find((m) => m.uuid === libre.uuid)?.subscribed).toBe(false);
   });
 
   it("Betaso Games ve la lista de suscriptores", async () => {
