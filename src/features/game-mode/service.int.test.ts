@@ -975,6 +975,36 @@ describe("GameModeService: la fuente del catálogo de cada operador", () => {
     expect((await service.catalogOf(RIVAL, "rival")).source).toBe("shared");
   });
 
+  // LA OTRA MITAD DE LA REGLA: con la fuente en `own`, el último propio activo no se da de baja —ni
+  // por `DELETE` ni por un `PUT` con `isActive: false`—. Con otro propio activo, o en `shared`, sí.
+  it("en `own`, dar de baja el último propio activo es 409; con otro activo o en `shared` se puede", async () => {
+    const { service, repository } = harness();
+    const unico = await service.create(PARLEY, clasica());
+    await service.setCatalogSource(PIA, "parley", "own");
+
+    await expect(service.softDelete(PARLEY, unico.uuid)).rejects.toThrow(
+      /volvé la fuente a shared/,
+    );
+    await expect(service.softDelete(GAMES, unico.uuid)).rejects.toBeInstanceOf(
+      GameModeStateConflictError,
+    );
+    await expect(service.update(PARLEY, unico.uuid, { isActive: false })).rejects.toBeInstanceOf(
+      GameModeStateConflictError,
+    );
+    expect((await repository.byUuid(unico.uuid))?.isActive).toBe(true);
+    // Un PUT que no lo desactiva pasa.
+    expect((await service.update(PARLEY, unico.uuid, { prize: 30 })).prize).toBe(30);
+
+    const otro = await service.create(PARLEY, clasica({ name: "Otro" }));
+    expect((await service.softDelete(PARLEY, unico.uuid)).isActive).toBe(false);
+    await expect(service.update(PARLEY, otro.uuid, { isActive: false })).rejects.toBeInstanceOf(
+      GameModeStateConflictError,
+    );
+
+    await service.setCatalogSource(PIA, "parley", "shared");
+    expect((await service.softDelete(PARLEY, otro.uuid)).isActive).toBe(false);
+  });
+
   it("cambiar la fuente va adentro del lease", async () => {
     const { service, repository } = harness({ lease: deniedLease });
     await repository.create(clasica({ ownerProviderId: "parley" }));

@@ -173,7 +173,9 @@ El camino habitual para pasar a `own`: `copy-shared`, editar las copias, y reci�
 
 **`PUT /game-modes/catalogs/:providerId` `{ "source": "shared" | "own" }`** responde lo mismo con la
 fuente nueva. Pasar a `own` exige **al menos un modo propio activo** del operador: si no, `409`
-(quedaría sin lobby). Volver a `shared` siempre se puede. Un operador sólo lee y cambia la suya
+(quedaría sin lobby). Volver a `shared` siempre se puede. Y al revés: con la fuente en `own`, dar de baja (o
+desactivar por `PUT` con `isActive: false`) el **último** modo propio activo del operador es `409`;
+primero hay que volver a `shared`. Un operador sólo lee y cambia la suya
 (`403` sobre otra); `support` lee y no cambia.
 
 Códigos del catálogo: `400 {code:"MALFORMED"}` forma inválida, `400 {status:"error"}` mesa gratis con

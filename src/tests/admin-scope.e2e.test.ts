@@ -167,4 +167,34 @@ describe("el ámbito de los admins (integración)", () => {
       data: { subscribers: ["parley"] },
     });
   });
+
+  // LA FUENTE `own` DE PUNTA A PUNTA: pasar exige un propio activo, y con la fuente en `own` el último
+  // propio activo no se da de baja hasta volver a `shared`.
+  it("la fuente `own` protege el último modo propio activo", async () => {
+    expect(
+      (await call("rival", "PUT", "/game-modes/catalogs/rival", { source: "own" })).status,
+    ).toBe(409);
+    const created = await call("rival", "POST", "/game-modes", {
+      name: "Único del rival e2e",
+      prize: 18,
+      entryFee: 10,
+      playersQuantity: 2,
+    });
+    const uuid = (created.body as { data: { uuid: string } }).data.uuid;
+    expect(
+      (await call("rival", "PUT", "/game-modes/catalogs/rival", { source: "own" })).status,
+    ).toBe(200);
+
+    const baja = await call("rival", "DELETE", `/game-modes/${uuid}`);
+    expect(baja.status).toBe(409);
+    expect((baja.body as { message: string }).message).toContain("shared");
+    expect((await call("rival", "PUT", `/game-modes/${uuid}`, { isActive: false })).status).toBe(
+      409,
+    );
+
+    expect(
+      (await call("rival", "PUT", "/game-modes/catalogs/rival", { source: "shared" })).status,
+    ).toBe(200);
+    expect((await call("rival", "DELETE", `/game-modes/${uuid}`)).status).toBe(200);
+  });
 });

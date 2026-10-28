@@ -266,6 +266,7 @@ export class GameModeService {
           throw new DuplicateGameModeError(`ya existe un modo "${input.name}"`);
         }
       }
+      if (input.isActive === false) await this.refuseEmptyingOwnCatalog(current);
       return this.write(uuid, input);
     });
   }
@@ -282,6 +283,7 @@ export class GameModeService {
       //
       // LOS SUSCRIPTORES SE QUEDAN: la baja de un compartido no los vacía, así que reactivarlo lo
       // vuelve a ofrecer a los mismos operadores. El catálogo efectivo ya excluye los inactivos.
+      await this.refuseEmptyingOwnCatalog(current);
       return this.write(uuid, { isActive: false });
     });
   }
@@ -402,6 +404,24 @@ export class GameModeService {
   private subscribersWritten(uuid: string, updated: GameMode | undefined): GameMode {
     if (!updated) throw notFound(uuid);
     return updated;
+  }
+
+  // EL ÚLTIMO PROPIO ACTIVO DE UN OPERADOR EN `own` NO SE DA DE BAJA: dejaría su catálogo vacío, o
+  // sea al operador sin lobby. Es la otra mitad de la regla de `setCatalogSource` (pasar a `own` exige
+  // un propio activo), y corre en el mismo turno del lease y la cola, así que una baja y un cambio de
+  // fuente no se cruzan. Primero se vuelve a `shared`, después se da de baja.
+  private async refuseEmptyingOwnCatalog(current: GameMode): Promise<void> {
+    const owner = current.ownerProviderId;
+    if (owner === null || !current.isActive) return;
+    if ((await this.catalogs.of(owner)).source !== "own") return;
+    const others = (await this.repository.active()).some(
+      (mode) => mode.ownerProviderId === owner && mode.uuid !== current.uuid,
+    );
+    if (!others) {
+      throw new GameModeStateConflictError(
+        `el modo ${current.uuid} es el último propio activo de ${owner}, que juega sólo con sus propios (fuente own): primero volvé la fuente a shared`,
+      );
+    }
   }
 
   // EL MODO QUE ESTE ACTOR PUEDE EDITAR, DAR DE BAJA O REACTIVAR: las reglas 1 y 2 de arriba.
