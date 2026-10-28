@@ -54,16 +54,22 @@ export interface CatalogActor {
 
 export const BETASO_GAMES: CatalogActor = { provider: null };
 
-// QUÉ MODOS VE UN OPERADOR: los suyos, y los compartidos que lo tienen en la lista de suscriptores
-// (explícita: sin lista, nadie). Betaso Games los ve todos. Es una regla de lectura y la comparten el
-// listado del panel, la búsqueda de un modo y la copia de los compartidos.
+// QUÉ MODOS SE LE OFRECEN A UN OPERADOR: los suyos, y los compartidos que lo tienen en la lista de
+// suscriptores (explícita: sin lista, nadie). Es la regla de lo que JUEGA: la usa la copia de los
+// compartidos, y el orquestador aplica la misma sobre `GET /internal/game-modes`.
 export function offeredTo(mode: GameMode, provider: string): boolean {
   if (mode.ownerProviderId !== null) return mode.ownerProviderId === provider;
   return mode.subscribers.includes(provider);
 }
 
+// QUÉ MODOS VE UN OPERADOR EN EL PANEL, que es más que lo que juega: además de lo que se le ofrece,
+// todos los compartidos ACTIVOS, para que elija a cuáles suscribirse (`subscribed` en el DTO dice en
+// cuáles está). Un compartido dado de baja sólo lo ve si estaba suscrito; uno propio de otro operador,
+// nunca. Betaso Games ve todo.
 export function visibleTo(mode: GameMode, actor: CatalogActor): boolean {
-  return actor.provider === null || offeredTo(mode, actor.provider);
+  if (actor.provider === null) return true;
+  if (mode.ownerProviderId === null && mode.isActive) return true;
+  return offeredTo(mode, actor.provider);
 }
 
 // Los CINCO errores de APLICACIÓN del catálogo. Son cinco y no uno porque un solo error con un
