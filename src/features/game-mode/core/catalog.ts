@@ -126,3 +126,36 @@ export class GameModeWriteBusyError extends Error {
 export class GameModeForbiddenError extends Error {
   override readonly name = "GameModeForbiddenError";
 }
+
+// ── LA FUENTE DEL CATÁLOGO DE CADA OPERADOR ───────────────────────────────────────────────────────
+//
+// QUÉ CATÁLOGO JUEGA UN OPERADOR, entero y no modo a modo: `shared` es el compartido —los
+// compartidos activos a los que está suscrito—, `own` son sólo sus modos propios activos. Quien
+// arma el catálogo efectivo es el orquestador (que además sabe si el operador juega contra todos,
+// en cuyo caso siempre usa el compartido); acá vive la elección porque el dominó es el dueño de los
+// modos. Un operador sin registro está en `shared`, y es el reposo: nadie queda sin lobby por no
+// haber elegido.
+export type CatalogSource = "shared" | "own";
+
+export const DEFAULT_CATALOG_SOURCE: CatalogSource = "shared";
+
+export interface ProviderCatalog {
+  readonly providerId: string;
+  readonly source: CatalogSource;
+  // Quién la cambió por última vez y cuándo; `null` en un operador que nunca la cambió.
+  readonly updatedAt: Date | null;
+  readonly updatedBy: string | null;
+}
+
+// EL PUERTO DE LAS FUENTES. `of` nunca devuelve `undefined`: un operador sin registro tiene la fuente
+// por default. `nonShared` es lo que lee el orquestador: sólo los que se apartan del default, porque
+// el resto —la inmensa mayoría— no necesita viajar.
+export interface ProviderCatalogRepository {
+  of(providerId: string): Promise<ProviderCatalog>;
+  nonShared(): Promise<readonly ProviderCatalog[]>;
+  set(providerId: string, source: CatalogSource, updatedBy: string): Promise<ProviderCatalog>;
+}
+
+export function defaultCatalogOf(providerId: string): ProviderCatalog {
+  return { providerId, source: DEFAULT_CATALOG_SOURCE, updatedAt: null, updatedBy: null };
+}

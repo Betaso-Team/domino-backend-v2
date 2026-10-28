@@ -13,13 +13,16 @@ import {
   sendMessage,
 } from "./responses";
 import {
+  CATALOG_SOURCE_BODY,
   COPY_SHARED_BODY,
   CREATE_BODY,
+  PROVIDER_PARAMS,
   SUBSCRIPTION_PARAMS,
   UPDATE_BODY,
   UUID_PARAMS,
   createInputOf,
   toAdminDTO,
+  toCatalogDTO,
   updateInputOf,
 } from "./schemas";
 
@@ -36,6 +39,8 @@ import {
 // | PUT, DELETE, GET reactive/:uuid           | todo         | sólo los propios suyos         | no      |
 // | PUT|DELETE /:uuid/subscriptions/:provider | cualquiera   | sólo a sí mismo                | no      |
 // | POST /game-modes/copy-shared              | cualquiera   | sólo para sí mismo             | no      |
+// | GET  /game-modes/catalogs/:providerId     | cualquiera   | sólo el suyo                   | lee     |
+// | PUT  /game-modes/catalogs/:providerId     | cualquiera   | sólo el suyo                   | no      |
 export function adminRoutes({
   service,
   logger,
@@ -60,6 +65,7 @@ export function adminRoutes({
       `POST ${BASE}`,
       `PUT ${BASE}/:uuid`,
       `POST ${BASE}/copy-shared`,
+      `GET|PUT ${BASE}/catalogs/:providerId`,
       `PUT|DELETE ${BASE}/:uuid/subscriptions/:providerId`,
       `DELETE ${BASE}/:uuid`,
       `GET ${BASE}/reactive/:uuid`,
@@ -175,6 +181,45 @@ export function adminRoutes({
         sendError(response, error);
       }
     }),
+  );
+
+  // LA FUENTE DEL CATÁLOGO DE UN OPERADOR (`shared` | `own`). Dos segmentos después de la base, así
+  // que no la tapa `/:uuid`; y va antes que las suscripciones, que tampoco la confunden.
+  router.get(
+    `${BASE}/catalogs/:providerId`,
+    scopedReader,
+    validated({ params: PROVIDER_PARAMS }, async ({ params }, response) => {
+      try {
+        sendData(
+          response,
+          200,
+          toCatalogDTO(await service.catalogOf(adminOf(response), params.providerId)),
+        );
+      } catch (error) {
+        sendError(response, error);
+      }
+    }),
+  );
+
+  // PASAR A `own` EXIGE UN MODO PROPIO ACTIVO: 409 si no hay (`GameModeStateConflictError`).
+  router.put(
+    `${BASE}/catalogs/:providerId`,
+    scoped,
+    validated(
+      { params: PROVIDER_PARAMS, body: CATALOG_SOURCE_BODY },
+      async ({ params, body }, response) => {
+        try {
+          const catalog = await service.setCatalogSource(
+            adminOf(response),
+            params.providerId,
+            body.source,
+          );
+          sendData(response, 200, toCatalogDTO(catalog));
+        } catch (error) {
+          sendError(response, error);
+        }
+      },
+    ),
   );
 
   // LAS SUSCRIPCIONES: tres segmentos, así que `/:uuid` no las tapa.

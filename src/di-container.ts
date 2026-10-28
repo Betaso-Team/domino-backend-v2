@@ -4,7 +4,9 @@ import {
   type GameModeReader,
   GameModeService,
   MemoryGameModeRepository,
+  MemoryProviderCatalogs,
   MongoGameModeRepository,
+  MongoProviderCatalogs,
 } from "@/features/game-mode";
 import {
   ColyseusMatchGateway,
@@ -183,6 +185,10 @@ rootContainer.register("PlayerLog", { useValue: history });
 const gameModeRepository = mongo
   ? new MongoGameModeRepository(mongo, clock)
   : new MemoryGameModeRepository(clock);
+// LAS FUENTES DEL CATÁLOGO DE CADA OPERADOR (`shared` | `own`), en la misma base que los modos.
+const providerCatalogs = mongo
+  ? new MongoProviderCatalogs(mongo, clock)
+  : new MemoryProviderCatalogs(clock);
 const catalogLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
 
 // ── LAS MESAS DEL ORQUESTADOR: el resultado y los cobros ────────────────────────────────────────
@@ -265,7 +271,7 @@ if (orchestratorCharges) {
 export const gameModes = gameModeRepository;
 rootContainer.register<GameModeReader>("GameModeReader", { useValue: gameModeRepository });
 rootContainer.register(GameModeService, {
-  useValue: new GameModeService(gameModeRepository, catalogLease),
+  useValue: new GameModeService(gameModeRepository, providerCatalogs, catalogLease),
 });
 
 // ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────

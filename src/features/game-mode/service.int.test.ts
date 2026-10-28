@@ -12,6 +12,7 @@ import {
 } from "./core/catalog";
 import type { GameMode } from "./core/game-mode";
 import { GameModeService } from "./service";
+import { MemoryProviderCatalogs } from "./transports/memory-provider-catalogs";
 import { MemoryGameModeRepository } from "./transports/memory-repository";
 import {
   BASE_INSTANT,
@@ -35,6 +36,7 @@ const CATALOG_LEASE_TTL_MS = 15_000;
 interface Harness {
   readonly service: GameModeService;
   readonly repository: MemoryGameModeRepository;
+  readonly catalogs: MemoryProviderCatalogs;
   readonly clock: MutableClock;
   readonly taken: ReadonlyArray<{ name: string; ttlMs: number }>;
 }
@@ -49,8 +51,9 @@ function harness(over: { lease?: Lease } = {}): Harness {
       return work();
     },
   };
-  const service = new GameModeService(repository, lease);
-  return { service, repository, clock, taken };
+  const catalogs = new MemoryProviderCatalogs(clock);
+  const service = new GameModeService(repository, catalogs, lease);
+  return { service, repository, catalogs, clock, taken };
 }
 
 // EL LEASE NEGADO SE ESCRIBE A MANO Y NO SE USA `MemoryLease`, y es la trampa de este archivo:
@@ -663,8 +666,8 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
       "De otros",
     ]);
     expect(await service.getPublic(propio.uuid)).toBeUndefined();
-    expect(await service.listInternal({ includeInactive: false })).toHaveLength(4);
-    expect(await service.listInternal({ includeInactive: true })).toHaveLength(5);
+    expect((await service.listInternal({ includeInactive: false })).modes).toHaveLength(4);
+    expect((await service.listInternal({ includeInactive: true })).modes).toHaveLength(5);
   });
 
   it("un operador edita, da de baja y reactiva los suyos", async () => {
@@ -911,5 +914,73 @@ describe("GameModeService: la copia de los compartidos", () => {
       GameModeForbiddenError,
     );
     expect(await repository.all()).toEqual(antes);
+  });
+});
+
+describe("GameModeService: la fuente del catálogo de cada operador", () => {
+  const ANA = { provider: null, name: "ana" } as const;
+  const PIA = { provider: "parley", name: "pia" } as const;
+
+  it("un operador sin registro está en `shared`", async () => {
+    const { service } = harness();
+
+    expect(await service.catalogOf(PARLEY, "parley")).toEqual({
+      providerId: "parley",
+      source: "shared",
+      updatedAt: null,
+      updatedBy: null,
+    });
+  });
+
+  // SIN MODOS PROPIOS ACTIVOS, `own` lo dejaría sin lobby: 409 y no se escribe nada.
+  it("pasar a `own` sin modos propios activos es 409", async () => {
+    const { service, repository } = harness();
+    const retirado = await repository.create(clasica({ ownerProviderId: "parley" }));
+    await repository.update(retirado.uuid, { isActive: false });
+    await repository.create(clasica({ name: "Del rival", ownerProviderId: "rival" }));
+
+    await expect(service.setCatalogSource(PIA, "parley", "own")).rejects.toBeInstanceOf(
+      GameModeStateConflictError,
+    );
+    expect((await service.catalogOf(GAMES, "parley")).source).toBe("shared");
+  });
+
+  it("con un modo propio activo pasa a `own`, y vuelve a `shared` sin condiciones", async () => {
+    const { service, repository, clock } = harness();
+    await repository.create(clasica({ ownerProviderId: "parley" }));
+    clock.set(BASE_INSTANT + 7_000);
+
+    expect(await service.setCatalogSource(PIA, "parley", "own")).toEqual({
+      providerId: "parley",
+      source: "own",
+      updatedAt: new Date(BASE_INSTANT + 7_000),
+      updatedBy: "pia",
+    });
+    expect((await service.listInternal({ includeInactive: false })).catalogs).toEqual([
+      expect.objectContaining({ providerId: "parley", source: "own" }),
+    ]);
+
+    expect((await service.setCatalogSource(ANA, "parley", "shared")).updatedBy).toBe("ana");
+    expect((await service.listInternal({ includeInactive: false })).catalogs).toEqual([]);
+  });
+
+  it("un operador no lee ni cambia la fuente de otro", async () => {
+    const { service, repository } = harness();
+    await repository.create(clasica({ ownerProviderId: "rival" }));
+
+    await expect(service.catalogOf(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
+    await expect(service.setCatalogSource(PIA, "rival", "own")).rejects.toBeInstanceOf(
+      GameModeForbiddenError,
+    );
+    expect((await service.catalogOf(RIVAL, "rival")).source).toBe("shared");
+  });
+
+  it("cambiar la fuente va adentro del lease", async () => {
+    const { service, repository } = harness({ lease: deniedLease });
+    await repository.create(clasica({ ownerProviderId: "parley" }));
+
+    await expect(service.setCatalogSource(PIA, "parley", "own")).rejects.toBeInstanceOf(
+      GameModeWriteBusyError,
+    );
   });
 });

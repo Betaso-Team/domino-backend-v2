@@ -2,6 +2,7 @@ import type { Lease } from "@/shared/mongo-lease";
 import { uuidV5 } from "./copy-uuid";
 import {
   type CatalogActor,
+  type CatalogSource,
   DuplicateGameModeError,
   FreeRoomWithEntryError,
   GameModeForbiddenError,
@@ -9,6 +10,8 @@ import {
   type GameModeRepository,
   GameModeStateConflictError,
   GameModeWriteBusyError,
+  type ProviderCatalog,
+  type ProviderCatalogRepository,
   offeredTo,
   visibleTo,
 } from "./core/catalog";
@@ -100,6 +103,7 @@ export class GameModeService {
 
   constructor(
     private readonly repository: GameModeRepository,
+    private readonly catalogs: ProviderCatalogRepository,
     private readonly lease: Lease,
   ) {}
 
@@ -124,8 +128,62 @@ export class GameModeService {
   // EL CATÁLOGO ENTERO PARA EL ORQUESTADOR, con dueños y suscriptores: es quien arma el catálogo
   // efectivo de cada operador. Los inactivos van sólo si los pide, para resolver el modo de una
   // partida vieja.
-  listInternal({ includeInactive }: { includeInactive: boolean }): Promise<readonly GameMode[]> {
-    return includeInactive ? this.repository.all() : this.repository.active();
+  //
+  // VA CON LAS FUENTES QUE SE APARTAN DEL DEFAULT (`own`): con eso el orquestador decide, por
+  // operador, si su catálogo es el compartido suscrito o sólo sus propios. Un operador ausente está
+  // en `shared`.
+  async listInternal({ includeInactive }: { includeInactive: boolean }): Promise<{
+    readonly modes: readonly GameMode[];
+    readonly catalogs: readonly ProviderCatalog[];
+  }> {
+    const [modes, catalogs] = await Promise.all([
+      includeInactive ? this.repository.all() : this.repository.active(),
+      this.catalogs.nonShared(),
+    ]);
+    return { modes, catalogs };
+  }
+
+  // LA FUENTE DEL CATÁLOGO DE UN OPERADOR. La lee cualquier rol del operador o de Betaso Games; otro
+  // operador es 403 (los ids de operador no son secretos, la fuente de un competidor sí).
+  catalogOf(actor: CatalogActor, providerId: string): Promise<ProviderCatalog> {
+    if (actor.provider !== null && actor.provider !== providerId) {
+      return Promise.reject(
+        new GameModeForbiddenError("un operador sólo ve la fuente de su propio catálogo"),
+      );
+    }
+    return this.catalogs.of(providerId);
+  }
+
+  // CAMBIAR LA FUENTE. Pasar a `own` exige AL MENOS UN MODO PROPIO ACTIVO del operador: sin eso el
+  // operador quedaría con un catálogo vacío, o sea sin lobby. Volver a `shared` siempre se puede.
+  // Adentro del lease y la cola, como toda escritura del catálogo: la comprobación y la escritura
+  // no se cruzan con una baja del último propio.
+  //
+  // Lo que NO se impide es dar de baja después el último propio con la fuente en `own`: eso lo ve
+  // el operador en su propio panel, y el orquestador no ofrece mesas de un catálogo vacío.
+  setCatalogSource(
+    actor: CatalogActor & { readonly name: string },
+    providerId: string,
+    source: CatalogSource,
+  ): Promise<ProviderCatalog> {
+    if (actor.provider !== null && actor.provider !== providerId) {
+      return Promise.reject(
+        new GameModeForbiddenError("un operador sólo elige la fuente de su propio catálogo"),
+      );
+    }
+    return this.mutating(async () => {
+      if (source === "own") {
+        const owned = (await this.repository.active()).some(
+          (mode) => mode.ownerProviderId === providerId,
+        );
+        if (!owned) {
+          throw new GameModeStateConflictError(
+            `el operador ${providerId} no tiene modos propios activos: no puede jugar sólo con los suyos`,
+          );
+        }
+      }
+      return this.catalogs.set(providerId, source, actor.name);
+    });
   }
 
   // LAS DOS LECTURAS DEL PANEL: ven también a los dados de baja, porque reactivar exige poder

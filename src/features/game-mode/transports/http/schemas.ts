@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CatalogSource, ProviderCatalog } from "../../core/catalog";
 import type {
   CreateGameMode,
   GameMode,
@@ -171,6 +172,37 @@ export const SUBSCRIPTION_PARAMS = z.object({
 });
 
 export const COPY_SHARED_BODY = z.strictObject({ providerId: providerIdOf("providerId") });
+
+// LA FUENTE DEL CATÁLOGO DE UN OPERADOR: el operador va en el path, la fuente en el cuerpo.
+export const PROVIDER_PARAMS = z.object({ providerId: providerIdOf("providerId") });
+export const CATALOG_SOURCE_BODY = z.strictObject({ source: z.enum(["shared", "own"]) });
+
+export interface ProviderCatalogDTO {
+  readonly providerId: string;
+  readonly source: CatalogSource;
+  readonly updatedAt: Date | null;
+  readonly updatedBy: string | null;
+}
+
+export function toCatalogDTO(catalog: ProviderCatalog): ProviderCatalogDTO {
+  return {
+    providerId: catalog.providerId,
+    source: catalog.source,
+    updatedAt: catalog.updatedAt,
+    updatedBy: catalog.updatedBy,
+  };
+}
+
+// LAS FUENTES PARA EL ORQUESTADOR, como mapa `providerId → fuente` y sólo las que no son `shared`.
+export function catalogSourcesOf(
+  catalogs: readonly ProviderCatalog[],
+): Record<string, CatalogSource> {
+  return Object.fromEntries(
+    catalogs
+      .filter((catalog) => catalog.source !== "shared")
+      .map((catalog) => [catalog.providerId, catalog.source]),
+  );
+}
 
 // `?includeInactive=1` para que el orquestador resuelva el modo de una partida ya jugada. Sólo `0`
 // y `1`: un `true` mal escrito tiene que ser 400 y no «sin inactivos» en silencio.

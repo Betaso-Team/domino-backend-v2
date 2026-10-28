@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GameModeRepository } from "../../core/catalog";
 import type { GameMode } from "../../core/game-mode";
 import { GameModeService } from "../../service";
+import { MemoryProviderCatalogs } from "../memory-provider-catalogs";
 import { MemoryGameModeRepository } from "../memory-repository";
 import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contract";
 import { gameModeHttp } from "./register";
@@ -83,6 +84,7 @@ function harness(
   const repository = over.repository ?? new MemoryGameModeRepository(clock);
   const service = new GameModeService(
     repository,
+    new MemoryProviderCatalogs(clock),
     over.lease ?? {
       async within(_name, _ttlMs, work) {
         return work();
@@ -191,11 +193,15 @@ function routesRegisteredWith(
   const clock = mutableClock();
   return routesOf(
     gameModeHttp({
-      service: new GameModeService(new MemoryGameModeRepository(clock), {
-        async within(_name, _ttlMs, work) {
-          return work();
+      service: new GameModeService(
+        new MemoryGameModeRepository(clock),
+        new MemoryProviderCatalogs(clock),
+        {
+          async within(_name, _ttlMs, work) {
+            return work();
+          },
         },
-      }),
+      ),
       logger: fakeLogger(),
       adminApiKey,
       orchestratorApiKey,
@@ -218,6 +224,8 @@ describe("gameModeHttp: las rutas", () => {
       "POST /game-modes",
       "PUT /game-modes/:uuid",
       "POST /game-modes/copy-shared",
+      "GET /game-modes/catalogs/:providerId",
+      "PUT /game-modes/catalogs/:providerId",
       "PUT /game-modes/:uuid/subscriptions/:providerId",
       "DELETE /game-modes/:uuid/subscriptions/:providerId",
       "DELETE /game-modes/:uuid",
@@ -248,11 +256,15 @@ describe("gameModeHttp: las rutas", () => {
     const clock = mutableClock();
 
     gameModeHttp({
-      service: new GameModeService(new MemoryGameModeRepository(clock), {
-        async within(_name, _ttlMs, work) {
-          return work();
+      service: new GameModeService(
+        new MemoryGameModeRepository(clock),
+        new MemoryProviderCatalogs(clock),
+        {
+          async within(_name, _ttlMs, work) {
+            return work();
+          },
         },
-      }),
+      ),
       logger,
       adminApiKey: undefined,
       orchestratorApiKey: undefined,
@@ -947,6 +959,22 @@ describe("GET /internal/game-modes", () => {
     ).toBe(400);
   });
 
+  // LAS FUENTES VIAJAN EN LA MISMA RESPUESTA, como mapa y sólo las que no son `shared`.
+  it("suma `catalogs` con las fuentes que no son `shared`", async () => {
+    const app = harness();
+    await app.repository.create(clasica({ name: "Propio", ownerProviderId: "parley" }));
+
+    expect((await app.get("/internal/game-modes", ORCHESTRATOR_KEY)).body).toMatchObject({
+      status: "success",
+      catalogs: {},
+    });
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"))).status,
+    ).toBe(200);
+    const response = await app.get("/internal/game-modes?includeInactive=1", ORCHESTRATOR_KEY);
+    expect((response.body as { catalogs: unknown }).catalogs).toEqual({ parley: "own" });
+  });
+
   // LA LLAVE DEL PANEL NO LA ABRE, ni un token: es del orquestador.
   it("sin la llave del orquestador es 401", async () => {
     const app = harness();
@@ -974,5 +1002,59 @@ describe("el catálogo público", () => {
       body: { status: "success", data: [wireDtoOf(compartido)] },
     });
     expect((await app.get(`/game-modes/${propio.uuid}`)).status).toBe(404);
+  });
+});
+
+describe("la fuente del catálogo por HTTP", () => {
+  it("GET devuelve `shared` por default, a cualquier rol del operador y a Betaso Games", async () => {
+    const app = harness();
+
+    for (const who of [as("parley"), as("parleySupport"), as("games"), KEY]) {
+      expect(await app.get("/game-modes/catalogs/parley", who)).toEqual({
+        status: 200,
+        body: {
+          status: "success",
+          data: { providerId: "parley", source: "shared", updatedAt: null, updatedBy: null },
+        },
+      });
+    }
+    expect((await app.get("/game-modes/catalogs/parley", as("rival"))).status).toBe(403);
+    expect((await app.get("/game-modes/catalogs/parley")).status).toBe(401);
+  });
+
+  it("PUT `own` sin modos propios activos es 409, y con uno pasa", async () => {
+    const app = harness();
+
+    const rechazo = await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"));
+    expect(rechazo.status).toBe(409);
+    expect(rechazo.body).toMatchObject({ status: "error" });
+
+    await app.repository.create(clasica({ ownerProviderId: "parley" }));
+    const ok = await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"));
+    expect(ok.status).toBe(200);
+    expect((ok.body as { data: unknown }).data).toMatchObject({
+      providerId: "parley",
+      source: "own",
+      updatedBy: "pia",
+    });
+    expect(
+      ((await app.get("/game-modes/catalogs/parley", as("parley"))).body as { data: unknown }).data,
+    ).toMatchObject({ source: "own" });
+  });
+
+  it("PUT: support no escribe, otro operador es 403, Betaso Games cualquiera, y la forma se valida", async () => {
+    const app = harness();
+    await app.repository.create(clasica({ ownerProviderId: "parley" }));
+
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parleySupport"))).status,
+    ).toBe(403);
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("rival"))).status,
+    ).toBe(403);
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "propio" }, as("games"))).status,
+    ).toBe(400);
+    expect((await app.put("/game-modes/catalogs/parley", { source: "own" }, KEY)).status).toBe(200);
   });
 });

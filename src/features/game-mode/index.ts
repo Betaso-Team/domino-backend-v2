@@ -21,7 +21,9 @@ export {
   type GameModeHttpDeps,
   gameModeHttp,
 } from "./transports/http/register";
+export { MemoryProviderCatalogs } from "./transports/memory-provider-catalogs";
 export { MemoryGameModeRepository } from "./transports/memory-repository";
+export { MongoProviderCatalogs } from "./transports/mongo-provider-catalogs";
 export {
   MongoGameModeRepository,
   subscribeExistingModes,
