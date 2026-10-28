@@ -316,8 +316,7 @@ export function describeGameModeRepositoryContract(
         enableBots: true,
         betLevels: [{ level: 2, extra: 1, additionalPoints: 15 }],
       });
-      // La identidad y el nacimiento NO son editables: `update` que los moviera dejaría al outbox
-      // publicando un modo distinto con la misma clave de deduplicación.
+      // La identidad y el nacimiento NO son editables: el orquestador guarda el uuid en cada mesa.
       expect(updated?.id).toBe(created.id);
       expect(updated?.uuid).toBe(created.uuid);
       expect(updated?.createdAt).toEqual(created.createdAt);
@@ -336,8 +335,7 @@ export function describeGameModeRepositoryContract(
 
     // EL RELOJ NO ES LA REVISIÓN, y éste es el test que lo cobra. La implementación obvia y
     // equivocada es derivar `version` de `updatedAt`: dos ediciones del mismo milisegundo
-    // colapsarían en la misma revisión, y el outbox deduplica por `uuid + version` — o sea que uno
-    // de los dos eventos se descarta EN SILENCIO y el consumidor se queda con el catálogo viejo.
+    // colapsarían en la misma revisión, y quien cachea el catálogo no vería el segundo cambio.
     it("dos ediciones del mismo milisegundo avanzan la revisión igual", async () => {
       const { repository } = harnessOf();
       const created = await repository.create(clasica());
@@ -371,9 +369,7 @@ export function describeGameModeRepositoryContract(
       expect(await repository.byUuid(propio.uuid)).toEqual(propio);
     });
 
-    // ⚠ SUSCRIBIRSE NO ES UNA REVISIÓN: ni `version` ni `updatedAt` se mueven. La revisión es lo que el
-    // outbox y su reconciliador miran, y si avanzara cada alta de un operador publicaría un
-    // `game_mode.updated` idéntico al exchange de Betaso.
+    // SUSCRIBIRSE NO ES UNA REVISIÓN: ni `version` ni `updatedAt` se mueven (ver el puerto).
     it("sumar, sacar y fijar suscriptores no avanza la revisión ni la fecha", async () => {
       const { repository, clock } = harnessOf();
       const creado = await repository.create(clasica());

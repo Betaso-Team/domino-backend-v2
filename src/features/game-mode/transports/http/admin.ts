@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { Logger } from "@/logger";
 import { type AdminTokenCheck, adminOf, requireAdminKey } from "@/shared/http/api-key";
 import { validated } from "@/shared/http/validated";
@@ -36,7 +35,6 @@ import {
 // | GET  /game-modes/admin, /admin/:uuid      | todo         | los suyos + compartidos que juega | lee  |
 // | POST /game-modes                          | sí           | sólo propios suyos             | no      |
 // | PUT, DELETE, GET reactive/:uuid           | todo         | sólo los propios suyos         | no      |
-// | POST /game-modes/sync                     | sí           | no                             | no      |
 // | PUT|DELETE /:uuid/subscriptions/:provider | cualquiera   | sólo a sí mismo                | no      |
 // | PUT  /:uuid/subscribers                   | sí           | no                             | no      |
 // | POST /game-modes/copy-shared              | cualquiera   | sólo para sí mismo             | no      |
@@ -63,7 +61,6 @@ export function adminRoutes({
     const missing = [
       `POST ${BASE}`,
       `PUT ${BASE}/:uuid`,
-      `POST ${BASE}/sync`,
       `POST ${BASE}/copy-shared`,
       `PUT|DELETE ${BASE}/:uuid/subscriptions/:providerId`,
       `PUT ${BASE}/:uuid/subscribers`,
@@ -164,30 +161,6 @@ export function adminRoutes({
         const updated = await service.update(admin, params.uuid, updateInputOf(body));
         sendData(response, 200, toAdminDTO(updated, admin));
       } catch (error) {
-        sendError(response, error);
-      }
-    }),
-  );
-
-  // DESPUÉS DEL `POST` DE LA COLECCIÓN y sin que nada lo tape: son dos paths distintos y no hay
-  // `POST /game-modes/:uuid` que pueda absorberlo. El orden es el del plan y el del archivo de v1.
-  //
-  // SÓLO BETASO GAMES: republica al exchange `betaso`, que es de Betaso Games, y sólo los compartidos.
-  router.post(
-    `${BASE}/sync`,
-    betasoGames,
-    validated({}, async (_input, response) => {
-      try {
-        // EL LOTE SE GENERA ACÁ, UNO POR REQUEST, y no es un detalle: la clave de deduplicación del
-        // outbox lleva el `batchId` (`["game_mode.sync", batchId, uuid]`) justamente para que este
-        // botón fuerce el evento aunque esa revisión ya se haya publicado. Con un id fijo, el
-        // segundo apretón del botón de recuperación no encolaría NADA y contestaría éxito igual.
-        sendData(response, 200, await service.syncAll(randomUUID()));
-      } catch (error) {
-        // TAMBIÉN VA ADENTRO DEL LEASE aunque no toque el catálogo —escribe el outbox—, así que
-        // también puede salir ocupado. Sin este `catch`, el único desenlace que este botón tiene
-        // además del éxito se vería como un 500: el operador que aprieta "republicar todo" mientras
-        // otro proceso edita leería una caída donde hay un "reintentá".
         sendError(response, error);
       }
     }),

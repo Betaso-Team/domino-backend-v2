@@ -38,12 +38,8 @@ export interface GameModeRepository extends GameModeReader {
 
   // LAS TRES ESCRITURAS DE LOS SUSCRIPTORES, sólo sobre modos COMPARTIDOS (`ownerProviderId` nulo).
   //
-  // ⚠ NINGUNA AVANZA LA REVISIÓN (`version`/`__v`) NI LA FECHA DE EDICIÓN. La revisión es lo que el
-  // outbox y su reconciliador miran para saber si un cambio del modo ya salió al exchange `betaso`:
-  // si suscribirse la avanzara, cada alta o baja de un operador publicaría un `game_mode.updated`
-  // con el mismo cuerpo —los suscriptores no viajan—, le contaría a Betaso la actividad comercial de
-  // los otros operadores y haría crecer el outbox por algo que no es un cambio del modo. Quién lo
-  // juega no es una edición del modo.
+  // NINGUNA AVANZA LA REVISIÓN (`version`/`__v`) NI LA FECHA DE EDICIÓN: quién juega un modo no es
+  // una edición del modo, y la revisión y la fecha son lo que el panel muestra como «editado».
   //
   // `add`/`remove` NO TOCAN UN MODO LEGADO (`subscribers` nulo) y devuelven `undefined`: sumar un
   // operador a un legado lo volvería la lista `[ese]`, o sea dejaría afuera EN SILENCIO a todos los

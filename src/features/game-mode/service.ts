@@ -13,7 +13,6 @@ import {
   visibleTo,
 } from "./core/catalog";
 import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode";
-import type { GameModeOutbox } from "./outbox";
 
 // EL ÁMBITO DE LOS OPERADORES, en tres reglas que todas las operaciones de acá comparten:
 //
@@ -57,25 +56,18 @@ export interface CopySharedResult {
 }
 
 // LOS CASOS DE USO DEL CATÁLOGO, y son el reemplazo del `GameModeService` de v1
-// (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts`). Lo que cambia respecto de aquél es
-// UNA cosa y define el archivo entero:
+// (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts`). Lo que cambia respecto de aquél:
 //
-// **EL REQUEST ADMINISTRATIVO NO ESPERA A RABBIT.** v1 publicaba en línea y se tragaba el fallo en un
-// `catch` que sólo logueaba (`:73-78`): con el broker caído, el panel recibía 201 y el consumidor
-// nunca se enteraba del modo nuevo. Acá la mutación escribe la base y escribe el outbox; el
-// despachador publica después, con confirmación y reintento. Por eso el constructor recibe un
-// `GameModeOutbox` y NO el publicador: la tentación no es importar el publicador de una, es
-// agregarle "sólo para el create" un `await` a la publicación, y un tipo que no se puede nombrar es
-// más barato de auditar que la convención de no hacerlo. `service.int.test.ts` pinea la lista de imports
-// justamente porque los tipos no lo prohíben.
+// **EL CATÁLOGO NO PUBLICA A NINGÚN BROKER.** v1 publicaba cada cambio al exchange `betaso` de Betaso;
+// v2 lo hizo un tiempo con un outbox, y se eliminó cuando Betaso pasó a leer los modos de dominó del
+// orquestador (`GET /v1/game-modes`), que los lee de acá. Una mutación escribe la base y nada más.
+// `service.int.test.ts` pinea la lista de imports para que ningún broker vuelva a entrar por acá.
 //
-// Lo segundo que cambia: v1 no serializaba NADA (ni lease, ni transacción, ni índice único detrás de
-// su regla de unicidad). Acá toda mutación corre adentro del lease, y además adentro de una cola del
-// proceso — ver `queued`.
+// v1 no serializaba NADA (ni lease, ni transacción, ni índice único detrás de su regla de unicidad).
+// Acá toda mutación corre adentro del lease, y además adentro de una cola del proceso — ver `queued`.
 
-// EL NOMBRE DEL LEASE DEL ESCRITOR. Es distinto del del despachador (`OUTBOX_LEASE`) a propósito: un
-// `POST /game-modes` y un tick del outbox no se estorban, y compartir el nombre haría que el panel
-// esperara a que termine de publicarse el evento anterior.
+// EL NOMBRE DEL LEASE DEL ESCRITOR. Es distinto del del despachador de resultados a propósito: no
+// se estorban.
 export const CATALOG_LEASE = "catalog-writer";
 
 // El mensaje es el que el panel muestra, el mismo texto que truco.
@@ -108,13 +100,7 @@ export class GameModeService {
 
   constructor(
     private readonly repository: GameModeRepository,
-    private readonly outbox: GameModeOutbox,
     private readonly lease: Lease,
-    // EL DESPERTADOR COMO CALLBACK Y NO COMO `OutboxDispatcher`. Un servicio que importara la clase
-    // cerraría el ciclo servicio → despachador → outbox → servicio; lo cierra el composition root,
-    // que es el único que tiene a los dos. Devuelve `void` y no promesa: si esperara, el request
-    // administrativo volvería a esperar a Rabbit por la puerta de atrás.
-    private readonly wakeDispatcher: () => void,
   ) {}
 
   // LAS LECTURAS NO TOMAN EL LEASE, y no es una optimización: un GET público que compitiera por el
@@ -143,7 +129,7 @@ export class GameModeService {
   }
 
   // LAS DOS LECTURAS DEL PANEL: ven también a los dados de baja, porque reactivar exige poder
-  // listarlos y abrirlos primero. Igual que las públicas, sin lease ni outbox; la frontera HTTP las
+  // listarlos y abrirlos primero. Igual que las públicas, sin lease; la frontera HTTP las
   // pone detrás de la llave, no el servicio. Cada operador ve lo que `visibleTo` le deja.
   async listFor(actor: CatalogActor): Promise<readonly GameMode[]> {
     return (await this.repository.all()).filter((mode) => visibleTo(mode, actor));
@@ -185,10 +171,7 @@ export class GameModeService {
           `ya existe un modo "${input.name}" de ${input.playersQuantity} jugadores`,
         );
       }
-      const created = await this.repository.create({ ...input, ownerProviderId: owner });
-      // El outbox descarta los propios (`publishable`): llamarlo igual deja la regla en un lugar.
-      await this.outbox.enqueueCreated(created);
-      return created;
+      return this.repository.create({ ...input, ownerProviderId: owner });
     });
   }
 
@@ -255,20 +238,8 @@ export class GameModeService {
     });
   }
 
-  // EL BOTÓN DE "REPUBLICAR TODO" DEL OPERADOR. Va adentro del lease aunque no toque el catálogo:
-  // escribe el outbox, y dos operadores apretándolo a la vez son dos lotes entrelazados.
-  syncAll(batchId: string): Promise<{ synced: number }> {
-    return this.mutating(async () => {
-      // `all()` Y NO `active()`, igual que el `/sync` de v1 (`game-mode.service.ts:177-178`): se
-      // aprieta justamente cuando el consumidor se quedó sin eventos, y un modo retirado cuyo
-      // `updated` se perdió es un modo que del otro lado se sigue ofreciendo para siempre.
-      const synced = await this.outbox.sync(await this.repository.all(), batchId);
-      return { synced };
-    });
-  }
-
   // UN OPERADOR SE SUSCRIBE A UN COMPARTIDO ACTIVO, o se da de baja. Betaso Games puede hacerlo por
-  // cualquiera. No mueve la revisión ni publica nada (ver el puerto).
+  // cualquiera. No mueve la revisión (ver el puerto).
   subscribe(actor: CatalogActor, uuid: string, providerId: string): Promise<GameMode> {
     return this.changeSubscription(actor, uuid, providerId, "add");
   }
@@ -436,46 +407,27 @@ export class GameModeService {
     return mode;
   }
 
-  // PERSISTIR Y RECIÉN AHÍ ENCOLAR, en ese orden y con las dos esperadas. Al revés se encola el
-  // evento de un cambio que la base puede rechazar, y el consumidor termina con un modo que acá no
-  // existe.
-  //
-  // NO HAY DIFF, y es deliberado: el repositorio incrementa `__v` en TODA llamada que encuentre el
-  // documento, incluso una cuyo `$set` no cambie nada, así que dos `PUT` idénticos dan las revisiones
-  // 1 y 2 y salen dos `game_mode.updated` con el mismo cuerpo. Es lo que hacía v1 —`findOneAndUpdate`
-  // + publicar, sin comparar nada (`game-mode.service.ts:110-123`)— y el costo es un evento de más
-  // que el consumidor ya deduplica por `id`. Lo que se compra es que "efectivo" no necesite
-  // definición: cualquier otra regla (comparar campo por campo, ignorar las fechas) tendría que
-  // coincidir EXACTAMENTE con el criterio del `$inc` del repositorio, y el día que no coincida hay un
-  // cambio real cuya revisión ya se publicó — o sea un evento descartado en silencio por la clave de
-  // deduplicación.
+  // NO HAY DIFF: el repositorio incrementa `__v` en TODA llamada que encuentre el documento, incluso
+  // una cuyo `$set` no cambie nada, igual que v1 (`game-mode.service.ts:110-123`).
   private async write(uuid: string, changes: UpdateGameMode): Promise<GameMode> {
     const updated = await this.repository.update(uuid, changes);
     // Inalcanzable hoy —la cola y el lease dejan una sola escritura por vez, y `found` ya leyó el
     // modo—, pero el puerto promete `GameMode | undefined` y tragarse el `undefined` con un `as`
     // sería prometer por él.
     if (!updated) throw notFound(uuid);
-    await this.outbox.ensureUpdated(updated);
     return updated;
   }
 
-  private async mutating<T>(work: () => Promise<T>): Promise<T> {
-    const result = await this.queued(async () => {
+  private mutating<T>(work: () => Promise<T>): Promise<T> {
+    return this.queued(async () => {
       const done = await this.lease.within(CATALOG_LEASE, LEASE_TTL_MS, work);
       // `undefined` ES "NO LO CONSEGUÍ" y es un desenlace NORMAL: lo tiene otro proceso. Sale como
       // 503 y no como 500 —nadie hizo nada mal y reintentar es la respuesta correcta—. El precio del
       // contrato está escrito en `shared/mongo-lease.ts`: un `work()` que devolviera `undefined` de
-      // verdad no se distinguiría, y ninguna de estas cinco operaciones lo hace.
+      // verdad no se distinguiría, y ninguna de estas operaciones lo hace.
       if (done === undefined) throw new GameModeWriteBusyError("el catálogo está ocupado");
       return done;
     });
-    // SE DESPIERTA SÓLO DESPUÉS DEL ÉXITO, y "éxito" incluye que el outbox haya aceptado la entrada.
-    // Despertar tras un fallo sería apurar un despachador que no tiene nada nuevo que publicar: si
-    // el lease no se consiguió no se escribió nada, y si el que falló fue el outbox lo que hay que
-    // correr es la reconciliación, que el tick de un segundo ya hace sola. Y va DESPUÉS de la cola,
-    // no adentro: el panel no espera a que se publique, sólo a que esté anotado.
-    this.wakeDispatcher();
-    return result;
   }
 
   // LA COLA, en cuatro líneas. `tail` nunca rechaza —se neutraliza abajo— así que una mutación que

@@ -45,20 +45,18 @@ describe("el composition root", () => {
     },
   );
 
-  // LAS TRES PIEZAS DEL CATÁLOGO ELIGEN JUNTAS Y POR `mongo`, nunca por separado. Un catálogo en
-  // Mongo con un outbox en memoria pierde en cada reinicio justamente los eventos que el outbox
-  // existe para no perder, y un lease de memoria no excluye a la otra instancia, que es lo único
-  // que ese lease hace. Se mide que las tres miren la MISMA condición.
-  it("repositorio, outbox y lease del catálogo eligen por la misma presencia de Mongo", () => {
-    for (const memoria of ["MemoryGameModeRepository", "MemoryGameModeOutbox", "MemoryLease"])
+  // EL REPOSITORIO Y EL LEASE DEL CATÁLOGO ELIGEN JUNTOS Y POR `mongo`, nunca por separado: un lease
+  // de memoria no excluye a la otra instancia, que es lo único que ese lease hace.
+  it("repositorio y lease del catálogo eligen por la misma presencia de Mongo", () => {
+    for (const memoria of ["MemoryGameModeRepository", "MemoryLease"])
       expect(source).toMatch(new RegExp(`mongo\\s*\\?[\\s\\S]{0,120}?:\\s*new ${memoria}`));
   });
 
-  // EL DESPACHADOR PIDE LAS DOS COSAS. Con una sola, esta instancia administra el catálogo y
-  // ACUMULA — que es un estado legítimo, no un error: sin Mongo el outbox es de memoria y despachar
-  // sería publicar lo que se va a perder igual; sin publicador no hay a dónde despachar.
-  it("el despachador del outbox exige Mongo Y publicador", () => {
-    expect(source).toMatch(/mongo\s*&&\s*amqp/);
+  // EL CATÁLOGO NO PUBLICA A NINGÚN BROKER: el exchange `betaso` y su outbox se fueron cuando Betaso
+  // pasó a leer los modos del orquestador. El único broker del proceso es el de juegos.
+  it("no hay outbox del catálogo ni broker de Betaso", () => {
+    expect(source).not.toMatch(/GameModeOutbox|\bOutboxDispatcher|outboxDispatcher/);
+    expect(source).not.toMatch(/rabbitmqUrl\b/);
   });
 
   // EL ORDEN DEL APAGADO ES EL CONTRATO, y cada paso escribe en el que viene después. Se mide como
@@ -68,7 +66,12 @@ describe("el composition root", () => {
   // cerrado.
   it("el apagado para el despachador, drena, cierra el broker y recién ahí Mongo", () => {
     const apagado = source.slice(source.indexOf("export async function shutdown"));
-    const pasos = ["outboxDispatcher?.close", "history.drain", "amqp?.close", "mongo?.close"];
+    const pasos = [
+      "matchResultDispatcher?.close",
+      "history.drain",
+      "betasoGamesAmqp?.close",
+      "mongo?.close",
+    ];
     const posiciones = pasos.map((paso) => apagado.indexOf(paso));
     expect(posiciones.every((posición) => posición >= 0)).toBe(true);
     expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones);
@@ -96,9 +99,7 @@ describe("la superficie Express", () => {
     expect(source).toMatch(/betaso_games:\s*\(\)\s*=>\s*gamesBroker\.ping\(\)/);
   });
 
-  // EL BROKER DE BETASO NO: sólo lleva el catálogo a un cliente, el outbox lo acumula mientras está
-  // caído y ninguna partida lo nota. Con él en el mapa, la caída del broker de un cliente sacaba de
-  // rotación al dominó.
+  // EL BROKER DE BETASO NO EXISTE: el dominó no le publica nada. Que no vuelva al mapa.
   it("no pone el broker de Betaso en las dependencias duras", () => {
     expect(source).not.toMatch(/rabbit:/);
     expect(source).not.toMatch(/amqp\.ping\(/);

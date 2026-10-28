@@ -3,11 +3,8 @@ import { JwtVerifier, adminTokenCheck } from "@/features/auth";
 import {
   type GameModeReader,
   GameModeService,
-  MemoryGameModeOutbox,
   MemoryGameModeRepository,
-  MongoGameModeOutbox,
   MongoGameModeRepository,
-  OutboxDispatcher,
 } from "@/features/game-mode";
 import {
   ColyseusMatchGateway,
@@ -172,54 +169,28 @@ rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
 rootContainer.register<MatchArchive>("MatchArchive", { useValue: history });
 rootContainer.register("PlayerLog", { useValue: history });
 
-// EL PUBLICADOR DEL BROKER, que es la ÚNICA instancia del proceso: `AmqpPublisher` memoiza una
-// conexión y un canal confirm adentro, así que dos instancias serían dos conexiones al mismo
-// broker y ninguna de las dos sabría de la otra al cerrarse.
-//
-// LA PRESENCIA DE LA URL ELIGE, igual que `MONGO_URI` y `REDIS_URL`, y `undefined` acá NO es una
-// falla: el outbox es durable y sigue acumulando. Se exporta por lo mismo que `mongo` —para que
-// `app.config.ts` lo meta en readiness y `main.ts` lo cierre—, y para nada más: publicar es cosa
-// del despachador.
-export const amqp = env.rabbitmqUrl ? new AmqpPublisher(env.rabbitmqUrl, logger) : undefined;
-
 // EL CATÁLOGO DE MODOS, que desde la Tarea 10 es la AUTORIDAD sobre la economía de una mesa: la
 // sala resuelve acá el modo que el request nombró y de él salen `pointsToWin`, `entryFee` y
 // `prize`. Sin este registro ninguna sala puede nacer, así que el token no es opcional.
 //
-// LA PRESENCIA DE `MONGO_URI` ELIGE LAS TRES PIEZAS A LA VEZ —repositorio, outbox y lease— y no
-// una por una, porque las tres son la MISMA base: un catálogo en Mongo con un outbox en memoria
-// perdería en cada reinicio justamente los eventos que el outbox existe para no perder, y un lease
-// de memoria no excluiría a la otra instancia, que es lo único que ese lease hace. Se reutiliza la
-// instancia `Mongo` de arriba: son colecciones distintas del mismo cliente, y abrir un segundo
+// LA PRESENCIA DE `MONGO_URI` ELIGE EL REPOSITORIO Y EL LEASE A LA VEZ, porque son la MISMA base: un
+// lease de memoria no excluiría a la otra instancia, que es lo único que ese lease hace. Se reutiliza
+// la instancia `Mongo` de arriba: son colecciones distintas del mismo cliente, y abrir un segundo
 // cliente sería un pool de conexiones que nadie cierra.
+//
+// EL CATÁLOGO NO PUBLICA A NINGÚN BROKER: el exchange `betaso` de Betaso y su outbox se eliminaron
+// cuando Betaso pasó a leer los modos de dominó del orquestador.
 const gameModeRepository = mongo
   ? new MongoGameModeRepository(mongo, clock)
   : new MemoryGameModeRepository(clock);
-const gameModeOutbox = mongo
-  ? new MongoGameModeOutbox(mongo, clock)
-  : new MemoryGameModeOutbox(clock);
 const catalogLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
-
-// EL DESPACHADOR SOLO EXISTE CON LAS DOS COSAS, y la conjunción es la decisión: sin Mongo el outbox
-// es de memoria y despacharlo sería publicar lo que se va a perder igual; sin publicador no hay a
-// dónde despachar. Con una sola de las dos, el proceso administra el catálogo y acumula — que es un
-// estado legítimo y no un error, exactamente como el historial de memoria.
-//
-// `wake()` sin despachador es un no-op y NO un error: el servicio no puede saber si esta instancia
-// publica, y hacérselo saber sería devolverle al caso de uso la dependencia que el callback
-// inyectado vino a sacarle.
-export const outboxDispatcher =
-  mongo && amqp
-    ? new OutboxDispatcher(gameModeRepository, gameModeOutbox, amqp, catalogLease, clock, logger)
-    : undefined;
-outboxDispatcher?.start();
 
 // ── LAS MESAS DEL ORQUESTADOR: el resultado y los cobros ────────────────────────────────────────
 //
-// EL RESULTADO VA POR SU PROPIO BROKER (`BETASO_GAMES_RABBITMQ_URL`, vhost `betaso_games`), que no es
-// el de Betaso: otro publicador, otra conexión. El outbox elige por `MONGO_URI` como el del catálogo,
-// y el despachador existe con el broker aunque no haya Mongo —sin Mongo, lo encolado se pierde con
-// el proceso, pero lo que alcance a salir sale—. Sin broker, el outbox acumula.
+// EL RESULTADO VA POR EL BROKER DE LA PLATAFORMA DE JUEGOS (`BETASO_GAMES_RABBITMQ_URL`, vhost
+// `betaso_games`), el único al que el dominó publica. El outbox elige por `MONGO_URI`, y el
+// despachador existe con el broker aunque no haya Mongo —sin Mongo, lo encolado se pierde con el
+// proceso, pero lo que alcance a salir sale—. Sin broker, el outbox acumula.
 //
 // `mandatory` es lo que hace que un resultado publicado antes de que el orquestador declare su cola
 // cuente como fallo y se reintente (ver `shared/amqp.ts`).
@@ -235,7 +206,7 @@ const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
 export const matchResultDispatcher = betasoGamesAmqp
   ? new TopicOutboxDispatcher({
       exchange: MATCH_RESULT_EXCHANGE,
-      // OTRO LEASE que el del catálogo: comparten colección, no nombre, así que no se bloquean.
+      // OTRO LEASE que el escritor del catálogo: comparten colección, no nombre, así que no se bloquean.
       leaseName: "match-result-publisher",
       queue: matchResultOutbox,
       delivery: betasoGamesAmqp,
@@ -258,7 +229,7 @@ const matchResultRecorder = new MatchResultRecorder({
   log: logger,
 });
 rootContainer.register(MatchResultRecorder, { useValue: matchResultRecorder });
-// Para la suite: lo encolado, sin broker. Se exporta como el catálogo exporta `gameModes`.
+// Para la suite: lo encolado, sin broker. Se exporta como `gameModes` más abajo.
 export const matchResults = matchResultOutbox;
 
 // A QUIÉN LE PIDEN LOS COBROS. Existe si y solo si esta instancia atiende al orquestador: `parseEnv`
@@ -294,9 +265,7 @@ if (orchestratorCharges) {
 export const gameModes = gameModeRepository;
 rootContainer.register<GameModeReader>("GameModeReader", { useValue: gameModeRepository });
 rootContainer.register(GameModeService, {
-  useValue: new GameModeService(gameModeRepository, gameModeOutbox, catalogLease, () =>
-    outboxDispatcher?.wake(),
-  ),
+  useValue: new GameModeService(gameModeRepository, catalogLease),
 });
 
 // ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────
@@ -428,15 +397,13 @@ export async function shutdown(): Promise<void> {
   // 0. PARAR EL DESPACHADOR, y va PRIMERO por lo mismo que el historial va antes que Mongo: tiene
   //    una entrega EN VUELO. `close()` cancela el temporizador y espera el `inFlight`, así que lo
   //    que estaba publicado y confirmado alcanza a marcarse `SENT`. Cortarle la base debajo dejaría
-  //    un evento entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
+  //    un resultado entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
   //    duplicado que el consumidor ya deduplica, pero el costo de esperar son milisegundos.
-  await outboxDispatcher?.close();
   await matchResultDispatcher?.close();
   await history.drain();
   // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
   //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`
   //    tolera una conexión ya cerrada, así que no hay nada que proteger acá.
-  await amqp?.close();
   await betasoGamesAmqp?.close();
   // 3. CERRAR MONGO ÚLTIMO. Los tres pasos de arriba escriben ahí: el despachador marca `SENT`, el
   //    historial drena su último lote. Al revés se pierde exactamente lo que se acaba de esperar.

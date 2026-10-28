@@ -117,11 +117,8 @@ const rooms = {
 // dentro de la flecha no compila aunque el ternario de afuera ya lo haya descartado. Con la
 // copia local sí, y el gate lo cazó con la suite en verde, que es el modo de falla de siempre.
 //
-// EL BROKER DE BETASO (`RABBITMQ_URL`, el del exchange `betaso`) NO ENTRA AL MAPA. Sólo lleva el
-// catálogo hacia Betaso, y eso ya está desacoplado por el outbox: con el broker caído los eventos se
-// acumulan y salen cuando vuelve, y ninguna partida lo nota. Con él adentro, una caída del broker de
-// UN cliente sacaba de rotación al dominó —o le hacía volver atrás un deploy— sin que hubiera nada
-// roto acá. La alarma de esa caída es el `error` del outbox del catálogo a los diez minutos.
+// EL DOMINÓ NO HABLA CON EL BROKER DE BETASO: el catálogo dejó de publicar al exchange `betaso`
+// (Betaso lee los modos del orquestador), así que el único broker es el de la plataforma de juegos.
 //
 // AL BROKER DE JUEGOS SE LE PIDE UN `ping()`, que abre el canal SIN publicar: una sonda que publicara
 // mandaría un evento a los consumidores en cada chequeo del balanceador.

@@ -16,10 +16,11 @@ export interface GameModeBetLevel {
 export interface GameMode {
   // El hex del `_id` de Mongo, ya convertido a string por el adaptador. Es identidad de
   // ALMACENAMIENTO: lo consume el DTO HTTP, que debe devolver `_id` porque el panel de v1 lo
-  // recibía. OJO: NO es el `id` del cuerpo Rabbit — ver el comentario de `events.ts`.
+  // recibía.
   readonly id: string;
   // El identificador LÓGICO, generado con UUID v4. Es el que viaja por la ruta HTTP
-  // (`/game-modes/:uuid`), el que deduplica el outbox y el que v1 publica como `id` a Rabbit.
+  // (`/game-modes/:uuid`), el que el orquestador guarda en cada mesa y el que nombra cada modo
+  // hacia afuera (Betaso lo usa como `externalId`).
   readonly uuid: string;
   readonly name: string;
   readonly multiplier: number;
@@ -60,9 +61,9 @@ export interface GameMode {
   readonly subscribers: readonly string[] | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
-  // El `__v` de Mongoose, que este incremento usa como REVISIÓN y no como adorno: el
-  // reconciliador del outbox compara `version` para saber si un modo ya publicó su cambio.
-  // Se usa la revisión y no `updatedAt` porque dos mutaciones del mismo milisegundo colapsan.
+  // El `__v` de Mongoose, que v2 usa como REVISIÓN: avanza con cada edición del modo (un `$inc` de la
+  // base), así que quien cachea el catálogo sabe si lo que tiene es viejo. Se usa la revisión y no
+  // `updatedAt` porque dos mutaciones del mismo milisegundo colapsan.
   readonly version: number;
 }
 

@@ -2,22 +2,21 @@ import type { Logger } from "@/logger";
 import type { AmqpDelivery, TopicPublishOptions } from "./amqp";
 import type { Lease } from "./mongo-lease";
 
-// EL OUTBOX DURABLE, LA PARTE QUE NO SABE QUÉ PUBLICA. Nació en el catálogo
-// (`features/game-mode/outbox.ts`) y se extrajo cuando apareció el segundo usuario —el resultado de
-// las partidas del orquestador—, que necesita exactamente las mismas cuatro propiedades:
+// EL OUTBOX DURABLE, LA PARTE QUE NO SABE QUÉ PUBLICA. Nació en el catálogo de modos (que publicaba
+// al exchange `betaso` de Betaso, ya eliminado) y hoy su único usuario es el resultado de las
+// partidas del orquestador, que necesita estas cuatro propiedades:
 //
 // 1. **Quien encola nunca espera a Rabbit.** Escribe acá y sigue; el despachador publica después.
 // 2. **Una entrada se marca `SENT` solo después del confirm del broker**, dentro de un plazo.
 // 3. **No hay límite de intentos**: una caída larga del broker cuesta retraso, no datos.
 // 4. **No se adelanta**: `next()` no ofrece la segunda entrada mientras la primera espera su
-//    reintento. En el catálogo eso evita aplicar un `updated` viejo encima de uno nuevo; en los
-//    resultados, mantiene el orden en que las partidas terminaron.
+//    reintento. En los resultados, mantiene el orden en que las partidas terminaron.
 //
 // LA ENTREGA ES AL MENOS UNA VEZ: un proceso que muere entre el confirm y la marca republica, y el
-// consumidor deduplica (por `id` en el catálogo, por `messageId` en los resultados).
+// consumidor deduplica (por `messageId` en los resultados).
 //
-// Lo que es de cada uso —las claves de deduplicación, la reconciliación del catálogo, el nombre del
-// exchange y del lease— entra por parámetro.
+// Lo que es de cada uso —las claves de deduplicación, el nombre del exchange y del lease— entra por
+// parámetro.
 
 export type OutboxStatus = "PENDING" | "SENT";
 
@@ -98,13 +97,11 @@ export interface TopicOutboxDispatcherOptions<K extends string, P> {
   readonly lease: Lease;
   readonly clock: OutboxClock;
   readonly log: Logger;
-  // Qué publica, para el log: "evento del catálogo", "resultado de partida".
+  // Qué publica, para el log: "resultado de partida".
   readonly label: string;
-  // Trabajo del uso antes de buscar la entrada, adentro del lease (la reconciliación del catálogo).
-  readonly beforeEach?: () => Promise<void>;
   readonly publishOptions?: (entry: OutboxEntry<K, P>) => TopicPublishOptions;
-  // Cuántas entradas publica un tick como máximo, cada una con su propio lease. El catálogo publica
-  // una; los resultados de partida, que llegan en ráfagas, más.
+  // Cuántas entradas publica un tick como máximo, cada una con su propio lease. Los resultados de
+  // partida, que llegan en ráfagas, publican más de una.
   readonly perTick?: number;
   // Desde cuánto sin salir una entrada deja de ser un `warn` y pasa a ser un `error` en cada fallo: un
   // broker que se reinicia es normal, un resultado que lleva diez minutos sin salir es un premio que
@@ -180,9 +177,8 @@ export class TopicOutboxDispatcher<K extends string, P> {
   }
 
   private async runOnce(): Promise<boolean> {
-    const { lease, leaseName, queue, clock, beforeEach } = this.options;
+    const { lease, leaseName, queue, clock } = this.options;
     const published = await lease.within(leaseName, LEASE_TTL_MS, async () => {
-      await beforeEach?.();
       const entry = await queue.next(new Date(clock.now()));
       if (!entry) return false;
       return this.deliver(entry);

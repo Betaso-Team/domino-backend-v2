@@ -6,7 +6,7 @@ import { AmqpDeliveryError, AmqpPublisher } from "./amqp";
 // CONTRA UN DOBLE DE `amqplib`, y no contra un RabbitMQ de verdad, por lo mismo que
 // `mongo-lease.test.ts` y `mongo-history.test.ts`: la suite del dominó no depende de NINGÚN
 // servicio externo y eso es una propiedad del repo y no del shell de quien la corre
-// (`vitest.setup.ts` borra `MONGO_URI`/`REDIS_URL` y va a borrar `RABBITMQ_URL`).
+// (`vitest.setup.ts` borra `MONGO_URI`, `REDIS_URL` y `BETASO_GAMES_RABBITMQ_URL`).
 //
 // El doble se instala con `vi.hoisted` porque la fábrica del `vi.mock` corre ANTES que los imports
 // de este archivo: un `const` declarado acá abajo todavía estaría en su zona muerta.
