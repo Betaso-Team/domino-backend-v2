@@ -9,19 +9,19 @@ const ADMIN_AUDIENCE = "betaso-games-admin";
 
 const ROLES: readonly AdminRole[] = ["admin", "support"];
 
-// LAS DOS CLAIMS DEL ÁMBITO, LEÍDAS TOLERANTES. billing-auth agrega `prv` (el operador del admin,
-// `null` = Betaso Games) y `role` (`admin` | `support`), y este verificador se despliega ANTES o
-// DESPUÉS que esa versión según el entorno. Exigirlas rechazaría todo token emitido antes —el panel
-// entero deslogueado durante un TTL—, así que ausente vale lo que valía siempre: Betaso Games y
-// `admin`. Lo que no se tolera es un valor PRESENTE que no se entiende: un `prv` que no es texto, o un
-// rol desconocido, es un token de otro contrato, y leerlo como el default sería dar de más.
-function providerOf(claim: unknown): string | null | undefined {
-  if (claim === undefined || claim === null) return null;
+// LAS DOS CLAIMS DEL ÁMBITO, EXIGIDAS. billing-auth firma en todo token de admin `prv` (el operador
+// del admin, `null` = Betaso Games) y `role` (`admin` | `support`). Un token sin alguna de las dos es
+// de antes de los operadores o de otro contrato, y no se tolera: leer la ausencia como «Betaso Games,
+// admin» sería darle el máximo justo al que no dice quién es. `prv` tiene que estar PRESENTE —texto
+// no vacío o `null` explícito—; ausente es `undefined` y el token se rechaza.
+function providerOf(payload: jwt.JwtPayload): string | null | undefined {
+  if (!("prv" in payload)) return undefined;
+  const claim: unknown = payload.prv;
+  if (claim === null) return null;
   return typeof claim === "string" && claim.length > 0 ? claim : undefined;
 }
 
 function roleOf(claim: unknown): AdminRole | undefined {
-  if (claim === undefined) return "admin";
   return ROLES.find((role) => role === claim);
 }
 
@@ -41,7 +41,7 @@ export function adminTokenCheck(trust: BillingAuthTrust): AdminTokenCheck {
       });
       if (typeof payload === "string" || payload.typ !== "admin") return undefined;
       if (typeof payload.sub !== "string" || typeof payload.exp !== "number") return undefined;
-      const provider = providerOf(payload.prv);
+      const provider = providerOf(payload);
       const role = roleOf(payload.role);
       if (provider === undefined || role === undefined) return undefined;
       return { name: payload.sub, provider, role };

@@ -24,10 +24,15 @@ const adminToken = (over: jwt.SignOptions = {}, claims: Record<string, unknown> 
   });
 
 describe("adminTokenCheck", () => {
-  // LOS TOKENS DE ANTES DE LOS OPERADORES no traen `prv` ni `role`: son admins de Betaso Games con
-  // rol `admin`, que es lo que eran. Exigir las claims deslogueaba a todo el panel durante un TTL.
-  it("un token sin prv ni role es un admin de Betaso Games", async () => {
-    expect(await check(adminToken())).toEqual({ name: "ana", provider: null, role: "admin" });
+  // SIN TOLERANCIA A LOS TOKENS DE ANTES: `prv` y `role` son obligatorios. Un token que no los trae
+  // no es «Betaso Games, admin»: es uno que no dice quién es.
+  it.each([
+    ["sin prv ni role", {}],
+    ["sin prv", { role: "admin" }],
+    ["sin role", { prv: null }],
+    ["un operador sin role", { prv: "parley" }],
+  ])("rechaza un token %s", async (_name, claims) => {
+    expect(await check(adminToken({}, claims))).toBeUndefined();
   });
 
   it.each([
@@ -39,7 +44,6 @@ describe("adminTokenCheck", () => {
       { prv: "parley", role: "support" },
       { provider: "parley", role: "support" },
     ],
-    ["un operador sin role", { prv: "parley" }, { provider: "parley", role: "admin" }],
   ])("lee el ámbito: %s", async (_name, claims, expected) => {
     expect(await check(adminToken({}, claims))).toEqual({ name: "ana", ...expected });
   });
@@ -47,10 +51,10 @@ describe("adminTokenCheck", () => {
   // UN VALOR PRESENTE QUE NO SE ENTIENDE NO ES EL DEFAULT: es un token de otro contrato, y leerlo como
   // Betaso Games con rol admin sería darle de más justo al que no se sabe quién es.
   it.each([
-    ["un rol desconocido", { role: "superadmin" }],
-    ["un rol que no es texto", { role: 1 }],
-    ["un prv vacío", { prv: "" }],
-    ["un prv que no es texto", { prv: 42 }],
+    ["un rol desconocido", { prv: null, role: "superadmin" }],
+    ["un rol que no es texto", { prv: null, role: 1 }],
+    ["un prv vacío", { prv: "", role: "admin" }],
+    ["un prv que no es texto", { prv: 42, role: "admin" }],
   ])("rechaza %s", async (_name, claims) => {
     expect(await check(adminToken({}, claims))).toBeUndefined();
   });

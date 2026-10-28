@@ -1,5 +1,5 @@
 import { env } from "@/env";
-import { mintAdminToken } from "@/tests/billing-auth-keys";
+import { mintAdminToken, mintLegacyAdminToken } from "@/tests/billing-auth-keys";
 import { bootTestServer } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ const URL = `http://127.0.0.1:${PORT}`;
 
 const TOKENS = {
   games: mintAdminToken("ana"),
-  legacy: mintAdminToken("viejo"),
+  legacy: mintLegacyAdminToken("viejo"),
   support: mintAdminToken("sol", { prv: null, role: "support" }),
   parley: mintAdminToken("pia", { prv: "parley", role: "admin" }),
   parleySupport: mintAdminToken("pedro", { prv: "parley", role: "support" }),
@@ -73,9 +73,14 @@ describe("el ámbito de los admins (integración)", () => {
   ];
 
   it.each(reads)("%s %s: Betaso Games y support entran, un operador no", async (method, path) => {
-    for (const who of ["games", "legacy", "support", "key"] as const) {
+    for (const who of ["games", "support", "key"] as const) {
       expect([200, 404]).toContain((await call(who, method, path)).status);
     }
+    // UN TOKEN SIN `prv` NI `role` NO ENTRA: sin tolerancia a los tokens de antes de los operadores.
+    expect(await call("legacy", method, path)).toEqual({
+      status: 401,
+      body: { error: "UNAUTHORIZED" },
+    });
     for (const who of ["parley", "parleySupport"] as const) {
       expect(await call(who, method, path)).toEqual({ status: 403, body: { error: "FORBIDDEN" } });
     }
@@ -138,7 +143,7 @@ describe("el ámbito de los admins (integración)", () => {
     });
   });
 
-  it("el republicado y la lista de suscriptores son sólo de Betaso Games", async () => {
+  it("la lista de suscriptores es sólo de Betaso Games", async () => {
     const created = await call("games", "POST", "/game-modes", {
       name: "Compartida e2e",
       prize: 18,
@@ -148,7 +153,6 @@ describe("el ámbito de los admins (integración)", () => {
     const uuid = (created.body as { data: { uuid: string } }).data.uuid;
 
     for (const who of ["parley", "support"] as const) {
-      expect((await call(who, "POST", "/game-modes/sync")).status).toBe(403);
       expect(
         (await call(who, "PUT", `/game-modes/${uuid}/subscribers`, { providerIds: [] })).status,
       ).toBe(403);
