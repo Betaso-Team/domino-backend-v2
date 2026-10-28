@@ -15,7 +15,6 @@ import {
 import {
   COPY_SHARED_BODY,
   CREATE_BODY,
-  SUBSCRIBERS_BODY,
   SUBSCRIPTION_PARAMS,
   UPDATE_BODY,
   UUID_PARAMS,
@@ -36,7 +35,6 @@ import {
 // | POST /game-modes                          | sí           | sólo propios suyos             | no      |
 // | PUT, DELETE, GET reactive/:uuid           | todo         | sólo los propios suyos         | no      |
 // | PUT|DELETE /:uuid/subscriptions/:provider | cualquiera   | sólo a sí mismo                | no      |
-// | PUT  /:uuid/subscribers                   | sí           | no                             | no      |
 // | POST /game-modes/copy-shared              | cualquiera   | sólo para sí mismo             | no      |
 export function adminRoutes({
   service,
@@ -63,7 +61,6 @@ export function adminRoutes({
       `PUT ${BASE}/:uuid`,
       `POST ${BASE}/copy-shared`,
       `PUT|DELETE ${BASE}/:uuid/subscriptions/:providerId`,
-      `PUT ${BASE}/:uuid/subscribers`,
       `DELETE ${BASE}/:uuid`,
       `GET ${BASE}/reactive/:uuid`,
       `GET ${BASE}/admin`,
@@ -75,10 +72,9 @@ export function adminRoutes({
     return router;
   }
 
-  // LAS CUATRO PUERTAS. `scoped` y `scopedReader` abren a los operadores; `betasoGames`, no.
+  // LAS PUERTAS: las dos abren a los operadores, que el servicio acota; sólo `scopedReader` a `support`.
   const scoped = requireAdminKey(adminApiKey, adminTokens, { providers: true });
   const scopedReader = requireAdminKey(adminApiKey, adminTokens, { providers: true, read: true });
-  const betasoGames = requireAdminKey(adminApiKey, adminTokens);
 
   // LAS LECTURAS DEL PANEL, con los dados de baja incluidos. Van acá y no en `catalog.ts` porque
   // son administrativas, y ANTES de `reactive/:uuid` y de todo lo demás por el mismo motivo que
@@ -181,7 +177,7 @@ export function adminRoutes({
     }),
   );
 
-  // LAS SUSCRIPCIONES: tres segmentos, así que ni `/:uuid` ni `/:uuid/subscribers` las tapan.
+  // LAS SUSCRIPCIONES: tres segmentos, así que `/:uuid` no las tapa.
   router.put(
     `${BASE}/:uuid/subscriptions/:providerId`,
     scoped,
@@ -208,24 +204,6 @@ export function adminRoutes({
         sendError(response, error);
       }
     }),
-  );
-
-  // LA LISTA ENTERA, sólo Betaso Games: es la que convierte un legado en lista explícita.
-  router.put(
-    `${BASE}/:uuid/subscribers`,
-    betasoGames,
-    validated(
-      { params: UUID_PARAMS, body: SUBSCRIBERS_BODY },
-      async ({ params, body }, response) => {
-        try {
-          const admin = adminOf(response);
-          const mode = await service.setSubscribers(admin, params.uuid, body.providerIds);
-          sendData(response, 200, toAdminDTO(mode, admin));
-        } catch (error) {
-          sendError(response, error);
-        }
-      },
-    ),
   );
 
   router.delete(

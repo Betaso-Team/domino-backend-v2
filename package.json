@@ -15,6 +15,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "replay": "tsx src/replay.ts",
+    "modes:subscribe-existing": "tsx src/subscribe-existing.ts",
     "smoke:client": "tsx src/smoke/engine-smoke.ts",
     "test:deploy": "node scripts/run-engine-smoke.mjs",
     "typecheck": "tsc --noEmit",

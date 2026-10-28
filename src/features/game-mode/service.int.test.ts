@@ -513,21 +513,19 @@ describe("GameModeService: sus dependencias", () => {
 const PARLEY = { provider: "parley" } as const;
 const RIVAL = { provider: "rival" } as const;
 
-// UN COMPARTIDO LEGADO, como los deja v1. Ningún adaptador sabe crear uno —todo modo nuevo nace con
-// lista—, así que se le borra la lista al arreglo interno del de memoria.
-function makeLegacy(repository: MemoryGameModeRepository, uuid: string): void {
-  const modes = (repository as unknown as { modes: Array<{ uuid: string; subscribers: unknown }> })
-    .modes;
-  const stored = modes.find((mode) => mode.uuid === uuid);
-  if (stored) stored.subscribers = null;
+// UN COMPARTIDO QUE JUEGAN LOS DOS OPERADORES, como queda un modo de antes de las suscripciones
+// después de `npm run modes:subscribe-existing -- parley rival`.
+async function subscribeBoth(repository: MemoryGameModeRepository, uuid: string): Promise<void> {
+  await repository.addSubscriber(uuid, "parley");
+  await repository.addSubscriber(uuid, "rival");
 }
 
-async function legacy(
+async function sharedByBoth(
   repository: MemoryGameModeRepository,
   over: Parameters<typeof clasica>[0] = {},
 ): Promise<GameMode> {
   const mode = await repository.create(clasica(over));
-  makeLegacy(repository, mode.uuid);
+  await subscribeBoth(repository, mode.uuid);
   return (await repository.byUuid(mode.uuid)) as GameMode;
 }
 
@@ -617,7 +615,7 @@ describe("GameModeService: la unicidad por dueño", () => {
 describe("GameModeService: lo que ve y toca cada operador", () => {
   async function catalog() {
     const h = harness();
-    const viejo = await legacy(h.repository, { name: "Legado" });
+    const viejo = await sharedByBoth(h.repository, { name: "De los dos" });
     const suscrito = await h.repository.create(clasica({ name: "Suscrito" }));
     await h.repository.addSubscriber(suscrito.uuid, "parley");
     const ajeno = await h.repository.create(clasica({ name: "De otros" }));
@@ -637,9 +635,15 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     const names = async (actor: { provider: string | null }) =>
       (await service.listFor(actor)).map((modo) => modo.name).sort();
 
-    expect(await names(PARLEY)).toEqual(["Legado", "Propio", "Suscrito"]);
-    expect(await names(RIVAL)).toEqual(["De otros", "Del rival", "Legado"]);
-    expect(await names(GAMES)).toEqual(["De otros", "Del rival", "Legado", "Propio", "Suscrito"]);
+    expect(await names(PARLEY)).toEqual(["De los dos", "Propio", "Suscrito"]);
+    expect(await names(RIVAL)).toEqual(["De los dos", "De otros", "Del rival"]);
+    expect(await names(GAMES)).toEqual([
+      "De los dos",
+      "De otros",
+      "Del rival",
+      "Propio",
+      "Suscrito",
+    ]);
   });
 
   it("getFor no le muestra a un operador lo que no ve", async () => {
@@ -655,8 +659,8 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     await repository.update(suscrito.uuid, { isActive: false });
 
     expect((await service.listPublic()).map((modo) => modo.name).sort()).toEqual([
+      "De los dos",
       "De otros",
-      "Legado",
     ]);
     expect(await service.getPublic(propio.uuid)).toBeUndefined();
     expect(await service.listInternal({ includeInactive: false })).toHaveLength(4);
@@ -717,34 +721,18 @@ describe("GameModeService: las suscripciones", () => {
     expect((await repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
   });
 
-  // ⚠ EL LEGADO SE OFRECE A TODOS: sumar a uno lo dejaría sólo para ése, así que se rechaza hasta que
-  // Betaso Games fije la lista entera.
-  it("sobre un legado es 409 y no lo toca; fijar la lista lo vuelve explícito", async () => {
-    const { service, repository } = harness();
-    const viejo = await legacy(repository);
-
-    await expect(service.subscribe(PARLEY, viejo.uuid, "parley")).rejects.toBeInstanceOf(
-      GameModeStateConflictError,
-    );
-    await expect(service.unsubscribe(GAMES, viejo.uuid, "parley")).rejects.toBeInstanceOf(
-      GameModeStateConflictError,
-    );
-    expect((await repository.byUuid(viejo.uuid))?.subscribers).toBeNull();
-
-    const fijado = await service.setSubscribers(GAMES, viejo.uuid, ["parley", "rival"]);
-    expect(fijado).toMatchObject({ subscribers: ["parley", "rival"], version: 0 });
-    const despues = await service.unsubscribe(PARLEY, viejo.uuid, "parley");
-    expect(despues.subscribers).toEqual(["rival"]);
-  });
-
-  it("sólo Betaso Games fija la lista entera", async () => {
-    const { service, repository } = harness();
+  // LA LISTA ES EXPLÍCITA: un compartido sin suscriptores no se le ofrece a nadie, y suscribirse lo
+  // suma sólo a ése.
+  it("un compartido sin lista no lo ve ningún operador hasta que se suscribe", async () => {
+    const { service } = harness();
     const modo = await service.create(GAMES, clasica());
 
-    await expect(service.setSubscribers(PARLEY, modo.uuid, ["parley"])).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
-    );
-    expect((await repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
+    expect(await service.getFor(PARLEY, modo.uuid)).toBeUndefined();
+    expect(await service.listFor(RIVAL)).toEqual([]);
+
+    await service.subscribe(PARLEY, modo.uuid, "parley");
+    expect((await service.getFor(PARLEY, modo.uuid))?.subscribers).toEqual(["parley"]);
+    expect(await service.getFor(RIVAL, modo.uuid)).toBeUndefined();
   });
 
   it("un modo inactivo no admite suscripciones; uno propio no tiene suscriptores", async () => {
@@ -757,9 +745,6 @@ describe("GameModeService: las suscripciones", () => {
       GameModeStateConflictError,
     );
     await expect(service.subscribe(PARLEY, propio.uuid, "parley")).rejects.toBeInstanceOf(
-      GameModeStateConflictError,
-    );
-    await expect(service.setSubscribers(GAMES, propio.uuid, ["x"])).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
     // El propio de OTRO operador no existe para éste.
@@ -786,7 +771,7 @@ describe("GameModeService: las suscripciones", () => {
     await expect(service.subscribe(PARLEY, modo.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeWriteBusyError,
     );
-    await expect(service.setSubscribers(GAMES, modo.uuid, [])).rejects.toBeInstanceOf(
+    await expect(service.unsubscribe(GAMES, modo.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeWriteBusyError,
     );
     await expect(service.copyShared(PARLEY, "parley")).rejects.toBeInstanceOf(
@@ -801,8 +786,8 @@ describe("GameModeService: la copia de los compartidos", () => {
   async function seeded() {
     const h = harness();
     // El uuid de origen se fija para poder escribir el de la copia como literal (`copy-uuid.test.ts`).
-    const viejo = (await h.repository.insertIfAbsent(ORIGEN, clasica({ name: "Legado" }))).mode;
-    makeLegacy(h.repository, ORIGEN);
+    const viejo = (await h.repository.insertIfAbsent(ORIGEN, clasica({ name: "De los dos" }))).mode;
+    await subscribeBoth(h.repository, ORIGEN);
     const suscrito = await h.repository.create(
       clasica({
         name: "Suscrito",
@@ -818,7 +803,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     return { ...h, viejo, suscrito, ajeno, retirado };
   }
 
-  it("copia los activos que juega —legados incluidos— con un uuid determinista", async () => {
+  it("copia los activos a los que está suscrito, con un uuid determinista", async () => {
     const { service, repository, clock, suscrito } = await seeded();
 
     const result = await service.copyShared(PARLEY, "parley");
@@ -845,7 +830,7 @@ describe("GameModeService: la copia de los compartidos", () => {
       subscribers: [],
       isActive: true,
     });
-    // Ni el ajeno (sin suscripción) ni el retirado se copian, y las copias no salen a Betaso.
+    // Ni el ajeno (sin suscripción) ni el retirado se copian.
     expect(await ownedBy(repository, "parley")).toHaveLength(2);
   });
 
@@ -907,7 +892,7 @@ describe("GameModeService: la copia de los compartidos", () => {
   it("un origen sin forma de UUID se saltea", async () => {
     const { service, repository } = harness();
     await repository.insertIfAbsent("modo-v1", clasica({ name: "Raro" }));
-    makeLegacy(repository, "modo-v1");
+    await subscribeBoth(repository, "modo-v1");
 
     expect(await service.copyShared(PARLEY, "parley")).toEqual({
       created: [],

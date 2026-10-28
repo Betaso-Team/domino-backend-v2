@@ -50,15 +50,13 @@ export interface GameMode {
   // de antes de los operadores no tienen el campo y se leen como `null`: eran todos compartidos.
   // NO SE EDITA: cambiarle el dueño a un modo es otro modo, con otro uuid.
   readonly ownerProviderId: string | null;
-  // QUIÉNES JUEGAN UN MODO COMPARTIDO. `null` es LEGADO —un documento de antes de las suscripciones—
-  // y se ofrece a TODOS los operadores, que es exactamente lo que pasaba antes de este campo: sin eso,
-  // el día del despliegue el catálogo efectivo de cada operador quedaría vacío y nadie podría jugar.
-  // Un arreglo es la lista explícita: un compartido nuevo nace con `[]`, o sea sin nadie, y un modo
-  // propio también lleva `[]` porque no tiene suscriptores (lo juega su dueño). Presente-y-vacío y
-  // ausente son dos casos distintos a propósito (ramas nulas).
+  // QUIÉNES JUEGAN UN MODO COMPARTIDO, SIEMPRE EXPLÍCITO: un compartido se ofrece sólo a los operadores
+  // de la lista. Un documento sin el campo se lee `[]` —nadie—, igual que un compartido nuevo; los
+  // modos de antes de las suscripciones se suscriben una vez con `npm run modes:subscribe-existing`.
+  // Un modo propio también lleva `[]`: no tiene suscriptores, lo juega su dueño.
   //
   // NO ES PARTE DE LA REVISIÓN: suscribirse no mueve `version` (ver el puerto).
-  readonly subscribers: readonly string[] | null;
+  readonly subscribers: readonly string[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
   // El `__v` de Mongoose, que v2 usa como REVISIÓN: avanza con cada edición del modo (un `$inc` de la

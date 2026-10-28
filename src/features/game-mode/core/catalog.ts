@@ -36,17 +36,13 @@ export interface GameModeRepository extends GameModeReader {
     input: CreateGameMode,
   ): Promise<{ readonly mode: GameMode; readonly created: boolean }>;
 
-  // LAS TRES ESCRITURAS DE LOS SUSCRIPTORES, sólo sobre modos COMPARTIDOS (`ownerProviderId` nulo).
+  // LAS DOS ESCRITURAS DE LOS SUSCRIPTORES, sólo sobre modos COMPARTIDOS (`ownerProviderId` nulo).
   //
   // NINGUNA AVANZA LA REVISIÓN (`version`/`__v`) NI LA FECHA DE EDICIÓN: quién juega un modo no es
   // una edición del modo, y la revisión y la fecha son lo que el panel muestra como «editado».
-  //
-  // `add`/`remove` NO TOCAN UN MODO LEGADO (`subscribers` nulo) y devuelven `undefined`: sumar un
-  // operador a un legado lo volvería la lista `[ese]`, o sea dejaría afuera EN SILENCIO a todos los
-  // que hoy lo juegan. Convertir un legado en lista es `setSubscribers`, que la pide entera.
+  // `undefined` si no hay un compartido con ese uuid.
   addSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined>;
   removeSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined>;
-  setSubscribers(uuid: string, providerIds: readonly string[]): Promise<GameMode | undefined>;
 }
 
 // QUIÉN PIDE, para el ámbito: `provider` nulo es Betaso Games, que ve y toca todo; un id es un admin
@@ -58,12 +54,12 @@ export interface CatalogActor {
 
 export const BETASO_GAMES: CatalogActor = { provider: null };
 
-// QUÉ MODOS VE UN OPERADOR: los suyos, y los compartidos que juega —legado (`null`, se ofrece a
-// todos) o con él en la lista—. Betaso Games los ve todos. Es una regla de lectura y la comparten el
+// QUÉ MODOS VE UN OPERADOR: los suyos, y los compartidos que lo tienen en la lista de suscriptores
+// (explícita: sin lista, nadie). Betaso Games los ve todos. Es una regla de lectura y la comparten el
 // listado del panel, la búsqueda de un modo y la copia de los compartidos.
 export function offeredTo(mode: GameMode, provider: string): boolean {
   if (mode.ownerProviderId !== null) return mode.ownerProviderId === provider;
-  return mode.subscribers === null || mode.subscribers.includes(provider);
+  return mode.subscribers.includes(provider);
 }
 
 export function visibleTo(mode: GameMode, actor: CatalogActor): boolean {

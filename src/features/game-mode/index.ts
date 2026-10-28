@@ -10,6 +10,8 @@
 // `GameModeService` y `gameModeHttp` salen como VALOR: el root arma el servicio con los adaptadores
 // y el lease de `shared/`, y es el único que lee las llaves de `env` para montar las rutas.
 //
+// `subscribeExistingModes` sale para el CLI de una sola vez (`src/subscribe-existing.ts`).
+//
 // SIN EVENTOS NI OUTBOX: el catálogo no publica a ningún broker. Betaso (y cualquier operador) lee los
 // modos del orquestador, que los lee de acá por `GET /internal/game-modes`.
 export type { GameModeReader } from "./core/catalog";
@@ -20,4 +22,7 @@ export {
   gameModeHttp,
 } from "./transports/http/register";
 export { MemoryGameModeRepository } from "./transports/memory-repository";
-export { MongoGameModeRepository } from "./transports/mongo-repository";
+export {
+  MongoGameModeRepository,
+  subscribeExistingModes,
+} from "./transports/mongo-repository";

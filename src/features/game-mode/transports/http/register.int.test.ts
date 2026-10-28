@@ -220,7 +220,6 @@ describe("gameModeHttp: las rutas", () => {
       "POST /game-modes/copy-shared",
       "PUT /game-modes/:uuid/subscriptions/:providerId",
       "DELETE /game-modes/:uuid/subscriptions/:providerId",
-      "PUT /game-modes/:uuid/subscribers",
       "DELETE /game-modes/:uuid",
       "GET /internal/game-modes",
       "GET /game-modes",
@@ -774,21 +773,19 @@ describe("la infraestructura administrativa", () => {
 
 // ═══ LOS OPERADORES Y EL ORQUESTADOR ══════════════════════════════════════════════════════════════
 
-// UN COMPARTIDO LEGADO: ningún adaptador sabe crear uno, así que se le borra la lista al arreglo
-// interno del de memoria —el repositorio del harness lo es—.
-async function legacyOf(repository: GameModeRepository, name = "Legado"): Promise<GameMode> {
+// UN COMPARTIDO QUE JUEGA PARLEY (y Betaso), como queda un modo de antes de las suscripciones después
+// de `npm run modes:subscribe-existing`.
+async function playedOf(repository: GameModeRepository, name = "Jugado"): Promise<GameMode> {
   const mode = await repository.create(clasica({ name }));
-  const modes = (repository as unknown as { modes: Array<{ uuid: string; subscribers: unknown }> })
-    .modes;
-  const stored = modes.find((m) => m.uuid === mode.uuid);
-  if (stored) stored.subscribers = null;
+  await repository.addSubscriber(mode.uuid, "betaso");
+  await repository.addSubscriber(mode.uuid, "parley");
   return (await repository.byUuid(mode.uuid)) as GameMode;
 }
 
 describe("el panel de un operador", () => {
   it("lista los suyos y los compartidos que juega, sin la lista de suscriptores", async () => {
     const app = harness();
-    const viejo = await legacyOf(app.repository);
+    const viejo = await playedOf(app.repository);
     const propio = await app.repository.create(
       clasica({ name: "Propio", ownerProviderId: "parley" }),
     );
@@ -807,15 +804,15 @@ describe("el panel de un operador", () => {
     });
   });
 
-  it("Betaso Games ve la lista, y el legado como `null`", async () => {
+  it("Betaso Games ve la lista de suscriptores", async () => {
     const app = harness();
-    const viejo = await legacyOf(app.repository);
+    const viejo = await playedOf(app.repository);
 
     expect(await app.get(`/game-modes/admin/${viejo.uuid}`, as("games"))).toEqual({
       status: 200,
       body: { status: "success", data: adminWireDtoOf(viejo) },
     });
-    expect(adminWireDtoOf(viejo).subscribers).toBeNull();
+    expect(adminWireDtoOf(viejo).subscribers).toEqual(["betaso", "parley"]);
   });
 
   it("un 403 del catálogo sale con su envelope", async () => {
@@ -862,49 +859,33 @@ describe("las suscripciones por HTTP", () => {
     expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
   });
 
-  it("sobre un legado contesta 409 con el motivo, y no lo toca", async () => {
+  it("sobre un compartido sin lista, suscribirse crea la lista con ése solo", async () => {
     const app = harness();
-    const viejo = await legacyOf(app.repository);
+    const modo = await app.repository.create(clasica());
 
-    const response = await app.put(
-      `/game-modes/${viejo.uuid}/subscriptions/parley`,
-      undefined,
-      as("games"),
-    );
-
-    expect(response.status).toBe(409);
-    expect((response.body as { message: string }).message).toContain(
-      "Betaso Games tiene que fijar",
-    );
-    expect((await app.repository.byUuid(viejo.uuid))?.subscribers).toBeNull();
+    expect(
+      (await app.put(`/game-modes/${modo.uuid}/subscriptions/parley`, undefined, as("games")))
+        .status,
+    ).toBe(200);
+    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
   });
 
-  it("la lista entera la fija Betaso Games, deduplicada", async () => {
+  // LA LISTA ENTERA YA NO SE FIJA POR HTTP: cada operador se suscribe (o Betaso Games lo suscribe).
+  it("PUT /game-modes/:uuid/subscribers no existe", async () => {
     const app = harness();
-    const viejo = await legacyOf(app.repository);
+    const modo = await app.repository.create(clasica());
 
-    const response = await app.put(
-      `/game-modes/${viejo.uuid}/subscribers`,
-      { providerIds: ["parley", "betaso", "parley"] },
-      KEY,
-    );
-
-    expect(response.status).toBe(200);
-    expect((response.body as { data: { subscribers: string[] } }).data.subscribers).toEqual([
-      "parley",
-      "betaso",
-    ]);
     expect(
-      (await app.put(`/game-modes/${viejo.uuid}/subscribers`, { providerIds: "parley" }, KEY))
+      (await app.put(`/game-modes/${modo.uuid}/subscribers`, { providerIds: ["parley"] }, KEY))
         .status,
-    ).toBe(400);
+    ).toBe(404);
   });
 });
 
 describe("POST /game-modes/copy-shared", () => {
   it("devuelve lo creado, lo que ya estaba y lo salteado", async () => {
     const app = harness();
-    await legacyOf(app.repository);
+    await playedOf(app.repository);
 
     const primera = await app.post(
       "/game-modes/copy-shared",
@@ -936,9 +917,9 @@ describe("POST /game-modes/copy-shared", () => {
 });
 
 describe("GET /internal/game-modes", () => {
-  it("devuelve los activos con dueño y suscriptores, el legado como null", async () => {
+  it("devuelve los activos con dueño y suscriptores", async () => {
     const app = harness();
-    const viejo = await legacyOf(app.repository);
+    const viejo = await playedOf(app.repository);
     const propio = await app.repository.create(
       clasica({ name: "Propio", ownerProviderId: "parley" }),
     );

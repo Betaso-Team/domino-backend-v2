@@ -73,11 +73,11 @@ export interface GameModeDocument {
   enableBots: boolean;
   // OPCIONAL EN LA BASE: los documentos de antes de los niveles no lo tienen, y se leen como `[]`.
   betLevels?: GameModeBetLevel[];
-  // OPCIONALES EN LA BASE, y su ausencia ES el legado: un documento de v1 o de antes de los
-  // operadores no tiene dueño (compartido) ni lista (se ofrece a todos). No se migra nada: leerlos
-  // como `null` es lo que hace que el despliegue no le cambie el catálogo a nadie.
+  // OPCIONALES EN LA BASE: un documento de v1 o de antes de los operadores no tiene dueño (se lee
+  // `null`, compartido) ni lista (se lee `[]`, no se ofrece a nadie). Los compartidos de antes se
+  // suscriben UNA vez con `npm run modes:subscribe-existing` (`subscribeExistingModes`, abajo).
   ownerProviderId?: string | null;
-  subscribers?: string[] | null;
+  subscribers?: string[];
   createdAt: Date;
   updatedAt: Date;
   __v: number;
@@ -152,33 +152,22 @@ export class MongoGameModeRepository implements GameModeRepository {
   }
 
   // LOS SUSCRIPTORES, con la condición EN EL FILTRO y no leída antes: sólo compartidos
-  // (`ownerProviderId: null` matchea también el campo ausente, que es el legado) y, para `add` y
-  // `remove`, sólo con la lista explícita. `$addToSet` sobre un campo AUSENTE lo crearía con un solo
-  // elemento —el legado convertido en `[ese]`, todos los demás afuera—, así que el `$type: "array"`
-  // es lo que lo impide en la base y no sólo en el servicio.
+  // (`ownerProviderId: null` matchea también el campo ausente de los documentos de v1). Un campo
+  // `subscribers` ausente se lee `[]`, y `$addToSet` sobre él lo crea con ese único elemento: es
+  // exactamente la misma lista.
   //
   // Sin `$inc` del `__v` ni `updatedAt`: suscribirse no es una revisión del modo (ver el puerto).
   async addSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
     return this.changeSubscribers(
-      { uuid, ownerProviderId: null, subscribers: { $type: "array" } },
+      { uuid, ownerProviderId: null },
       { $addToSet: { subscribers: providerId } },
     );
   }
 
   async removeSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
     return this.changeSubscribers(
-      { uuid, ownerProviderId: null, subscribers: { $type: "array" } },
-      { $pull: { subscribers: providerId } },
-    );
-  }
-
-  async setSubscribers(
-    uuid: string,
-    providerIds: readonly string[],
-  ): Promise<GameMode | undefined> {
-    return this.changeSubscribers(
       { uuid, ownerProviderId: null },
-      { $set: { subscribers: [...new Set(providerIds)] } },
+      { $pull: { subscribers: providerId } },
     );
   }
 
@@ -221,8 +210,8 @@ export class MongoGameModeRepository implements GameModeRepository {
       enableBots: input.enableBots ?? input.playersQuantity === 4,
       betLevels: [...(input.betLevels ?? [])],
       // EL DUEÑO Y LA LISTA SE ESCRIBEN SIEMPRE en los documentos nuevos, aunque sean el default: un
-      // compartido nuevo nace con `[]` —sin nadie— y no ausente, porque ausente es el LEGADO y se
-      // ofrecería a todos.
+      // compartido nuevo nace con `[]`, sin nadie. Escrito y no ausente para que la suscripción de
+      // una sola vez (`subscribeExistingModes`) no lo confunda con un modo de antes.
       ownerProviderId: input.ownerProviderId ?? null,
       subscribers: [],
       // `createdAt`/`updatedAt` los ponía el `timestamps: true` de Mongoose. Acá los pone el
@@ -323,7 +312,7 @@ function modeOf(document: WithId<GameModeDocument>): GameMode {
     enableBots: document.enableBots,
     betLevels: document.betLevels ?? [],
     ownerProviderId: document.ownerProviderId ?? null,
-    subscribers: document.subscribers ?? null,
+    subscribers: document.subscribers ?? [],
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
     version: document.__v,
@@ -339,4 +328,24 @@ function definedOf(input: UpdateGameMode): Partial<GameModeDocument> {
     if (value !== undefined) set[key] = value;
   }
   return set as Partial<GameModeDocument>;
+}
+
+// LA SUSCRIPCIÓN DE UNA SOLA VEZ (`npm run modes:subscribe-existing -- <providerId...>`). Desde que
+// la lista es explícita, un compartido de antes de las suscripciones —sin el campo— se lee `[]` y no
+// se le ofrece a nadie. Esto les fija la lista a los operadores dados, que son los que ya los jugaban.
+//
+// SÓLO LOS DOCUMENTOS SIN EL CAMPO, y en eso descansa que sea IDEMPOTENTE: la primera corrida escribe
+// la lista, y la segunda no encuentra nada que tocar —aunque entre medio un operador se haya dado de
+// baja de un modo, o Betaso Games haya creado uno nuevo, que nace con `[]` escrito—. Sin `__v` ni
+// `updatedAt`, como toda escritura de suscriptores. Devuelve cuántos modos tocó.
+export async function subscribeExistingModes(
+  source: CollectionSource,
+  providerIds: readonly string[],
+): Promise<number> {
+  const collection = await source.collection<GameModeDocument>(GAME_MODE_COLLECTION);
+  const { modifiedCount } = await collection.updateMany(
+    { ownerProviderId: null, subscribers: { $exists: false } },
+    { $set: { subscribers: [...new Set(providerIds)] } },
+  );
+  return modifiedCount;
 }

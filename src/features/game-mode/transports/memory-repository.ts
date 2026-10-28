@@ -33,39 +33,28 @@ export class MemoryGameModeRepository implements GameModeRepository {
     return { mode: await this.insert(uuid, input), created: true };
   }
 
-  // LOS SUSCRIPTORES: sólo compartidos, y `add`/`remove` sólo sobre una lista explícita (ver el
-  // puerto). Sin `updatedAt` ni `version`: suscribirse no es una edición del modo.
+  // LOS SUSCRIPTORES: sólo compartidos (ver el puerto). Sin `updatedAt` ni `version`: suscribirse no
+  // es una edición del modo.
   async addSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
-    return this.changeSubscribers(uuid, true, (list) =>
+    return this.changeSubscribers(uuid, (list) =>
       list.includes(providerId) ? list : [...list, providerId],
     );
   }
 
   async removeSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
-    return this.changeSubscribers(uuid, true, (list) => list.filter((id) => id !== providerId));
-  }
-
-  async setSubscribers(
-    uuid: string,
-    providerIds: readonly string[],
-  ): Promise<GameMode | undefined> {
-    return this.changeSubscribers(uuid, false, () => [...new Set(providerIds)]);
+    return this.changeSubscribers(uuid, (list) => list.filter((id) => id !== providerId));
   }
 
   private changeSubscribers(
     uuid: string,
-    explicitOnly: boolean,
     next: (list: readonly string[]) => readonly string[],
   ): GameMode | undefined {
     const index = this.modes.findIndex(
-      (mode) =>
-        mode.uuid === uuid &&
-        mode.ownerProviderId === null &&
-        (!explicitOnly || mode.subscribers !== null),
+      (mode) => mode.uuid === uuid && mode.ownerProviderId === null,
     );
     if (index < 0) return undefined;
     const current = this.modes[index] as GameMode;
-    const updated: GameMode = { ...current, subscribers: next(current.subscribers ?? []) };
+    const updated: GameMode = { ...current, subscribers: next(current.subscribers) };
     this.modes[index] = updated;
     return copyOf(updated);
   }
@@ -95,8 +84,7 @@ export class MemoryGameModeRepository implements GameModeRepository {
       enableBots: input.enableBots ?? input.playersQuantity === 4,
       betLevels: [...(input.betLevels ?? [])],
       ownerProviderId: input.ownerProviderId ?? null,
-      // TODO MODO NACE SIN SUSCRIPTORES, con la lista explícita: el legado (`null`) sólo lo tienen
-      // los documentos de antes de este campo. Un compartido nuevo no se ofrece a nadie hasta que se
+      // TODO MODO NACE SIN SUSCRIPTORES: un compartido nuevo no se ofrece a nadie hasta que se
       // suscriban; uno propio no tiene suscriptores.
       subscribers: [],
       createdAt: now,
@@ -165,7 +153,7 @@ export class MemoryGameModeRepository implements GameModeRepository {
 // La copia que sale, con la lista de suscriptores copiada también: un spread a secas comparte el
 // arreglo, y quien le hiciera `push` cambiaría a quién se ofrece el modo sin pasar por el puerto.
 function copyOf(mode: GameMode): GameMode {
-  return { ...mode, subscribers: mode.subscribers === null ? null : [...mode.subscribers] };
+  return { ...mode, subscribers: [...mode.subscribers] };
 }
 
 function definedOf(input: UpdateGameMode): Partial<GameMode> {

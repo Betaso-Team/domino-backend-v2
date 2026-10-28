@@ -9,7 +9,7 @@ import { INTERNAL_QUERY, toInternalDTO } from "./schemas";
 export const INTERNAL_GAME_MODES_ROUTE = "/internal/game-modes";
 
 // EL CATÁLOGO PARA EL ORQUESTADOR: todos los modos activos —compartidos y propios— con su dueño y sus
-// suscriptores (`null` en un legado, que se ofrece a todos los operadores). Con eso arma el catálogo
+// suscriptores (una lista explícita: `[]` es nadie). Con eso arma el catálogo
 // efectivo de cada operador y decide qué modo puede pedir cada jugador; el dominó no lo verifica al
 // abrir la mesa. `?includeInactive=1` suma los dados de baja, para resolver el modo de una partida
 // vieja.

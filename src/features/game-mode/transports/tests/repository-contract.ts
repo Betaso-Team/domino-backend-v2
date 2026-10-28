@@ -370,7 +370,7 @@ export function describeGameModeRepositoryContract(
     });
 
     // SUSCRIBIRSE NO ES UNA REVISIÓN: ni `version` ni `updatedAt` se mueven (ver el puerto).
-    it("sumar, sacar y fijar suscriptores no avanza la revisión ni la fecha", async () => {
+    it("sumar y sacar suscriptores no avanza la revisión ni la fecha", async () => {
       const { repository, clock } = harnessOf();
       const creado = await repository.create(clasica());
       clock.set(BASE_INSTANT + 5_000);
@@ -379,18 +379,16 @@ export function describeGameModeRepositoryContract(
       const otra = await repository.addSubscriber(creado.uuid, "betaso");
       const repetido = await repository.addSubscriber(creado.uuid, "parley");
       const sacado = await repository.removeSubscriber(creado.uuid, "parley");
-      const fijado = await repository.setSubscribers(creado.uuid, ["uno", "dos", "uno"]);
 
       expect(sumado?.subscribers).toEqual(["parley"]);
       expect(otra?.subscribers).toEqual(["parley", "betaso"]);
       expect(repetido?.subscribers).toEqual(["parley", "betaso"]);
       expect(sacado?.subscribers).toEqual(["betaso"]);
-      expect(fijado?.subscribers).toEqual(["uno", "dos"]);
-      for (const mode of [sumado, otra, repetido, sacado, fijado]) {
+      for (const mode of [sumado, otra, repetido, sacado]) {
         expect(mode?.version).toBe(0);
         expect(mode?.updatedAt).toEqual(new Date(BASE_INSTANT));
       }
-      expect(await repository.byUuid(creado.uuid)).toEqual(fijado);
+      expect(await repository.byUuid(creado.uuid)).toEqual(sacado);
     });
 
     // UNA EDICIÓN NO TOCA A QUIÉN SE OFRECE: el `$set` del `PUT` lleva sólo los campos del modo.
@@ -410,17 +408,16 @@ export function describeGameModeRepositoryContract(
 
       expect(await repository.addSubscriber(propio.uuid, "otro")).toBeUndefined();
       expect(await repository.removeSubscriber(propio.uuid, "otro")).toBeUndefined();
-      expect(await repository.setSubscribers(propio.uuid, ["otro"])).toBeUndefined();
       expect((await repository.byUuid(propio.uuid))?.subscribers).toEqual([]);
       expect(await repository.addSubscriber("no-existe", "otro")).toBeUndefined();
     });
 
-    it("una lista fijada vacía deja el modo sin nadie", async () => {
+    it("sacar al último deja el modo sin nadie", async () => {
       const { repository } = harnessOf();
       const creado = await repository.create(clasica());
       await repository.addSubscriber(creado.uuid, "parley");
 
-      expect((await repository.setSubscribers(creado.uuid, []))?.subscribers).toEqual([]);
+      expect((await repository.removeSubscriber(creado.uuid, "parley"))?.subscribers).toEqual([]);
     });
   });
 

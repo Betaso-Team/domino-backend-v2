@@ -170,15 +170,6 @@ export const SUBSCRIPTION_PARAMS = z.object({
   providerId: providerIdOf("providerId"),
 });
 
-// LA LISTA ENTERA DE SUSCRIPTORES, que reemplaza la que hubiera (también un legado). `[]` deja el
-// modo sin nadie. Los repetidos se colapsan: la lista es un conjunto.
-export const SUBSCRIBERS_BODY = z.strictObject({
-  providerIds: z
-    .array(providerIdOf("providerIds"))
-    .max(1000)
-    .transform((ids) => [...new Set(ids)]),
-});
-
 export const COPY_SHARED_BODY = z.strictObject({ providerId: providerIdOf("providerId") });
 
 // `?includeInactive=1` para que el orquestador resuelva el modo de una partida ya jugada. Sólo `0`
@@ -242,7 +233,7 @@ export function toDTO(mode: GameMode): GameModeDTO {
 // Un operador no ve quién más juega un compartido: es información comercial de los otros.
 export interface AdminGameModeDTO extends GameModeDTO {
   readonly ownerProviderId: string | null;
-  readonly subscribers?: readonly string[] | null;
+  readonly subscribers?: readonly string[];
 }
 
 export function toAdminDTO(
@@ -253,10 +244,10 @@ export function toAdminDTO(
   return viewer.provider === null ? { ...dto, subscribers: mode.subscribers } : dto;
 }
 
-// LO QUE VE EL ORQUESTADOR: todo, con `subscribers: null` en un legado —que se ofrece a todos—.
+// LO QUE VE EL ORQUESTADOR: todo, con dueño y suscriptores (siempre una lista; `[]` es nadie).
 export interface InternalGameModeDTO extends GameModeDTO {
   readonly ownerProviderId: string | null;
-  readonly subscribers: readonly string[] | null;
+  readonly subscribers: readonly string[];
 }
 
 export function toInternalDTO(mode: GameMode): InternalGameModeDTO {

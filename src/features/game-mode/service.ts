@@ -248,28 +248,8 @@ export class GameModeService {
     return this.changeSubscription(actor, uuid, providerId, "remove");
   }
 
-  // LA LISTA ENTERA, sólo Betaso Games, y es lo único que convierte un LEGADO en lista explícita. La
-  // puerta HTTP ya la cierra a los operadores; se repite acá porque un operador fijando la lista de
-  // un compartido sacaría a los demás de un modo que juegan.
-  setSubscribers(
-    actor: CatalogActor,
-    uuid: string,
-    providerIds: readonly string[],
-  ): Promise<GameMode> {
-    if (actor.provider !== null) {
-      return Promise.reject(new GameModeForbiddenError("sólo Betaso Games fija los suscriptores"));
-    }
-    return this.mutating(async () => {
-      const current = await this.found(uuid);
-      if (current.ownerProviderId !== null) {
-        throw new GameModeStateConflictError(`el modo ${uuid} es propio y no tiene suscriptores`);
-      }
-      return this.subscribersWritten(uuid, await this.repository.setSubscribers(uuid, providerIds));
-    });
-  }
-
   // LA COPIA DE LOS COMPARTIDOS QUE UN OPERADOR JUEGA a modos propios suyos: lo que pide pasar a
-  // jugar con valores propios. Los legados cuentan como suscritos, porque hoy los juega.
+  // jugar con valores propios: los compartidos activos con él en la lista de suscriptores.
   //
   // UNA SOLA VEZ POR MODO Y DETERMINISTA: el uuid de la copia es el v5 de (origen, operador), así que
   // reintentar después de una copia a medias crea lo que faltó y deja como está lo que ya se copió
@@ -351,14 +331,6 @@ export class GameModeService {
       }
       if (!current.isActive) {
         throw new GameModeStateConflictError(`el modo ${uuid} está inactivo`);
-      }
-      // ⚠ EL LEGADO SE RECHAZA EN VEZ DE CONVERTIRSE: hoy se ofrece a TODOS, así que sumar a uno lo
-      // dejaría ofrecido sólo a ése, y sacar a uno no tiene lista de la que sacarlo. Betaso Games lo
-      // vuelve explícito primero con la lista entera (`PUT /game-modes/:uuid/subscribers`).
-      if (current.subscribers === null) {
-        throw new GameModeStateConflictError(
-          `el modo ${uuid} se ofrece a todos los operadores (sin lista de suscriptores): Betaso Games tiene que fijar la lista antes`,
-        );
       }
       const updated =
         change === "add"

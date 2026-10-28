@@ -143,7 +143,7 @@ describe("el ámbito de los admins (integración)", () => {
     });
   });
 
-  it("la lista de suscriptores es sólo de Betaso Games", async () => {
+  it("un operador se suscribe a sí mismo y no edita un compartido", async () => {
     const created = await call("games", "POST", "/game-modes", {
       name: "Compartida e2e",
       prize: 18,
@@ -152,11 +152,9 @@ describe("el ámbito de los admins (integración)", () => {
     });
     const uuid = (created.body as { data: { uuid: string } }).data.uuid;
 
-    for (const who of ["parley", "support"] as const) {
-      expect(
-        (await call(who, "PUT", `/game-modes/${uuid}/subscribers`, { providerIds: [] })).status,
-      ).toBe(403);
-    }
+    expect((await call("support", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
+      403,
+    );
     // Parley se suscribe a sí mismo; el compartido no lo edita.
     expect((await call("parley", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
       200,

@@ -33,7 +33,7 @@ type StoredDocument = GameModeDocument & { _id: ObjectId };
 
 // El subconjunto de filtros que este adaptador usa: igualdad sobre campos de primer nivel
 // (`{ uuid }`, `{ isActive: true }`, `{ uuid, isActive: true }`), el `null` de Mongo —que matchea
-// también el campo AUSENTE, y es como el adaptador reconoce un compartido legado— y `$type: "array"`.
+// también el campo AUSENTE, y es como el adaptador reconoce un compartido de v1— y `$type: "array"`.
 // No se implementa más porque no se usa más — un doble con operadores que nadie llama es código que
 // puede estar mal sin que nada lo note.
 function matches(document: StoredDocument, filter: Filter<GameModeDocument>): boolean {
@@ -124,8 +124,8 @@ function fakeCollection() {
           target[key] = (target[key] ?? 0) + Number(delta);
         }
         // `$addToSet` y `$pull` de un valor, como los usa el adaptador. Sobre un campo AUSENTE,
-        // `$addToSet` lo crea con ese único valor, igual que Mongo: es justo lo que el filtro
-        // `$type: "array"` del adaptador tiene que impedir sobre un legado.
+        // `$addToSet` lo crea con ese único valor, igual que Mongo, y ausente se lee `[]`: es la
+        // misma lista.
         const lists = after as unknown as Record<string, unknown[] | undefined>;
         for (const [key, value] of Object.entries(update.$addToSet ?? {})) {
           const list = lists[key] ?? [];
@@ -188,8 +188,8 @@ describe("MongoGameModeRepository: el documento productivo", () => {
       isFreeRoom: false,
       enableBots: false,
       // Los campos que v1 no tenía: los niveles de aumento, vacíos si no vienen, el dueño (`null`:
-      // compartido) y la lista de suscriptores, explícita y vacía —ausente sería el legado, que se
-      // ofrece a todos—.
+      // compartido) y la lista de suscriptores, escrita y vacía: así la suscripción de una sola vez
+      // no lo confunde con un modo de antes.
       betLevels: [],
       ownerProviderId: null,
       subscribers: [],
@@ -299,11 +299,10 @@ describe("MongoGameModeRepository: la edición en la base", () => {
   });
 });
 
-// EL LEGADO: los documentos de v1 y de antes de los operadores no tienen `ownerProviderId` ni
-// `subscribers`, y no se migra nada. Leerlos como compartido-que-se-ofrece-a-todos es lo que hace que
-// el despliegue no le cambie el catálogo a ningún operador; y no convertirlos por la puerta de atrás
-// es lo que impide que una suscripción deje afuera a todos los demás.
-describe("MongoGameModeRepository: el documento legado", () => {
+// EL DOCUMENTO DE ANTES: los de v1 y de antes de los operadores no tienen `ownerProviderId` ni
+// `subscribers`. Se leen como compartido SIN NADIE (`[]`): la lista es explícita, y los que ya se
+// jugaban se suscriben una vez con `npm run modes:subscribe-existing`.
+describe("MongoGameModeRepository: el documento de antes de los operadores", () => {
   function withLegacy() {
     const h = harness();
     const legacy = {
@@ -326,43 +325,21 @@ describe("MongoGameModeRepository: el documento legado", () => {
     return { ...h, legacy };
   }
 
-  it("sin dueño ni lista se lee como compartido legado", async () => {
+  it("sin dueño ni lista se lee como compartido sin suscriptores", async () => {
     const { repository, legacy } = withLegacy();
 
     expect(await repository.byUuid(legacy.uuid)).toMatchObject({
       ownerProviderId: null,
-      subscribers: null,
+      subscribers: [],
     });
   });
 
-  it("sumar o sacar un operador no convierte el legado en lista", async () => {
-    const { repository, legacy, documents } = withLegacy();
-
-    expect(await repository.addSubscriber(legacy.uuid, "parley")).toBeUndefined();
-    expect(await repository.removeSubscriber(legacy.uuid, "parley")).toBeUndefined();
-    expect(documents[0]).not.toHaveProperty("subscribers");
-  });
-
-  it("fijar la lista lo vuelve explícito, sin tocar la revisión", async () => {
-    const { repository, legacy } = withLegacy();
-
-    expect(await repository.setSubscribers(legacy.uuid, ["betaso", "parley"])).toMatchObject({
-      ownerProviderId: null,
-      subscribers: ["betaso", "parley"],
-      version: 0,
-    });
-  });
-
-  it("el $addToSet lleva el filtro de lista y nunca un $inc", async () => {
+  it("el $addToSet filtra por compartido y nunca lleva un $inc", async () => {
     const { repository, collection, legacy } = withLegacy();
     await repository.addSubscriber(legacy.uuid, "parley");
 
     const [filter, update] = collection.findOneAndUpdate.mock.calls[0] ?? [];
-    expect(filter).toEqual({
-      uuid: legacy.uuid,
-      ownerProviderId: null,
-      subscribers: { $type: "array" },
-    });
+    expect(filter).toEqual({ uuid: legacy.uuid, ownerProviderId: null });
     expect(update).toEqual({ $addToSet: { subscribers: "parley" } });
   });
 });

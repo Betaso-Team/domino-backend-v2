@@ -1,7 +1,11 @@
 import { Mongo } from "@/shared/mongo";
 import { MONGO_INT_URI } from "@/tests/int-services";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { GAME_MODE_COLLECTION, MongoGameModeRepository } from "./mongo-repository";
+import {
+  GAME_MODE_COLLECTION,
+  MongoGameModeRepository,
+  subscribeExistingModes,
+} from "./mongo-repository";
 import {
   BASE_INSTANT,
   clasica,
@@ -40,7 +44,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoGameModeRepository contra Mongo", () => {
     return { repository: new MongoGameModeRepository(mongo, clock), clock };
   });
 
-  // EL LEGADO, como lo dejó v1: sin `ownerProviderId` ni `subscribers`. Escrito con el driver y no
+  // EL DOCUMENTO DE v1: sin `ownerProviderId` ni `subscribers`. Escrito con el driver y no
   // con el adaptador, que ya no sabe crear uno.
   async function legacyMode(uuid = "11111111-2222-4333-8444-555555555555") {
     await (await collection()).insertOne({
@@ -61,31 +65,39 @@ describe.skipIf(!MONGO_INT_URI)("MongoGameModeRepository contra Mongo", () => {
     return uuid;
   }
 
-  it("un documento de v1 se lee como compartido legado, y una suscripción no lo convierte", async () => {
+  it("un documento de v1 se lee como compartido sin nadie, y suscribirse le crea la lista", async () => {
     const repository = new MongoGameModeRepository(mongo, mutableClock());
     const uuid = await legacyMode();
 
-    expect(await repository.byUuid(uuid)).toMatchObject({
-      ownerProviderId: null,
-      subscribers: null,
-    });
-    expect(await repository.addSubscriber(uuid, "parley")).toBeUndefined();
-    expect(await repository.removeSubscriber(uuid, "parley")).toBeUndefined();
-    const [raw] = await (await collection()).find({ uuid }).toArray();
-    expect(raw).not.toHaveProperty("subscribers");
-    expect(raw).not.toHaveProperty("ownerProviderId");
-  });
-
-  it("fijar la lista vuelve explícito al legado sin mover su revisión", async () => {
-    const repository = new MongoGameModeRepository(mongo, mutableClock());
-    const uuid = await legacyMode();
-
-    expect(await repository.setSubscribers(uuid, ["betaso", "parley", "betaso"])).toMatchObject({
-      ownerProviderId: null,
-      subscribers: ["betaso", "parley"],
+    expect(await repository.byUuid(uuid)).toMatchObject({ ownerProviderId: null, subscribers: [] });
+    expect(await repository.removeSubscriber(uuid, "parley")).toMatchObject({ subscribers: [] });
+    expect(await repository.addSubscriber(uuid, "parley")).toMatchObject({
+      subscribers: ["parley"],
       version: 0,
       updatedAt: new Date(BASE_INSTANT),
     });
+  });
+
+  // LA SUSCRIPCIÓN DE UNA SOLA VEZ: sólo los compartidos SIN el campo, así que la segunda corrida no
+  // toca nada —tampoco lo que un operador cambió entre las dos—, y un compartido nuevo (con `[]`
+  // escrito) o un propio quedan como están.
+  it("subscribeExistingModes suscribe sólo los compartidos sin lista, y es idempotente", async () => {
+    const repository = new MongoGameModeRepository(mongo, mutableClock());
+    const viejo = await legacyMode();
+    const otroViejo = await legacyMode("22222222-2222-4333-8444-555555555555");
+    const nuevo = await repository.create(clasica({ name: "Nuevo" }));
+    const propio = await repository.create(clasica({ name: "Propio", ownerProviderId: "parley" }));
+
+    expect(await subscribeExistingModes(mongo, ["betaso", "parley", "betaso"])).toBe(2);
+    expect((await repository.byUuid(viejo))?.subscribers).toEqual(["betaso", "parley"]);
+    expect((await repository.byUuid(otroViejo))?.subscribers).toEqual(["betaso", "parley"]);
+    expect((await repository.byUuid(nuevo.uuid))?.subscribers).toEqual([]);
+    expect((await repository.byUuid(propio.uuid))?.subscribers).toEqual([]);
+    expect((await repository.byUuid(viejo))?.version).toBe(0);
+
+    await repository.removeSubscriber(viejo, "parley");
+    expect(await subscribeExistingModes(mongo, ["betaso", "parley"])).toBe(0);
+    expect((await repository.byUuid(viejo))?.subscribers).toEqual(["betaso"]);
   });
 
   // DOS INSTANCIAS COPIANDO LO MISMO A LA VEZ: el lease lo evita, pero si fallara, el índice único
