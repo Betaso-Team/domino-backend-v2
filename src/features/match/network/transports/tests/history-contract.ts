@@ -759,5 +759,59 @@ export function describeHistoryContract(
         totalExact: true,
       });
     });
+
+    // EL ESTADO (`status`), exacto: `started` es la abierta, `finished` y `aborted` las cerradas. La
+    // forma vieja nunca grabó estado y no coincide con ninguno. Sin el filtro salen todos.
+    it("por estado: exacto, con los demás filtros, y la vieja nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      const rows: readonly Row[] = [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"] },
+        { matchId: "m-2", at: at(20), users: ["ana", "carla"] },
+        { matchId: "m-abierta", at: at(30), users: ["ana", "dani"] },
+        { matchId: "m-vieja", at: at(40), roomId: null },
+        { matchId: "m-5", at: at(50), users: ["beto", "eva"] },
+        { matchId: "m-6", at: at(60), users: ["ana", "eva"] },
+      ];
+      await seed(history, clock, rows);
+      clock.set(at(70));
+      const closings: [string, MatchClosing["matchEndReason"], MatchClosing["status"]][] = [
+        ["m-1", "SCORE", "finished"],
+        ["m-2", "CHARGE_REJECTED", "aborted"],
+        ["m-5", "ABANDONMENT", "finished"],
+        ["m-6", "INTERRUPTED", "aborted"],
+      ];
+      for (const [matchId, matchEndReason, status] of closings) {
+        const users = rows.find((row) => row.matchId === matchId)?.users ?? [];
+        history.close(matchId, {
+          ...CLOSING,
+          roomId: `room-${matchId}`,
+          seats: seatsOf(users),
+          status,
+          matchEndReason,
+        });
+      }
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ status: "started" })).toEqual(["m-abierta"]);
+      expect(await ids({ status: "finished" })).toEqual(["m-5", "m-1"]);
+      expect(await ids({ status: "aborted" })).toEqual(["m-6", "m-2"]);
+      // SIN EL FILTRO, TODOS: la vieja incluida.
+      expect(await ids({})).toEqual(["m-6", "m-5", "m-vieja", "m-abierta", "m-2", "m-1"]);
+      // CON LOS DEMÁS, por AND: el jugador, las fechas, la sala y el motivo.
+      expect(await ids({ status: "aborted", userId: "eva" })).toEqual(["m-6"]);
+      expect(await ids({ status: "finished", from: new Date(at(15)) })).toEqual(["m-5"]);
+      expect(await ids({ status: "aborted", roomId: "room-m-2" })).toEqual(["m-2"]);
+      expect(await ids({ status: "finished", roomId: "room-m-2" })).toEqual([]);
+      expect(await ids({ status: "aborted", matchEndReason: "SCORE" })).toEqual([]);
+
+      const page = await history.list({ pageSize: 10, status: "aborted" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
+        total: 2,
+        totalExact: true,
+      });
+    });
   });
 }

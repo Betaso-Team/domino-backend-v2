@@ -244,6 +244,7 @@ function matches(document: Stored, query: MatchListQuery): boolean {
   if (query.matchEndReason !== undefined && document.matchEndReason !== query.matchEndReason) {
     return false;
   }
+  if (query.status !== undefined && document.status !== query.status) return false;
   return true;
 }
 

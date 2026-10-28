@@ -218,7 +218,7 @@ describe("recordRoutes: lo que contestan", () => {
 
     const after = cursorOf({ t: Date.parse("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) });
     await get(
-      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED`,
+      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted`,
     );
     expect(list).toHaveBeenLastCalledWith({
       pageSize: 5,
@@ -228,6 +228,7 @@ describe("recordRoutes: lo que contestan", () => {
       id: "b".repeat(24),
       userId: "u-ana",
       matchEndReason: "CHARGE_REJECTED",
+      status: "aborted",
     });
   });
 
@@ -266,6 +267,11 @@ describe("recordRoutes: lo que contestan", () => {
     "matchEndReason=GANÓ",
     "matchEndReason=score",
     "matchEndReason=SCORE&matchEndReason=ABANDONMENT",
+    // EL ESTADO, uno de los tres y escrito como él: ni inventado, ni en mayúscula, ni dos.
+    "status=",
+    "status=open",
+    "status=FINISHED",
+    "status=started&status=finished",
   ])("un pedido imposible es 400 MALFORMED (%s)", async (query) => {
     const base = await serve(untouched);
 

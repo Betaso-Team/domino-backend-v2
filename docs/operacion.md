@@ -96,7 +96,7 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 
 ## Registro de partidas
 
-`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y cinco
+`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y seis
 índices que el proceso pide al primer uso, en segundo plano:
 
 | Índice | Sirve a |
@@ -106,12 +106,13 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 | `createdAt_-1__id_-1` | el orden del listado: sin filtros, por fechas y con cursor |
 | `seats.userId_1_createdAt_-1__id_-1` | el filtro `userId` del listado, con o sin fechas y cursor, ya ordenado. Es multikey (una clave por asiento) |
 | `matchEndReason_1_createdAt_-1__id_-1` | el filtro `matchEndReason` del listado (el motivo del cierre), con o sin fechas y cursor, ya ordenado |
+| `status_1_createdAt_-1__id_-1` | el filtro `status` del listado (abierta, terminada o abortada), con o sin fechas y cursor, ya ordenado |
 
 El filtro `id` usa el `_id_` de la colección. Cada combinación de filtros del listado sale de uno de
 estos sin recorrer la colección ni ordenar en memoria, y lee como mucho `pageSize + 1` documentos en
 cualquier página; lo mide `mongo-history.int.test.ts` con `explain` contra un Mongo de verdad. La
-excepción es motivo + jugador juntos, que no tiene índice propio: usa uno de los dos y lee de más, hasta
-las partidas de ese jugador.
+excepción es motivo + jugador, estado + jugador y estado + sala, que no tienen índice propio: usan uno
+de los dos y leen de más, hasta las partidas de ese jugador o de esa sala.
 
 **Al desplegar un índice nuevo no hay que hacer nada a mano.** El proceso pide los índices con su
 primera escritura y no los espera: sobre millones de documentos uno nuevo tarda minutos, y Mongo lo
@@ -126,6 +127,7 @@ db.match_history.createIndex({ roomId: 1, createdAt: -1, _id: -1 }, { name: "roo
 db.match_history.createIndex({ createdAt: -1, _id: -1 }, { name: "createdAt_-1__id_-1" })
 db.match_history.createIndex({ "seats.userId": 1, createdAt: -1, _id: -1 }, { name: "seats.userId_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ matchEndReason: 1, createdAt: -1, _id: -1 }, { name: "matchEndReason_1_createdAt_-1__id_-1" })
+db.match_history.createIndex({ status: 1, createdAt: -1, _id: -1 }, { name: "status_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ matchId: 1 }, { name: "matchId_1", unique: true })
 ```
 
@@ -133,7 +135,7 @@ El `roomId_1` que creaba la versión anterior quedó cubierto por el compuesto (
 pero ocupa memoria y frena cada escritura. Una vez creado el compuesto, se puede borrar:
 `db.match_history.dropIndex("roomId_1")`.
 
-**El de `seats.userId` es el más grande de los cinco**: lleva una clave por asiento (dos o cuatro por
+**El de `seats.userId` es el más grande de los seis**: lleva una clave por asiento (dos o cuatro por
 partida; un usuario en dos asientos de la misma partida es una sola), así que es el que más tarda en
 construirse. Mientras no exista, el filtro por jugador funciona pero recorre el índice de fechas descartando partidas (o, para un
 jugador con pocas, las ordena en memoria), y una búsqueda ancha puede terminar en el 503 del plazo. Tiene

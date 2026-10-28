@@ -5,6 +5,7 @@ import { type Response, Router } from "express";
 import { z } from "zod";
 import {
   MATCH_END_REASONS,
+  MATCH_STATUSES,
   type MatchArchive,
   type MatchCursor,
   MatchListTimeoutError,
@@ -89,6 +90,7 @@ const LIST_QUERY = z
     id: objectId.optional(),
     userId: id.optional(),
     matchEndReason: z.enum(MATCH_END_REASONS).optional(),
+    status: z.enum(MATCH_STATUSES).optional(),
   })
   .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
     message: "`from` no puede ser posterior a `to`",
@@ -141,7 +143,8 @@ export function recordRoutes({
     MATCHES_ROUTE,
     admin,
     validated({ query: LIST_QUERY }, async ({ query }, response) => {
-      const { pageSize, after, from, to, matchId, roomId, id, userId, matchEndReason } = query;
+      const { pageSize, after, from, to, matchId, roomId, id, userId, matchEndReason, status } =
+        query;
       try {
         const page = await archive.list({
           pageSize,
@@ -153,6 +156,7 @@ export function recordRoutes({
           ...(id === undefined ? {} : { id }),
           ...(userId === undefined ? {} : { userId }),
           ...(matchEndReason === undefined ? {} : { matchEndReason }),
+          ...(status === undefined ? {} : { status }),
         });
         sendData(response, {
           items: page.items,

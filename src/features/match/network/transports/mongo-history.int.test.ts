@@ -36,6 +36,7 @@ const ALL_INDEXES = [
   "matchId_1",
   "roomId_1_createdAt_-1__id_-1",
   "seats.userId_1_createdAt_-1__id_-1",
+  "status_1_createdAt_-1__id_-1",
 ];
 const INDEX_WAIT = { timeout: 5_000, interval: 20 };
 const indexNames = async () =>
@@ -62,7 +63,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
   describeHistoryContract("MongoHistory", (options) => fresh(undefined, options));
   describePlayerLogContract("MongoHistory", (options) => fresh(undefined, options));
 
-  it("crea sus cinco índices, con el de `matchId` único", async () => {
+  it("crea sus seis índices, con el de `matchId` único", async () => {
     const history = await fresh();
     history.record([entry(1)]);
     await history.drain();
@@ -206,16 +207,21 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       // TRESCIENTAS PARTIDAS en quince salas, de a tres por segundo —empates en el mismo milisegundo—,
       // con su timeline y cuatro asientos: tres jugadores de diez, y en el cuarto `jugador-x` (que está
       // en cuatro de cada cinco) o, cada cinco, el del primero repetido —el mismo usuario en dos
-      // asientos, dos claves del índice multikey para un documento—. Más veinte de la forma vieja, sin
-      // sala ni asientos.
+      // asientos, dos claves del índice multikey para un documento—. Más treinta abiertas y veinte de
+      // la forma vieja, sin sala ni asientos.
       await (await collection()).insertMany([
         ...Array.from({ length: 300 }, (_, index) => ({
           matchId: `p-${index}`,
           roomId: `sala-${index % 15}`,
           version: 2.1,
-          status: "finished",
-          // UNO DE CADA SIETE abandonó: un motivo minoritario, como en producción.
-          matchEndReason: index % 7 === 0 ? "ABANDONMENT" : "SCORE",
+          // UNA DE CADA TRECE se abortó: un estado minoritario, como en producción.
+          ...(index % 13 === 0
+            ? { status: "aborted", matchEndReason: "INTERRUPTED" }
+            : {
+                status: "finished",
+                // UNO DE CADA SIETE abandonó: un motivo minoritario, como en producción.
+                matchEndReason: index % 7 === 0 ? "ABANDONMENT" : "SCORE",
+              }),
           createdAt: new Date(T + Math.floor(index / 3) * 1_000),
           updatedAt: new Date(T + Math.floor(index / 3) * 1_000),
           seats: [
@@ -225,6 +231,22 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
             index % 5 === 0 ? `jugador-${index % 10}` : "jugador-x",
           ].map((userId, seat) => ({ id: `seat-${seat + 1}`, seat, userId })),
           timeline: [entry(1, { matchId: `p-${index}` })],
+        })),
+        // TREINTA ABIERTAS, sin motivo y con jugadores propios: el historial del jugador las descarta
+        // leyéndolas, y así no le cambian lo que lee a ninguno de los de arriba.
+        ...Array.from({ length: 30 }, (_, index) => ({
+          matchId: `abierta-${index}`,
+          roomId: `sala-${index % 15}`,
+          version: 2.1,
+          status: "started",
+          createdAt: new Date(T + index * 3_000 + 250),
+          updatedAt: new Date(T + index * 3_000 + 250),
+          seats: [`abre-${index % 4}`, `abre-${(index + 1) % 4}`].map((userId, seat) => ({
+            id: `seat-${seat + 1}`,
+            seat,
+            userId,
+          })),
+          timeline: [entry(1, { matchId: `abierta-${index}` })],
         })),
         ...Array.from({ length: 20 }, (_, index) => ({
           matchId: `vieja-${index}`,
@@ -262,6 +284,8 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         "fechas + matchEndReason",
         () => ({ pageSize: PAGE, from, to, matchEndReason: "ABANDONMENT" }),
       ],
+      ["status (una de cada trece)", () => ({ pageSize: PAGE, status: "aborted" })],
+      ["fechas + status", () => ({ pageSize: PAGE, from, to, status: "started" })],
       [
         "matchId + roomId + id",
         () => ({
@@ -324,6 +348,12 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         expect(items.length).toBeGreaterThan(0);
         expect(items.every((item) => item.matchEndReason === matchEndReason)).toBe(true);
       }
+      const { status } = query();
+      if (status !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        expect(items.every((item) => item.status === status)).toBe(true);
+      }
     });
 
     // CON CURSOR, Y HONDO: la página sexta lee lo mismo que la segunda. Un `skip` leería las cien
@@ -337,6 +367,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["cursor + userId", { userId: "jugador-5" }, 2, PAGE],
       ["cursor + fechas + userId", { from: new Date(T), to, userId: "jugador-x" }, 2, PAGE],
       ["cursor + matchEndReason", { matchEndReason: "ABANDONMENT" }, 2, 4],
+      ["cursor + status", { status: "aborted" }, 2, 4],
     ] as const)(
       "%s: sin COLLSCAN, sin SORT y sin leer de más",
       async (_name, filters, depth, pageSize) => {
@@ -424,6 +455,27 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       const { items } = await history.list(query);
       expect(items.length).toBeGreaterThan(0);
       expect(items.every((item) => item.matchEndReason === "SCORE")).toBe(true);
+    });
+
+    // ESTADO + JUGADOR Y ESTADO + SALA TAMPOCO TIENEN COMPUESTO PROPIO, por lo mismo que motivo +
+    // jugador: Mongo usa uno de los dos índices y filtra el otro leyendo documentos (medido contra
+    // Mongo 7: 24 leídos con el jugador y 22 con la sala, para una página de 21). Lo que se fija es que
+    // nunca recorra la colección ni ordene en memoria, y que lo leído no pase de las partidas del
+    // jugador o de la sala.
+    it.each([
+      ["estado + jugador", { userId: "jugador-x" }, { "seats.userId": "jugador-x" }],
+      ["estado + sala", { roomId: "sala-4" }, { roomId: "sala-4" }],
+    ] as const)("%s: sin COLLSCAN ni SORT, y lo leído acotado", async (_name, filters, scope) => {
+      const query: MatchListQuery = { pageSize: PAGE, ...filters, status: "finished" };
+      const plan = await explained(query);
+      const bound = await (await collection()).countDocuments(scope);
+
+      expect(plan.stages).not.toContain("COLLSCAN");
+      expect(plan.stages).not.toContain("SORT");
+      expect(plan.docsExamined).toBeLessThanOrEqual(bound);
+      const { items } = await history.list(query);
+      expect(items.length).toBeGreaterThan(0);
+      expect(items.every((item) => item.status === "finished")).toBe(true);
     });
 
     // EL TOTAL FILTRADO, la otra consulta del listado: `countDocuments` es un `$match` + `$limit` +

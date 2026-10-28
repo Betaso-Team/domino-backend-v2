@@ -160,6 +160,14 @@ const END_REASONS: Record<MatchEndReason, true> = {
 };
 export const MATCH_END_REASONS = Object.keys(END_REASONS) as [MatchEndReason, ...MatchEndReason[]];
 
+/** En qué punto está el documento: abierto al primer reparto (`started`) o cerrado con su desenlace. */
+export type MatchStatus = "started" | "finished" | "aborted";
+
+// LOS ESTADOS EN UN ARREGLO, por lo mismo que los motivos: el filtro del listado los valida, y un
+// estado nuevo del tipo que falte acá no compila.
+const STATUSES: Record<MatchStatus, true> = { started: true, finished: true, aborted: true };
+export const MATCH_STATUSES = Object.keys(STATUSES) as [MatchStatus, ...MatchStatus[]];
+
 /**
  * Por qué un jugador ya no está en la mesa: lo dijo él (`LEFT`), o lo retiró el reloj — conectado
  * (`TIMEOUT`) o con la conexión caída (`DISCONNECTED`).
@@ -286,7 +294,7 @@ export interface MatchSummary {
   readonly matchId: string;
   readonly game: "domino";
   readonly roomId?: string;
-  readonly status?: "started" | "finished" | "aborted";
+  readonly status?: MatchStatus;
   readonly table?: MatchSetup["table"];
   readonly createdAt?: Date;
   readonly updatedAt?: Date;
@@ -332,6 +340,11 @@ export interface MatchListQuery {
    * coincide con ninguno, y la forma vieja tampoco.
    */
   readonly matchEndReason?: MatchEndReason;
+  /**
+   * En qué punto está, exacto: `started` (abierta), `finished` o `aborted`. La forma vieja no tiene
+   * estado y no coincide con ninguno. Sin este filtro salen todos: el default lo pone el panel.
+   */
+  readonly status?: MatchStatus;
 }
 
 /**
