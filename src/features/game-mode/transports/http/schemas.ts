@@ -165,16 +165,12 @@ export const UUID_PARAMS = z.object({
     .regex(/^\P{Cc}+$/u, "uuid inválido"),
 });
 
-// LA SUSCRIPCIÓN DE UN OPERADOR: el modo y el operador van en el path, el cuerpo no lleva nada.
-export const SUBSCRIPTION_PARAMS = z.object({
-  uuid: UUID_PARAMS.shape.uuid,
-  providerId: providerIdOf("providerId"),
-});
+// EL OPERADOR SOBRE EL QUE SE ACTÚA NO VIAJA EN EL PATH NI EN EL CUERPO: sale del token. Un admin de
+// operador ya dice quién es; sólo Betaso Games (token sin `prv`, o la llave) lo nombra, con
+// `?providerId=`. Lo resuelve `providerOf` (`admin.ts`); acá sólo se valida la forma.
+export const PROVIDER_QUERY = z.object({ providerId: providerIdOf("providerId").optional() });
 
-export const COPY_SHARED_BODY = z.strictObject({ providerId: providerIdOf("providerId") });
-
-// LA FUENTE DEL CATÁLOGO DE UN OPERADOR: el operador va en el path, la fuente en el cuerpo.
-export const PROVIDER_PARAMS = z.object({ providerId: providerIdOf("providerId") });
+// LA FUENTE DEL CATÁLOGO: el operador sale del token (o de `?providerId=`), la fuente va en el cuerpo.
 export const CATALOG_SOURCE_BODY = z.strictObject({ source: z.enum(["shared", "own"]) });
 
 export interface ProviderCatalogDTO {
