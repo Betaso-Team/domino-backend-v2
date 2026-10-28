@@ -105,7 +105,7 @@ export type MatchHistoryDocument = {
   entries?: HistoryEntry[];
 };
 
-// LOS CINCO ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS SEIS ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -125,6 +125,9 @@ export type MatchHistoryDocument = {
 //   · `matchEndReason` con el orden del listado detrás: el filtro por motivo del cierre. Son siete
 //     valores sobre millones de filas, así que sin el orden detrás la página de «abandonos» leería y
 //     ordenaría todos los abandonos de la historia para mostrar veinte.
+//   · `status` con el orden del listado detrás: el filtro por estado (abierta, terminada, abortada),
+//     por lo mismo que el del motivo: tres valores sobre millones de filas. Con el jugador o la sala
+//     no tiene compuesto propio, a propósito: Mongo usa uno y filtra el otro leyendo de más.
 //
 // El filtro por `_id` no necesita uno: el de la colección ya está.
 //
@@ -143,6 +146,10 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
     {
       key: { matchEndReason: 1, createdAt: -1, _id: -1 },
       name: "matchEndReason_1_createdAt_-1__id_-1",
+    },
+    {
+      key: { status: 1, createdAt: -1, _id: -1 },
+      name: "status_1_createdAt_-1__id_-1",
     },
   ],
 ];
@@ -172,6 +179,7 @@ function filterOf(query: MatchListQuery): ListFilter {
     // Cualquier asiento: sobre un arreglo, la igualdad de Mongo pregunta por algún elemento.
     ...(query.userId === undefined ? {} : { "seats.userId": query.userId }),
     ...(query.matchEndReason === undefined ? {} : { matchEndReason: query.matchEndReason }),
+    ...(query.status === undefined ? {} : { status: query.status }),
   };
 }
 

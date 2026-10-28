@@ -143,7 +143,8 @@ export const isFiltered = (query: MatchListQuery): boolean =>
   query.roomId !== undefined ||
   query.id !== undefined ||
   query.userId !== undefined ||
-  query.matchEndReason !== undefined;
+  query.matchEndReason !== undefined ||
+  query.status !== undefined;
 
 const createdAtOf = (document: StoredMatchRecord): number | undefined =>
   document.createdAt instanceof Date ? document.createdAt.getTime() : undefined;

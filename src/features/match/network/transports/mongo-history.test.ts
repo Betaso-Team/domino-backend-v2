@@ -350,6 +350,7 @@ describe("MongoHistory: la cabecera y el cierre", () => {
       "createdAt_-1__id_-1",
       "seats.userId_1_createdAt_-1__id_-1",
       "matchEndReason_1_createdAt_-1__id_-1",
+      "status_1_createdAt_-1__id_-1",
     ]);
     expect(updateOne).toHaveBeenCalledTimes(2);
     expect(logger.error).toHaveBeenCalledTimes(1);
