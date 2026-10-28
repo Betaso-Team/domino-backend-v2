@@ -40,7 +40,7 @@ export function playerRoutes({
   }
   router.get(
     PLAYER_MATCHES_ROUTE,
-    requireAdminKey(adminApiKey, adminTokens),
+    requireAdminKey(adminApiKey, adminTokens, { read: true }),
     validated({ params: PLAYER_PARAMS, query: PAGE_QUERY }, ({ params, query }, response) =>
       sendPlayerPage({ players, logger }, params.userId, query, response, (data) => ({
         status: "success",
