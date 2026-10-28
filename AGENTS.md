@@ -2499,7 +2499,8 @@ Desde `main`. Se programó contra el contrato de token que billing-auth está sa
   lo devuelve a los mismos operadores.
 - **La unicidad es por dueño** y conserva la asimetría de v1 (par al crear, nombre al renombrar) y el
   hueco heredado, con un test pineado por dueño además del original.
-- **La copia de los compartidos** (`POST /game-modes/copy-shared`) usa uuid v5 (`copy-uuid.ts`,
+- **La copia de los compartidos** (~~`POST /game-modes/copy-shared`~~ → `POST /game-modes/copies`, ver
+  «el operador sale del token») usa uuid v5 (`copy-uuid.ts`,
   `node:crypto`, vector del RFC en su test) e `insertIfAbsent` (`$setOnInsert` con upsert): reintentar
   completa una copia a medias y no pisa lo que el operador editó. Un propio homónimo con otro uuid se
   saltea y se informa (`NAME_TAKEN`); un origen sin forma de UUID, `INVALID_SOURCE_UUID`. Todo en un
@@ -2546,13 +2547,44 @@ Emmanuel». Varias entradas del bloque anterior quedan desactualizadas; las vige
   y lease; nada de amqp ni outbox). ⚠ Mergear a `develop` DESPUÉS de que Betaso-Backend lea dominó
   del orquestador; en el VPS, quitar `RABBITMQ_URL` del `.env` (se ignora igual).
 - **La fuente del catálogo** (`provider_catalogs`, `{ providerId, source, updatedAt, updatedBy }`,
-  ausente = `shared`): `GET /game-modes/catalogs/:providerId` (cualquier rol del ámbito) y
-  `PUT … {source}` (rol `admin` del ámbito; Betaso Games cualquiera), bajo el lease y la cola. `own`
+  ausente = `shared`): ~~`GET /game-modes/catalogs/:providerId` (cualquier rol del ámbito) y
+  `PUT … {source}`~~ → `source` en `GET /game-modes/admin` y `PUT /game-modes/source {source}`, ver
+  «el operador sale del token» (rol `admin` del ámbito; Betaso Games cualquiera), bajo el lease y la cola. `own`
   sin un modo propio ACTIVO es 409. No se impide dar de baja después el último propio con la fuente
   en `own`: lo resuelve el orquestador (catálogo vacío, no ofrece mesas).
 - **`GET /internal/game-modes`** = `{ status, data: [modos], catalogs: { [providerId]: "own" } }`, sólo
   las fuentes que no son `shared`; `?includeInactive=1` igual que antes.
-- `copy-shared` se queda; ahora copia los compartidos activos a los que el operador está suscrito.
+- ~~`copy-shared` se queda~~ (ahora `POST /game-modes/copies`); copia los compartidos activos a los
+  que el operador está suscrito.
+
+## Incremento completo — el operador sale del token (rama `refactor/modos-sin-proveedor-en-la-ruta`)
+
+Del plan «tasas y emparejamiento con nombres claros, rutas sin proveedor redundante y permisos de
+usuarios del panel» (sección Dominó). Desde `main`. Rompe la API del panel a propósito: nada está en
+producción, y no quedan alias.
+
+- **El operador sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo.
+  `providerOf` (`transports/http/admin.ts`, el mismo patrón que los webhooks del orquestador): un
+  admin de operador actúa sobre el suyo (`?providerId=` igual se acepta, distinto es
+  `403 {status:"error", code:"FORBIDDEN"}`); Betaso Games (token con `prv: null`, o la llave) lo nombra
+  con `?providerId=`, y sin él es `400 {status:"error", code:"PROVIDER_REQUIRED"}`. La credencial y
+  el rol se miran antes (la puerta), la forma después (`validated`, `PROVIDER_QUERY`) y el operador
+  al final.
+- **Rutas:** `PUT|DELETE /game-modes/:uuid/subscriptions/:providerId` → `PUT|DELETE
+  /game-modes/:uuid/subscription`; `POST /game-modes/copy-shared {providerId}` → `POST
+  /game-modes/copies` (sin cuerpo; misma respuesta y mismo uuid v5); `GET|PUT
+  /game-modes/catalogs/:providerId` → `PUT /game-modes/source {source}`. Las viejas dan 404.
+  `POST /game-modes` (con `ownerProviderId`) y `GET /internal/game-modes` no cambian.
+- **La fuente se lee en `GET /game-modes/admin`**: con un operador resuelto (token de operador, o
+  Betaso Games con `?providerId=`) responde `{ status, data, source }`, y `data` es lo que ve ESE
+  operador (Betaso Games sigue viendo `subscribers`); Betaso Games sin `?providerId=` recibe todos los
+  modos y ningún `source`. El GET de la fuente sola se fue.
+- ⚠ **`PUT /game-modes/source` va ANTES de `PUT /game-modes/:uuid`**: es un solo segmento, y al revés
+  todo cambio de fuente sería la edición del modo de uuid `source`. Lo pinea el test del orden de
+  registro (`register.int.test.ts`).
+- **Servicio:** `copyShared` → `createCopies` (`CopySharedResult` → `CopiesResult`); `listFor(actor,
+  providerId?)` filtra por lo que ve ese operador. Las firmas reciben el operador ya resuelto, y el
+  servicio conserva la regla 3 (`refuseForeign`) como segunda llave.
 
 ## Cómo se ejecuta una tarea
 
