@@ -222,12 +222,11 @@ describe("gameModeHttp: las rutas", () => {
       "GET /game-modes/admin/:uuid",
       "GET /game-modes/reactive/:uuid",
       "POST /game-modes",
+      "POST /game-modes/copies",
+      "PUT /game-modes/source",
       "PUT /game-modes/:uuid",
-      "POST /game-modes/copy-shared",
-      "GET /game-modes/catalogs/:providerId",
-      "PUT /game-modes/catalogs/:providerId",
-      "PUT /game-modes/:uuid/subscriptions/:providerId",
-      "DELETE /game-modes/:uuid/subscriptions/:providerId",
+      "PUT /game-modes/:uuid/subscription",
+      "DELETE /game-modes/:uuid/subscription",
       "DELETE /game-modes/:uuid",
       "GET /internal/game-modes",
       "GET /game-modes",
@@ -280,6 +279,9 @@ describe("gameModeHttp: las rutas", () => {
     ["GET", "/game-modes/reactive/mode-1"],
     ["GET", "/game-modes/admin"],
     ["GET", "/game-modes/admin/mode-1"],
+    ["POST", "/game-modes/copies"],
+    ["PUT", "/game-modes/source"],
+    ["PUT", "/game-modes/mode-1/subscription"],
   ])("sin llave interna %s %s no existe", async (method, path) => {
     const app = harness({ adminApiKey: undefined });
 
@@ -683,6 +685,10 @@ describe("la llave interna", () => {
     ["GET", "/game-modes/reactive/mode-1"],
     ["GET", "/game-modes/admin"],
     ["GET", "/game-modes/admin/mode-1"],
+    ["POST", "/game-modes/copies"],
+    ["PUT", "/game-modes/source"],
+    ["PUT", "/game-modes/mode-1/subscription"],
+    ["DELETE", "/game-modes/mode-1/subscription"],
   ];
 
   async function callWith(app: Harness, method: string, path: string, key?: string) {
@@ -851,60 +857,140 @@ describe("el panel de un operador", () => {
   });
 });
 
+// EL OPERADOR SOBRE EL QUE ACTÚA UNA RUTA SALE DEL TOKEN: el admin de un operador no lo nombra (o
+// nombra el suyo); Betaso Games lo nombra con `?providerId=`, y sin él es 400.
+const PROVIDER_REQUIRED = {
+  status: 400,
+  body: {
+    status: "error",
+    code: "PROVIDER_REQUIRED",
+    message: "falta ?providerId=: Betaso Games indica sobre qué operador actúa",
+  },
+};
+const FOREIGN_PROVIDER = {
+  status: 403,
+  body: { status: "error", code: "FORBIDDEN", message: "un operador sólo actúa sobre sí mismo" },
+};
+
 describe("las suscripciones por HTTP", () => {
-  it("un operador se suscribe y se da de baja él mismo", async () => {
+  it("un operador se suscribe y se da de baja él mismo, sin nombrarse", async () => {
     const app = harness();
     const modo = await app.repository.create(clasica());
 
-    const alta = await app.put(
-      `/game-modes/${modo.uuid}/subscriptions/parley`,
-      undefined,
-      as("parley"),
-    );
+    const alta = await app.put(`/game-modes/${modo.uuid}/subscription`, undefined, as("parley"));
     expect(alta.status).toBe(200);
     expect((alta.body as { data: Record<string, unknown> }).data).not.toHaveProperty("subscribers");
     expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
+    // IDEMPOTENTE: otra alta no duplica.
+    expect(
+      (await app.put(`/game-modes/${modo.uuid}/subscription`, undefined, as("parley"))).status,
+    ).toBe(200);
+    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
+
+    expect((await app.del(`/game-modes/${modo.uuid}/subscription`, as("parley"))).status).toBe(200);
+    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
+    expect((await app.del(`/game-modes/${modo.uuid}/subscription`, as("parley"))).status).toBe(200);
+  });
+
+  it("un operador puede nombrarse a sí mismo; a otro es 403 y no toca nada", async () => {
+    const app = harness();
+    const modo = await app.repository.create(clasica());
 
     expect(
-      (await app.del(`/game-modes/${modo.uuid}/subscriptions/parley`, as("parley"))).status,
+      (
+        await app.put(
+          `/game-modes/${modo.uuid}/subscription?providerId=parley`,
+          undefined,
+          as("parley"),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      await app.put(
+        `/game-modes/${modo.uuid}/subscription?providerId=rival`,
+        undefined,
+        as("parley"),
+      ),
+    ).toEqual(FOREIGN_PROVIDER);
+    expect(
+      await app.del(`/game-modes/${modo.uuid}/subscription?providerId=rival`, as("parley")),
+    ).toEqual(FOREIGN_PROVIDER);
+    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
+  });
+
+  it("Betaso Games suscribe al que nombre con ?providerId=, y sin él es 400", async () => {
+    const app = harness();
+    const modo = await app.repository.create(clasica());
+
+    for (const who of [as("games"), KEY]) {
+      expect(await app.put(`/game-modes/${modo.uuid}/subscription`, undefined, who)).toEqual(
+        PROVIDER_REQUIRED,
+      );
+      expect(await app.del(`/game-modes/${modo.uuid}/subscription`, who)).toEqual(
+        PROVIDER_REQUIRED,
+      );
+    }
+    const alta = await app.put(
+      `/game-modes/${modo.uuid}/subscription?providerId=parley`,
+      undefined,
+      as("games"),
+    );
+    expect(alta.status).toBe(200);
+    // Betaso Games ve la lista de suscriptores en la respuesta.
+    expect((alta.body as { data: { subscribers: string[] } }).data.subscribers).toEqual(["parley"]);
+    expect(
+      (await app.del(`/game-modes/${modo.uuid}/subscription?providerId=parley`, KEY)).status,
     ).toBe(200);
     expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
   });
 
-  it("sobre un compartido sin lista, suscribirse crea la lista con ése solo", async () => {
+  it("sólo sobre compartidos activos, y support no se suscribe", async () => {
     const app = harness();
-    const modo = await app.repository.create(clasica());
+    const propio = await app.repository.create(clasica({ ownerProviderId: "parley" }));
+    const retirado = await app.repository.create(clasica({ name: "Retirado" }));
+    await app.repository.update(retirado.uuid, { isActive: false });
+    const modo = await app.repository.create(clasica({ name: "Activa" }));
 
     expect(
-      (await app.put(`/game-modes/${modo.uuid}/subscriptions/parley`, undefined, as("games")))
+      (await app.put(`/game-modes/${propio.uuid}/subscription`, undefined, as("parley"))).status,
+    ).toBe(409);
+    expect(
+      (await app.put(`/game-modes/${retirado.uuid}/subscription`, undefined, as("parley"))).status,
+    ).toBe(409);
+    expect(
+      (await app.put("/game-modes/no-existe/subscription", undefined, as("parley"))).status,
+    ).toBe(404);
+    expect(
+      (await app.put(`/game-modes/${modo.uuid}/subscription`, undefined, as("parleySupport")))
         .status,
-    ).toBe(200);
-    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
+    ).toBe(403);
   });
 
-  // LA LISTA ENTERA YA NO SE FIJA POR HTTP: cada operador se suscribe (o Betaso Games lo suscribe).
-  it("PUT /game-modes/:uuid/subscribers no existe", async () => {
+  // LA LISTA ENTERA YA NO SE FIJA POR HTTP, y la ruta con el operador en el path desapareció.
+  it.each([
+    ["PUT", "/subscribers"],
+    ["PUT", "/subscriptions/parley"],
+    ["DELETE", "/subscriptions/parley"],
+  ])("%s /game-modes/:uuid%s no existe", async (method, suffix) => {
     const app = harness();
     const modo = await app.repository.create(clasica());
+    const path = `/game-modes/${modo.uuid}${suffix}`;
 
-    expect(
-      (await app.put(`/game-modes/${modo.uuid}/subscribers`, { providerIds: ["parley"] }, KEY))
-        .status,
-    ).toBe(404);
+    const response =
+      method === "PUT"
+        ? await app.put(path, { providerIds: ["parley"] }, KEY)
+        : await app.del(path, KEY);
+    expect(response.status).toBe(404);
   });
 });
 
-describe("POST /game-modes/copy-shared", () => {
+describe("POST /game-modes/copies", () => {
   it("devuelve lo creado, lo que ya estaba y lo salteado", async () => {
     const app = harness();
     await playedOf(app.repository);
 
-    const primera = await app.post(
-      "/game-modes/copy-shared",
-      { providerId: "parley" },
-      as("parley"),
-    );
-    const segunda = await app.post("/game-modes/copy-shared", { providerId: "parley" }, KEY);
+    const primera = await app.post("/game-modes/copies", undefined, as("parley"));
+    const segunda = await app.post("/game-modes/copies?providerId=parley", undefined, KEY);
 
     expect(primera.status).toBe(200);
     const created = (primera.body as { data: { created: unknown[] } }).data.created;
@@ -913,18 +999,30 @@ describe("POST /game-modes/copy-shared", () => {
       status: "success",
       data: { created: [], existing: created, skipped: [] },
     });
+    expect((await app.repository.all()).filter((m) => m.ownerProviderId === "parley")).toHaveLength(
+      1,
+    );
   });
 
-  it("un operador no copia para otro, y support no copia", async () => {
+  it("un operador no copia para otro, support no copia y Betaso Games sin ?providerId= es 400", async () => {
+    const app = harness();
+    await playedOf(app.repository);
+
+    expect(await app.post("/game-modes/copies?providerId=rival", undefined, as("parley"))).toEqual(
+      FOREIGN_PROVIDER,
+    );
+    expect((await app.post("/game-modes/copies", undefined, as("parleySupport"))).status).toBe(403);
+    expect(await app.post("/game-modes/copies", undefined, as("games"))).toEqual(PROVIDER_REQUIRED);
+    expect(await app.post("/game-modes/copies", undefined, KEY)).toEqual(PROVIDER_REQUIRED);
+    expect((await app.repository.all()).filter((m) => m.ownerProviderId !== null)).toEqual([]);
+  });
+
+  it("POST /game-modes/copy-shared no existe", async () => {
     const app = harness();
 
-    expect(
-      (await app.post("/game-modes/copy-shared", { providerId: "rival" }, as("parley"))).status,
-    ).toBe(403);
-    expect(
-      (await app.post("/game-modes/copy-shared", { providerId: "parley" }, as("parleySupport")))
-        .status,
-    ).toBe(403);
+    expect((await app.post("/game-modes/copy-shared", { providerId: "parley" }, KEY)).status).toBe(
+      404,
+    );
   });
 });
 
@@ -968,9 +1066,7 @@ describe("GET /internal/game-modes", () => {
       status: "success",
       catalogs: {},
     });
-    expect(
-      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"))).status,
-    ).toBe(200);
+    expect((await app.put("/game-modes/source", { source: "own" }, as("parley"))).status).toBe(200);
     const response = await app.get("/internal/game-modes?includeInactive=1", ORCHESTRATOR_KEY);
     expect((response.body as { catalogs: unknown }).catalogs).toEqual({ parley: "own" });
   });
@@ -1006,31 +1102,75 @@ describe("el catálogo público", () => {
 });
 
 describe("la fuente del catálogo por HTTP", () => {
-  it("GET devuelve `shared` por default, a cualquier rol del operador y a Betaso Games", async () => {
+  it("GET /game-modes/admin la suma con un operador resuelto: `shared` por default", async () => {
     const app = harness();
+    const viejo = await playedOf(app.repository);
+    const propio = await app.repository.create(
+      clasica({ name: "Propio", ownerProviderId: "parley" }),
+    );
+    await app.repository.create(clasica({ name: "Del rival", ownerProviderId: "rival" }));
 
-    for (const who of [as("parley"), as("parleySupport"), as("games"), KEY]) {
-      expect(await app.get("/game-modes/catalogs/parley", who)).toEqual({
-        status: 200,
-        body: {
-          status: "success",
-          data: { providerId: "parley", source: "shared", updatedAt: null, updatedBy: null },
-        },
-      });
+    for (const who of [as("parley"), as("parleySupport")]) {
+      const response = await app.get("/game-modes/admin", who);
+      expect(response.status).toBe(200);
+      const body = response.body as {
+        status: string;
+        data: Array<{ uuid: string }>;
+        source: string;
+      };
+      expect(body.status).toBe("success");
+      expect(body.source).toBe("shared");
+      expect(body.data.map((m) => m.uuid).sort()).toEqual([viejo.uuid, propio.uuid].sort());
     }
-    expect((await app.get("/game-modes/catalogs/parley", as("rival"))).status).toBe(403);
-    expect((await app.get("/game-modes/catalogs/parley")).status).toBe(401);
+    // Nombrarse a sí mismo es lo mismo; nombrar a otro es 403.
+    expect(
+      (
+        (await app.get("/game-modes/admin?providerId=parley", as("parley"))).body as {
+          source: string;
+        }
+      ).source,
+    ).toBe("shared");
+    expect(await app.get("/game-modes/admin?providerId=rival", as("parleySupport"))).toEqual(
+      FOREIGN_PROVIDER,
+    );
   });
 
-  it("PUT `own` sin modos propios activos es 409, y con uno pasa", async () => {
+  it("Betaso Games con ?providerId= ve el catálogo de ese operador y su fuente; sin él, todo y sin fuente", async () => {
+    const app = harness();
+    const viejo = await playedOf(app.repository);
+    const propio = await app.repository.create(
+      clasica({ name: "Propio", ownerProviderId: "parley" }),
+    );
+    const ajeno = await app.repository.create(
+      clasica({ name: "Del rival", ownerProviderId: "rival" }),
+    );
+
+    for (const who of [as("games"), as("support"), KEY]) {
+      const scoped = await app.get("/game-modes/admin?providerId=parley", who);
+      expect(scoped.status).toBe(200);
+      const body = scoped.body as { data: Array<Record<string, unknown>>; source: string };
+      expect(body.source).toBe("shared");
+      expect(body.data.map((m) => m.uuid).sort()).toEqual([viejo.uuid, propio.uuid].sort());
+      // Betaso Games sigue viendo los suscriptores.
+      expect(body.data.find((m) => m.uuid === viejo.uuid)).toEqual(adminWireDtoOf(viejo));
+
+      const all = await app.get("/game-modes/admin", who);
+      expect(all.body).not.toHaveProperty("source");
+      expect(
+        (all.body as { data: Array<{ uuid: string }> }).data.map((m) => m.uuid).sort(),
+      ).toEqual([viejo.uuid, propio.uuid, ajeno.uuid].sort());
+    }
+  });
+
+  it("PUT `own` sin modos propios activos es 409, y con uno pasa y se ve en el listado", async () => {
     const app = harness();
 
-    const rechazo = await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"));
+    const rechazo = await app.put("/game-modes/source", { source: "own" }, as("parley"));
     expect(rechazo.status).toBe(409);
     expect(rechazo.body).toMatchObject({ status: "error" });
 
     await app.repository.create(clasica({ ownerProviderId: "parley" }));
-    const ok = await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"));
+    const ok = await app.put("/game-modes/source", { source: "own" }, as("parley"));
     expect(ok.status).toBe(200);
     expect((ok.body as { data: unknown }).data).toMatchObject({
       providerId: "parley",
@@ -1038,23 +1178,54 @@ describe("la fuente del catálogo por HTTP", () => {
       updatedBy: "pia",
     });
     expect(
-      ((await app.get("/game-modes/catalogs/parley", as("parley"))).body as { data: unknown }).data,
-    ).toMatchObject({ source: "own" });
+      ((await app.get("/game-modes/admin", as("parley"))).body as { source: string }).source,
+    ).toBe("own");
+    expect(
+      ((await app.get("/game-modes/admin?providerId=parley", KEY)).body as { source: string })
+        .source,
+    ).toBe("own");
+    // La de otro operador no cambió.
+    expect(
+      ((await app.get("/game-modes/admin", as("rival"))).body as { source: string }).source,
+    ).toBe("shared");
   });
 
-  it("PUT: support no escribe, otro operador es 403, Betaso Games cualquiera, y la forma se valida", async () => {
+  it("PUT: support no escribe, otro operador es 403, Betaso Games con ?providerId= (sin él 400), y la forma se valida", async () => {
     const app = harness();
     await app.repository.create(clasica({ ownerProviderId: "parley" }));
 
     expect(
-      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parleySupport"))).status,
+      (await app.put("/game-modes/source", { source: "own" }, as("parleySupport"))).status,
     ).toBe(403);
     expect(
-      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("rival"))).status,
-    ).toBe(403);
+      await app.put("/game-modes/source?providerId=parley", { source: "own" }, as("rival")),
+    ).toEqual(FOREIGN_PROVIDER);
+    expect(await app.put("/game-modes/source", { source: "own" }, as("games"))).toEqual(
+      PROVIDER_REQUIRED,
+    );
     expect(
-      (await app.put("/game-modes/catalogs/parley", { source: "propio" }, as("games"))).status,
+      (await app.put("/game-modes/source?providerId=parley", { source: "propio" }, as("games")))
+        .status,
     ).toBe(400);
-    expect((await app.put("/game-modes/catalogs/parley", { source: "own" }, KEY)).status).toBe(200);
+    expect(
+      (await app.put("/game-modes/source?providerId=parley", { source: "own" }, KEY)).body,
+    ).toMatchObject({ data: { providerId: "parley", source: "own", updatedBy: "ADMIN_API_KEY" } });
+  });
+
+  it("un modo llamado `source` no se edita por PUT: la ruta de la fuente va antes", async () => {
+    const app = harness();
+
+    expect(await app.put("/game-modes/source", { prize: 1 }, KEY)).toMatchObject({ status: 400 });
+  });
+
+  it.each([
+    ["GET", "/game-modes/catalogs/parley"],
+    ["PUT", "/game-modes/catalogs/parley"],
+  ])("%s %s no existe", async (method, path) => {
+    const app = harness();
+
+    const response =
+      method === "GET" ? await app.get(path, KEY) : await app.put(path, { source: "own" }, KEY);
+    expect(response.status).toBe(404);
   });
 });

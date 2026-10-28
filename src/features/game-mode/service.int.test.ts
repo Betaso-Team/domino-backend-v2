@@ -649,6 +649,18 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     ]);
   });
 
+  // CON `providerId`: Betaso Games mira el catálogo de un operador; un operador sólo el suyo.
+  it("listFor con providerId: Betaso Games ve lo de ese operador, un operador sólo lo suyo", async () => {
+    const { service } = await catalog();
+
+    const names = async (actor: { provider: string | null }, providerId: string) =>
+      (await service.listFor(actor, providerId)).map((modo) => modo.name).sort();
+
+    expect(await names(GAMES, "parley")).toEqual(["De los dos", "Propio", "Suscrito"]);
+    expect(await names(PARLEY, "parley")).toEqual(["De los dos", "Propio", "Suscrito"]);
+    await expect(service.listFor(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
+  });
+
   it("getFor no le muestra a un operador lo que no ve", async () => {
     const { service, delRival, ajeno, propio } = await catalog();
 
@@ -777,7 +789,7 @@ describe("GameModeService: las suscripciones", () => {
     await expect(service.unsubscribe(GAMES, modo.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeWriteBusyError,
     );
-    await expect(service.copyShared(PARLEY, "parley")).rejects.toBeInstanceOf(
+    await expect(service.createCopies(PARLEY, "parley")).rejects.toBeInstanceOf(
       GameModeWriteBusyError,
     );
   });
@@ -809,7 +821,7 @@ describe("GameModeService: la copia de los compartidos", () => {
   it("copia los activos a los que está suscrito, con un uuid determinista", async () => {
     const { service, repository, clock, suscrito } = await seeded();
 
-    const result = await service.copyShared(PARLEY, "parley");
+    const result = await service.createCopies(PARLEY, "parley");
 
     expect(result.skipped).toEqual([]);
     expect(result.existing).toEqual([]);
@@ -839,11 +851,11 @@ describe("GameModeService: la copia de los compartidos", () => {
 
   it("repetirla no duplica ni pisa lo que el operador editó", async () => {
     const { service, repository } = await seeded();
-    const primera = await service.copyShared(PARLEY, "parley");
+    const primera = await service.createCopies(PARLEY, "parley");
     const copia = primera.created[0] as { uuid: string };
     await service.update(PARLEY, copia.uuid, { prize: 999 });
 
-    const segunda = await service.copyShared(GAMES, "parley");
+    const segunda = await service.createCopies(GAMES, "parley");
 
     const byUuid = (a: { uuid: string }, b: { uuid: string }) => a.uuid.localeCompare(b.uuid);
     expect(segunda.created).toEqual([]);
@@ -864,10 +876,10 @@ describe("GameModeService: la copia de los compartidos", () => {
       return real(uuid, input);
     };
 
-    await expect(service.copyShared(PARLEY, "parley")).rejects.toThrow("mongo caído");
+    await expect(service.createCopies(PARLEY, "parley")).rejects.toThrow("mongo caído");
     expect(await ownedBy(repository, "parley")).toHaveLength(1);
 
-    const retry = await service.copyShared(PARLEY, "parley");
+    const retry = await service.createCopies(PARLEY, "parley");
 
     expect(retry.existing).toHaveLength(1);
     expect(retry.created).toHaveLength(1);
@@ -878,7 +890,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     const { service, suscrito } = await seeded();
     const mio = await service.create(PARLEY, clasica({ name: "Suscrito", playersQuantity: 4 }));
 
-    const result = await service.copyShared(PARLEY, "parley");
+    const result = await service.createCopies(PARLEY, "parley");
 
     expect(result.skipped).toEqual([
       {
@@ -897,7 +909,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     await repository.insertIfAbsent("modo-v1", clasica({ name: "Raro" }));
     await subscribeBoth(repository, "modo-v1");
 
-    expect(await service.copyShared(PARLEY, "parley")).toEqual({
+    expect(await service.createCopies(PARLEY, "parley")).toEqual({
       created: [],
       existing: [],
       skipped: [
@@ -910,7 +922,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     const { service, repository } = await seeded();
     const antes = await repository.all();
 
-    await expect(service.copyShared(PARLEY, "rival")).rejects.toBeInstanceOf(
+    await expect(service.createCopies(PARLEY, "rival")).rejects.toBeInstanceOf(
       GameModeForbiddenError,
     );
     expect(await repository.all()).toEqual(antes);

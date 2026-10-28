@@ -25,7 +25,9 @@ import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode"
 //    es 403 y no 404. Se lee y se juega; lo editan, lo dan de baja y lo reactivan sólo en Betaso
 //    Games.
 // 3. **Cada operador habla por sí mismo**: crea modos propios suyos, se suscribe él, copia para él.
-//    Pedirlo para otro es 403 antes de leer nada.
+//    Pedirlo para otro es 403 antes de leer nada. El operador sobre el que se actúa llega YA RESUELTO
+//    por la frontera HTTP (el del token, o el `?providerId=` de Betaso Games); el chequeo de acá es la
+//    segunda llave, para el día que otro llamador se olvide de la primera.
 //
 // Betaso Games (`provider: null`) pasa las tres. El rol (`support` sólo lee) lo resuelve la puerta
 // HTTP antes de llegar acá: este servicio sólo sabe de QUIÉN es cada modo.
@@ -51,7 +53,7 @@ export interface SkippedCopy {
   readonly conflictUuid?: string;
 }
 
-export interface CopySharedResult {
+export interface CopiesResult {
   readonly created: readonly CopiedMode[];
   // Ya estaban, de una copia anterior: se dejan como están, el operador puede haberlas editado.
   readonly existing: readonly CopiedMode[];
@@ -146,10 +148,10 @@ export class GameModeService {
   // LA FUENTE DEL CATÁLOGO DE UN OPERADOR. La lee cualquier rol del operador o de Betaso Games; otro
   // operador es 403 (los ids de operador no son secretos, la fuente de un competidor sí).
   catalogOf(actor: CatalogActor, providerId: string): Promise<ProviderCatalog> {
-    if (actor.provider !== null && actor.provider !== providerId) {
-      return Promise.reject(
-        new GameModeForbiddenError("un operador sólo ve la fuente de su propio catálogo"),
-      );
+    try {
+      refuseForeign(actor, providerId, "un operador sólo ve la fuente de su propio catálogo");
+    } catch (error) {
+      return Promise.reject(error);
     }
     return this.catalogs.of(providerId);
   }
@@ -166,10 +168,10 @@ export class GameModeService {
     providerId: string,
     source: CatalogSource,
   ): Promise<ProviderCatalog> {
-    if (actor.provider !== null && actor.provider !== providerId) {
-      return Promise.reject(
-        new GameModeForbiddenError("un operador sólo elige la fuente de su propio catálogo"),
-      );
+    try {
+      refuseForeign(actor, providerId, "un operador sólo elige la fuente de su propio catálogo");
+    } catch (error) {
+      return Promise.reject(error);
     }
     return this.mutating(async () => {
       if (source === "own") {
@@ -189,8 +191,14 @@ export class GameModeService {
   // LAS DOS LECTURAS DEL PANEL: ven también a los dados de baja, porque reactivar exige poder
   // listarlos y abrirlos primero. Igual que las públicas, sin lease; la frontera HTTP las
   // pone detrás de la llave, no el servicio. Cada operador ve lo que `visibleTo` le deja.
-  async listFor(actor: CatalogActor): Promise<readonly GameMode[]> {
-    return (await this.repository.all()).filter((mode) => visibleTo(mode, actor));
+  //
+  // CON `providerId`, LO QUE VE ESE OPERADOR: así Betaso Games mira el catálogo de uno desde el panel
+  // (`?providerId=`). Un operador sólo puede pedir el suyo, que es lo mismo que no pedir nada.
+  async listFor(actor: CatalogActor, providerId?: string): Promise<readonly GameMode[]> {
+    if (providerId !== undefined)
+      refuseForeign(actor, providerId, "un operador sólo ve su propio catálogo");
+    const viewer = providerId === undefined ? actor : { provider: providerId };
+    return (await this.repository.all()).filter((mode) => visibleTo(mode, viewer));
   }
 
   async getFor(actor: CatalogActor, uuid: string): Promise<GameMode | undefined> {
@@ -320,11 +328,11 @@ export class GameModeService {
   // Toda la copia va en UN turno del lease. Son decenas de modos y dos escrituras como mucho cada
   // uno; si el catálogo creciera hasta acercarse al plazo del lease, lo que cambia es tomar un turno
   // por modo —el reintento ya es seguro—, no la regla.
-  copyShared(actor: CatalogActor, providerId: string): Promise<CopySharedResult> {
-    if (actor.provider !== null && actor.provider !== providerId) {
-      return Promise.reject(
-        new GameModeForbiddenError("un operador sólo copia los compartidos para sí mismo"),
-      );
+  createCopies(actor: CatalogActor, providerId: string): Promise<CopiesResult> {
+    try {
+      refuseForeign(actor, providerId, "un operador sólo copia los compartidos para sí mismo");
+    } catch (error) {
+      return Promise.reject(error);
     }
     return this.mutating(async () => {
       const all = [...(await this.repository.all())];
@@ -375,10 +383,10 @@ export class GameModeService {
     providerId: string,
     change: "add" | "remove",
   ): Promise<GameMode> {
-    if (actor.provider !== null && actor.provider !== providerId) {
-      return Promise.reject(
-        new GameModeForbiddenError("un operador sólo se suscribe o se da de baja a sí mismo"),
-      );
+    try {
+      refuseForeign(actor, providerId, "un operador sólo se suscribe o se da de baja a sí mismo");
+    } catch (error) {
+      return Promise.reject(error);
     }
     return this.mutating(async () => {
       const current = await this.found(uuid);
@@ -490,6 +498,13 @@ export class GameModeService {
       () => undefined,
     );
     return result;
+  }
+}
+
+// LA REGLA 3 en una línea: un operador actúa sólo sobre sí mismo; Betaso Games, sobre cualquiera.
+function refuseForeign(actor: CatalogActor, providerId: string, message: string): void {
+  if (actor.provider !== null && actor.provider !== providerId) {
+    throw new GameModeForbiddenError(message);
   }
 }
 

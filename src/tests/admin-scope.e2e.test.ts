@@ -152,15 +152,28 @@ describe("el ámbito de los admins (integración)", () => {
     });
     const uuid = (created.body as { data: { uuid: string } }).data.uuid;
 
-    expect((await call("support", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
-      403,
-    );
-    // Parley se suscribe a sí mismo; el compartido no lo edita.
-    expect((await call("parley", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
-      200,
-    );
-    expect((await call("parley", "PUT", `/game-modes/${uuid}/subscriptions/rival`)).status).toBe(
-      403,
+    expect(
+      (await call("support", "PUT", `/game-modes/${uuid}/subscription?providerId=parley`)).status,
+    ).toBe(403);
+    // Parley se suscribe a sí mismo sin nombrarse; a otro no; el compartido no lo edita.
+    expect((await call("parley", "PUT", `/game-modes/${uuid}/subscription`)).status).toBe(200);
+    expect(
+      (await call("parley", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
+    ).toBe(403);
+    // Betaso Games nombra al operador; sin `?providerId=` es 400.
+    expect(await call("games", "PUT", `/game-modes/${uuid}/subscription`)).toMatchObject({
+      status: 400,
+      body: { code: "PROVIDER_REQUIRED" },
+    });
+    expect(
+      (await call("games", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
+    ).toBe(200);
+    expect(
+      (await call("games", "DELETE", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
+    ).toBe(200);
+    // La ruta vieja, con el operador en el path, ya no existe.
+    expect((await call("games", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
+      404,
     );
     expect((await call("parley", "PUT", `/game-modes/${uuid}`, { prize: 1 })).status).toBe(403);
     expect((await call("games", "GET", `/game-modes/admin/${uuid}`)).body).toMatchObject({
@@ -169,11 +182,9 @@ describe("el ámbito de los admins (integración)", () => {
   });
 
   // LA FUENTE `own` DE PUNTA A PUNTA: pasar exige un propio activo, y con la fuente en `own` el último
-  // propio activo no se da de baja hasta volver a `shared`.
+  // propio activo no se da de baja hasta volver a `shared`. La fuente se lee en el listado del panel.
   it("la fuente `own` protege el último modo propio activo", async () => {
-    expect(
-      (await call("rival", "PUT", "/game-modes/catalogs/rival", { source: "own" })).status,
-    ).toBe(409);
+    expect((await call("rival", "PUT", "/game-modes/source", { source: "own" })).status).toBe(409);
     const created = await call("rival", "POST", "/game-modes", {
       name: "Único del rival e2e",
       prize: 18,
@@ -181,9 +192,12 @@ describe("el ámbito de los admins (integración)", () => {
       playersQuantity: 2,
     });
     const uuid = (created.body as { data: { uuid: string } }).data.uuid;
-    expect(
-      (await call("rival", "PUT", "/game-modes/catalogs/rival", { source: "own" })).status,
-    ).toBe(200);
+    expect((await call("rival", "PUT", "/game-modes/source", { source: "own" })).status).toBe(200);
+    expect((await call("rival", "GET", "/game-modes/admin")).body).toMatchObject({ source: "own" });
+    expect((await call("games", "GET", "/game-modes/admin?providerId=rival")).body).toMatchObject({
+      source: "own",
+    });
+    expect((await call("games", "GET", "/game-modes/admin")).body).not.toHaveProperty("source");
 
     const baja = await call("rival", "DELETE", `/game-modes/${uuid}`);
     expect(baja.status).toBe(409);
@@ -192,9 +206,35 @@ describe("el ámbito de los admins (integración)", () => {
       409,
     );
 
+    // Betaso Games la vuelve a `shared` por el operador; sin `?providerId=` es 400.
+    expect((await call("games", "PUT", "/game-modes/source", { source: "shared" })).status).toBe(
+      400,
+    );
     expect(
-      (await call("rival", "PUT", "/game-modes/catalogs/rival", { source: "shared" })).status,
+      (await call("parley", "PUT", "/game-modes/source?providerId=rival", { source: "shared" }))
+        .status,
+    ).toBe(403);
+    expect(
+      (await call("games", "PUT", "/game-modes/source?providerId=rival", { source: "shared" }))
+        .status,
     ).toBe(200);
     expect((await call("rival", "DELETE", `/game-modes/${uuid}`)).status).toBe(200);
+  });
+
+  it("la copia de los compartidos: el operador del token, o el que nombre Betaso Games", async () => {
+    expect((await call("parley", "POST", "/game-modes/copies")).status).toBe(200);
+    expect((await call("parley", "POST", "/game-modes/copies?providerId=rival")).status).toBe(403);
+    expect((await call("parleySupport", "POST", "/game-modes/copies")).status).toBe(403);
+    expect((await call("games", "POST", "/game-modes/copies")).status).toBe(400);
+    expect((await call("key", "POST", "/game-modes/copies?providerId=parley")).status).toBe(200);
+  });
+
+  it.each([
+    ["POST", "/game-modes/copy-shared"],
+    ["GET", "/game-modes/catalogs/parley"],
+    ["PUT", "/game-modes/catalogs/parley"],
+  ])("%s %s ya no existe", async (method, path) => {
+    const body = method === "GET" ? undefined : { providerId: "parley", source: "own" };
+    expect((await call("games", method, path, body)).status).toBe(404);
   });
 });
