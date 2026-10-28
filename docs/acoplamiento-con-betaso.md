@@ -31,23 +31,35 @@ Sirve de referencia para medir lo que falta:
 
 ## 1. Dependencias en tiempo de ejecución
 
-### El catálogo se publica al exchange `betaso`
+### ~~El catálogo se publica al exchange `betaso`~~
 
-- `src/features/game-mode/events.ts:5`: `GAME_MODE_EXCHANGE = "betaso"`, con las claves
-  `game_mode.created` y `game_mode.updated`.
-- El exchange vive en el broker de Betaso (`RABBITMQ_URL`) y lo consume Betaso-Backend
-  (`betaso-backend/src/common/queue/contracts/betaso/game-modes/`).
-- El payload (`events.ts:18-41`) es el de v1 y no se renombra porque Betaso tiene colas enlazadas a
-  él: `id` = `uuid` del modo, `game: "domino"`, `prize`, `entryFee`, `multiplier`, `pointsToWin` y
-  `playerCount`.
+Resuelto el 2026-10-28: **el dominó ya no publica nada al exchange `betaso`** ni se conecta al broker
+de Betaso. El outbox del catálogo, su despachador, `POST /game-modes/sync`, `events.ts` y
+`RABBITMQ_URL` se eliminaron.
 
-### Producción no arranca sin el broker de Betaso
+Betaso lee los modos de dominó **del orquestador**, como cualquier operador:
+`GET {ORCHESTRATOR_BASE_URL}/v1/game-modes?includeInactive=1` con su API key de proveedor. El
+orquestador arma el catálogo efectivo de cada operador con `GET /internal/game-modes` del dominó
+(modos con dueño y suscriptores, más la fuente `shared`/`own` de cada operador). Betaso conserva su
+forma propia (`externalId` = `uuid` del modo, `game: "domino"`, `prize`, `entryFee`, `multiplier`,
+`pointsToWin`, `playerCount`) mapeándola de su lado, y las bajas le llegan con `includeInactive=1`.
 
-- `src/env.ts:445-451`: con `NODE_ENV=production`, `RABBITMQ_URL` es obligatoria junto a `MONGO_URI`
-  y `ADMIN_API_KEY`.
-- ~~`/ready` incluye el chequeo `rabbit`.~~ Resuelto: `/ready` ya no consulta el broker de Betaso. Si
-  cae, los eventos del catálogo se acumulan en el outbox y, a los diez minutos sin salir, el
-  despachador loguea `error`.
+~~- `src/features/game-mode/events.ts:5`: `GAME_MODE_EXCHANGE = "betaso"`, con las claves
+  `game_mode.created` y `game_mode.updated`.~~
+~~- Desde los modos con dueño (2026-10-27) sólo salían los modos compartidos; se iba a eliminar cuando
+  Betaso-Backend leyera el catálogo del orquestador.~~
+
+⚠ Orden de despliegue: Betaso-Backend tiene que leer dominó del orquestador ANTES de que esta versión
+llegue al entorno; si no, su registro de modos se queda sin dominó. La colección `game_mode_outbox`
+queda huérfana en las bases que la tenían.
+
+### ~~Producción no arranca sin el broker de Betaso~~
+
+- ~~`src/env.ts`: con `NODE_ENV=production`, `RABBITMQ_URL` es obligatoria junto a `MONGO_URI` y
+  `ADMIN_API_KEY`.~~ Resuelto: `RABBITMQ_URL` ya no se lee; en producción se exigen `MONGO_URI` y
+  `ADMIN_API_KEY`. Una `RABBITMQ_URL` que quede en un `.env` se ignora (quitarla al desplegar).
+- ~~`/ready` incluye el chequeo `rabbit`.~~ Resuelto: `/ready` sólo consulta el broker de juegos
+  (`betaso_games`).
 
 ### Las colecciones de Mongo son las de v1
 
@@ -115,6 +127,10 @@ El admin inicia sesión en billing-auth, que le emite un token ES256 con audienc
 clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a Betaso quién es un
 administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
 
+Desde el 2026-10-27 el token dice además de qué operador es el admin (`prv`) y con qué rol (`role`), y
+el dominó acota cada ruta (`docs/api-y-mensajes.md`, «HTTP interno»). Betaso es un operador más: un
+admin de Betaso entra al catálogo con su ámbito y a nada más.
+
 **Decidido el 2026-10-14:** no se porta. El panel será uno propio de Betaso Games, con login del
 sistema, y no es del MVP. Mientras tanto el catálogo y los ajustes se administran con `ADMIN_API_KEY`
 desde un cliente HTTP.
@@ -146,15 +162,15 @@ figuran aquí.
   - `docs/.vitepress/config.ts`: título «Dominó Betaso».
 - **Monedas en fixtures.** `"VES"` y `"USD"` en los fixtures y smoke tests. El motor trata la moneda
   como texto opaco.
-- **Exchange `betaso` en pruebas.** Aparece en los smoke tests y en los tests de amqp, outbox y
-  torneo.
+- **Exchange `betaso` en pruebas.** ~~Aparece en los smoke tests y en los tests de amqp, outbox y
+  torneo.~~ Sólo queda en los tests de torneo (sin cablear).
 - **Comentarios.** Unos veinte citan `Betaso-Domino-Backend/src/...` como fuente de verdad.
   `features/match/transports/match-registry.ts:34` supone que el id de usuario es compartido entre
   los productos de Betaso.
 - **Comentario obsoleto.** `match-contract.ts:258` menciona `BETASO_BACKEND_URL`, que ya no existe.
 - **Docs.**
-  - `.env.example` describe `RABBITMQ_URL` como «el del exchange `betaso` de Betaso».
-  - `AGENTS.md` lista las deudas con Betaso: el exchange `betaso`, la migración de
+  - ~~`.env.example` describe `RABBITMQ_URL` como «el del exchange `betaso` de Betaso».~~ Ya no está.
+  - `AGENTS.md` lista las deudas con Betaso: ~~el exchange `betaso`~~, la migración de
     `bet_increase_configs` y el login del panel.
   - `README.md`, `docs/index.md`, `docs/arquitectura.md`, `docs/api-y-mensajes.md` y
     `docs/reglas-de-juego-v1.md` presentan el servicio como «Dominó Betaso».

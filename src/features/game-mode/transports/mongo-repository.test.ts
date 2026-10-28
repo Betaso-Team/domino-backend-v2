@@ -32,13 +32,19 @@ import {
 type StoredDocument = GameModeDocument & { _id: ObjectId };
 
 // El subconjunto de filtros que este adaptador usa: igualdad sobre campos de primer nivel
-// (`{ uuid }`, `{ isActive: true }`, `{ uuid, isActive: true }`). No se implementa más porque no se
-// usa más — un doble con operadores que nadie llama es código que puede estar mal sin que nada lo
-// note.
+// (`{ uuid }`, `{ isActive: true }`, `{ uuid, isActive: true }`), el `null` de Mongo —que matchea
+// también el campo AUSENTE, y es como el adaptador reconoce un compartido de v1— y `$type: "array"`.
+// No se implementa más porque no se usa más — un doble con operadores que nadie llama es código que
+// puede estar mal sin que nada lo note.
 function matches(document: StoredDocument, filter: Filter<GameModeDocument>): boolean {
-  return Object.entries(filter).every(
-    ([key, value]) => (document as unknown as Record<string, unknown>)[key] === value,
-  );
+  return Object.entries(filter).every(([key, value]) => {
+    const actual = (document as unknown as Record<string, unknown>)[key];
+    if (value === null) return actual === null || actual === undefined;
+    if (typeof value === "object" && value !== null && "$type" in value) {
+      return (value as { $type: string }).$type === "array" && Array.isArray(actual);
+    }
+    return actual === value;
+  });
 }
 
 function compare(left: unknown, right: unknown): number {
@@ -81,6 +87,22 @@ function fakeCollection() {
       documents.push({ ...document, _id });
       return { acknowledged: true, insertedId: _id };
     }),
+    // El upsert de `insertIfAbsent`: si nada matchea, inserta el `$setOnInsert`; si algo matchea, no
+    // lo toca. Es todo lo que el adaptador le pide a `updateOne`.
+    updateOne: vi.fn(
+      async (
+        filter: Filter<GameModeDocument>,
+        update: UpdateFilter<GameModeDocument>,
+        options?: { upsert?: boolean },
+      ) => {
+        if (documents.some((document) => matches(document, filter))) {
+          return { acknowledged: true, matchedCount: 1, upsertedCount: 0 };
+        }
+        if (!options?.upsert) return { acknowledged: true, matchedCount: 0, upsertedCount: 0 };
+        documents.push({ ...(update.$setOnInsert as GameModeDocument), _id: new ObjectId() });
+        return { acknowledged: true, matchedCount: 0, upsertedCount: 1 };
+      },
+    ),
     findOne: vi.fn(async (filter: Filter<GameModeDocument>) => {
       return documents.find((document) => matches(document, filter)) ?? null;
     }),
@@ -100,6 +122,17 @@ function fakeCollection() {
         for (const [key, delta] of Object.entries(update.$inc ?? {})) {
           const target = after as unknown as Record<string, number>;
           target[key] = (target[key] ?? 0) + Number(delta);
+        }
+        // `$addToSet` y `$pull` de un valor, como los usa el adaptador. Sobre un campo AUSENTE,
+        // `$addToSet` lo crea con ese único valor, igual que Mongo, y ausente se lee `[]`: es la
+        // misma lista.
+        const lists = after as unknown as Record<string, unknown[] | undefined>;
+        for (const [key, value] of Object.entries(update.$addToSet ?? {})) {
+          const list = lists[key] ?? [];
+          lists[key] = list.includes(value) ? [...list] : [...list, value];
+        }
+        for (const [key, value] of Object.entries(update.$pull ?? {})) {
+          lists[key] = (lists[key] ?? []).filter((item) => item !== value);
         }
         documents[index] = after;
         // `before` cuando no se pidió `after`, que es el default REAL del driver. Es lo que hace
@@ -154,8 +187,12 @@ describe("MongoGameModeRepository: el documento productivo", () => {
       isActive: true,
       isFreeRoom: false,
       enableBots: false,
-      // El único campo que v1 no tenía: los niveles de aumento, vacíos si no vienen.
+      // Los campos que v1 no tenía: los niveles de aumento, vacíos si no vienen, el dueño (`null`:
+      // compartido) y la lista de suscriptores, escrita y vacía: así la suscripción de una sola vez
+      // no lo confunde con un modo de antes.
       betLevels: [],
+      ownerProviderId: null,
+      subscribers: [],
       createdAt: new Date(BASE_INSTANT),
       updatedAt: new Date(BASE_INSTANT),
       __v: 0,
@@ -166,8 +203,7 @@ describe("MongoGameModeRepository: el documento productivo", () => {
   });
 
   // `id` es el HEX DEL `_id`, y no el uuid. Es identidad de almacenamiento: el DTO HTTP tiene que
-  // devolver `_id` porque el panel de v1 lo recibía. El del cuerpo Rabbit es el otro (ver
-  // `events.ts`), y confundirlos es lo que duplica el catálogo del consumidor en silencio.
+  // devolver `_id` porque el panel de v1 lo recibía. Hacia afuera, un modo se nombra por su uuid.
   it("el id de la entidad es el hex del _id que asignó Mongo", async () => {
     const { repository, documents } = harness();
 
@@ -257,9 +293,53 @@ describe("MongoGameModeRepository: la edición en la base", () => {
       updatedAt: new Date(BASE_INSTANT),
     });
     // LA REVISIÓN ES UN `$inc` DE LA BASE, no un número calculado en el proceso: dos ediciones que
-    // leyeran el `__v` viejo y escribieran `viejo + 1` producirían la misma revisión, que es
-    // exactamente lo que el outbox usa para deduplicar.
+    // leyeran el `__v` viejo y escribieran `viejo + 1` producirían la misma revisión.
     expect(update?.$inc).toEqual({ __v: 1 });
     expect(options).toMatchObject({ returnDocument: "after" });
+  });
+});
+
+// EL DOCUMENTO DE ANTES: los de v1 y de antes de los operadores no tienen `ownerProviderId` ni
+// `subscribers`. Se leen como compartido SIN NADIE (`[]`): la lista es explícita, y los que ya se
+// jugaban se suscriben una vez con `npm run modes:subscribe-existing`.
+describe("MongoGameModeRepository: el documento de antes de los operadores", () => {
+  function withLegacy() {
+    const h = harness();
+    const legacy = {
+      _id: new ObjectId(),
+      uuid: "11111111-2222-4333-8444-555555555555",
+      name: "Clásica v1",
+      multiplier: 1,
+      prize: 18,
+      entryFee: 10,
+      playersQuantity: 2 as const,
+      pointsToWin: 25,
+      isActive: true,
+      isFreeRoom: false,
+      enableBots: false,
+      createdAt: new Date(BASE_INSTANT),
+      updatedAt: new Date(BASE_INSTANT),
+      __v: 0,
+    };
+    h.documents.push(legacy);
+    return { ...h, legacy };
+  }
+
+  it("sin dueño ni lista se lee como compartido sin suscriptores", async () => {
+    const { repository, legacy } = withLegacy();
+
+    expect(await repository.byUuid(legacy.uuid)).toMatchObject({
+      ownerProviderId: null,
+      subscribers: [],
+    });
+  });
+
+  it("el $addToSet filtra por compartido y nunca lleva un $inc", async () => {
+    const { repository, collection, legacy } = withLegacy();
+    await repository.addSubscriber(legacy.uuid, "parley");
+
+    const [filter, update] = collection.findOneAndUpdate.mock.calls[0] ?? [];
+    expect(filter).toEqual({ uuid: legacy.uuid, ownerProviderId: null });
+    expect(update).toEqual({ $addToSet: { subscribers: "parley" } });
   });
 });

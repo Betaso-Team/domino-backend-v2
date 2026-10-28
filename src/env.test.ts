@@ -13,7 +13,6 @@ describe("parseEnv", () => {
       PORT: "3000",
       BILLING_AUTH_PUBLIC_KEY: KEY,
       MONGO_URI: "mongodb://mongo:27017/domino",
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       ADMIN_API_KEY: "k".repeat(16),
     });
     expect(env.port).toBe(3000);
@@ -58,7 +57,6 @@ describe("parseEnv", () => {
       NODE_ENV: "production",
       BILLING_AUTH_PUBLIC_KEY: KEY,
       MONGO_URI: "mongodb://mongo:27017/domino",
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       ADMIN_API_KEY: "k".repeat(16),
     });
     expect(env.logLevel).toBe("info");
@@ -73,7 +71,6 @@ describe("parseEnv", () => {
       APP_ENV: "dev",
       BILLING_AUTH_PUBLIC_KEY: KEY,
       MONGO_URI: "mongodb://mongo:27017/domino",
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       ADMIN_API_KEY: "k".repeat(16),
     });
     expect(env.logLevel).toBe("debug");
@@ -87,7 +84,6 @@ describe("parseEnv", () => {
       APP_ENV: "stage",
       BILLING_AUTH_PUBLIC_KEY: KEY,
       MONGO_URI: "mongodb://mongo:27017/domino",
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       ADMIN_API_KEY: "k".repeat(16),
     });
     expect(env.logLevel).toBe("debug");
@@ -149,37 +145,34 @@ describe("parseEnv", () => {
     expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY }).redisUrl).toBeUndefined();
   });
 
-  // RABBITMQ_URL sigue el mismo criterio que las otras dos URIs: la PRESENCIA del dato elige la
-  // implementación y no hay ningún `AMQP_DRIVER` que nombre una. Ausente significa que esta
-  // instancia no publica al broker —el outbox sigue acumulando, que es el punto entero de que
-  // sea durable—, y es lo que hace que `npm test` no toque la red.
-  it("sin RABBITMQ_URL el entorno es válido y la URL queda indefinida", () => {
-    expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY }).rabbitmqUrl).toBeUndefined();
+  // LA VIEJA RABBITMQ_URL (el exchange `betaso` del catálogo) YA NO SE LEE: un `.env` que todavía la
+  // tenga arranca igual, y nada en el entorno la expone.
+  it("ignora RABBITMQ_URL: el catálogo no publica a ningún broker", () => {
+    const env = parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, RABBITMQ_URL: "amqp://x" });
+    expect(Object.keys(env)).not.toContain("rabbitmqUrl");
   });
 
-  // EN PRODUCCIÓN LAS TRES SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera
+  // EN PRODUCCIÓN LAS DOS SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera
   // de producción, "ausente" es la decisión legítima de una instancia que corre sola y sin
   // infraestructura. En producción es lo contrario — un despliegue productivo sin `MONGO_URI`
-  // arranca creyendo que persiste, sin `RABBITMQ_URL` acumula eventos que nadie va a publicar, y
-  // sin `ADMIN_API_KEY` deja el catálogo sin su API administrativa. Todas fallan en SILENCIO, que es exactamente la clase de
-  // error que un arranque tiene que rechazar.
+  // arranca creyendo que persiste, y sin `ADMIN_API_KEY` deja el catálogo sin su API
+  // administrativa. Las dos fallan en SILENCIO, que es exactamente la clase de error que un
+  // arranque tiene que rechazar.
   describe("en producción exige la infraestructura completa", () => {
     const productivo = {
       NODE_ENV: "production",
       BILLING_AUTH_PUBLIC_KEY: KEY,
       MONGO_URI: "mongodb://mongo:27017/domino",
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       ADMIN_API_KEY: "k".repeat(16),
     };
 
     it("acepta el entorno productivo completo", () => {
       const env = parseEnv(productivo);
       expect(env.mongoUri).toBe("mongodb://mongo:27017/domino");
-      expect(env.rabbitmqUrl).toBe("amqp://guest:guest@rabbitmq:5672");
       expect(env.adminApiKey).toBe("k".repeat(16));
     });
 
-    it.each([["MONGO_URI"], ["RABBITMQ_URL"], ["ADMIN_API_KEY"]] as const)(
+    it.each([["MONGO_URI"], ["ADMIN_API_KEY"]] as const)(
       "rechaza producción sin %s",
       (faltante) => {
         const { [faltante]: _, ...incompleto } = productivo;
@@ -188,20 +181,19 @@ describe("parseEnv", () => {
     );
 
     // UN SOLO ERROR QUE LAS ENUMERA, no el primero que aparece. Un arranque que dice "falta
-    // MONGO_URI", se corrige, y entonces dice "falta RABBITMQ_URL" es tres despliegues en vez de
+    // MONGO_URI", se corrige, y entonces dice "falta ADMIN_API_KEY" es dos despliegues en vez de
     // uno — y cada intento contra un entorno productivo cuesta una ventana de mantenimiento.
     it("nombra TODAS las que faltan en un solo error", () => {
       const intento = () => parseEnv({ NODE_ENV: "production", BILLING_AUTH_PUBLIC_KEY: KEY });
       expect(intento).toThrow(/MONGO_URI/);
-      expect(intento).toThrow(/RABBITMQ_URL/);
+      expect(intento).not.toThrow(/RABBITMQ_URL/);
       expect(intento).toThrow(/ADMIN_API_KEY/);
     });
 
     // La misma ausencia FUERA de producción no es un error: es el despliegue de desarrollo.
-    it("fuera de producción las tres pueden faltar", () => {
+    it("fuera de producción las dos pueden faltar", () => {
       const env = parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY });
       expect(env.mongoUri).toBeUndefined();
-      expect(env.rabbitmqUrl).toBeUndefined();
       expect(env.adminApiKey).toBeUndefined();
     });
   });
@@ -332,7 +324,6 @@ describe("parseEnv", () => {
           ...callback,
           NODE_ENV: "production",
           MONGO_URI: "mongodb://mongo:27017/domino",
-          RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
           ADMIN_API_KEY: "k".repeat(16),
           ORCHESTRATOR_API_KEY: orq,
         }),
@@ -374,7 +365,6 @@ describe("parseEnv", () => {
       NODE_ENV: "production",
       BILLING_AUTH_PUBLIC_KEY: KEY,
       MONGO_URI: "mongodb://mongo:27017/domino",
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672",
       ADMIN_API_KEY: "k".repeat(16),
     };
 

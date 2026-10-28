@@ -16,10 +16,11 @@ export interface GameModeBetLevel {
 export interface GameMode {
   // El hex del `_id` de Mongo, ya convertido a string por el adaptador. Es identidad de
   // ALMACENAMIENTO: lo consume el DTO HTTP, que debe devolver `_id` porque el panel de v1 lo
-  // recibía. OJO: NO es el `id` del cuerpo Rabbit — ver el comentario de `events.ts`.
+  // recibía.
   readonly id: string;
   // El identificador LÓGICO, generado con UUID v4. Es el que viaja por la ruta HTTP
-  // (`/game-modes/:uuid`), el que deduplica el outbox y el que v1 publica como `id` a Rabbit.
+  // (`/game-modes/:uuid`), el que el orquestador guarda en cada mesa y el que nombra cada modo
+  // hacia afuera (Betaso lo usa como `externalId`).
   readonly uuid: string;
   readonly name: string;
   readonly multiplier: number;
@@ -44,11 +45,23 @@ export interface GameMode {
   // LOS AUMENTOS QUE OFRECE, ordenados por nivel. **Vacío = no ofrece aumentar**, y es el reposo:
   // un modo que nadie configuró (o un Novato) no cobra de más.
   readonly betLevels: readonly GameModeBetLevel[];
+  // EL DUEÑO DEL MODO. `null` es un modo COMPARTIDO, de Betaso Games, que se ofrece a los operadores
+  // suscritos; un id es un modo PROPIO de ese operador, que sólo juegan sus jugadores. Los documentos
+  // de antes de los operadores no tienen el campo y se leen como `null`: eran todos compartidos.
+  // NO SE EDITA: cambiarle el dueño a un modo es otro modo, con otro uuid.
+  readonly ownerProviderId: string | null;
+  // QUIÉNES JUEGAN UN MODO COMPARTIDO, SIEMPRE EXPLÍCITO: un compartido se ofrece sólo a los operadores
+  // de la lista. Un documento sin el campo se lee `[]` —nadie—, igual que un compartido nuevo; los
+  // modos de antes de las suscripciones se suscriben una vez con `npm run modes:subscribe-existing`.
+  // Un modo propio también lleva `[]`: no tiene suscriptores, lo juega su dueño.
+  //
+  // NO ES PARTE DE LA REVISIÓN: suscribirse no mueve `version` (ver el puerto).
+  readonly subscribers: readonly string[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
-  // El `__v` de Mongoose, que este incremento usa como REVISIÓN y no como adorno: el
-  // reconciliador del outbox compara `version` para saber si un modo ya publicó su cambio.
-  // Se usa la revisión y no `updatedAt` porque dos mutaciones del mismo milisegundo colapsan.
+  // El `__v` de Mongoose, que v2 usa como REVISIÓN: avanza con cada edición del modo (un `$inc` de la
+  // base), así que quien cachea el catálogo sabe si lo que tiene es viejo. Se usa la revisión y no
+  // `updatedAt` porque dos mutaciones del mismo milisegundo colapsan.
   readonly version: number;
 }
 
@@ -65,17 +78,27 @@ type DefaultedGameModeFields =
 
 // Lo que hace falta para CREAR un modo. Fuera quedan la identidad (`id`/`uuid`), las fechas y
 // la revisión —los pone el repositorio—, `isActive` —un modo nace activo; darlo de baja es
-// otra operación— y los cuatro defaulteables, que vuelven como opcionales.
+// otra operación—, `subscribers` —todo modo nace sin suscriptores: suscribir es otra operación— y
+// los defaulteables, que vuelven como opcionales. `ownerProviderId` ausente es `null`: compartido.
 export type CreateGameMode = Omit<
   GameMode,
-  "id" | "uuid" | "createdAt" | "updatedAt" | "version" | "isActive" | DefaultedGameModeFields
+  | "id"
+  | "uuid"
+  | "createdAt"
+  | "updatedAt"
+  | "version"
+  | "isActive"
+  | "ownerProviderId"
+  | "subscribers"
+  | DefaultedGameModeFields
 > &
-  Partial<Pick<GameMode, DefaultedGameModeFields>>;
+  Partial<Pick<GameMode, DefaultedGameModeFields | "ownerProviderId">>;
 
 // Lo que se puede EDITAR. Todo opcional y todo por separado: un campo ausente no se toca, que
 // es la diferencia entre un `PUT` parcial y un borrado silencioso de los campos que el panel
 // no mandó. `isActive` sí entra —la baja y la reactivación son ediciones de ese booleano, no
-// claves de evento propias— y la identidad, las fechas y la revisión no.
+// claves de evento propias— y la identidad, las fechas y la revisión no. Tampoco el dueño (no se
+// edita) ni los suscriptores, que tienen sus propias operaciones y no avanzan la revisión.
 export type UpdateGameMode = Partial<
   Pick<
     GameMode,

@@ -50,6 +50,10 @@ interface GameModeDTO {
   readonly isFreeRoom: boolean;
   readonly enableBots: boolean;
   readonly betLevels: GameMode["betLevels"];
+  // Las dos que el POST administrativo agrega al DTO de v1: el smoke crea con la llave, que es Betaso
+  // Games, así que vienen las dos.
+  readonly ownerProviderId: string | null;
+  readonly subscribers?: readonly string[] | null;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly __v: number;
@@ -281,6 +285,8 @@ async function createGameMode(): Promise<GameMode> {
     isFreeRoom: data.isFreeRoom,
     enableBots: data.enableBots,
     betLevels: data.betLevels,
+    ownerProviderId: data.ownerProviderId,
+    subscribers: data.subscribers ?? [],
     createdAt: new Date(data.createdAt),
     updatedAt: new Date(data.updatedAt),
     version: data.__v,

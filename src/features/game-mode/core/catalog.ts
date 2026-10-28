@@ -26,6 +26,44 @@ export interface GameModeRepository extends GameModeReader {
   // uuid que el panel tiene cacheado, y la frontera HTTP la convierte en 404. El throw queda
   // para lo que el llamador no puede prever.
   update(uuid: string, input: UpdateGameMode): Promise<GameMode | undefined>;
+
+  // CREA CON UN UUID DADO, O DEVUELVE EL QUE YA ESTABA con ese uuid, sin tocarlo. Es la escritura de
+  // la copia de los compartidos a un operador (`copyShared`): el uuid es determinista, así que un
+  // reintento después de una copia a medias completa lo que faltó y no duplica nada. `created` dice
+  // cuál de las dos pasó. Lo que había NO se pisa: el operador puede haber editado su copia.
+  insertIfAbsent(
+    uuid: string,
+    input: CreateGameMode,
+  ): Promise<{ readonly mode: GameMode; readonly created: boolean }>;
+
+  // LAS DOS ESCRITURAS DE LOS SUSCRIPTORES, sólo sobre modos COMPARTIDOS (`ownerProviderId` nulo).
+  //
+  // NINGUNA AVANZA LA REVISIÓN (`version`/`__v`) NI LA FECHA DE EDICIÓN: quién juega un modo no es
+  // una edición del modo, y la revisión y la fecha son lo que el panel muestra como «editado».
+  // `undefined` si no hay un compartido con ese uuid.
+  addSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined>;
+  removeSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined>;
+}
+
+// QUIÉN PIDE, para el ámbito: `provider` nulo es Betaso Games, que ve y toca todo; un id es un admin
+// de ese operador. Es la mitad del `Admin` de `shared/http/api-key.ts` que el catálogo necesita, y se
+// redeclara acá para que el core no dependa de la frontera HTTP (el tipado estructural las une).
+export interface CatalogActor {
+  readonly provider: string | null;
+}
+
+export const BETASO_GAMES: CatalogActor = { provider: null };
+
+// QUÉ MODOS VE UN OPERADOR: los suyos, y los compartidos que lo tienen en la lista de suscriptores
+// (explícita: sin lista, nadie). Betaso Games los ve todos. Es una regla de lectura y la comparten el
+// listado del panel, la búsqueda de un modo y la copia de los compartidos.
+export function offeredTo(mode: GameMode, provider: string): boolean {
+  if (mode.ownerProviderId !== null) return mode.ownerProviderId === provider;
+  return mode.subscribers.includes(provider);
+}
+
+export function visibleTo(mode: GameMode, actor: CatalogActor): boolean {
+  return actor.provider === null || offeredTo(mode, actor.provider);
 }
 
 // Los CINCO errores de APLICACIÓN del catálogo. Son cinco y no uno porque un solo error con un
@@ -80,4 +118,44 @@ export class FreeRoomWithEntryError extends Error {
 // reintentar es la respuesta correcta, así que la frontera contesta 503 y no 409 ni 500.
 export class GameModeWriteBusyError extends Error {
   override readonly name = "GameModeWriteBusyError";
+}
+
+// UN OPERADOR PIDIENDO ALGO QUE NO ES SUYO: editar un compartido —que no es secreto, lo lista el
+// catálogo público—, crear un modo para otro operador, suscribir a otro. 403. Un modo PROPIO de otro
+// operador no llega acá: sale como «no existe» (404), porque decir 403 le confirmaría que existe.
+export class GameModeForbiddenError extends Error {
+  override readonly name = "GameModeForbiddenError";
+}
+
+// ── LA FUENTE DEL CATÁLOGO DE CADA OPERADOR ───────────────────────────────────────────────────────
+//
+// QUÉ CATÁLOGO JUEGA UN OPERADOR, entero y no modo a modo: `shared` es el compartido —los
+// compartidos activos a los que está suscrito—, `own` son sólo sus modos propios activos. Quien
+// arma el catálogo efectivo es el orquestador (que además sabe si el operador juega contra todos,
+// en cuyo caso siempre usa el compartido); acá vive la elección porque el dominó es el dueño de los
+// modos. Un operador sin registro está en `shared`, y es el reposo: nadie queda sin lobby por no
+// haber elegido.
+export type CatalogSource = "shared" | "own";
+
+export const DEFAULT_CATALOG_SOURCE: CatalogSource = "shared";
+
+export interface ProviderCatalog {
+  readonly providerId: string;
+  readonly source: CatalogSource;
+  // Quién la cambió por última vez y cuándo; `null` en un operador que nunca la cambió.
+  readonly updatedAt: Date | null;
+  readonly updatedBy: string | null;
+}
+
+// EL PUERTO DE LAS FUENTES. `of` nunca devuelve `undefined`: un operador sin registro tiene la fuente
+// por default. `nonShared` es lo que lee el orquestador: sólo los que se apartan del default, porque
+// el resto —la inmensa mayoría— no necesita viajar.
+export interface ProviderCatalogRepository {
+  of(providerId: string): Promise<ProviderCatalog>;
+  nonShared(): Promise<readonly ProviderCatalog[]>;
+  set(providerId: string, source: CatalogSource, updatedBy: string): Promise<ProviderCatalog>;
+}
+
+export function defaultCatalogOf(providerId: string): ProviderCatalog {
+  return { providerId, source: DEFAULT_CATALOG_SOURCE, updatedAt: null, updatedBy: null };
 }

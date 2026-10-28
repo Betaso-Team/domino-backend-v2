@@ -3,10 +3,10 @@ import type { Logger } from "@/logger";
 import { type ConfirmChannel, type RecoveringChannelModel, connect } from "amqplib";
 
 // LA ENTREGA por cola, sin saber QUÉ entrega. Vive en `shared/` y no dentro de
-// `features/game-mode/` por el mismo argumento que `shared/mongo.ts`: `amqplib` es un paquete de
-// runtime, su ciclo de vida es del PROCESO —una conexión, un canal, un cierre ordenado— y lo que la
-// feature sabe es el CONTRATO (a qué exchange, con qué routing key y con qué campos), que se queda
-// del otro lado, en `features/game-mode/events.ts`.
+// una feature por el mismo argumento que `shared/mongo.ts`: `amqplib` es un paquete de runtime, su
+// ciclo de vida es del PROCESO —una conexión, un canal, un cierre ordenado— y lo que la feature sabe
+// es el CONTRATO (a qué exchange, con qué routing key y con qué campos), que se queda del otro lado,
+// en `features/match/network/match-results.ts`.
 //
 // SON DOS FORMAS DE PUBLICAR Y NO SE PUEDEN MEZCLAR, porque el backend principal consume de dos
 // maneras distintas:
@@ -16,7 +16,7 @@ import { type ConfirmChannel, type RecoveringChannelModel, connect } from "amqpl
 //                     Es el camino del RANKING (`rankings_queue`).
 //   publishTopic    → a un EXCHANGE topic, con el payload CRUDO, porque ese consumidor no es un
 //                     `@EventPattern` y el envoltorio lo dejaría sin entender el mensaje. Es el
-//                     camino del CATÁLOGO (exchange `betaso`).
+//                     camino del RESULTADO de cada mesa (exchange `betaso_games`).
 //
 // Mezclarlas produce un mensaje que nadie consume, EN SILENCIO. Los dos contratos son de v1
 // (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts`) y se conservan enteros.

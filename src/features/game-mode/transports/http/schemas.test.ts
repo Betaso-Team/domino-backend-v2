@@ -20,6 +20,8 @@ function mode(over: Partial<GameMode> = {}): GameMode {
     isFreeRoom: false,
     enableBots: false,
     betLevels: [{ level: 2, extra: 1, additionalPoints: 15 }],
+    ownerProviderId: null,
+    subscribers: ["betaso"],
     createdAt: new Date("2026-09-15T10:00:00.000Z"),
     updatedAt: new Date("2026-09-15T11:00:00.000Z"),
     version: 7,

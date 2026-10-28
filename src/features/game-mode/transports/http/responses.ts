@@ -2,6 +2,7 @@ import type { Response } from "express";
 import {
   DuplicateGameModeError,
   FreeRoomWithEntryError,
+  GameModeForbiddenError,
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
@@ -28,7 +29,7 @@ export function sendMessage(response: Response, message: string): void {
   response.json({ status: "success", message });
 }
 
-// LA TRADUCCIÓN DE LOS CINCO ERRORES DE APLICACIÓN, Y EL `throw` DEL FINAL ES LA MITAD DEL ARCHIVO.
+// LA TRADUCCIÓN DE LOS SEIS ERRORES DE APLICACIÓN, Y EL `throw` DEL FINAL ES LA MITAD DEL ARCHIVO.
 // Lo que no reconoce se RELANZA: `validated` lo reenvía a `next` y el manejador compartido lo loguea
 // con stack y contesta 500. v1 hacía lo contrario —un `catch (error)` por ruta que convertía
 // cualquier cosa en 500 con un mensaje genérico—, y ahí se le perdían los dos casos que esta tarea
@@ -48,6 +49,12 @@ export function sendError(response: Response, error: unknown): void {
   // un choque con el estado actual, no con la forma del pedido.
   if (error instanceof DuplicateGameModeError || error instanceof GameModeStateConflictError) {
     response.status(409).json({ status: "error", message: error.message });
+    return;
+  }
+  // 403 CON EL ENVELOPE DEL CATÁLOGO: un operador pidiendo algo de un modo que ve pero no es suyo. Lo
+  // que no ve sale como el 404 de arriba, nunca por acá (ver `service.ts`).
+  if (error instanceof GameModeForbiddenError) {
+    response.status(403).json({ status: "error", message: error.message });
     return;
   }
   if (error instanceof FreeRoomWithEntryError) {

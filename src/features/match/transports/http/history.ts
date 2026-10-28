@@ -80,8 +80,10 @@ export function historyRoutes({
   // verde de vitest, que borra los tipos sin chequearlos.
   router.get(
     HISTORY_ROUTE,
-    // Una lectura de soporte: la llave, o cualquier operador con sesión en el panel.
-    requireAdminKey(adminApiKey, adminTokens),
+    // Una lectura de soporte: la llave, o un admin de Betaso Games (también `support`). Un admin de
+    // OPERADOR no entra: el historial no sabe de qué operador es cada mesa, así que no hay ámbito
+    // con el que acotarlo, y abrirlo le mostraría las partidas de todos.
+    requireAdminKey(adminApiKey, adminTokens, { read: true }),
     validated({ params: HISTORY_PARAMS }, async ({ params }, response) => {
       // Contra `HistoryReader` y no contra la implementación: el cast a `MemoryHistory`
       // que estaba acá compilaba una promesa que el token no hacía.

@@ -1,7 +1,7 @@
 // EL ÚNICO LUGAR DE LA SUITE QUE LEE UN SERVICIO EXTERNO DEL ENTORNO, y existe para que sea uno
 // solo.
 //
-// `vitest.setup.ts` BORRA `MONGO_URI`, `REDIS_URL` y `RABBITMQ_URL` a propósito: que la suite no
+// `vitest.setup.ts` BORRA `MONGO_URI`, `REDIS_URL` y `BETASO_GAMES_RABBITMQ_URL` a propósito: que la suite no
 // dependa de ningún servicio es una propiedad del repo y no del shell de quien la corre, y de paso
 // la presencia de esas tres variables es lo que ELIGE la implementación de cada puerto. Un test de
 // contrato contra una base de verdad no puede leerlas, entonces: se saltearía siempre, que es peor

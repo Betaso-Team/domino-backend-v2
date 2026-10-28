@@ -26,6 +26,18 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
   `BILLING_AUTH_PUBLIC_KEY` (obligatoria); no hay HS256 ni secreto compartido con el backend de
   Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
   llave nuestra, no la de un cliente.
+- **Cada admin tiene operador y rol.** El token de admin de billing-auth trae `prv` (el operador;
+  `null` = Betaso Games) y `role` (`admin` | `support`), **obligatorios**: sin alguno, 401. `requireAdminKey` **cierra por default**: una ruta es de Betaso Games y de escritura salvo
+  que declare `read` (entra `support`) o `providers` (entran los operadores, y la ruta acota). Hoy sólo
+  el catálogo declara `providers`; el historial, los registros, `/game-data` y `/internal/settings`
+  son de Betaso Games. Ver «Incremento completo — modos con dueño y suscripciones».
+- **Los modos tienen dueño** (`ownerProviderId`: `null` compartido, un id propio de ese operador) y los
+  compartidos, suscriptores **explícitos** (`subscribers`; ausente = `[]` = nadie). Cada operador
+  elige la **fuente** de su catálogo entero (`provider_catalogs`: `shared` | `own`, ausente =
+  `shared`). El público `GET /game-modes` sirve sólo compartidos; el orquestador lee modos y fuentes
+  por `GET /internal/game-modes`. **El catálogo no publica a ningún broker**: el exchange `betaso`,
+  su outbox, `/sync` y `RABBITMQ_URL` se fueron; Betaso lee dominó del orquestador. Ver «Incremento
+  completo — modos con dueño: fuente del catálogo y sin exchange `betaso`».
 - **La revancha**: el motor abre la ventana (`isRematchEnabled: true` en `configOf`), pero nadie abre
   la compuerta, así que sale siempre con `eligible: false`. Revancha de verdad pide que el orquestador
   vuelva a cobrar.
@@ -2562,6 +2574,94 @@ verde; el contrato y el `explain` corrieron contra un Mongo 7 de verdad.
   tipo que había quedado del port de truco y nadie resolvía; ahora es el de este puerto.
 - Verificado por mutación: sin la ruta en `register.ts` el e2e de cableado sale rojo, y con "irse" antes
   que "ganar" sale rojo el caso de 4P.
+
+## Incremento completo — modos con dueño y suscripciones (rama `feat/modos-con-dueno-y-suscripciones`)
+
+El PR 3 del plan «rivales, valores propios, suscripciones y roles del panel» (`tasks/` del workspace).
+Desde `main`. Se programó contra el contrato de token que billing-auth está sacando en paralelo.
+
+- **El principal es `{ name, provider, role }`** (`shared/http/api-key.ts`) y la llave
+  (`API_KEY_ADMIN`) es un admin de Betaso Games. El verificador (`admin-token-verifier.ts`) es
+  TOLERANTE con lo ausente —un token de antes no trae ni `prv` ni `role`, y rechazarlo deslogueaba al
+  panel un TTL entero— y ESTRICTO con lo presente: un rol desconocido o un `prv` que no es texto es
+  `undefined`, no el default.
+- ⚠ **EL HUECO ENTRE DESPLIEGUES (B4) SE CIERRA ACÁ Y NO EN CADA RUTA.** Antes el token abría todo lo
+  que abría la llave, así que el día que billing-auth emitiera un token de operador, ese admin entraba
+  como admin total del dominó. `requireAdminKey(expected, tokens, { read?, providers? })` cierra por
+  default: sin `providers`, un operador es 403; sin `read`, `support` es 403. Una ruta nueva que se
+  olvide de decir algo queda cerrada, que es el error que se ve. Lo fija
+  `src/tests/admin-scope.e2e.test.ts` contra la app montada. `requireApiKey` (el orquestador) ya no es
+  la misma puerta: no deja principal, porque el orquestador no es un admin.
+- **Dos reglas de ámbito en el servicio** (`service.ts`): un modo propio de OTRO operador no existe
+  (404 en todo); un compartido no es secreto —lo lista el público— así que tocarlo sin poder es 403
+  (`GameModeForbiddenError`, el sexto error). Cada operador habla por sí mismo: crea propios suyos, se
+  suscribe él, copia para él.
+- **Sin migración ni apagón**: `ownerProviderId` y `subscribers` ausentes se leen `null`. `null` en
+  `subscribers` es LEGADO y se ofrece a todos, igual que antes; un compartido nuevo nace con `[]`. Sumar
+  o sacar un operador de un legado es 409 hasta que Betaso Games fije la lista
+  (`PUT /game-modes/:uuid/subscribers`): sumarlo lo dejaría ofrecido sólo a ése. El adaptador Mongo lo
+  impide también en la base (`subscribers: { $type: "array" }` en el filtro: `$addToSet` sobre un campo
+  ausente lo crearía con un solo elemento).
+- **Los suscriptores no avanzan `__v` ni `updatedAt`.** `__v` es la revisión del outbox: si avanzara,
+  cada suscripción publicaría un `game_mode.updated` idéntico a Betaso —contándole la actividad de los
+  otros operadores—. La baja de un compartido sigue escribiendo sólo `isActive`, así que reactivarlo
+  lo devuelve a los mismos operadores.
+- **La unicidad es por dueño** y conserva la asimetría de v1 (par al crear, nombre al renombrar) y el
+  hueco heredado, con un test pineado por dueño además del original.
+- **La copia de los compartidos** (`POST /game-modes/copy-shared`) usa uuid v5 (`copy-uuid.ts`,
+  `node:crypto`, vector del RFC en su test) e `insertIfAbsent` (`$setOnInsert` con upsert): reintentar
+  completa una copia a medias y no pisa lo que el operador editó. Un propio homónimo con otro uuid se
+  saltea y se informa (`NAME_TAKEN`); un origen sin forma de UUID, `INVALID_SOURCE_UUID`. Todo en un
+  turno del lease.
+- **Al exchange `betaso` sólo salen los compartidos** (`publishable`, `outbox.ts`), filtrado en los dos
+  adaptadores y en las cuatro puertas: el reconciliador lee el catálogo entero en cada tick y, sin el
+  filtro, "recuperaría" todo modo propio. El outbox, `/sync` y `RABBITMQ_URL` se quedan hasta que
+  Betaso-Backend lea el catálogo del orquestador.
+- **`GET /internal/game-modes`** (`transports/http/internal.ts`): con `ORCHESTRATOR_API_KEY`, fail
+  closed, activos con dueño y suscriptores; `?includeInactive=1` suma los dados de baja.
+- ⚠ **El dominó no verifica el operador al abrir una mesa**: `POST /internal/matches` resuelve el modo
+  activo por uuid sin mirar su dueño. Lo garantiza el orquestador.
+- **El público `/game-modes/:uuid` contesta 404 a un modo propio.** El front de dominó lee esa ruta para
+  la config de la mesa (`table-config.ts`): una mesa con un modo propio no la va a encontrar hasta que
+  el front lea el catálogo efectivo del orquestador. No pasa hasta que exista un modo propio.
+- **Mongo de verdad**: `mongo-repository.int.test.ts` corre el contrato del repositorio contra Mongo
+  (`MONGO_INT_URI`) más el legado de v1 y tres upserts concurrentes.
+
+### Al mergear a `develop`
+
+`develop` tiene `GET /internal/players/:userId/matches` (`players.ts`) detrás de
+`requireAdminKey(adminApiKey, adminTokens)`. Con el default cerrado queda de Betaso Games con rol
+`admin`: si `support` tiene que leerlo, va `{ read: true }`. Ningún operador debe entrar (no hay ámbito
+de partidas). El filtro por motivo del listado no cambia nada de esto.
+
+## Incremento completo — modos con dueño: fuente del catálogo y sin exchange `betaso` (misma rama)
+
+Correcciones del PR 3 sobre la rama de arriba, del plan «correcciones sobre la implementación de
+Emmanuel». Varias entradas del bloque anterior quedan desactualizadas; las vigentes son éstas:
+
+- ~~El verificador es TOLERANTE con lo ausente~~ → **exige `prv` (texto o `null` explícito) y `role`**.
+  `mintAdminToken` de la suite firma `{ prv: null, role: "admin" }` por default; el token viejo es
+  `mintLegacyAdminToken` y da 401.
+- ~~`subscribers: null` es LEGADO y se ofrece a todos~~ → **la lista es explícita**: ausente se lee
+  `[]`. Se fueron el 409 sobre el legado, `PUT /game-modes/:uuid/subscribers`, `setSubscribers` y el
+  filtro `$type: "array"`. Los compartidos de antes se suscriben UNA vez con
+  `npm run modes:subscribe-existing -- <providerId...>` (`src/subscribe-existing.ts` →
+  `subscribeExistingModes`): sólo toca los compartidos SIN el campo, por eso es idempotente y por eso
+  todo modo nuevo nace con `[]` ESCRITO. Cómo correrlo en un servidor: `docs/operacion.md`.
+- ~~Al exchange `betaso` sólo salen los compartidos~~ → **no sale nada**: outbox del catálogo,
+  `events.ts`, `POST /game-modes/sync`, el despachador, `RABBITMQ_URL` (y su exigencia en prod) y el
+  smoke `smoke:game-mode` se borraron. `shared/outbox`, `shared/mongo-outbox` y `shared/amqp` quedan:
+  son del resultado de partida. `service.int.test.ts` pinea los imports de `service.ts` (repositorio
+  y lease; nada de amqp ni outbox). ⚠ Mergear a `develop` DESPUÉS de que Betaso-Backend lea dominó
+  del orquestador; en el VPS, quitar `RABBITMQ_URL` del `.env` (se ignora igual).
+- **La fuente del catálogo** (`provider_catalogs`, `{ providerId, source, updatedAt, updatedBy }`,
+  ausente = `shared`): `GET /game-modes/catalogs/:providerId` (cualquier rol del ámbito) y
+  `PUT … {source}` (rol `admin` del ámbito; Betaso Games cualquiera), bajo el lease y la cola. `own`
+  sin un modo propio ACTIVO es 409, y con la fuente en `own` dar de baja el último propio activo
+  también es 409 (`refuseEmptyingOwnCatalog`, en el mismo turno del lease).
+- **`GET /internal/game-modes`** = `{ status, data: [modos], catalogs: { [providerId]: "own" } }`, sólo
+  las fuentes que no son `shared`; `?includeInactive=1` igual que antes.
+- `copy-shared` se queda; ahora copia los compartidos activos a los que el operador está suscrito.
 
 ## Cómo se ejecuta una tarea
 

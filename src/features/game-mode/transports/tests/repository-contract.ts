@@ -73,6 +73,10 @@ export function describeGameModeRepositoryContract(
         enableBots: false,
         // SIN NIVELES, el reposo: una mesa que nadie configuró no ofrece aumentar.
         betLevels: [],
+        // UN COMPARTIDO SIN NADIE: la lista explícita y vacía, no el legado (`null`), que se ofrecería
+        // a todos los operadores.
+        ownerProviderId: null,
+        subscribers: [],
         createdAt: new Date(BASE_INSTANT),
         updatedAt: new Date(BASE_INSTANT),
         version: 0,
@@ -312,8 +316,7 @@ export function describeGameModeRepositoryContract(
         enableBots: true,
         betLevels: [{ level: 2, extra: 1, additionalPoints: 15 }],
       });
-      // La identidad y el nacimiento NO son editables: `update` que los moviera dejaría al outbox
-      // publicando un modo distinto con la misma clave de deduplicación.
+      // La identidad y el nacimiento NO son editables: el orquestador guarda el uuid en cada mesa.
       expect(updated?.id).toBe(created.id);
       expect(updated?.uuid).toBe(created.uuid);
       expect(updated?.createdAt).toEqual(created.createdAt);
@@ -332,8 +335,7 @@ export function describeGameModeRepositoryContract(
 
     // EL RELOJ NO ES LA REVISIÓN, y éste es el test que lo cobra. La implementación obvia y
     // equivocada es derivar `version` de `updatedAt`: dos ediciones del mismo milisegundo
-    // colapsarían en la misma revisión, y el outbox deduplica por `uuid + version` — o sea que uno
-    // de los dos eventos se descarta EN SILENCIO y el consumidor se queda con el catálogo viejo.
+    // colapsarían en la misma revisión, y quien cachea el catálogo no vería el segundo cambio.
     it("dos ediciones del mismo milisegundo avanzan la revisión igual", async () => {
       const { repository } = harnessOf();
       const created = await repository.create(clasica());
@@ -354,6 +356,99 @@ export function describeGameModeRepositoryContract(
 
       expect(await repository.update("no-existe", { name: "Fantasma" })).toBeUndefined();
       expect(await repository.all()).toEqual([]);
+    });
+  });
+
+  describe(`${label}: dueño y suscriptores`, () => {
+    it("un modo propio nace con su dueño y sin suscriptores", async () => {
+      const { repository } = harnessOf();
+
+      const propio = await repository.create(clasica({ ownerProviderId: "parley" }));
+
+      expect(propio).toMatchObject({ ownerProviderId: "parley", subscribers: [] });
+      expect(await repository.byUuid(propio.uuid)).toEqual(propio);
+    });
+
+    // SUSCRIBIRSE NO ES UNA REVISIÓN: ni `version` ni `updatedAt` se mueven (ver el puerto).
+    it("sumar y sacar suscriptores no avanza la revisión ni la fecha", async () => {
+      const { repository, clock } = harnessOf();
+      const creado = await repository.create(clasica());
+      clock.set(BASE_INSTANT + 5_000);
+
+      const sumado = await repository.addSubscriber(creado.uuid, "parley");
+      const otra = await repository.addSubscriber(creado.uuid, "betaso");
+      const repetido = await repository.addSubscriber(creado.uuid, "parley");
+      const sacado = await repository.removeSubscriber(creado.uuid, "parley");
+
+      expect(sumado?.subscribers).toEqual(["parley"]);
+      expect(otra?.subscribers).toEqual(["parley", "betaso"]);
+      expect(repetido?.subscribers).toEqual(["parley", "betaso"]);
+      expect(sacado?.subscribers).toEqual(["betaso"]);
+      for (const mode of [sumado, otra, repetido, sacado]) {
+        expect(mode?.version).toBe(0);
+        expect(mode?.updatedAt).toEqual(new Date(BASE_INSTANT));
+      }
+      expect(await repository.byUuid(creado.uuid)).toEqual(sacado);
+    });
+
+    // UNA EDICIÓN NO TOCA A QUIÉN SE OFRECE: el `$set` del `PUT` lleva sólo los campos del modo.
+    it("editar el modo conserva los suscriptores y el dueño", async () => {
+      const { repository } = harnessOf();
+      const creado = await repository.create(clasica());
+      await repository.addSubscriber(creado.uuid, "parley");
+
+      const editado = await repository.update(creado.uuid, { prize: 20, isActive: false });
+
+      expect(editado).toMatchObject({ ownerProviderId: null, subscribers: ["parley"], version: 1 });
+    });
+
+    it("los suscriptores son sólo de los compartidos", async () => {
+      const { repository } = harnessOf();
+      const propio = await repository.create(clasica({ ownerProviderId: "parley" }));
+
+      expect(await repository.addSubscriber(propio.uuid, "otro")).toBeUndefined();
+      expect(await repository.removeSubscriber(propio.uuid, "otro")).toBeUndefined();
+      expect((await repository.byUuid(propio.uuid))?.subscribers).toEqual([]);
+      expect(await repository.addSubscriber("no-existe", "otro")).toBeUndefined();
+    });
+
+    it("sacar al último deja el modo sin nadie", async () => {
+      const { repository } = harnessOf();
+      const creado = await repository.create(clasica());
+      await repository.addSubscriber(creado.uuid, "parley");
+
+      expect((await repository.removeSubscriber(creado.uuid, "parley"))?.subscribers).toEqual([]);
+    });
+  });
+
+  describe(`${label}: crear con un uuid dado`, () => {
+    it("crea con ese uuid, y la segunda vez devuelve el que estaba sin tocarlo", async () => {
+      const { repository, clock } = harnessOf();
+      const uuid = "bb041643-c230-559e-9082-526e5f05487b";
+
+      const primero = await repository.insertIfAbsent(
+        uuid,
+        clasica({ name: "Copia", ownerProviderId: "parley" }),
+      );
+      await repository.update(uuid, { prize: 99 });
+      clock.set(BASE_INSTANT + 1_000);
+      const segundo = await repository.insertIfAbsent(
+        uuid,
+        clasica({ name: "Otra cosa", ownerProviderId: "parley" }),
+      );
+
+      expect(primero.created).toBe(true);
+      expect(primero.mode).toMatchObject({
+        uuid,
+        name: "Copia",
+        ownerProviderId: "parley",
+        subscribers: [],
+        isActive: true,
+        version: 0,
+      });
+      expect(segundo.created).toBe(false);
+      expect(segundo.mode).toMatchObject({ uuid, name: "Copia", prize: 99, version: 1 });
+      expect(await repository.all()).toHaveLength(1);
     });
   });
 }

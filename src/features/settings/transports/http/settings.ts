@@ -51,9 +51,10 @@ export function settingsRoutes(deps: SettingsRoutesDeps): Router {
     });
     return router;
   }
-  // Leerla y cambiarla: la llave o un admin.
+  // Leerla: la llave o un admin de Betaso Games, `support` incluido. Cambiarla: sólo un `admin` de
+  // Betaso Games. Ningún admin de OPERADOR: los plazos son de todas las mesas de todos los operadores.
   const admin = requireAdminKey(adminApiKey, adminTokens);
-  const reader = admin;
+  const reader = requireAdminKey(adminApiKey, adminTokens, { read: true });
 
   const dtoOf = (section: SettingsSection): SectionDTO => ({
     name: section.name,
