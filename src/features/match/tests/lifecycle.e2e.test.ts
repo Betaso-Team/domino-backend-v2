@@ -252,6 +252,13 @@ describe("ciclo de vida de una partida", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      // LOS PLAZOS CON LOS QUE NACIÓ, los del entorno de la suite: el front dibuja el anillo con ellos.
+      timeouts: {
+        turnMs: env.turnTimeoutMs,
+        extraTimeMs: env.extraTimeReserveMs,
+        dealingMs: env.dealingTimeoutMs,
+        betResponseMs: originalGlobalConfig.betResponseTimeoutMs,
+      },
       serverNow: expect.any(Number),
     });
   });
