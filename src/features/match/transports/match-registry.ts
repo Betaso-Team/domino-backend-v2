@@ -1,5 +1,31 @@
 import type { KeyValueStore } from "@/shared/kv";
-import type { DominoMatchConfig } from "../core/config";
+import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
+
+/**
+ * LOS PLAZOS CON LOS QUE NACIÓ LA MESA, para que el front dibuje el anillo con el largo de verdad.
+ * El vencimiento ya viaja en `activeDeadline`; lo que el cliente no podía saber es cuánto duraba el
+ * plazo entero, y con una constante propia el anillo arrancaba a la mitad o trabado arriba apenas el
+ * panel editaba la sección `match`. Son los de la foto de `onCreate`, no los de hoy: una edición en
+ * caliente llega a la mesa siguiente, y la que está abierta tiene que seguir publicando los suyos.
+ */
+export interface PublicMatchTimeouts {
+  readonly turnMs: number;
+  readonly extraTimeMs: number;
+  readonly dealingMs: number;
+  readonly betResponseMs: number;
+}
+
+// Allowlist, como el resto del DTO: la config global también lleva plazos que el front no usa y
+// semillas de prueba que no tienen por qué salir. Se recorta acá, ANTES del registro, para que el
+// registro nunca tenga la config entera en la mano.
+export function publicTimeoutsOf(global: GlobalDominoConfig): PublicMatchTimeouts {
+  return {
+    turnMs: global.turnTimeoutMs,
+    extraTimeMs: global.extraTimeReserveMs,
+    dealingMs: global.dealingTimeoutMs,
+    betResponseMs: global.betResponseTimeoutMs,
+  };
+}
 
 export interface PublicMatchConfig {
   readonly matchId: string;
@@ -15,6 +41,7 @@ export interface PublicMatchConfig {
    * esta mesa no ofrece aumentar. El precio de cada uno lo deriva el cliente con `betAmountsOf`.
    */
   readonly betLevels: readonly { readonly level: number; readonly additionalPoints: number }[];
+  readonly timeouts: PublicMatchTimeouts;
 }
 
 export interface MatchConfigResponse extends PublicMatchConfig {
@@ -113,7 +140,14 @@ export class MatchRegistry {
   // Nace la sala. Es el PRIMER LATIDO y nada más: todo lo que escribe lo vuelve a escribir cada
   // `HEARTBEAT_MS`, así que no hay un camino de alta distinto del de mantenimiento — y un camino
   // que corre una sola vez es el que nadie prueba.
-  async register(roomId: string, config: DominoMatchConfig): Promise<void> {
+  //
+  // LOS PLAZOS SON OBLIGATORIOS y no tienen default: uno fijo acá publicaría la base aunque la mesa
+  // haya nacido con una edición del panel, y el anillo del front volvería a mentir sin un test rojo.
+  async register(
+    roomId: string,
+    config: DominoMatchConfig,
+    timeouts: PublicMatchTimeouts,
+  ): Promise<void> {
     // Allowlist explícita: restar `seed` filtraría solo lo conocido hoy y una propiedad
     // secreta agregada mañana se filtraría al wire. Tampoco se exponen campos derivados
     // de la ventana de reparto.
@@ -130,6 +164,13 @@ export class MatchRegistry {
         level,
         additionalPoints,
       })),
+      // Campo por campo y no con un spread: un objeto más ancho que el tipo también compila.
+      timeouts: {
+        turnMs: timeouts.turnMs,
+        extraTimeMs: timeouts.extraTimeMs,
+        dealingMs: timeouts.dealingMs,
+        betResponseMs: timeouts.betResponseMs,
+      },
     });
     this.seatsByRoomId.set(
       roomId,

@@ -1,7 +1,8 @@
 import { MemoryKeyValueStore } from "@/shared/kv";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_GLOBAL_CONFIG } from "../core/config";
 import { replayConfigOf } from "./match-contract";
-import { HEARTBEAT_MS, MatchRegistry, TTL_SECONDS } from "./match-registry";
+import { HEARTBEAT_MS, MatchRegistry, TTL_SECONDS, publicTimeoutsOf } from "./match-registry";
 
 // El config se arma con el CONTRATO y no a mano: lo que el registro indexa son las parejas
 // del snapshot REAL, y un objeto escrito a mano podría describir una mesa que el contrato
@@ -29,6 +30,9 @@ const roomOptions = {
 } as const;
 
 const config = replayConfigOf(roomOptions);
+// Los plazos con los que nació la mesa. Distintos entre sí a propósito: con dos iguales, un campo
+// cruzado con otro pasaría verde.
+const timeouts = { turnMs: 45_000, extraTimeMs: 25_000, dealingMs: 15_000, betResponseMs: 8_000 };
 // LA MESA CON DOS MONEDAS, para medir qué NO sale por el DTO público: identidad, moneda y
 // tasa son privadas, y con las dos monedas distintas una fuga se ve por cualquiera de las dos.
 const privateConfig = replayConfigOf({
@@ -51,7 +55,7 @@ function fakeClock(start = 1_000_000) {
 describe("MatchRegistry", () => {
   it("expone solo la configuración pública de una sala", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     expect(await registry.publicConfigOf("room-1")).toEqual({
       matchId: "m1",
@@ -61,7 +65,30 @@ describe("MatchRegistry", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      timeouts: { turnMs: 45_000, extraTimeMs: 25_000, dealingMs: 15_000, betResponseMs: 8_000 },
     });
+  });
+
+  // LOS PLAZOS SALEN DE LA CONFIG QUE LA MESA FOTOGRAFIÓ, recortados: la config global también trae
+  // pausas, revancha y la ventana de reconexión, que el front no usa y no tienen por qué viajar.
+  it("publica solo los cuatro plazos de la config global", () => {
+    expect(
+      publicTimeoutsOf({
+        ...DEFAULT_GLOBAL_CONFIG,
+        turnTimeoutMs: 1,
+        extraTimeReserveMs: 2,
+        dealingTimeoutMs: 3,
+        betResponseTimeoutMs: 4,
+      }),
+    ).toEqual({ turnMs: 1, extraTimeMs: 2, dealingMs: 3, betResponseMs: 4 });
+  });
+
+  it("no publica más que los plazos aunque reciba un objeto más ancho", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    const wider = { ...timeouts, presentingRoundMs: 4_000 };
+    await registry.register("room-1", config, wider);
+
+    expect((await registry.publicConfigOf("room-1"))?.timeouts).toEqual(timeouts);
   });
 
   // LOS NIVELES QUE LA MESA OFRECE, para pintar el aumento ANTES de proponer (truco `58ce78f`). Sale
@@ -72,6 +99,7 @@ describe("MatchRegistry", () => {
     await registry.register(
       "room-1",
       replayConfigOf({ ...roomOptions, betLevels: [{ level: 3, extra: 7, additionalPoints: 15 }] }),
+      timeouts,
     );
 
     expect((await registry.publicConfigOf("room-1"))?.betLevels).toEqual([
@@ -85,7 +113,7 @@ describe("MatchRegistry", () => {
   it("nunca serializa la semilla, ni siquiera en el almacén", async () => {
     const store = new MemoryKeyValueStore();
     const registry = new MatchRegistry(store);
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     expect(JSON.stringify(await registry.publicConfigOf("room-1"))).not.toContain(
       "secreto-que-no-sale",
@@ -101,7 +129,7 @@ describe("MatchRegistry", () => {
 
   it("encuentra la sala activa de un jugador", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     expect(await registry.matchOf("u2")).toBe("room-1");
     expect(await registry.matchOf("u9")).toBeUndefined();
@@ -109,7 +137,7 @@ describe("MatchRegistry", () => {
 
   it("deja de exponer una partida eliminada", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     await registry.remove("room-1");
 
@@ -126,7 +154,7 @@ describe("MatchRegistry", () => {
     const procesoA = new MatchRegistry(compartido);
     const procesoB = new MatchRegistry(compartido);
 
-    await procesoA.register("room-1", config);
+    await procesoA.register("room-1", config, timeouts);
 
     expect(await procesoB.publicConfigOf("room-1")).toEqual({
       matchId: "m1",
@@ -136,6 +164,7 @@ describe("MatchRegistry", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      timeouts,
     });
     expect(await procesoB.matchOf("u1")).toBe("room-1");
   });
@@ -146,7 +175,7 @@ describe("MatchRegistry", () => {
   it("olvida la sala de un proceso que dejó de latir", async () => {
     const clock = fakeClock();
     const registry = new MatchRegistry(new MemoryKeyValueStore(clock.now));
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     clock.advance(TTL_SECONDS * 1000 + 1);
 
@@ -159,7 +188,7 @@ describe("MatchRegistry", () => {
   it("el latido renueva el plazo de una sala viva", async () => {
     const clock = fakeClock();
     const registry = new MatchRegistry(new MemoryKeyValueStore(clock.now));
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     clock.advance(TTL_SECONDS * 1000 - 1);
     await registry.keepAlive("room-1");
@@ -176,7 +205,7 @@ describe("MatchRegistry", () => {
     const compartido = new MemoryKeyValueStore();
     const procesoA = new MatchRegistry(compartido);
     const procesoB = new MatchRegistry(compartido);
-    await procesoA.register("room-1", config);
+    await procesoA.register("room-1", config, timeouts);
 
     await procesoB.keepAlive("room-1");
     await procesoB.remove("room-1");
@@ -193,7 +222,7 @@ describe("MatchRegistry", () => {
   // repetido desde que la identidad se aplanó.
   it("indexa cada asiento por su userId y no inventa los que no se sentaron", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", privateConfig);
+    await registry.register("room-1", privateConfig, timeouts);
 
     expect(await registry.matchOf("u1")).toBe("room-1");
     expect(await registry.matchOf("u2")).toBe("room-1");
@@ -209,7 +238,7 @@ describe("MatchRegistry", () => {
   it("publica los montos UC sin identidad, moneda ni tasa", async () => {
     const store = new MemoryKeyValueStore();
     const registry = new MatchRegistry(store);
-    await registry.register("room-1", privateConfig);
+    await registry.register("room-1", privateConfig, timeouts);
     const raw = await store.get("match_config:room-1");
 
     expect(raw).toBeDefined();
@@ -226,7 +255,7 @@ describe("MatchRegistry", () => {
     const compartido = new MemoryKeyValueStore();
     const vieja = new MatchRegistry(compartido);
     const nueva = new MatchRegistry(compartido);
-    await vieja.register("room-1", config);
+    await vieja.register("room-1", config, timeouts);
     await nueva.register(
       "room-2",
       replayConfigOf({
@@ -234,6 +263,7 @@ describe("MatchRegistry", () => {
         matchId: "m2",
         seats: [seat("u1", 0), seat("u3", 1)],
       }),
+      timeouts,
     );
 
     await vieja.remove("room-1");
@@ -250,7 +280,7 @@ describe("MatchRegistry", () => {
 describe("MatchRegistry: el latido suelta a quien ya no juega", () => {
   it("suelta al que dejó de estar activo y renueva al resto", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     await registry.keepAlive("room-1", ["u2"]);
 
@@ -260,7 +290,7 @@ describe("MatchRegistry: el latido suelta a quien ya no juega", () => {
 
   it("con la partida terminada no queda nadie sentado, y la sala sigue respondiendo su config", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     await registry.keepAlive("room-1", []);
 
@@ -273,7 +303,7 @@ describe("MatchRegistry: el latido suelta a quien ya no juega", () => {
   // volver a sentarlo, o el jugador quedaría preso de la mesa vieja otra vez.
   it("un latido sin lista no revive a quien ya se soltó", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
     await registry.keepAlive("room-1", ["u2"]);
 
     await registry.keepAlive("room-1");
@@ -286,10 +316,11 @@ describe("MatchRegistry: el latido suelta a quien ya no juega", () => {
     const compartido = new MemoryKeyValueStore();
     const vieja = new MatchRegistry(compartido);
     const nueva = new MatchRegistry(compartido);
-    await vieja.register("room-1", config);
+    await vieja.register("room-1", config, timeouts);
     await nueva.register(
       "room-2",
       replayConfigOf({ ...roomOptions, matchId: "m2", seats: [seat("u1", 0), seat("u3", 1)] }),
+      timeouts,
     );
 
     await vieja.keepAlive("room-1", []);
@@ -299,7 +330,7 @@ describe("MatchRegistry: el latido suelta a quien ya no juega", () => {
 
   it("el censo cuenta solo a los que siguen jugando", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     await registry.keepAlive("room-1", ["u2"]);
     expect(await registry.census()).toMatchObject({ playersInMatch: 1 });
@@ -321,8 +352,8 @@ describe("MatchRegistry: censo del lobby", () => {
       seats: [seat("u3", 0), seat("u4", 1)],
     });
 
-    await processA.register("room-1", config);
-    await processB.register("room-2", otherMode);
+    await processA.register("room-1", config, timeouts);
+    await processB.register("room-2", otherMode, timeouts);
 
     const census = await processA.census();
     expect(census.playersInMatch).toBe(4);
@@ -336,7 +367,7 @@ describe("MatchRegistry: censo del lobby", () => {
     const clock = fakeClock();
     const store = new MemoryKeyValueStore(clock.now);
     const registry = new MatchRegistry(store, clock.now);
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
     await store.hset("live_seats", "corrupt", "{");
 
     clock.advance(2 * HEARTBEAT_MS + 1);
@@ -352,7 +383,7 @@ describe("MatchRegistry: censo del lobby", () => {
   it("al cerrar una sala la saca del censo en el acto", async () => {
     const store = new MemoryKeyValueStore();
     const registry = new MatchRegistry(store);
-    await registry.register("room-1", config);
+    await registry.register("room-1", config, timeouts);
 
     await registry.remove("room-1");
 

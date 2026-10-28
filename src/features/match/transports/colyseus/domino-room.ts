@@ -41,7 +41,7 @@ import {
   OrchestratorUnavailableError,
 } from "../../network/orchestrator-charges";
 import { type SeatCredentials, UnknownGameModeError, configOf, requestOf } from "../match-contract";
-import { HEARTBEAT_MS, MatchRegistry } from "../match-registry";
+import { HEARTBEAT_MS, MatchRegistry, publicTimeoutsOf } from "../match-registry";
 import {
   type MatchHasOutcome,
   type MatchSeatGuard,
@@ -348,7 +348,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // un `GET /config/:roomId` que llegue antes de que la clave esté escrita —y que caiga en otro
     // proceso, que es todo el punto de esto— responde 404 por una sala que existe.
     this.matches = rootContainer.resolve(MatchRegistry);
-    await this.matches.register(this.roomId, config);
+    await this.matches.register(this.roomId, config, publicTimeoutsOf(global));
 
     // EL LATIDO que renueva ese plazo. Va POR EL RELOJ DE LA SALA —el mismo que vence los
     // turnos— y no colgado de los hechos del juego, porque tiene que darse aunque no pase nada:
