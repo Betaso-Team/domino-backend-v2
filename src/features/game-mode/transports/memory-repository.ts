@@ -21,6 +21,45 @@ export class MemoryGameModeRepository implements GameModeRepository {
   constructor(private readonly clock: Clock) {}
 
   async create(input: CreateGameMode): Promise<GameMode> {
+    return this.insert(randomUUID(), input);
+  }
+
+  async insertIfAbsent(
+    uuid: string,
+    input: CreateGameMode,
+  ): Promise<{ readonly mode: GameMode; readonly created: boolean }> {
+    const existing = this.found((mode) => mode.uuid === uuid);
+    if (existing) return { mode: existing, created: false };
+    return { mode: await this.insert(uuid, input), created: true };
+  }
+
+  // LOS SUSCRIPTORES: sólo compartidos (ver el puerto). Sin `updatedAt` ni `version`: suscribirse no
+  // es una edición del modo.
+  async addSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
+    return this.changeSubscribers(uuid, (list) =>
+      list.includes(providerId) ? list : [...list, providerId],
+    );
+  }
+
+  async removeSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
+    return this.changeSubscribers(uuid, (list) => list.filter((id) => id !== providerId));
+  }
+
+  private changeSubscribers(
+    uuid: string,
+    next: (list: readonly string[]) => readonly string[],
+  ): GameMode | undefined {
+    const index = this.modes.findIndex(
+      (mode) => mode.uuid === uuid && mode.ownerProviderId === null,
+    );
+    if (index < 0) return undefined;
+    const current = this.modes[index] as GameMode;
+    const updated: GameMode = { ...current, subscribers: next(current.subscribers) };
+    this.modes[index] = updated;
+    return copyOf(updated);
+  }
+
+  private async insert(uuid: string, input: CreateGameMode): Promise<GameMode> {
     const now = new Date(this.clock.now());
     // Los defaults están duplicados con los del adaptador Mongo y eso es DELIBERADO: extraerlos a
     // una función compartida los volvería un dato que ninguno de los dos adaptadores declara, y el
@@ -31,7 +70,7 @@ export class MemoryGameModeRepository implements GameModeRepository {
       // como `_id` porque el panel de v1 lo recibía así: un `mode-1` sería un identificador que un
       // panel que valide la forma rechaza.
       id: randomBytes(12).toString("hex"),
-      uuid: randomUUID(),
+      uuid,
       name: input.name,
       multiplier: input.multiplier ?? 1,
       prize: input.prize,
@@ -44,12 +83,16 @@ export class MemoryGameModeRepository implements GameModeRepository {
       // sobre una mesa de cuatro es una elección, y `||` la pisaría con el default.
       enableBots: input.enableBots ?? input.playersQuantity === 4,
       betLevels: [...(input.betLevels ?? [])],
+      ownerProviderId: input.ownerProviderId ?? null,
+      // TODO MODO NACE SIN SUSCRIPTORES: un compartido nuevo no se ofrece a nadie hasta que se
+      // suscriban; uno propio no tiene suscriptores.
+      subscribers: [],
       createdAt: now,
       updatedAt: now,
       version: 0,
     };
     this.modes.push(mode);
-    return { ...mode };
+    return copyOf(mode);
   }
 
   async update(uuid: string, input: UpdateGameMode): Promise<GameMode | undefined> {
@@ -63,13 +106,12 @@ export class MemoryGameModeRepository implements GameModeRepository {
       // misma trampa que del lado de Mongo, donde termina siendo un `null` en la base.
       ...definedOf(input),
       updatedAt: new Date(this.clock.now()),
-      // LA REVISIÓN AVANZA DESDE LA REVISIÓN, no desde el reloj. Dos ediciones del mismo
-      // milisegundo tienen que dar 1 y 2: el outbox deduplica por `uuid + version`, y dos cambios
-      // reales con la misma revisión son un evento publicado y otro descartado en silencio.
+      // LA REVISIÓN AVANZA DESDE LA REVISIÓN, no desde el reloj: dos ediciones del mismo
+      // milisegundo tienen que dar 1 y 2, igual que el `$inc` del adaptador Mongo.
       version: current.version + 1,
     };
     this.modes[index] = updated;
-    return { ...updated };
+    return copyOf(updated);
   }
 
   async active(): Promise<readonly GameMode[]> {
@@ -95,17 +137,23 @@ export class MemoryGameModeRepository implements GameModeRepository {
   // algo que el otro adaptador no puede cumplir.
   //
   // Se copia cada modo al salir: quien reciba uno y lo mute cambiaría el catálogo de todos sin
-  // pasar por `update`, o sea sin avanzar la revisión que el outbox mira.
+  // pasar por `update`, o sea sin avanzar la revisión.
   private newestFirst(modes: readonly GameMode[]): readonly GameMode[] {
     return [...modes]
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
-      .map((mode) => ({ ...mode }));
+      .map(copyOf);
   }
 
   private found(predicate: (mode: GameMode) => boolean): GameMode | undefined {
     const mode = this.modes.find(predicate);
-    return mode ? { ...mode } : undefined;
+    return mode ? copyOf(mode) : undefined;
   }
+}
+
+// La copia que sale, con la lista de suscriptores copiada también: un spread a secas comparte el
+// arreglo, y quien le hiciera `push` cambiaría a quién se ofrece el modo sin pasar por el puerto.
+function copyOf(mode: GameMode): GameMode {
+  return { ...mode, subscribers: [...mode.subscribers] };
 }
 
 function definedOf(input: UpdateGameMode): Partial<GameMode> {

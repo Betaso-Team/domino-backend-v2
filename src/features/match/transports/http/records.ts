@@ -125,7 +125,11 @@ export function recordRoutes({
   }
   // Primero QUIÉN SOS y después QUÉ MANDASTE: al revés, un anónimo distinguiría una forma inválida de
   // una válida en rutas que no tiene derecho a tocar.
-  const admin = requireAdminKey(adminApiKey, adminTokens);
+  //
+  // LAS TRES SON LECTURAS DE BETASO GAMES (`support` incluido) y ningún admin de OPERADOR las abre: el
+  // registro no guarda de qué operador es cada asiento, así que no hay ámbito con el que acotarlo, y
+  // abrirlas le mostraría a un operador las partidas —y los `userId`— de todos los demás.
+  const admin = requireAdminKey(adminApiKey, adminTokens, { read: true });
 
   // EL LISTADO, sólo `GET`: el `POST` del mismo path es del orquestador, con su propia llave
   // (`./tables.ts`), y Express los separa por método. La más nueva primero, sin `timeline` ni `rounds`,

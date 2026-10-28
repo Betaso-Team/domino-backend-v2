@@ -3,9 +3,9 @@ import { ObjectId } from "mongodb";
 import type { CollectionSource } from "./mongo-lease";
 import type { OutboxClock, OutboxEntry, OutboxRecord, OutboxStore } from "./outbox";
 
-// EL ALMACÉN DURABLE DE UN OUTBOX, parametrizado por colección. Lo usan el catálogo
-// (`game_mode_outbox`) y los resultados de partida (`match_result_outbox`); cada uno es dueño de su
-// colección y de sus claves, y ninguno lee la del otro.
+// EL ALMACÉN DURABLE DE UN OUTBOX, parametrizado por colección. Hoy lo usan los resultados de partida
+// (`match_result_outbox`); cada uso es dueño de su colección y de sus claves. La vieja
+// `game_mode_outbox` del catálogo quedó huérfana en las bases que la tenían: nadie la lee.
 //
 // SIN MONGOOSE: el driver oficial y el documento a la vista.
 
@@ -18,9 +18,8 @@ const DUPLICATE_KEY = 11000;
 // `dedupeKey` único es LA idempotencia: no es una consulta previa, es la base rechazando el segundo
 // insert. `{status, _id}` es la consulta de `next()`, que corre una vez por segundo para siempre.
 //
-// **EL CATÁLOGO NO VENCE NADA**: sus `SENT` son lo que impide que la reconciliación vuelva a emitir
-// toda revisión ya publicada. Los RESULTADOS sí (`sentRetentionSeconds`): nadie los reconcilia, y una
-// partida no se cierra dos veces con días de diferencia. El TTL va sobre `sentAt`, que una entrada
+// EL TTL ES OPCIONAL porque un outbox con reconciliación necesitaría sus `SENT` para siempre. Los
+// RESULTADOS vencen (`sentRetentionSeconds`): nadie los reconcilia, y una partida no se cierra dos veces con días de diferencia. El TTL va sobre `sentAt`, que una entrada
 // pendiente no tiene, y Mongo no vence un documento sin el campo: **lo que no salió no vence nunca**.
 // Mientras dura, un resultado enviado sigue acá entero, y volverlo a `PENDING` lo publica otra vez:
 // es la red si el broker pierde su disco antes de que el orquestador lo consuma.

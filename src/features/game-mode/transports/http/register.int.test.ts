@@ -1,5 +1,6 @@
 import type { AddressInfo } from "node:net";
 import type { Logger } from "@/logger";
+import type { Admin, AdminTokenCheck } from "@/shared/http/api-key";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import type { Lease } from "@/shared/mongo-lease";
 import { routesOf } from "@/tests/routes";
@@ -8,15 +9,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GameModeRepository } from "../../core/catalog";
 import type { GameMode } from "../../core/game-mode";
 import { GameModeService } from "../../service";
-import { MemoryGameModeOutbox } from "../memory-outbox";
+import { MemoryProviderCatalogs } from "../memory-provider-catalogs";
 import { MemoryGameModeRepository } from "../memory-repository";
 import { BASE_INSTANT, clasica, mutableClock } from "../tests/repository-contract";
 import { gameModeHttp } from "./register";
 
 // LA FRONTERA MEDIDA CONTRA EL SERVICIO DE VERDAD y los adaptadores de memoria, no contra un doble
-// del servicio. Es el mismo argumento de `service.int.test.ts`: `MemoryGameModeRepository` y
-// `MemoryGameModeOutbox` son los que despliega la instancia sin `MONGO_URI`, así que medir contra
-// ellos mide el sistema. Un doble con `create: vi.fn()` mediría que el handler llama al método que
+// del servicio. Es el mismo argumento de `service.int.test.ts`: `MemoryGameModeRepository` es el que
+// despliega la instancia sin `MONGO_URI`, así que medir contra él mide el sistema. Un doble con `create: vi.fn()` mediría que el handler llama al método que
 // el propio test le enseñó a devolver, y lo que importa acá —el 409 del duplicado, el 409 de la baja
 // repetida, el 404 del inactivo, el default que NO se pisa en un `PUT` parcial— nace del ida y
 // vuelta entre los tres.
@@ -25,6 +25,19 @@ import { gameModeHttp } from "./register";
 // lease negado (503) y el repositorio que revienta (500).
 
 const KEY = "k".repeat(16);
+const ORCHESTRATOR_KEY = "o".repeat(16);
+
+// LOS ADMINS CON SESIÓN, como los dejaría pasar el verificador de billing-auth. Se pasan como
+// `"Bearer <token>"` en el lugar de la llave (ver `call`).
+const TOKENS: Record<string, Admin> = {
+  games: { name: "ana", provider: null, role: "admin" },
+  support: { name: "sol", provider: null, role: "support" },
+  parley: { name: "pia", provider: "parley", role: "admin" },
+  parleySupport: { name: "pedro", provider: "parley", role: "support" },
+  rival: { name: "rita", provider: "rival", role: "admin" },
+};
+const adminTokens: AdminTokenCheck = async (token) => TOKENS[token];
+const as = (who: keyof typeof TOKENS): string => `Bearer ${who}`;
 const SAME_LENGTH_KEY = "x".repeat(16);
 const CREATED_AT = new Date(BASE_INSTANT).toISOString();
 
@@ -35,7 +48,6 @@ interface Response {
 
 interface Harness {
   readonly repository: GameModeRepository;
-  readonly outbox: MemoryGameModeOutbox;
   readonly logger: Logger;
   get(path: string, key?: string): Promise<Response>;
   post(path: string, body?: unknown, key?: string): Promise<Response>;
@@ -63,22 +75,21 @@ afterEach(() => {
 function harness(
   over: {
     adminApiKey?: string | undefined;
+    orchestratorApiKey?: string | undefined;
     lease?: Lease;
     repository?: GameModeRepository;
   } = {},
 ): Harness {
   const clock = mutableClock();
   const repository = over.repository ?? new MemoryGameModeRepository(clock);
-  const outbox = new MemoryGameModeOutbox(clock);
   const service = new GameModeService(
     repository,
-    outbox,
+    new MemoryProviderCatalogs(clock),
     over.lease ?? {
       async within(_name, _ttlMs, work) {
         return work();
       },
     },
-    vi.fn(),
   );
   const logger = fakeLogger();
   const app = express();
@@ -91,6 +102,8 @@ function harness(
       service,
       logger,
       adminApiKey: "adminApiKey" in over ? over.adminApiKey : KEY,
+      adminTokens,
+      orchestratorApiKey: "orchestratorApiKey" in over ? over.orchestratorApiKey : ORCHESTRATOR_KEY,
     }),
   );
   app.use(httpErrorHandler(logger));
@@ -110,7 +123,11 @@ function harness(
     const response = await fetch(`http://127.0.0.1:${port}${path}`, {
       method,
       headers: {
-        ...(key === undefined ? {} : { "x-internal-api-key": key }),
+        ...(key === undefined
+          ? {}
+          : key.startsWith("Bearer ")
+            ? { authorization: key }
+            : { "x-internal-api-key": key }),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -129,7 +146,6 @@ function harness(
 
   return {
     repository,
-    outbox,
     logger,
     get: (path, key) => call("GET", path, undefined, key),
     post: (path, body, key) => call("POST", path, body, key),
@@ -158,69 +174,81 @@ function wireDtoOf(mode: GameMode): Record<string, unknown> {
   };
 }
 
-// LAS CLAVES DE DEDUPLICACIÓN DE LO ENCOLADO, leídas por la ÚNICA ventana que el puerto tiene
-// (`next` + `sent`), que es la misma que usa el despachador en producción. No hay inspector de
-// "todas las entradas" a propósito — ver `transports/tests/outbox-contract.ts`.
-async function drain(outbox: MemoryGameModeOutbox): Promise<string[]> {
-  const keys: string[] = [];
-  const later = new Date(BASE_INSTANT + 60_000);
-  for (;;) {
-    const entry = await outbox.next(later);
-    if (!entry) return keys;
-    keys.push(entry.dedupeKey);
-    await outbox.sent(entry.id, later);
-  }
+// LO QUE VE BETASO GAMES EN EL PANEL: el DTO de v1 más el dueño y la lista de suscriptores.
+function adminWireDtoOf(mode: GameMode): Record<string, unknown> {
+  return {
+    ...wireDtoOf(mode),
+    ownerProviderId: mode.ownerProviderId,
+    subscribers: mode.subscribers,
+  };
 }
 
 // EL REGISTRO, MEDIDO SIN SERVIDOR. Lo que se mide acá es una decisión de wiring —qué rutas llegan a
 // existir y EN QUÉ ORDEN—, y eso un servidor no lo muestra: dos órdenes distintos pueden responder
 // igual hoy y dejar de hacerlo con la ruta que se agregue mañana.
-function routesRegisteredWith(adminApiKey: string | undefined): string[] {
+function routesRegisteredWith(
+  adminApiKey: string | undefined,
+  orchestratorApiKey: string | undefined,
+): string[] {
   const clock = mutableClock();
   return routesOf(
     gameModeHttp({
       service: new GameModeService(
         new MemoryGameModeRepository(clock),
-        new MemoryGameModeOutbox(clock),
+        new MemoryProviderCatalogs(clock),
         {
           async within(_name, _ttlMs, work) {
             return work();
           },
         },
-        vi.fn(),
       ),
       logger: fakeLogger(),
       adminApiKey,
+      orchestratorApiKey,
     }),
   );
 }
 
 describe("gameModeHttp: las rutas", () => {
-  // `reactive/:uuid` ANTES de `/:uuid`, y `sync` después del `POST` de la colección. Es el orden que
+  // `reactive/:uuid` ANTES de `/:uuid`. Es el orden que
   // hay que conservar: hoy Express no confunde `/game-modes/reactive/x` con `/game-modes/:uuid` —son
   // dos segmentos contra uno—, pero una ruta futura con dos segmentos sí lo haría, y este arreglo es
   // lo único que lo dice. Desde que las rutas son dos routers (`admin.ts` y `catalog.ts`), lo que lo
   // garantiza es que el admin se monte PRIMERO (`register.ts`): al revés, como en truco, la lectura
   // `/:uuid` quedaría adelante.
-  it("registra las siete rutas de v1 y las dos lecturas del panel en orden", () => {
-    expect(routesRegisteredWith(KEY)).toEqual([
+  it("registra las siete rutas de v1, las de los operadores y la del orquestador en orden", () => {
+    expect(routesRegisteredWith(KEY, ORCHESTRATOR_KEY)).toEqual([
       "GET /game-modes/admin",
       "GET /game-modes/admin/:uuid",
       "GET /game-modes/reactive/:uuid",
       "POST /game-modes",
       "PUT /game-modes/:uuid",
-      "POST /game-modes/sync",
+      "POST /game-modes/copy-shared",
+      "GET /game-modes/catalogs/:providerId",
+      "PUT /game-modes/catalogs/:providerId",
+      "PUT /game-modes/:uuid/subscriptions/:providerId",
+      "DELETE /game-modes/:uuid/subscriptions/:providerId",
       "DELETE /game-modes/:uuid",
+      "GET /internal/game-modes",
       "GET /game-modes",
       "GET /game-modes/:uuid",
     ]);
+  });
+
+  // FAIL CLOSED TAMBIÉN DEL LADO DEL ORQUESTADOR: sin su llave, su catálogo no existe, y la del panel
+  // no lo reemplaza.
+  it("sin la llave del orquestador no existe su catálogo", () => {
+    expect(routesRegisteredWith(KEY, undefined)).not.toContain("GET /internal/game-modes");
   });
 
   // FAIL CLOSED, y es la decisión del incremento: el panel no autentica administradores contra
   // domino, así que sin llave no hay quién valide al admin. Una mutación que configura dinero real
   // y contesta sin credencial es peor que una funcionalidad ausente.
   it("sin llave interna sólo quedan los dos GET públicos", () => {
-    expect(routesRegisteredWith(undefined)).toEqual(["GET /game-modes", "GET /game-modes/:uuid"]);
+    expect(routesRegisteredWith(undefined, undefined)).toEqual([
+      "GET /game-modes",
+      "GET /game-modes/:uuid",
+    ]);
   });
 
   it("sin llave interna avisa nombrando las rutas que no se registraron", () => {
@@ -230,16 +258,16 @@ describe("gameModeHttp: las rutas", () => {
     gameModeHttp({
       service: new GameModeService(
         new MemoryGameModeRepository(clock),
-        new MemoryGameModeOutbox(clock),
+        new MemoryProviderCatalogs(clock),
         {
           async within(_name, _ttlMs, work) {
             return work();
           },
         },
-        vi.fn(),
       ),
       logger,
       adminApiKey: undefined,
+      orchestratorApiKey: undefined,
     });
 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("/game-modes"));
@@ -248,7 +276,6 @@ describe("gameModeHttp: las rutas", () => {
   it.each([
     ["POST", "/game-modes"],
     ["PUT", "/game-modes/mode-1"],
-    ["POST", "/game-modes/sync"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
     ["GET", "/game-modes/admin"],
@@ -353,7 +380,7 @@ describe("POST /game-modes", () => {
 
     expect(response.status).toBe(201);
     const created = (await app.repository.all())[0] as GameMode;
-    expect(response.body).toEqual({ status: "success", data: wireDtoOf(created) });
+    expect(response.body).toEqual({ status: "success", data: adminWireDtoOf(created) });
     expect(created.name).toBe("Clásica");
   });
 
@@ -587,7 +614,7 @@ describe("GET /game-modes/admin", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       status: "success",
-      data: [wireDtoOf(retirada as GameMode), wireDtoOf(activa)],
+      data: [adminWireDtoOf(retirada as GameMode), adminWireDtoOf(activa)],
     });
     expect((response.body as { data: Array<{ isActive: boolean }> }).data[0]?.isActive).toBe(false);
   });
@@ -604,7 +631,7 @@ describe("GET /game-modes/admin/:uuid", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       status: "success",
-      data: wireDtoOf(retirado as GameMode),
+      data: adminWireDtoOf(retirado as GameMode),
     });
   });
 
@@ -648,45 +675,10 @@ describe("GET /game-modes/reactive/:uuid", () => {
   });
 });
 
-describe("POST /game-modes/sync", () => {
-  // El número es el de ENCOLADOS y cuenta los inactivos, igual que el `/sync` de v1 que consulta
-  // `getAll()` (`game-mode.service.ts:177-178`).
-  it("devuelve cuántos modos encoló", async () => {
-    const app = harness();
-    const primero = await app.repository.create(clasica());
-    await app.repository.create(clasica({ name: "Cuarteto", playersQuantity: 4 }));
-    await app.repository.update(primero.uuid, { isActive: false });
-
-    expect(await app.post("/game-modes/sync", undefined, KEY)).toEqual({
-      status: 200,
-      body: { status: "success", data: { synced: 2 } },
-    });
-  });
-
-  // CADA REQUEST LLEVA SU PROPIO LOTE, y el número de la respuesta NO alcanza para medirlo: `sync`
-  // devuelve los modos RECORRIDOS y no los insertados, así que un `batchId` fijo contestaría
-  // `{ synced: 1 }` las dos veces sin haber encolado nada la segunda —el botón de recuperación
-  // apretado por segunda vez, contestando éxito y sin publicar—. Lo que lo mide es el outbox: la
-  // clave de deduplicación del lote es `["game_mode.sync", batchId, uuid]`, así que dos lotes
-  // distintos son dos entradas.
-  it("dos llamadas encolan dos lotes distintos", async () => {
-    const app = harness();
-    await app.repository.create(clasica());
-
-    await app.post("/game-modes/sync", undefined, KEY);
-    await app.post("/game-modes/sync", undefined, KEY);
-
-    const syncs = (await drain(app.outbox)).filter((key) => key.includes("game_mode.sync"));
-    expect(syncs).toHaveLength(2);
-    expect(new Set(syncs).size).toBe(2);
-  });
-});
-
 describe("la llave interna", () => {
   const mutations: Array<[string, string]> = [
     ["POST", "/game-modes"],
     ["PUT", "/game-modes/mode-1"],
-    ["POST", "/game-modes/sync"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
     ["GET", "/game-modes/admin"],
@@ -745,10 +737,6 @@ describe("la infraestructura administrativa", () => {
     ["PUT", "/game-modes/mode-1"],
     ["DELETE", "/game-modes/mode-1"],
     ["GET", "/game-modes/reactive/mode-1"],
-    // EL `/sync` TAMBIÉN, y es el que se olvidaba: va adentro del lease aunque no toque el catálogo
-    // —escribe el outbox—, así que el operador que aprieta "republicar todo" mientras otro proceso
-    // edita tiene que leer "reintentá" y no una caída.
-    ["POST", "/game-modes/sync"],
   ])("%s %s contesta 503 si el catálogo está ocupado", async (method, path) => {
     const app = harness({
       lease: {
@@ -792,5 +780,281 @@ describe("la infraestructura administrativa", () => {
     });
 
     expect(await app.get("/game-modes")).toEqual({ status: 500, body: { error: "INTERNAL" } });
+  });
+});
+
+// ═══ LOS OPERADORES Y EL ORQUESTADOR ══════════════════════════════════════════════════════════════
+
+// UN COMPARTIDO QUE JUEGA PARLEY (y Betaso), como queda un modo de antes de las suscripciones después
+// de `npm run modes:subscribe-existing`.
+async function playedOf(repository: GameModeRepository, name = "Jugado"): Promise<GameMode> {
+  const mode = await repository.create(clasica({ name }));
+  await repository.addSubscriber(mode.uuid, "betaso");
+  await repository.addSubscriber(mode.uuid, "parley");
+  return (await repository.byUuid(mode.uuid)) as GameMode;
+}
+
+describe("el panel de un operador", () => {
+  it("lista los suyos y los compartidos que juega, sin la lista de suscriptores", async () => {
+    const app = harness();
+    const viejo = await playedOf(app.repository);
+    const propio = await app.repository.create(
+      clasica({ name: "Propio", ownerProviderId: "parley" }),
+    );
+    await app.repository.create(clasica({ name: "Del rival", ownerProviderId: "rival" }));
+    await app.repository.create(clasica({ name: "Sin suscriptores" }));
+
+    const response = await app.get("/game-modes/admin", as("parley"));
+
+    expect(response.status).toBe(200);
+    const data = (response.body as { data: Array<Record<string, unknown>> }).data;
+    expect(data.map((m) => m.uuid).sort()).toEqual([viejo.uuid, propio.uuid].sort());
+    for (const dto of data) expect(dto).not.toHaveProperty("subscribers");
+    expect(data.find((m) => m.uuid === propio.uuid)).toEqual({
+      ...wireDtoOf(propio),
+      ownerProviderId: "parley",
+    });
+  });
+
+  it("Betaso Games ve la lista de suscriptores", async () => {
+    const app = harness();
+    const viejo = await playedOf(app.repository);
+
+    expect(await app.get(`/game-modes/admin/${viejo.uuid}`, as("games"))).toEqual({
+      status: 200,
+      body: { status: "success", data: adminWireDtoOf(viejo) },
+    });
+    expect(adminWireDtoOf(viejo).subscribers).toEqual(["betaso", "parley"]);
+  });
+
+  it("un 403 del catálogo sale con su envelope", async () => {
+    const app = harness();
+    const compartido = await app.repository.create(clasica());
+
+    expect(await app.put(`/game-modes/${compartido.uuid}`, { prize: 1 }, as("parley"))).toEqual({
+      status: 403,
+      body: { status: "error", message: "un modo compartido lo administra Betaso Games" },
+    });
+  });
+
+  it("crear para otro operador es 403 y no deja nada", async () => {
+    const app = harness();
+
+    const response = await app.post(
+      "/game-modes",
+      { name: "X", prize: 1, entryFee: 1, playersQuantity: 2, ownerProviderId: "rival" },
+      as("parley"),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await app.repository.all()).toEqual([]);
+  });
+});
+
+describe("las suscripciones por HTTP", () => {
+  it("un operador se suscribe y se da de baja él mismo", async () => {
+    const app = harness();
+    const modo = await app.repository.create(clasica());
+
+    const alta = await app.put(
+      `/game-modes/${modo.uuid}/subscriptions/parley`,
+      undefined,
+      as("parley"),
+    );
+    expect(alta.status).toBe(200);
+    expect((alta.body as { data: Record<string, unknown> }).data).not.toHaveProperty("subscribers");
+    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
+
+    expect(
+      (await app.del(`/game-modes/${modo.uuid}/subscriptions/parley`, as("parley"))).status,
+    ).toBe(200);
+    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
+  });
+
+  it("sobre un compartido sin lista, suscribirse crea la lista con ése solo", async () => {
+    const app = harness();
+    const modo = await app.repository.create(clasica());
+
+    expect(
+      (await app.put(`/game-modes/${modo.uuid}/subscriptions/parley`, undefined, as("games")))
+        .status,
+    ).toBe(200);
+    expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
+  });
+
+  // LA LISTA ENTERA YA NO SE FIJA POR HTTP: cada operador se suscribe (o Betaso Games lo suscribe).
+  it("PUT /game-modes/:uuid/subscribers no existe", async () => {
+    const app = harness();
+    const modo = await app.repository.create(clasica());
+
+    expect(
+      (await app.put(`/game-modes/${modo.uuid}/subscribers`, { providerIds: ["parley"] }, KEY))
+        .status,
+    ).toBe(404);
+  });
+});
+
+describe("POST /game-modes/copy-shared", () => {
+  it("devuelve lo creado, lo que ya estaba y lo salteado", async () => {
+    const app = harness();
+    await playedOf(app.repository);
+
+    const primera = await app.post(
+      "/game-modes/copy-shared",
+      { providerId: "parley" },
+      as("parley"),
+    );
+    const segunda = await app.post("/game-modes/copy-shared", { providerId: "parley" }, KEY);
+
+    expect(primera.status).toBe(200);
+    const created = (primera.body as { data: { created: unknown[] } }).data.created;
+    expect(created).toHaveLength(1);
+    expect(segunda.body).toEqual({
+      status: "success",
+      data: { created: [], existing: created, skipped: [] },
+    });
+  });
+
+  it("un operador no copia para otro, y support no copia", async () => {
+    const app = harness();
+
+    expect(
+      (await app.post("/game-modes/copy-shared", { providerId: "rival" }, as("parley"))).status,
+    ).toBe(403);
+    expect(
+      (await app.post("/game-modes/copy-shared", { providerId: "parley" }, as("parleySupport")))
+        .status,
+    ).toBe(403);
+  });
+});
+
+describe("GET /internal/game-modes", () => {
+  it("devuelve los activos con dueño y suscriptores", async () => {
+    const app = harness();
+    const viejo = await playedOf(app.repository);
+    const propio = await app.repository.create(
+      clasica({ name: "Propio", ownerProviderId: "parley" }),
+    );
+    const retirado = await app.repository.create(clasica({ name: "Retirado" }));
+    await app.repository.update(retirado.uuid, { isActive: false });
+
+    const response = await app.get("/internal/game-modes", ORCHESTRATOR_KEY);
+
+    expect(response.status).toBe(200);
+    const data = (response.body as { data: Array<Record<string, unknown>> }).data;
+    expect(data).toHaveLength(2);
+    expect(data).toContainEqual(adminWireDtoOf(viejo));
+    expect(data).toContainEqual(adminWireDtoOf(propio));
+  });
+
+  it("con includeInactive=1 suma los dados de baja, y otro valor es 400", async () => {
+    const app = harness();
+    const retirado = await app.repository.create(clasica({ name: "Retirado" }));
+    await app.repository.update(retirado.uuid, { isActive: false });
+
+    const all = await app.get("/internal/game-modes?includeInactive=1", ORCHESTRATOR_KEY);
+    expect((all.body as { data: unknown[] }).data).toHaveLength(1);
+    expect(
+      (await app.get("/internal/game-modes?includeInactive=true", ORCHESTRATOR_KEY)).status,
+    ).toBe(400);
+  });
+
+  // LAS FUENTES VIAJAN EN LA MISMA RESPUESTA, como mapa y sólo las que no son `shared`.
+  it("suma `catalogs` con las fuentes que no son `shared`", async () => {
+    const app = harness();
+    await app.repository.create(clasica({ name: "Propio", ownerProviderId: "parley" }));
+
+    expect((await app.get("/internal/game-modes", ORCHESTRATOR_KEY)).body).toMatchObject({
+      status: "success",
+      catalogs: {},
+    });
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"))).status,
+    ).toBe(200);
+    const response = await app.get("/internal/game-modes?includeInactive=1", ORCHESTRATOR_KEY);
+    expect((response.body as { catalogs: unknown }).catalogs).toEqual({ parley: "own" });
+  });
+
+  // LA LLAVE DEL PANEL NO LA ABRE, ni un token: es del orquestador.
+  it("sin la llave del orquestador es 401", async () => {
+    const app = harness();
+
+    for (const key of [undefined, KEY, as("games"), `${"o".repeat(15)}x`]) {
+      expect((await app.get("/internal/game-modes", key)).status).toBe(401);
+    }
+  });
+
+  it("sin ORCHESTRATOR_API_KEY no existe", async () => {
+    const app = harness({ orchestratorApiKey: undefined });
+
+    expect((await app.get("/internal/game-modes", ORCHESTRATOR_KEY)).status).toBe(404);
+  });
+});
+
+describe("el catálogo público", () => {
+  it("no lista ni abre un modo propio", async () => {
+    const app = harness();
+    const propio = await app.repository.create(clasica({ ownerProviderId: "parley" }));
+    const compartido = await app.repository.create(clasica({ name: "Compartida" }));
+
+    expect(await app.get("/game-modes")).toEqual({
+      status: 200,
+      body: { status: "success", data: [wireDtoOf(compartido)] },
+    });
+    expect((await app.get(`/game-modes/${propio.uuid}`)).status).toBe(404);
+  });
+});
+
+describe("la fuente del catálogo por HTTP", () => {
+  it("GET devuelve `shared` por default, a cualquier rol del operador y a Betaso Games", async () => {
+    const app = harness();
+
+    for (const who of [as("parley"), as("parleySupport"), as("games"), KEY]) {
+      expect(await app.get("/game-modes/catalogs/parley", who)).toEqual({
+        status: 200,
+        body: {
+          status: "success",
+          data: { providerId: "parley", source: "shared", updatedAt: null, updatedBy: null },
+        },
+      });
+    }
+    expect((await app.get("/game-modes/catalogs/parley", as("rival"))).status).toBe(403);
+    expect((await app.get("/game-modes/catalogs/parley")).status).toBe(401);
+  });
+
+  it("PUT `own` sin modos propios activos es 409, y con uno pasa", async () => {
+    const app = harness();
+
+    const rechazo = await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"));
+    expect(rechazo.status).toBe(409);
+    expect(rechazo.body).toMatchObject({ status: "error" });
+
+    await app.repository.create(clasica({ ownerProviderId: "parley" }));
+    const ok = await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parley"));
+    expect(ok.status).toBe(200);
+    expect((ok.body as { data: unknown }).data).toMatchObject({
+      providerId: "parley",
+      source: "own",
+      updatedBy: "pia",
+    });
+    expect(
+      ((await app.get("/game-modes/catalogs/parley", as("parley"))).body as { data: unknown }).data,
+    ).toMatchObject({ source: "own" });
+  });
+
+  it("PUT: support no escribe, otro operador es 403, Betaso Games cualquiera, y la forma se valida", async () => {
+    const app = harness();
+    await app.repository.create(clasica({ ownerProviderId: "parley" }));
+
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("parleySupport"))).status,
+    ).toBe(403);
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "own" }, as("rival"))).status,
+    ).toBe(403);
+    expect(
+      (await app.put("/game-modes/catalogs/parley", { source: "propio" }, as("games"))).status,
+    ).toBe(400);
+    expect((await app.put("/game-modes/catalogs/parley", { source: "own" }, KEY)).status).toBe(200);
   });
 });

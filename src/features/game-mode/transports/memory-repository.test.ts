@@ -31,8 +31,7 @@ describe("MemoryGameModeRepository: lo propio de no tener base", () => {
   });
 
   // Nada de lo que devuelve puede ser el objeto que el repositorio guarda: quien reciba un modo y
-  // lo mute cambiaría el catálogo de todos sin pasar por `update`, y sin avanzar la revisión que
-  // el outbox mira.
+  // lo mute cambiaría el catálogo de todos sin pasar por `update`, y sin avanzar la revisión.
   it("lo que devuelve no es el objeto guardado", async () => {
     const { repository } = harness();
     const created = await repository.create(clasica());

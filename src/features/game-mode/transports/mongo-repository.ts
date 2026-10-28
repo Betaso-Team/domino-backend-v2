@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import type { Collection, Document, IndexDescription, ObjectId, WithId } from "mongodb";
+import {
+  type Collection,
+  type Document,
+  type Filter,
+  type IndexDescription,
+  MongoServerError,
+  type ObjectId,
+  type UpdateFilter,
+  type WithId,
+} from "mongodb";
 import type { GameModeRepository } from "../core/catalog";
 import type { CreateGameMode, GameMode, GameModeBetLevel, UpdateGameMode } from "../core/game-mode";
 
@@ -64,6 +73,11 @@ export interface GameModeDocument {
   enableBots: boolean;
   // OPCIONAL EN LA BASE: los documentos de antes de los niveles no lo tienen, y se leen como `[]`.
   betLevels?: GameModeBetLevel[];
+  // OPCIONALES EN LA BASE: un documento de v1 o de antes de los operadores no tiene dueño (se lee
+  // `null`, compartido) ni lista (se lee `[]`, no se ofrece a nadie). Los compartidos de antes se
+  // suscriben UNA vez con `npm run modes:subscribe-existing` (`subscribeExistingModes`, abajo).
+  ownerProviderId?: string | null;
+  subscribers?: string[];
   createdAt: Date;
   updatedAt: Date;
   __v: number;
@@ -105,14 +119,78 @@ export class MongoGameModeRepository implements GameModeRepository {
   ) {}
 
   async create(input: CreateGameMode): Promise<GameMode> {
+    const document = this.documentOf(randomUUID(), input);
+    const { insertedId } = await (await this.collection()).insertOne(document);
+    return modeOf({ ...document, _id: insertedId });
+  }
+
+  // UN `$setOnInsert` CON UPSERT: si el uuid ya está, el documento no se toca —la copia del operador
+  // puede haberse editado— y vuelve tal cual; si no, nace con todo lo de `create`. Es una sola
+  // operación y no "leo, decido, escribo", y el E11000 de dos upserts que compiten por el mismo uuid
+  // —el índice `uuid_1` es único— es el camino ORDINARIO de "lo insertó el otro": se relee.
+  async insertIfAbsent(
+    uuid: string,
+    input: CreateGameMode,
+  ): Promise<{ readonly mode: GameMode; readonly created: boolean }> {
+    const collection = await this.collection();
+    const document = this.documentOf(uuid, input);
+    try {
+      const result = await collection.updateOne(
+        { uuid },
+        { $setOnInsert: document },
+        { upsert: true },
+      );
+      const stored = await collection.findOne({ uuid });
+      if (!stored) throw new Error(`el modo ${uuid} no quedó escrito`);
+      return { mode: modeOf(stored), created: result.upsertedCount === 1 };
+    } catch (error) {
+      if (!(error instanceof MongoServerError) || error.code !== 11000) throw error;
+      const stored = await collection.findOne({ uuid });
+      if (!stored) throw error;
+      return { mode: modeOf(stored), created: false };
+    }
+  }
+
+  // LOS SUSCRIPTORES, con la condición EN EL FILTRO y no leída antes: sólo compartidos
+  // (`ownerProviderId: null` matchea también el campo ausente de los documentos de v1). Un campo
+  // `subscribers` ausente se lee `[]`, y `$addToSet` sobre él lo crea con ese único elemento: es
+  // exactamente la misma lista.
+  //
+  // Sin `$inc` del `__v` ni `updatedAt`: suscribirse no es una revisión del modo (ver el puerto).
+  async addSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
+    return this.changeSubscribers(
+      { uuid, ownerProviderId: null },
+      { $addToSet: { subscribers: providerId } },
+    );
+  }
+
+  async removeSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined> {
+    return this.changeSubscribers(
+      { uuid, ownerProviderId: null },
+      { $pull: { subscribers: providerId } },
+    );
+  }
+
+  private async changeSubscribers(
+    filter: Filter<GameModeDocument>,
+    update: UpdateFilter<GameModeDocument>,
+  ): Promise<GameMode | undefined> {
+    const updated = await (await this.collection()).findOneAndUpdate(filter, update, {
+      returnDocument: "after",
+    });
+    return updated ? modeOf(updated) : undefined;
+  }
+
+  private documentOf(uuid: string, input: CreateGameMode): GameModeDocument {
     const now = new Date(this.clock.now());
     // LOS DEFAULTS SON LOS DEL SCHEMA DE v1 y no los del DTO zod, que nunca se ejecutaba: las rutas
     // de v1 desestructuran `req.body` crudo y jamás llaman `CreateGameModeSchema.parse`, así que su
     // `pointsToWin` por default de 10 era código muerto y lo que los documentos productivos tienen
     // es el 25 del schema (`game-mode.schema.ts:51-56`).
-    const document: GameModeDocument = {
-      // `randomUUID()` de node y no el paquete `uuid` que usa v1: es la misma v4 y es del runtime.
-      uuid: randomUUID(),
+    return {
+      // `randomUUID()` de node (en `create`) y no el paquete `uuid` que usa v1: es la misma v4 y es
+      // del runtime. La copia de los compartidos trae el suyo, determinista.
+      uuid,
       name: input.name,
       multiplier: input.multiplier ?? 1,
       // Los importes son UC COMPLETAS y se guardan tal cual, decimales incluidos. No hay escala en
@@ -131,6 +209,11 @@ export class MongoGameModeRepository implements GameModeRepository {
       // elección del panel, y `||` la pisaría con el default.
       enableBots: input.enableBots ?? input.playersQuantity === 4,
       betLevels: [...(input.betLevels ?? [])],
+      // EL DUEÑO Y LA LISTA SE ESCRIBEN SIEMPRE en los documentos nuevos, aunque sean el default: un
+      // compartido nuevo nace con `[]`, sin nadie. Escrito y no ausente para que la suscripción de
+      // una sola vez (`subscribeExistingModes`) no lo confunda con un modo de antes.
+      ownerProviderId: input.ownerProviderId ?? null,
+      subscribers: [],
       // `createdAt`/`updatedAt` los ponía el `timestamps: true` de Mongoose. Acá los pone el
       // repositorio desde el reloj INYECTADO —no `new Date()` directo—, que es lo que hace que el
       // contrato pueda medir dos ediciones dentro del mismo milisegundo.
@@ -138,8 +221,6 @@ export class MongoGameModeRepository implements GameModeRepository {
       updatedAt: now,
       __v: 0,
     };
-    const { insertedId } = await (await this.collection()).insertOne(document);
-    return modeOf({ ...document, _id: insertedId });
   }
 
   async update(uuid: string, input: UpdateGameMode): Promise<GameMode | undefined> {
@@ -154,14 +235,10 @@ export class MongoGameModeRepository implements GameModeRepository {
         // LA REVISIÓN ES UN `$inc` DE LA BASE, y es la línea que no se puede escribir de otra
         // forma. Derivarla del reloj colapsaría dos ediciones del mismo milisegundo en la misma
         // revisión; calcularla en el proceso (`leído + 1`) colapsaría dos ediciones concurrentes.
-        // El outbox deduplica por `uuid + version`, así que dos cambios reales con la misma
-        // revisión son UN evento publicado y otro DESCARTADO EN SILENCIO — el consumidor se queda
-        // con el catálogo viejo y nadie ve un error.
         $inc: { __v: 1 },
       },
-      // `after` porque lo que se devuelve es el modo YA EDITADO: quien llama publica el evento con
-      // ese cuerpo, y el default del driver (`before`) publicaría el estado anterior con la
-      // revisión anterior.
+      // `after` porque lo que se devuelve es el modo YA EDITADO: el panel recibe ese cuerpo, y el
+      // default del driver (`before`) le devolvería el estado anterior.
       { returnDocument: "after" },
     );
     // `undefined` y no un throw: "no existe" es una respuesta esperable de un `PUT` sobre un uuid
@@ -220,10 +297,6 @@ export class MongoGameModeRepository implements GameModeRepository {
 
 // EL MAPPER, y la única frontera entre los dos vocabularios. `_id` → `id` (hex, porque el DTO HTTP
 // tiene que devolverlo y el panel de v1 lo recibía así) y `__v` → `version`.
-//
-// OJO con `id`: NO es el `id` del cuerpo Rabbit, que es el `uuid` (ver `events.ts`). Publicar el
-// hex le crea al consumidor un registro nuevo por cada modo en vez de actualizar el que ya tiene,
-// y nada falla de este lado.
 function modeOf(document: WithId<GameModeDocument>): GameMode {
   return {
     id: document._id.toHexString(),
@@ -238,6 +311,8 @@ function modeOf(document: WithId<GameModeDocument>): GameMode {
     isFreeRoom: document.isFreeRoom,
     enableBots: document.enableBots,
     betLevels: document.betLevels ?? [],
+    ownerProviderId: document.ownerProviderId ?? null,
+    subscribers: document.subscribers ?? [],
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
     version: document.__v,
@@ -253,4 +328,24 @@ function definedOf(input: UpdateGameMode): Partial<GameModeDocument> {
     if (value !== undefined) set[key] = value;
   }
   return set as Partial<GameModeDocument>;
+}
+
+// LA SUSCRIPCIÓN DE UNA SOLA VEZ (`npm run modes:subscribe-existing -- <providerId...>`). Desde que
+// la lista es explícita, un compartido de antes de las suscripciones —sin el campo— se lee `[]` y no
+// se le ofrece a nadie. Esto les fija la lista a los operadores dados, que son los que ya los jugaban.
+//
+// SÓLO LOS DOCUMENTOS SIN EL CAMPO, y en eso descansa que sea IDEMPOTENTE: la primera corrida escribe
+// la lista, y la segunda no encuentra nada que tocar —aunque entre medio un operador se haya dado de
+// baja de un modo, o Betaso Games haya creado uno nuevo, que nace con `[]` escrito—. Sin `__v` ni
+// `updatedAt`, como toda escritura de suscriptores. Devuelve cuántos modos tocó.
+export async function subscribeExistingModes(
+  source: CollectionSource,
+  providerIds: readonly string[],
+): Promise<number> {
+  const collection = await source.collection<GameModeDocument>(GAME_MODE_COLLECTION);
+  const { modifiedCount } = await collection.updateMany(
+    { ownerProviderId: null, subscribers: { $exists: false } },
+    { $set: { subscribers: [...new Set(providerIds)] } },
+  );
+  return modifiedCount;
 }
