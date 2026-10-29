@@ -207,7 +207,7 @@ describe("configOf", () => {
   });
 
   // LA MESA DE CUATRO NACE, y hasta este incremento no podía: se rechazaba acá porque
-  // `settlementOf` exigía exactamente un ganador y el final de una mesa de cuatro lanzaba DESPUÉS
+  // `payoutOf` exigía exactamente un ganador y el final de una mesa de cuatro lanzaba DESPUÉS
   // del veredicto —sin premio y sin reembolso, o sea plata trabada—. Lo que la abrió fue traer la
   // regla de reparto de v1, no borrar la guarda.
   it("sienta un modo de cuatro y le copia los bots", () => {

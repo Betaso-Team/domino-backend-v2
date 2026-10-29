@@ -245,7 +245,7 @@ describe("DominoRoom", () => {
     ).rejects.toThrow(/UNKNOWN_GAME_MODE/);
   });
 
-  // LA MESA DE CUATRO NACE, y hasta este incremento se rechazaba antes de génesis: `settlementOf`
+  // LA MESA DE CUATRO NACE, y hasta este incremento se rechazaba antes de génesis: `payoutOf`
   // exigía exactamente un ganador, así que el final de una mesa de cuatro lanzaba DESPUÉS del
   // veredicto —sin premio y sin reembolso, plata trabada—. La abrió la regla de reparto de v1.
   it("crea la sala de cuatro y reparte los cuatro asientos", async () => {

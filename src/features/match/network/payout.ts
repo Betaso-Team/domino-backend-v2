@@ -12,7 +12,7 @@ import type { NetworkMatchEvent } from "./events";
 //
 // Vive en `network/` y no en `core/` porque `MATCH_ABORTED` es un evento de PLATAFORMA:
 // el dominio no tiene un final sin veredicto, así que el core no podría nombrarlo.
-export type SettlementKind = "REWARD" | "REFUND";
+export type PayoutKind = "REWARD" | "REFUND";
 
 /**
  * A quién se le acredita y cuánto. Lleva el `userId` de plataforma —y no el `playerId`
@@ -32,18 +32,18 @@ export type SettlementKind = "REWARD" | "REFUND";
  * motivo que el índice del registro: `["m","a:b"]` y `["m:a","b"]` no pueden colisionar, y
  * una colisión acá es un pago que no se hace porque otro ya usó la clave.
  */
-export interface SettlementEntry {
+export interface PayoutEntry {
   readonly userId: string;
   readonly currency: string;
   readonly amount: number;
   readonly idempotencyKey: string;
 }
 
-export interface SettlementInstruction {
+export interface PayoutInstruction {
   readonly matchId: string;
   readonly rateId: string;
-  readonly kind: SettlementKind;
-  readonly entries: readonly SettlementEntry[];
+  readonly kind: PayoutKind;
+  readonly entries: readonly PayoutEntry[];
 }
 
 // Recibe el `matchId` pelado y no la `config` entera A PROPÓSITO: con la config adentro
@@ -52,10 +52,10 @@ export interface SettlementInstruction {
 // entrada.
 const entryOf = (
   matchId: string,
-  kind: SettlementKind,
+  kind: PayoutKind,
   amount: number,
   seat: MatchSeat,
-): SettlementEntry => ({
+): PayoutEntry => ({
   userId: seat.userId,
   currency: seat.currency,
   amount,
@@ -107,7 +107,7 @@ function rewardOf(
   winnerTeamId: string,
   match: MatchState,
   config: DominoMatchConfig,
-): SettlementInstruction {
+): PayoutInstruction {
   // El equipo ganador se lee del ESTADO —que es quien reparte los asientos en equipos— y
   // la identidad se lee de la CONFIG, que es donde está congelada. Cruzarlos por el id
   // opaco es lo que mantiene al motor sin saber de plataformas.
@@ -210,11 +210,11 @@ const isRefundable = (player: { hasAbandoned: boolean; hasSeenTiles: boolean }) 
  * esa mesa se liquidó, y la distinción entre "no hubo desenlace" y "el desenlace no movía
  * plata", que pasarían a ser el mismo `undefined`. Filtrar montos nulos es del que paga.
  */
-export function settlementOf(
+export function payoutOf(
   event: NetworkMatchEvent,
   match: MatchState,
   config: DominoMatchConfig,
-): SettlementInstruction | undefined {
+): PayoutInstruction | undefined {
   switch (event.type) {
     case "MATCH_ABORTED": {
       assertSameTable(match, config);
@@ -257,7 +257,7 @@ export function settlementOf(
     //
     // `MULTIPLIER_AGREED` la mueve, pero NO por acá: lo cobra su propio listener contra la
     // billetera, con su razón (`BET_MULTIPLIER`) y su clave de idempotencia, en el instante en
-    // que se acepta. `settlementOf` proyecta el DESENLACE de la mesa —premio o reembolso— y el
+    // que se acepta. `payoutOf` proyecta el DESENLACE de la mesa —premio o reembolso— y el
     // aumento ya está adentro de ese número: `stakesOf` lo lee del estado (`acceptedBetLevel`) al
     // proyectar el desenlace. Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
     //

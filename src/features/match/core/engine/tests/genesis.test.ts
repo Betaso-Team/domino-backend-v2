@@ -20,7 +20,7 @@ describe("createMatchState", () => {
 
   // El árbol copia del snapshot lo que se juega y se dibuja: perfil y `userId`. La moneda NO se
   // copia: es la que ya se cobró y se queda congelada en `config.seats`, de donde la lee la
-  // liquidación (`settlement.test.ts`), así que una recompensa no puede salir en otra moneda.
+  // liquidación (`payout.test.ts`), así que una recompensa no puede salir en otra moneda.
   it("copia perfil y userId, y no la moneda", () => {
     const match = createMatchState(config(["u1", "u2"]));
     expect(match.players[0]).toMatchObject({

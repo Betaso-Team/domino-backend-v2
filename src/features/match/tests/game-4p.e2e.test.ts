@@ -1,6 +1,6 @@
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { settlementOf } from "../network/settlement";
+import { payoutOf } from "../network/payout";
 import {
   type SeatedMatch,
   bootServer,
@@ -94,7 +94,7 @@ describe("partida 4P completa", () => {
     expect(Object.keys(state.scoreboard?.toJSON() ?? {}).sort()).toEqual(["teamA", "teamB"]);
   });
 
-  // ⚠ EL PREMIO DE LA PAREJA, y es lo que el incremento abrió. Hasta acá `settlementOf` exigía
+  // ⚠ EL PREMIO DE LA PAREJA, y es lo que el incremento abrió. Hasta acá `payoutOf` exigía
   // EXACTAMENTE un ganador, así que el final de una mesa de cuatro lanzaba DESPUÉS del veredicto:
   // sin premio y sin reembolso, plata trabada. Se proyecta sobre la partida REAL que se acaba de
   // jugar —no sobre un estado armado a mano— que es la única forma de saber que el veredicto del
@@ -103,7 +103,7 @@ describe("partida 4P completa", () => {
     const state = match.serverState;
     const winnerTeamId = (state.scoreboard?.teamA ?? 0) >= state.pointsToWin ? "A" : "B";
 
-    const instruction = settlementOf(
+    const instruction = payoutOf(
       { type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" },
       state,
       match.config,

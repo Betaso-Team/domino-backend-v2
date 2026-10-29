@@ -79,7 +79,7 @@ export const PlayerState = schema(
     //
     // Es PÚBLICO porque el front lo pinta, y es lo que separa a este campo de `hasAbandoned`:
     // los dos dicen "acá no hay nadie" pero uno deja la mesa andando y el otro la cierra. Y
-    // separa además quién COBRA — el bot no, ver `network/settlement.ts`.
+    // separa además quién COBRA — el bot no, ver `network/payout.ts`.
     isBot: t.boolean().default(false),
     // ⚠ VA AL FINAL por lo mismo que `isBot`: antes era `noSync()` y no ocupaba índice, así que
     // sincronizarlo en su lugar habría corrido `teamId` y todo lo que sigue. Ver arriba por qué viaja.
