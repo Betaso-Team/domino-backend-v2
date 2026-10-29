@@ -58,7 +58,7 @@ Los procesos no se hablan directamente. Redis hace que sus salas, reservas y reg
 solo clúster. Mongo guarda lo que debe sobrevivir a un reinicio. El broker de juegos es una salida con
 outbox: una partida puede seguir jugando si está temporalmente caído. El catálogo no publica a ningún
 broker: el orquestador lo lee por `GET /internal/game-modes` (modos con dueño y suscriptores, y la
-fuente `shared`/`own` de cada operador), y los operadores —Betaso incluido— lo leen del orquestador.
+fuente `shared`/`own` de cada proveedor), y los proveedores —Betaso incluido— lo leen del orquestador.
 
 ## Las capas
 
@@ -197,7 +197,7 @@ son fases distintas: cada una espera una clase diferente de input o timeout.
 | Registro de salas y presence | Redis compartido entre procesos | Implementación local de Colyseus; clúster de un proceso |
 | `MatchRegistry` | Redis, TTL y censo compartido | `MemoryKeyValueStore`; válido para una sola instancia |
 | Historial (un registro v2.1 por partida) | MongoDB, persiste reinicios | `MemoryHistory`, el mismo documento, limitado a 200 partidas y al proceso |
-| Catálogo y fuentes por operador | MongoDB (`game_modes_domino`, `provider_catalogs`) | Repositorios de memoria |
+| Catálogo y fuentes por proveedor | MongoDB (`game_modes_domino`, `provider_catalogs`) | Repositorios de memoria |
 | Resultado de partida | RabbitMQ `betaso_games` con confirmaciones | El outbox de resultados acumula; sin Mongo, muere con el proceso |
 | Cobros de entrada y aumento | Orquestador por HTTP | La mesa no arranca, o el aumento se anula |
 
@@ -230,5 +230,5 @@ La API que este backend le expone al orquestador está en `docs/api-y-mensajes.m
 4. `src/features/match/transports/colyseus/commands/`: entrada de mensajes.
 5. `src/features/match/network/`: historial y efectos hacia la plataforma. El registro de cada
    partida —cabecera, timeline, manos y desenlace— está en `history.ts` y `match-record.ts`.
-6. `src/features/game-mode/`: catálogo, dueños, suscripciones y fuente de cada operador.
+6. `src/features/game-mode/`: catálogo, dueños, suscripciones y fuente de cada proveedor.
 7. `src/di-container.ts` y `src/app.config.ts`: decisiones de infraestructura.

@@ -37,10 +37,10 @@ Resuelto el 2026-10-28: **el dominó ya no publica nada al exchange `betaso`** n
 de Betaso. El outbox del catálogo, su despachador, `POST /game-modes/sync`, `events.ts` y
 `RABBITMQ_URL` se eliminaron.
 
-Betaso lee los modos de dominó **del orquestador**, como cualquier operador:
+Betaso lee los modos de dominó **del orquestador**, como cualquier proveedor:
 `GET {ORCHESTRATOR_BASE_URL}/v1/game-modes?includeInactive=1` con su API key de proveedor. El
-orquestador arma el catálogo efectivo de cada operador con `GET /internal/game-modes` del dominó
-(modos con dueño y suscriptores, más la fuente `shared`/`own` de cada operador). Betaso conserva su
+orquestador arma el catálogo efectivo de cada proveedor con `GET /internal/game-modes` del dominó
+(modos con dueño y suscriptores, más la fuente `shared`/`own` de cada proveedor). Betaso conserva su
 forma propia (`externalId` = `uuid` del modo, `game: "domino"`, `prize`, `entryFee`, `multiplier`,
 `pointsToWin`, `playerCount`) mapeándola de su lado, y las bajas le llegan con `includeInactive=1`.
 
@@ -127,8 +127,8 @@ El admin inicia sesión en billing-auth, que le emite un token ES256 con audienc
 clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a Betaso quién es un
 administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
 
-Desde el 2026-10-27 el token dice además de qué operador es el admin (`prv`) y con qué rol (`role`), y
-el dominó acota cada ruta (`docs/api-y-mensajes.md`, «HTTP interno»). Betaso es un operador más: un
+Desde el 2026-10-27 el token dice además de qué proveedor es el admin (`prv`) y con qué rol (`role`), y
+el dominó acota cada ruta (`docs/api-y-mensajes.md`, «HTTP interno»). Betaso es un proveedor más: un
 admin de Betaso entra al catálogo con su ámbito y a nada más.
 
 **Decidido el 2026-10-14:** no se porta. El panel será uno propio de Betaso Games, con login del

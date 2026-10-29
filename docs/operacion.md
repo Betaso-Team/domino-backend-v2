@@ -14,16 +14,16 @@ broker de juegos (`BETASO_GAMES_RABBITMQ_URL`) son capacidades opcionales elegid
 El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
 Las partidas ya abiertas terminan.
 
-**Admins de operador.** El dominó acota cada ruta de administración por el operador (`prv`) y el rol
-(`role`) del token de billing-auth: un admin de operador sólo entra al catálogo, con su ámbito, y
+**Admins de proveedor.** El dominó acota cada ruta de administración por el proveedor (`prv`) y el rol
+(`role`) del token de billing-auth: un admin de proveedor sólo entra al catálogo, con su ámbito, y
 `support` sólo lee (`docs/api-y-mensajes.md`, «HTTP interno»). La regla operativa del despliegue: **no
-se crea ningún usuario de operador** en un entorno hasta que billing-auth, el dominó, el orquestador y
+se crea ningún usuario de proveedor** en un entorno hasta que billing-auth, el dominó, el orquestador y
 el panel con ámbito estén desplegados en ese entorno.
 
 **Suscripciones explícitas: una suscripción de una sola vez al desplegar.** Un compartido se ofrece
-sólo a los operadores de su lista (`subscribers`), y un modo de antes de las suscripciones —sin el
+sólo a los proveedores de su lista (`subscribers`), y un modo de antes de las suscripciones —sin el
 campo— se lee `[]`: no se le ofrece a nadie. En el MISMO despliegue que trae esta versión, se
-suscriben los modos de antes a los operadores que ya los jugaban:
+suscriben los modos de antes a los proveedores que ya los jugaban:
 
 ```bash
 npm run modes:subscribe-existing -- betaso
@@ -31,7 +31,7 @@ npm run modes:subscribe-existing -- betaso
 
 Toca sólo los compartidos **sin** el campo `subscribers` (un compartido nuevo nace con `[]` escrito,
 un propio también), así que es idempotente: correrlo otra vez no cambia nada, tampoco lo que un
-operador haya cambiado entre las dos corridas. Loguea cuántos modos tocó (`modified`).
+proveedor haya cambiado entre las dos corridas. Loguea cuántos modos tocó (`modified`).
 
 Cómo correrlo contra un servidor. El release del VPS sólo trae `dist/`, así que se corre desde un
 checkout del repo con `npm ci` (en el VPS o en tu máquina con un túnel SSH a su Mongo). Necesita, por
@@ -51,13 +51,13 @@ npm run modes:subscribe-existing -- betaso
 
 (Si la URI lleva usuario y clave, es la del `shared/.env` con el host cambiado al del túnel.)
 
-**La fuente del catálogo** (`shared` | `own`) de cada operador vive en la colección
-`provider_catalogs`; sin documento, el operador está en `shared`, así que no hace falta sembrar nada.
+**La fuente del catálogo** (`shared` | `own`) de cada proveedor vive en la colección
+`provider_catalogs`; sin documento, el proveedor está en `shared`, así que no hace falta sembrar nada.
 Se lee en `GET /game-modes/admin` (`source`) y se cambia con `PUT /game-modes/source`.
 
-**El operador sale del token.** Las rutas del catálogo que actúan sobre un operador (suscripción,
-copias, fuente) no lo llevan en el path: un admin de operador actúa sobre el suyo, y Betaso Games —el
-panel con un admin sin operador, o un script con `ADMIN_API_KEY`— lo nombra con `?providerId=`. Sin
+**El proveedor sale del token.** Las rutas del catálogo que actúan sobre un proveedor (suscripción,
+copias, fuente) no lo llevan en el path: un admin de proveedor actúa sobre el suyo, y Betaso Games —el
+panel con un admin sin proveedor, o un script con `ADMIN_API_KEY`— lo nombra con `?providerId=`. Sin
 él, `400 PROVIDER_REQUIRED`. Por ejemplo, suscribir a Betaso a un compartido desde un script:
 
 ```bash
