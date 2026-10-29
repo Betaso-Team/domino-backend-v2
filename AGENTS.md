@@ -8,6 +8,11 @@ estar en cómo lo resolvió truco.
 
 El resto de este archivo es el registro de los incrementos, en orden; esta sección es la foto de hoy.
 
+**Vocabulario.** Un **proveedor** es la plataforma que ofrece el dominó a sus jugadores (Betaso,
+Parley): `providerId` en el código, `prv` en el token. **Operador** es una persona que opera el
+sistema (soporte, quien despliega, un usuario del panel), nunca una plataforma. Una **ficha** es una
+pieza del dominó.
+
 - **El dominó es un game backend del orquestador de Betaso Juegos**
   (`betaso-games-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
   entrada**: admite, empareja, tiene el único interruptor de mantenimiento y abre cada mesa por la API
