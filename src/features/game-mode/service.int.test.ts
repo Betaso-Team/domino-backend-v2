@@ -537,7 +537,7 @@ const ownedBy = async (repository: MemoryGameModeRepository, provider: string) =
   (await repository.all()).filter((mode) => mode.ownerProviderId === provider);
 
 describe("GameModeService: el dueño de un modo nuevo", () => {
-  it("un operador crea un modo propio suyo, sin mandar el campo o mandándolo", async () => {
+  it("un proveedor crea un modo propio suyo, sin mandar el campo o mandándolo", async () => {
     const { service } = harness();
 
     const sinCampo = await service.create(PARLEY, clasica());
@@ -551,9 +551,9 @@ describe("GameModeService: el dueño de un modo nuevo", () => {
   });
 
   it.each([
-    ["para otro operador", "rival"],
+    ["para otro proveedor", "rival"],
     ["compartido", null],
-  ])("un operador no crea un modo %s, y no se escribe nada", async (_label, owner) => {
+  ])("un proveedor no crea un modo %s, y no se escribe nada", async (_label, owner) => {
     const { service, repository } = harness();
 
     await expect(
@@ -562,7 +562,7 @@ describe("GameModeService: el dueño de un modo nuevo", () => {
     expect(await repository.all()).toEqual([]);
   });
 
-  it("Betaso Games crea compartidos por default y propios del operador que nombre", async () => {
+  it("Betaso Games crea compartidos por default y propios del proveedor que nombre", async () => {
     const { service } = harness();
 
     expect((await service.create(GAMES, clasica())).ownerProviderId).toBeNull();
@@ -603,7 +603,7 @@ describe("GameModeService: la unicidad por dueño", () => {
   });
 
   // EL HUECO HEREDADO, POR DUEÑO: el mismo `PUT` de sólo la cantidad, en los modos de un proveedor.
-  it("⚠ HUECO HEREDADO DE v1, también dentro de un operador", async () => {
+  it("⚠ HUECO HEREDADO DE v1, también dentro de un proveedor", async () => {
     const { service, repository } = harness();
     await service.create(PARLEY, clasica());
     const cuatro = await service.create(PARLEY, clasica({ playersQuantity: 4 }));
@@ -616,7 +616,7 @@ describe("GameModeService: la unicidad por dueño", () => {
   });
 });
 
-describe("GameModeService: lo que ve y toca cada operador", () => {
+describe("GameModeService: lo que ve y toca cada proveedor", () => {
   async function catalog() {
     const h = harness();
     const viejo = await sharedByBoth(h.repository, { name: "De los dos" });
@@ -633,7 +633,7 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     return { ...h, viejo, suscrito, ajeno, propio, delRival };
   }
 
-  it("un operador ve los suyos y todos los compartidos activos; Betaso Games ve todo", async () => {
+  it("un proveedor ve los suyos y todos los compartidos activos; Betaso Games ve todo", async () => {
     const { service } = await catalog();
 
     const names = async (actor: { provider: string | null }) =>
@@ -651,7 +651,7 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
   });
 
   // CON `providerId`: Betaso Games mira el catálogo de un proveedor; un proveedor sólo el suyo.
-  it("listFor con providerId: Betaso Games ve lo de ese operador, un operador sólo lo suyo", async () => {
+  it("listFor con providerId: Betaso Games ve lo de ese proveedor, un proveedor sólo lo suyo", async () => {
     const { service } = await catalog();
 
     const names = async (actor: { provider: string | null }, providerId: string) =>
@@ -662,7 +662,7 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     await expect(service.listFor(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
   });
 
-  it("getFor no le muestra a un operador el propio de otro; sí cualquier compartido activo", async () => {
+  it("getFor no le muestra a un proveedor el propio de otro; sí cualquier compartido activo", async () => {
     const { service, repository, delRival, ajeno, propio } = await catalog();
 
     expect(await service.getFor(PARLEY, delRival.uuid)).toBeUndefined();
@@ -688,7 +688,7 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     expect((await service.listInternal({ includeInactive: true })).modes).toHaveLength(5);
   });
 
-  it("un operador edita, da de baja y reactiva los suyos", async () => {
+  it("un proveedor edita, da de baja y reactiva los suyos", async () => {
     const { service, propio } = await catalog();
 
     expect((await service.update(PARLEY, propio.uuid, { prize: 30 })).prize).toBe(30);
@@ -697,7 +697,7 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
   });
 
   // 403 SOBRE UN COMPARTIDO —es público— Y 404 SOBRE EL PROPIO DE OTRO, que no puede saber que existe.
-  it("un compartido es 403 y el propio de otro operador es 404, en las tres escrituras", async () => {
+  it("un compartido es 403 y el propio de otro proveedor es 404, en las tres escrituras", async () => {
     const { service, repository, viejo, ajeno, delRival } = await catalog();
     const antes = await repository.all();
 
@@ -715,7 +715,7 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
 });
 
 describe("GameModeService: las suscripciones", () => {
-  it("un operador se suscribe y se da de baja, sin revisión", async () => {
+  it("un proveedor se suscribe y se da de baja, sin revisión", async () => {
     const { service, repository, clock } = harness();
     const modo = await service.create(GAMES, clasica());
 
@@ -729,7 +729,7 @@ describe("GameModeService: las suscripciones", () => {
     expect((await repository.byUuid(modo.uuid))?.version).toBe(0);
   });
 
-  it("un operador no suscribe ni da de baja a otro", async () => {
+  it("un proveedor no suscribe ni da de baja a otro", async () => {
     const { service, repository } = harness();
     const modo = await service.create(GAMES, clasica());
 
@@ -855,7 +855,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     expect(await ownedBy(repository, "parley")).toHaveLength(2);
   });
 
-  it("repetirla no duplica ni pisa lo que el operador editó", async () => {
+  it("repetirla no duplica ni pisa lo que el proveedor editó", async () => {
     const { service, repository } = await seeded();
     const primera = await service.createCopies(PARLEY, "parley");
     const copia = primera.created[0] as { uuid: string };
@@ -924,7 +924,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     });
   });
 
-  it("un operador no copia para otro", async () => {
+  it("un proveedor no copia para otro", async () => {
     const { service, repository } = await seeded();
     const antes = await repository.all();
 
@@ -935,11 +935,11 @@ describe("GameModeService: la copia de los compartidos", () => {
   });
 });
 
-describe("GameModeService: la fuente del catálogo de cada operador", () => {
+describe("GameModeService: la fuente del catálogo de cada proveedor", () => {
   const ANA = { provider: null, name: "ana" } as const;
   const PIA = { provider: "parley", name: "pia" } as const;
 
-  it("un operador sin registro está en `shared`", async () => {
+  it("un proveedor sin registro está en `shared`", async () => {
     const { service } = harness();
 
     expect(await service.catalogOf(PARLEY, "parley")).toEqual({
@@ -982,7 +982,7 @@ describe("GameModeService: la fuente del catálogo de cada operador", () => {
     expect((await service.listInternal({ includeInactive: false })).catalogs).toEqual([]);
   });
 
-  it("un operador no lee ni cambia la fuente de otro", async () => {
+  it("un proveedor no lee ni cambia la fuente de otro", async () => {
     const { service, repository } = harness();
     await repository.create(clasica({ ownerProviderId: "rival" }));
 

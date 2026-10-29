@@ -216,7 +216,7 @@ describe("gameModeHttp: las rutas", () => {
   // lo único que lo dice. Desde que las rutas son dos routers (`admin.ts` y `catalog.ts`), lo que lo
   // garantiza es que el admin se monte PRIMERO (`register.ts`): al revés, como en truco, la lectura
   // `/:uuid` quedaría adelante.
-  it("registra las siete rutas de v1, las de los operadores y la del orquestador en orden", () => {
+  it("registra las siete rutas de v1, las de los proveedores y la del orquestador en orden", () => {
     expect(routesRegisteredWith(KEY, ORCHESTRATOR_KEY)).toEqual([
       "GET /game-modes/admin",
       "GET /game-modes/admin/:uuid",
@@ -800,7 +800,7 @@ async function playedOf(repository: GameModeRepository, name = "Jugado"): Promis
   return (await repository.byUuid(mode.uuid)) as GameMode;
 }
 
-describe("el panel de un operador", () => {
+describe("el panel de un proveedor", () => {
   it("lista los suyos y todos los compartidos activos, con `subscribed` y sin la lista de suscriptores", async () => {
     const app = harness();
     const viejo = await playedOf(app.repository);
@@ -847,7 +847,7 @@ describe("el panel de un operador", () => {
     });
   });
 
-  it("crear para otro operador es 403 y no deja nada", async () => {
+  it("crear para otro proveedor es 403 y no deja nada", async () => {
     const app = harness();
 
     const response = await app.post(
@@ -868,16 +868,16 @@ const PROVIDER_REQUIRED = {
   body: {
     status: "error",
     code: "PROVIDER_REQUIRED",
-    message: "falta ?providerId=: Betaso Games indica sobre qué operador actúa",
+    message: "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
   },
 };
 const FOREIGN_PROVIDER = {
   status: 403,
-  body: { status: "error", code: "FORBIDDEN", message: "un operador sólo actúa sobre sí mismo" },
+  body: { status: "error", code: "FORBIDDEN", message: "un proveedor sólo actúa sobre sí mismo" },
 };
 
 describe("las suscripciones por HTTP", () => {
-  it("un operador se suscribe y se da de baja él mismo, sin nombrarse", async () => {
+  it("un proveedor se suscribe y se da de baja él mismo, sin nombrarse", async () => {
     const app = harness();
     const modo = await app.repository.create(clasica());
 
@@ -896,7 +896,7 @@ describe("las suscripciones por HTTP", () => {
     expect((await app.del(`/game-modes/${modo.uuid}/subscription`, as("parley"))).status).toBe(200);
   });
 
-  it("un operador puede nombrarse a sí mismo; a otro es 403 y no toca nada", async () => {
+  it("un proveedor puede nombrarse a sí mismo; a otro es 403 y no toca nada", async () => {
     const app = harness();
     const modo = await app.repository.create(clasica());
 
@@ -1008,7 +1008,7 @@ describe("POST /game-modes/copies", () => {
     );
   });
 
-  it("un operador no copia para otro, support no copia y Betaso Games sin ?providerId= es 400", async () => {
+  it("un proveedor no copia para otro, support no copia y Betaso Games sin ?providerId= es 400", async () => {
     const app = harness();
     await playedOf(app.repository);
 
@@ -1106,7 +1106,7 @@ describe("el catálogo público", () => {
 });
 
 describe("la fuente del catálogo por HTTP", () => {
-  it("GET /game-modes/admin la suma con un operador resuelto: `shared` por default", async () => {
+  it("GET /game-modes/admin la suma con un proveedor resuelto: `shared` por default", async () => {
     const app = harness();
     const viejo = await playedOf(app.repository);
     const propio = await app.repository.create(
@@ -1139,7 +1139,7 @@ describe("la fuente del catálogo por HTTP", () => {
     );
   });
 
-  it("Betaso Games con ?providerId= ve el catálogo de ese operador y su fuente; sin él, todo y sin fuente", async () => {
+  it("Betaso Games con ?providerId= ve el catálogo de ese proveedor y su fuente; sin él, todo y sin fuente", async () => {
     const app = harness();
     const viejo = await playedOf(app.repository);
     const propio = await app.repository.create(
@@ -1194,7 +1194,7 @@ describe("la fuente del catálogo por HTTP", () => {
     ).toBe("shared");
   });
 
-  it("PUT: support no escribe, otro operador es 403, Betaso Games con ?providerId= (sin él 400), y la forma se valida", async () => {
+  it("PUT: support no escribe, otro proveedor es 403, Betaso Games con ?providerId= (sin él 400), y la forma se valida", async () => {
     const app = harness();
     await app.repository.create(clasica({ ownerProviderId: "parley" }));
 

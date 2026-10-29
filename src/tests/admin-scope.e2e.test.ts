@@ -72,7 +72,7 @@ describe("el ámbito de los admins (integración)", () => {
     ["GET", "/internal/settings/match"],
   ];
 
-  it.each(reads)("%s %s: Betaso Games y support entran, un operador no", async (method, path) => {
+  it.each(reads)("%s %s: Betaso Games y support entran, un proveedor no", async (method, path) => {
     for (const who of ["games", "support", "key"] as const) {
       expect([200, 404]).toContain((await call(who, method, path)).status);
     }
@@ -104,7 +104,7 @@ describe("el ámbito de los admins (integración)", () => {
 
   // EL CATÁLOGO, CON EL PROVEEDOR DENTRO DE SU ÁMBITO: crea su modo propio, que no sale al público y
   // que el orquestador ve con su dueño; el otro proveedor ni lo ve.
-  it("un operador crea un modo propio que sólo ven él, Betaso Games y el orquestador", async () => {
+  it("un proveedor crea un modo propio que sólo ven él, Betaso Games y el orquestador", async () => {
     const created = await call("parley", "POST", "/game-modes", {
       name: "Clásica de Parley",
       prize: 18,
@@ -143,7 +143,7 @@ describe("el ámbito de los admins (integración)", () => {
     });
   });
 
-  it("un operador se suscribe a sí mismo y no edita un compartido", async () => {
+  it("un proveedor se suscribe a sí mismo y no edita un compartido", async () => {
     const created = await call("games", "POST", "/game-modes", {
       name: "Compartida e2e",
       prize: 18,
@@ -221,7 +221,7 @@ describe("el ámbito de los admins (integración)", () => {
     expect((await call("rival", "DELETE", `/game-modes/${uuid}`)).status).toBe(200);
   });
 
-  it("la copia de los compartidos: el operador del token, o el que nombre Betaso Games", async () => {
+  it("la copia de los compartidos: el proveedor del token, o el que nombre Betaso Games", async () => {
     expect((await call("parley", "POST", "/game-modes/copies")).status).toBe(200);
     expect((await call("parley", "POST", "/game-modes/copies?providerId=rival")).status).toBe(403);
     expect((await call("parleySupport", "POST", "/game-modes/copies")).status).toBe(403);

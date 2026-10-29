@@ -30,7 +30,7 @@ describe("adminTokenCheck", () => {
     ["sin prv ni role", {}],
     ["sin prv", { role: "admin" }],
     ["sin role", { prv: null }],
-    ["un operador sin role", { prv: "parley" }],
+    ["un admin de proveedor sin role", { prv: "parley" }],
   ])("rechaza un token %s", async (_name, claims) => {
     expect(await check(adminToken({}, claims))).toBeUndefined();
   });
@@ -38,9 +38,13 @@ describe("adminTokenCheck", () => {
   it.each([
     ["prv nulo y rol admin", { prv: null, role: "admin" }, { provider: null, role: "admin" }],
     ["prv nulo y rol support", { prv: null, role: "support" }, { provider: null, role: "support" }],
-    ["un operador admin", { prv: "parley", role: "admin" }, { provider: "parley", role: "admin" }],
     [
-      "un operador support",
+      "un admin de proveedor con rol admin",
+      { prv: "parley", role: "admin" },
+      { provider: "parley", role: "admin" },
+    ],
+    [
+      "un admin de proveedor con rol support",
       { prv: "parley", role: "support" },
       { provider: "parley", role: "support" },
     ],

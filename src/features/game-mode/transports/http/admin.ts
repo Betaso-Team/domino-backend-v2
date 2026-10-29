@@ -55,7 +55,7 @@ function providerOf(response: Response, asked: string | undefined): string | und
     response.status(400).json({
       status: "error",
       code: "PROVIDER_REQUIRED",
-      message: "falta ?providerId=: Betaso Games indica sobre qué operador actúa",
+      message: "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
     });
     return undefined;
   }
@@ -63,7 +63,7 @@ function providerOf(response: Response, asked: string | undefined): string | und
     response.status(403).json({
       status: "error",
       code: "FORBIDDEN",
-      message: "un operador sólo actúa sobre sí mismo",
+      message: "un proveedor sólo actúa sobre sí mismo",
     });
     return undefined;
   }

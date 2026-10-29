@@ -149,7 +149,7 @@ export class GameModeService {
   // proveedor es 403 (los ids de proveedor no son secretos, la fuente de un competidor sí).
   catalogOf(actor: CatalogActor, providerId: string): Promise<ProviderCatalog> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo ve la fuente de su propio catálogo");
+      refuseForeign(actor, providerId, "un proveedor sólo ve la fuente de su propio catálogo");
     } catch (error) {
       return Promise.reject(error);
     }
@@ -169,7 +169,7 @@ export class GameModeService {
     source: CatalogSource,
   ): Promise<ProviderCatalog> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo elige la fuente de su propio catálogo");
+      refuseForeign(actor, providerId, "un proveedor sólo elige la fuente de su propio catálogo");
     } catch (error) {
       return Promise.reject(error);
     }
@@ -180,7 +180,7 @@ export class GameModeService {
         );
         if (!owned) {
           throw new GameModeStateConflictError(
-            `el operador ${providerId} no tiene modos propios activos: no puede jugar sólo con los suyos`,
+            `el proveedor ${providerId} no tiene modos propios activos: no puede jugar sólo con los suyos`,
           );
         }
       }
@@ -196,7 +196,7 @@ export class GameModeService {
   // (`?providerId=`). Un proveedor sólo puede pedir el suyo, que es lo mismo que no pedir nada.
   async listFor(actor: CatalogActor, providerId?: string): Promise<readonly GameMode[]> {
     if (providerId !== undefined)
-      refuseForeign(actor, providerId, "un operador sólo ve su propio catálogo");
+      refuseForeign(actor, providerId, "un proveedor sólo ve su propio catálogo");
     const viewer = providerId === undefined ? actor : { provider: providerId };
     return (await this.repository.all()).filter((mode) => visibleTo(mode, viewer));
   }
@@ -330,7 +330,7 @@ export class GameModeService {
   // por modo —el reintento ya es seguro—, no la regla.
   createCopies(actor: CatalogActor, providerId: string): Promise<CopiesResult> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo copia los compartidos para sí mismo");
+      refuseForeign(actor, providerId, "un proveedor sólo copia los compartidos para sí mismo");
     } catch (error) {
       return Promise.reject(error);
     }
@@ -384,7 +384,7 @@ export class GameModeService {
     change: "add" | "remove",
   ): Promise<GameMode> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo se suscribe o se da de baja a sí mismo");
+      refuseForeign(actor, providerId, "un proveedor sólo se suscribe o se da de baja a sí mismo");
     } catch (error) {
       return Promise.reject(error);
     }
@@ -517,7 +517,7 @@ function notFound(uuid: string): GameModeNotFoundError {
 function ownerFor(actor: CatalogActor, requested: string | null | undefined): string | null {
   if (actor.provider === null) return requested ?? null;
   if (requested === undefined || requested === actor.provider) return actor.provider;
-  throw new GameModeForbiddenError("un operador sólo crea modos propios suyos");
+  throw new GameModeForbiddenError("un proveedor sólo crea modos propios suyos");
 }
 
 // LA COPIA: los mismos números y niveles que el compartido, con el proveedor de dueño. Campo por campo

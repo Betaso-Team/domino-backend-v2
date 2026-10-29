@@ -13,7 +13,7 @@ function describeContract(
   harnessOf: () => { repository: ProviderCatalogRepository; clock: MutableClock },
 ): void {
   describe(label, () => {
-    it("un operador sin registro está en `shared`, y no viaja en `nonShared`", async () => {
+    it("un proveedor sin registro está en `shared`, y no viaja en `nonShared`", async () => {
       const { repository } = harnessOf();
 
       expect(await repository.of("parley")).toEqual({
@@ -25,7 +25,7 @@ function describeContract(
       expect(await repository.nonShared()).toEqual([]);
     });
 
-    it("`set` escribe un registro por operador, con quién y cuándo", async () => {
+    it("`set` escribe un registro por proveedor, con quién y cuándo", async () => {
       const { repository, clock } = harnessOf();
       clock.set(BASE_INSTANT + 1_000);
       await repository.set("parley", "own", "pia");
@@ -78,7 +78,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoProviderCatalogs contra Mongo", () => {
     return { repository: new MongoProviderCatalogs(mongo, clock), clock };
   });
 
-  it("deja un solo documento por operador", async () => {
+  it("deja un solo documento por proveedor", async () => {
     const repository = new MongoProviderCatalogs(mongo, mutableClock());
     await Promise.all([
       repository.set("parley", "own", "pia"),
