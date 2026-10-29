@@ -9,9 +9,9 @@ const ADMIN_AUDIENCE = "betaso-games-admin";
 
 const ROLES: readonly AdminRole[] = ["admin", "support"];
 
-// LAS DOS CLAIMS DEL ÁMBITO, EXIGIDAS. billing-auth firma en todo token de admin `prv` (el operador
+// LAS DOS CLAIMS DEL ÁMBITO, EXIGIDAS. billing-auth firma en todo token de admin `prv` (el proveedor
 // del admin, `null` = Betaso Games) y `role` (`admin` | `support`). Un token sin alguna de las dos es
-// de antes de los operadores o de otro contrato, y no se tolera: leer la ausencia como «Betaso Games,
+// de antes de los proveedores o de otro contrato, y no se tolera: leer la ausencia como «Betaso Games,
 // admin» sería darle el máximo justo al que no dice quién es. `prv` tiene que estar PRESENTE —texto
 // no vacío o `null` explícito—; ausente es `undefined` y el token se rechaza.
 function providerOf(payload: jwt.JwtPayload): string | null | undefined {

@@ -157,7 +157,7 @@ describe("la puerta con un token de admin", () => {
   });
 });
 
-// ⚠ EL DEFAULT ES EL CERRADO, y es lo que impide que un admin de OPERADOR entre como admin total el
+// ⚠ EL DEFAULT ES EL CERRADO, y es lo que impide que un admin de PROVEEDOR entre como admin total el
 // día que billing-auth empiece a emitir sus tokens: una ruta que no declara nada es de escritura y
 // de Betaso Games. La matriz entera, una fila por credencial y una columna por lo que la ruta abre.
 describe("lo que abre cada puerta", () => {

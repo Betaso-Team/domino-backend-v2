@@ -81,7 +81,7 @@ export function historyRoutes({
   router.get(
     HISTORY_ROUTE,
     // Una lectura de soporte: la llave, o un admin de Betaso Games (también `support`). Un admin de
-    // OPERADOR no entra: el historial no sabe de qué operador es cada mesa, así que no hay ámbito
+    // PROVEEDOR no entra: el historial no sabe de qué proveedor es cada mesa, así que no hay ámbito
     // con el que acotarlo, y abrirlo le mostraría las partidas de todos.
     requireAdminKey(adminApiKey, adminTokens, { read: true }),
     validated({ params: HISTORY_PARAMS }, async ({ params }, response) => {

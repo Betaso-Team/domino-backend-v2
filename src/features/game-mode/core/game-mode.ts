@@ -45,12 +45,12 @@ export interface GameMode {
   // LOS AUMENTOS QUE OFRECE, ordenados por nivel. **Vacío = no ofrece aumentar**, y es el reposo:
   // un modo que nadie configuró (o un Novato) no cobra de más.
   readonly betLevels: readonly GameModeBetLevel[];
-  // EL DUEÑO DEL MODO. `null` es un modo COMPARTIDO, de Betaso Games, que se ofrece a los operadores
-  // suscritos; un id es un modo PROPIO de ese operador, que sólo juegan sus jugadores. Los documentos
-  // de antes de los operadores no tienen el campo y se leen como `null`: eran todos compartidos.
+  // EL DUEÑO DEL MODO. `null` es un modo COMPARTIDO, de Betaso Games, que se ofrece a los proveedores
+  // suscritos; un id es un modo PROPIO de ese proveedor, que sólo juegan sus jugadores. Los documentos
+  // de antes de los proveedores no tienen el campo y se leen como `null`: eran todos compartidos.
   // NO SE EDITA: cambiarle el dueño a un modo es otro modo, con otro uuid.
   readonly ownerProviderId: string | null;
-  // QUIÉNES JUEGAN UN MODO COMPARTIDO, SIEMPRE EXPLÍCITO: un compartido se ofrece sólo a los operadores
+  // QUIÉNES JUEGAN UN MODO COMPARTIDO, SIEMPRE EXPLÍCITO: un compartido se ofrece sólo a los proveedores
   // de la lista. Un documento sin el campo se lee `[]` —nadie—, igual que un compartido nuevo; los
   // modos de antes de las suscripciones se suscriben una vez con `npm run modes:subscribe-existing`.
   // Un modo propio también lleva `[]`: no tiene suscriptores, lo juega su dueño.

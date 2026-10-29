@@ -789,7 +789,7 @@ describe("la infraestructura administrativa", () => {
   });
 });
 
-// ═══ LOS OPERADORES Y EL ORQUESTADOR ══════════════════════════════════════════════════════════════
+// ═══ LOS PROVEEDORES Y EL ORQUESTADOR ═════════════════════════════════════════════════════════════
 
 // UN COMPARTIDO QUE JUEGA PARLEY (y Betaso), como queda un modo de antes de las suscripciones después
 // de `npm run modes:subscribe-existing`.
@@ -861,7 +861,7 @@ describe("el panel de un operador", () => {
   });
 });
 
-// EL OPERADOR SOBRE EL QUE ACTÚA UNA RUTA SALE DEL TOKEN: el admin de un operador no lo nombra (o
+// EL PROVEEDOR SOBRE EL QUE ACTÚA UNA RUTA SALE DEL TOKEN: el admin de un proveedor no lo nombra (o
 // nombra el suyo); Betaso Games lo nombra con `?providerId=`, y sin él es 400.
 const PROVIDER_REQUIRED = {
   status: 400,
@@ -970,7 +970,7 @@ describe("las suscripciones por HTTP", () => {
     ).toBe(403);
   });
 
-  // LA LISTA ENTERA YA NO SE FIJA POR HTTP, y la ruta con el operador en el path desapareció.
+  // LA LISTA ENTERA YA NO SE FIJA POR HTTP, y la ruta con el proveedor en el path desapareció.
   it.each([
     ["PUT", "/subscribers"],
     ["PUT", "/subscriptions/parley"],
@@ -1188,7 +1188,7 @@ describe("la fuente del catálogo por HTTP", () => {
       ((await app.get("/game-modes/admin?providerId=parley", KEY)).body as { source: string })
         .source,
     ).toBe("own");
-    // La de otro operador no cambió.
+    // La de otro proveedor no cambió.
     expect(
       ((await app.get("/game-modes/admin", as("rival"))).body as { source: string }).source,
     ).toBe("shared");

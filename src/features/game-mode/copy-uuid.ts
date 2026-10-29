@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-// EL UUID DE LA COPIA DE UN MODO COMPARTIDO A UN OPERADOR: v5 (RFC 4122, SHA-1) con el uuid del
-// modo de origen como espacio de nombres y el id del operador como nombre. Determinista a propósito:
+// EL UUID DE LA COPIA DE UN MODO COMPARTIDO A UN PROVEEDOR: v5 (RFC 4122, SHA-1) con el uuid del
+// modo de origen como espacio de nombres y el id del proveedor como nombre. Determinista a propósito:
 // es lo que hace que reintentar una copia a medias complete lo que faltó en vez de duplicar, y que
 // dos instancias que copian lo mismo lleguen al mismo documento.
 //

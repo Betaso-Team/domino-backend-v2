@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // porque cruza tres features —catálogo, partida y configuración— y lo que mide es el CABLEADO: que
 // ninguna ruta de administración se haya montado sin decir a quién abre.
 //
-// ⚠ ES EL HUECO ENTRE DESPLIEGUES: el día que billing-auth emite tokens de operador, todo lo que no
+// ⚠ ES EL HUECO ENTRE DESPLIEGUES: el día que billing-auth emite tokens de proveedor, todo lo que no
 // diga `providers` tiene que contestarle 403 a un admin de Parley. Una ruta nueva detrás de
 // `requireAdminKey` sin acotar ya queda cerrada por el default; ésta es la lista de las que hay hoy.
 const PORT = 2633;
@@ -61,7 +61,7 @@ describe("el ámbito de los admins (integración)", () => {
     await server.shutdown();
   });
 
-  // LAS RUTAS DE BETASO GAMES: un operador no entra a ninguna, ni a leer. `support` lee y no escribe.
+  // LAS RUTAS DE BETASO GAMES: un proveedor no entra a ninguna, ni a leer. `support` lee y no escribe.
   // Los 404 de una lectura son de la ruta (no hay tal partida), o sea que la puerta ya dejó pasar.
   const reads: Array<[string, string]> = [
     ["GET", "/internal/matches"],
@@ -76,7 +76,7 @@ describe("el ámbito de los admins (integración)", () => {
     for (const who of ["games", "support", "key"] as const) {
       expect([200, 404]).toContain((await call(who, method, path)).status);
     }
-    // UN TOKEN SIN `prv` NI `role` NO ENTRA: sin tolerancia a los tokens de antes de los operadores.
+    // UN TOKEN SIN `prv` NI `role` NO ENTRA: sin tolerancia a los tokens de antes de los proveedores.
     expect(await call("legacy", method, path)).toEqual({
       status: 401,
       body: { error: "UNAUTHORIZED" },
@@ -102,8 +102,8 @@ describe("el ámbito de los admins (integración)", () => {
     expect((await call("key", "GET", "/internal/game-modes")).status).toBe(401);
   });
 
-  // EL CATÁLOGO, CON EL OPERADOR DENTRO DE SU ÁMBITO: crea su modo propio, que no sale al público y
-  // que el orquestador ve con su dueño; el otro operador ni lo ve.
+  // EL CATÁLOGO, CON EL PROVEEDOR DENTRO DE SU ÁMBITO: crea su modo propio, que no sale al público y
+  // que el orquestador ve con su dueño; el otro proveedor ni lo ve.
   it("un operador crea un modo propio que sólo ven él, Betaso Games y el orquestador", async () => {
     const created = await call("parley", "POST", "/game-modes", {
       name: "Clásica de Parley",
@@ -114,7 +114,7 @@ describe("el ámbito de los admins (integración)", () => {
     expect(created.status).toBe(201);
     const mode = (created.body as { data: Record<string, unknown> }).data;
     expect(mode).toMatchObject({ ownerProviderId: "parley" });
-    // UN OPERADOR NO VE LISTAS DE SUSCRIPTORES, ni siquiera la (vacía) de su propio modo.
+    // UN PROVEEDOR NO VE LISTAS DE SUSCRIPTORES, ni siquiera la (vacía) de su propio modo.
     expect(mode).not.toHaveProperty("subscribers");
     const uuid = mode.uuid as string;
 
@@ -160,7 +160,7 @@ describe("el ámbito de los admins (integración)", () => {
     expect(
       (await call("parley", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
     ).toBe(403);
-    // Betaso Games nombra al operador; sin `?providerId=` es 400.
+    // Betaso Games nombra al proveedor; sin `?providerId=` es 400.
     expect(await call("games", "PUT", `/game-modes/${uuid}/subscription`)).toMatchObject({
       status: 400,
       body: { code: "PROVIDER_REQUIRED" },
@@ -171,7 +171,7 @@ describe("el ámbito de los admins (integración)", () => {
     expect(
       (await call("games", "DELETE", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
     ).toBe(200);
-    // La ruta vieja, con el operador en el path, ya no existe.
+    // La ruta vieja, con el proveedor en el path, ya no existe.
     expect((await call("games", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
       404,
     );
@@ -206,7 +206,7 @@ describe("el ámbito de los admins (integración)", () => {
       409,
     );
 
-    // Betaso Games la vuelve a `shared` por el operador; sin `?providerId=` es 400.
+    // Betaso Games la vuelve a `shared` por el proveedor; sin `?providerId=` es 400.
     expect((await call("games", "PUT", "/game-modes/source", { source: "shared" })).status).toBe(
       400,
     );

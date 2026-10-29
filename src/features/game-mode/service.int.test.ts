@@ -499,7 +499,7 @@ describe("GameModeService: sus dependencias", () => {
     // parsea TypeScript miente de otras maneras. Lo que de verdad sostiene la propiedad es el
     // comentario de cabecera de `service.ts` y la revisión; esto es el piso, no el techo.
     expect([...imported].sort()).toEqual([
-      // El uuid determinista de la copia a un operador: `node:crypto` y nada más.
+      // El uuid determinista de la copia a un proveedor: `node:crypto` y nada más.
       "./copy-uuid",
       "./core/catalog",
       "./core/game-mode",
@@ -511,13 +511,13 @@ describe("GameModeService: sus dependencias", () => {
   });
 });
 
-// ═══ LOS OPERADORES ═══════════════════════════════════════════════════════════════════════════════
+// ═══ LOS PROVEEDORES ══════════════════════════════════════════════════════════════════════════════
 // Modos con dueño, suscripciones y la copia de los compartidos. Los actores son los que dejaría
-// pasar la puerta HTTP: Betaso Games (`GAMES`) y dos operadores que no se ven entre sí.
+// pasar la puerta HTTP: Betaso Games (`GAMES`) y dos proveedores que no se ven entre sí.
 const PARLEY = { provider: "parley" } as const;
 const RIVAL = { provider: "rival" } as const;
 
-// UN COMPARTIDO QUE JUEGAN LOS DOS OPERADORES, como queda un modo de antes de las suscripciones
+// UN COMPARTIDO QUE JUEGAN LOS DOS PROVEEDORES, como queda un modo de antes de las suscripciones
 // después de `npm run modes:subscribe-existing -- parley rival`.
 async function subscribeBoth(repository: MemoryGameModeRepository, uuid: string): Promise<void> {
   await repository.addSubscriber(uuid, "parley");
@@ -602,7 +602,7 @@ describe("GameModeService: la unicidad por dueño", () => {
     expect(renombrada.name).toBe("Compartida");
   });
 
-  // EL HUECO HEREDADO, POR DUEÑO: el mismo `PUT` de sólo la cantidad, en los modos de un operador.
+  // EL HUECO HEREDADO, POR DUEÑO: el mismo `PUT` de sólo la cantidad, en los modos de un proveedor.
   it("⚠ HUECO HEREDADO DE v1, también dentro de un operador", async () => {
     const { service, repository } = harness();
     await service.create(PARLEY, clasica());
@@ -650,7 +650,7 @@ describe("GameModeService: lo que ve y toca cada operador", () => {
     ]);
   });
 
-  // CON `providerId`: Betaso Games mira el catálogo de un operador; un operador sólo el suyo.
+  // CON `providerId`: Betaso Games mira el catálogo de un proveedor; un proveedor sólo el suyo.
   it("listFor con providerId: Betaso Games ve lo de ese operador, un operador sólo lo suyo", async () => {
     const { service } = await catalog();
 
@@ -768,14 +768,14 @@ describe("GameModeService: las suscripciones", () => {
     await expect(service.subscribe(PARLEY, propio.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
-    // El propio de OTRO operador no existe para éste.
+    // El propio de OTRO proveedor no existe para éste.
     await expect(service.subscribe(RIVAL, propio.uuid, "rival")).rejects.toBeInstanceOf(
       GameModeNotFoundError,
     );
     expect((await repository.byUuid(propio.uuid))?.subscribers).toEqual([]);
   });
 
-  // LA BAJA ESCRIBE SÓLO `isActive`: reactivar devuelve el modo a los mismos operadores.
+  // LA BAJA ESCRIBE SÓLO `isActive`: reactivar devuelve el modo a los mismos proveedores.
   it("dar de baja un compartido conserva sus suscriptores", async () => {
     const { service } = harness();
     const modo = await service.create(GAMES, clasica());
