@@ -12,7 +12,7 @@
 //
 // `subscribeExistingModes` sale para el CLI de una sola vez (`src/subscribe-existing.ts`).
 //
-// SIN EVENTOS NI OUTBOX: el catálogo no publica a ningún broker. Betaso (y cualquier operador) lee los
+// SIN EVENTOS NI OUTBOX: el catálogo no publica a ningún broker. Betaso (y cualquier proveedor) lee los
 // modos del orquestador, que los lee de acá por `GET /internal/game-modes`.
 export type { GameModeReader } from "./core/catalog";
 export type { GameMode } from "./core/game-mode";

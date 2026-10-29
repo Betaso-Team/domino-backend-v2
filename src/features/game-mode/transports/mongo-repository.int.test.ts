@@ -79,7 +79,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoGameModeRepository contra Mongo", () => {
   });
 
   // LA SUSCRIPCIÓN DE UNA SOLA VEZ: sólo los compartidos SIN el campo, así que la segunda corrida no
-  // toca nada —tampoco lo que un operador cambió entre las dos—, y un compartido nuevo (con `[]`
+  // toca nada —tampoco lo que un proveedor cambió entre las dos—, y un compartido nuevo (con `[]`
   // escrito) o un propio quedan como están.
   it("subscribeExistingModes suscribe sólo los compartidos sin lista, y es idempotente", async () => {
     const repository = new MongoGameModeRepository(mongo, mutableClock());

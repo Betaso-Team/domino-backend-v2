@@ -99,7 +99,7 @@ describe("matchSetupOf", () => {
 });
 
 describe("matchCloseOf", () => {
-  it("una partida ganada: el premio de `settlementOf`, la entrada cobrada y el peso del ranking", () => {
+  it("una partida ganada: el premio de `payoutOf`, la entrada cobrada y el peso del ranking", () => {
     const match = createMatchState(config);
     const winnerTeamId = teamOf(match, 0);
 

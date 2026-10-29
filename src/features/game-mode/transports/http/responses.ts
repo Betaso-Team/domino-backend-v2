@@ -51,7 +51,7 @@ export function sendError(response: Response, error: unknown): void {
     response.status(409).json({ status: "error", message: error.message });
     return;
   }
-  // 403 CON EL ENVELOPE DEL CATÁLOGO: un operador pidiendo algo de un modo que ve pero no es suyo. Lo
+  // 403 CON EL ENVELOPE DEL CATÁLOGO: un proveedor pidiendo algo de un modo que ve pero no es suyo. Lo
   // que no ve sale como el 404 de arriba, nunca por acá (ver `service.ts`).
   if (error instanceof GameModeForbiddenError) {
     response.status(403).json({ status: "error", message: error.message });

@@ -74,7 +74,7 @@ export function describeGameModeRepositoryContract(
         // SIN NIVELES, el reposo: una mesa que nadie configuró no ofrece aumentar.
         betLevels: [],
         // UN COMPARTIDO SIN NADIE: la lista explícita y vacía, no el legado (`null`), que se ofrecería
-        // a todos los operadores.
+        // a todos los proveedores.
         ownerProviderId: null,
         subscribers: [],
         createdAt: new Date(BASE_INSTANT),

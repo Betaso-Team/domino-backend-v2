@@ -27,10 +27,10 @@ import {
 // LAS MUTACIONES DEL PANEL Y SUS DOS LECTURAS, detrás de su llave.
 //
 // QUIÉN ENTRA A CADA UNA lo dice su puerta (`requireAdminKey`), y el default es el cerrado: Betaso
-// Games con rol `admin`. Las que abren a los admins de OPERADOR (`providers`) delegan el ámbito en el
+// Games con rol `admin`. Las que abren a los admins de PROVEEDOR (`providers`) delegan el ámbito en el
 // servicio, que sabe de quién es cada modo; las de sólo lectura (`read`) abren también a `support`.
 //
-// | ruta                                     | Betaso Games | operador                       | support |
+// | ruta                                     | Betaso Games | proveedor                      | support |
 // |------------------------------------------|--------------|--------------------------------|---------|
 // | GET  /game-modes/admin, /admin/:uuid      | todo         | los suyos + compartidos que juega | lee  |
 // | POST /game-modes                          | sí           | sólo propios suyos             | no      |
@@ -39,12 +39,12 @@ import {
 // | POST /game-modes/copies                   | ?providerId= | para él mismo                  | no      |
 // | PUT  /game-modes/source                   | ?providerId= | la suya                        | no      |
 //
-// EL OPERADOR SOBRE EL QUE SE ACTÚA SALE DEL TOKEN, nunca del path ni del cuerpo: ver `providerOf`.
+// EL PROVEEDOR SOBRE EL QUE SE ACTÚA SALE DEL TOKEN, nunca del path ni del cuerpo: ver `providerOf`.
 // `GET /game-modes/admin` lo acepta opcional y, si hay uno resuelto, suma la fuente de su catálogo.
 
 /**
- * SOBRE QUÉ OPERADOR ACTÚA el pedido, o `undefined` después de contestar por qué ninguno. Un admin de
- * operador, el suyo (un `?providerId=` igual al suyo se acepta, uno distinto es 403); Betaso Games
+ * SOBRE QUÉ PROVEEDOR ACTÚA el pedido, o `undefined` después de contestar por qué ninguno. Un admin de
+ * proveedor, el suyo (un `?providerId=` igual al suyo se acepta, uno distinto es 403); Betaso Games
  * —token sin `prv`, o la llave— el que nombre con `?providerId=`, y sin él es 400. Es el mismo patrón
  * que los webhooks del orquestador (`reports/transports/http/webhooks.ts`).
  */
@@ -55,7 +55,7 @@ function providerOf(response: Response, asked: string | undefined): string | und
     response.status(400).json({
       status: "error",
       code: "PROVIDER_REQUIRED",
-      message: "falta ?providerId=: Betaso Games indica sobre qué operador actúa",
+      message: "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
     });
     return undefined;
   }
@@ -63,7 +63,7 @@ function providerOf(response: Response, asked: string | undefined): string | und
     response.status(403).json({
       status: "error",
       code: "FORBIDDEN",
-      message: "un operador sólo actúa sobre sí mismo",
+      message: "un proveedor sólo actúa sobre sí mismo",
     });
     return undefined;
   }
@@ -71,7 +71,7 @@ function providerOf(response: Response, asked: string | undefined): string | und
 }
 
 // LO MISMO, PERO OPCIONAL PARA BETASO GAMES: el listado del panel sin `?providerId=` es el catálogo
-// entero. `null` = Betaso Games sin operador; `undefined` = ya se contestó el 403.
+// entero. `null` = Betaso Games sin proveedor; `undefined` = ya se contestó el 403.
 function optionalProviderOf(
   response: Response,
   asked: string | undefined,
@@ -117,7 +117,7 @@ export function adminRoutes({
     return router;
   }
 
-  // LAS PUERTAS: las dos abren a los operadores, que el servicio acota; sólo `scopedReader` a `support`.
+  // LAS PUERTAS: las dos abren a los proveedores, que el servicio acota; sólo `scopedReader` a `support`.
   const scoped = requireAdminKey(adminApiKey, adminTokens, { providers: true });
   const scopedReader = requireAdminKey(adminApiKey, adminTokens, { providers: true, read: true });
 
@@ -126,7 +126,7 @@ export function adminRoutes({
   // aquél: el admin se monta primero (`register.ts`), así que `/game-modes/admin` le gana al
   // `/:uuid` público, que lo tomaría por el uuid de un modo llamado "admin".
   //
-  // CON UN OPERADOR RESUELTO (el del token, o el `?providerId=` de Betaso Games) la respuesta suma
+  // CON UN PROVEEDOR RESUELTO (el del token, o el `?providerId=` de Betaso Games) la respuesta suma
   // `source`, la fuente de su catálogo: `{ status, data, source }`. Betaso Games sin `?providerId=`
   // ve todos los modos y ninguna fuente, porque no hay un catálogo del que hablar.
   router.get(
@@ -215,7 +215,7 @@ export function adminRoutes({
     }),
   );
 
-  // LA COPIA DE LOS COMPARTIDOS QUE EL OPERADOR JUEGA a modos propios suyos. Sin cuerpo: el operador
+  // LA COPIA DE LOS COMPARTIDOS QUE EL PROVEEDOR JUEGA a modos propios suyos. Sin cuerpo: el proveedor
   // es el resuelto. 200 y no 201 aunque cree: es idempotente, y el segundo llamado —el reintento de
   // una copia a medias— no crea lo que ya estaba. No la tapa nada: no hay `POST /game-modes/:uuid`.
   router.post(
@@ -232,7 +232,7 @@ export function adminRoutes({
     }),
   );
 
-  // LA FUENTE DEL CATÁLOGO DEL OPERADOR (`shared` | `own`). Pasar a `own` exige un modo propio activo:
+  // LA FUENTE DEL CATÁLOGO DEL PROVEEDOR (`shared` | `own`). Pasar a `own` exige un modo propio activo:
   // 409 si no hay (`GameModeStateConflictError`). Se lee en `GET /game-modes/admin` (`source`).
   //
   // ⚠ VA ANTES DE `PUT /:uuid`: es un solo segmento, y al revés todo cambio de fuente sería la edición
@@ -273,7 +273,7 @@ export function adminRoutes({
     }),
   );
 
-  // LAS SUSCRIPCIONES DEL OPERADOR RESUELTO: tres segmentos, así que `/:uuid` no las tapa.
+  // LAS SUSCRIPCIONES DEL PROVEEDOR RESUELTO: tres segmentos, así que `/:uuid` no las tapa.
   router.put(
     `${BASE}/:uuid/subscription`,
     scoped,

@@ -4,7 +4,7 @@
 // transporte: si el root tuviera que bajar a `core/engine/clock` para escribirlos, la
 // frontera de la feature existiría solo para los que ya están adentro.
 export type { Clock } from "./core/engine/clock";
-// LOS TIPOS DE LOS PARÁMETROS DE `settlementOf`, y salen porque una firma cuyos parámetros
+// LOS TIPOS DE LOS PARÁMETROS DE `payoutOf`, y salen porque una firma cuyos parámetros
 // no se pueden NOMBRAR obliga a importar hondo, que es justo lo que la Regla 4 evita. Por
 // tipado estructural un consumidor puede pasar un literal, pero no puede declarar la
 // variable que va a pasar ni escribir el `switch` que decide cuándo liquidar — y el primer
@@ -36,11 +36,11 @@ export type { PlayerLog } from "./network/player-log";
 // el smoke, mañana el adaptador que efectivamente pague. Sale la función y salen sus tipos:
 // una instrucción que nadie puede nombrar no se puede recibir, ni loguear, ni auditar.
 export {
-  settlementOf,
-  type SettlementEntry,
-  type SettlementInstruction,
-  type SettlementKind,
-} from "./network/settlement";
+  payoutOf,
+  type PayoutEntry,
+  type PayoutInstruction,
+  type PayoutKind,
+} from "./network/payout";
 export { ColyseusMatchGateway } from "./transports/colyseus/gateway";
 // El reparto de partidas entre procesos. Sale por acá porque lo entrega el composition root al
 // servidor, que es el único que puede: `matchMaker` no se importa desde ningún otro lado.

@@ -73,7 +73,7 @@ export interface GameModeDocument {
   enableBots: boolean;
   // OPCIONAL EN LA BASE: los documentos de antes de los niveles no lo tienen, y se leen como `[]`.
   betLevels?: GameModeBetLevel[];
-  // OPCIONALES EN LA BASE: un documento de v1 o de antes de los operadores no tiene dueño (se lee
+  // OPCIONALES EN LA BASE: un documento de v1 o de antes de los proveedores no tiene dueño (se lee
   // `null`, compartido) ni lista (se lee `[]`, no se ofrece a nadie). Los compartidos de antes se
   // suscriben UNA vez con `npm run modes:subscribe-existing` (`subscribeExistingModes`, abajo).
   ownerProviderId?: string | null;
@@ -124,7 +124,7 @@ export class MongoGameModeRepository implements GameModeRepository {
     return modeOf({ ...document, _id: insertedId });
   }
 
-  // UN `$setOnInsert` CON UPSERT: si el uuid ya está, el documento no se toca —la copia del operador
+  // UN `$setOnInsert` CON UPSERT: si el uuid ya está, el documento no se toca —la copia del proveedor
   // puede haberse editado— y vuelve tal cual; si no, nace con todo lo de `create`. Es una sola
   // operación y no "leo, decido, escribo", y el E11000 de dos upserts que compiten por el mismo uuid
   // —el índice `uuid_1` es único— es el camino ORDINARIO de "lo insertó el otro": se relee.
@@ -332,10 +332,10 @@ function definedOf(input: UpdateGameMode): Partial<GameModeDocument> {
 
 // LA SUSCRIPCIÓN DE UNA SOLA VEZ (`npm run modes:subscribe-existing -- <providerId...>`). Desde que
 // la lista es explícita, un compartido de antes de las suscripciones —sin el campo— se lee `[]` y no
-// se le ofrece a nadie. Esto les fija la lista a los operadores dados, que son los que ya los jugaban.
+// se le ofrece a nadie. Esto les fija la lista a los proveedores dados, que son los que ya los jugaban.
 //
 // SÓLO LOS DOCUMENTOS SIN EL CAMPO, y en eso descansa que sea IDEMPOTENTE: la primera corrida escribe
-// la lista, y la segunda no encuentra nada que tocar —aunque entre medio un operador se haya dado de
+// la lista, y la segunda no encuentra nada que tocar —aunque entre medio un proveedor se haya dado de
 // baja de un modo, o Betaso Games haya creado uno nuevo, que nace con `[]` escrito—. Sin `__v` ni
 // `updatedAt`, como toda escritura de suscriptores. Devuelve cuántos modos tocó.
 export async function subscribeExistingModes(

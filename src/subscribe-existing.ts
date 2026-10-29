@@ -7,7 +7,7 @@ import { flushLogs, logger } from "./logger";
 //
 // LA SUSCRIPCIÓN DE UNA SOLA VEZ. Desde que la lista de suscriptores de un compartido es explícita,
 // un modo de antes de las suscripciones —sin el campo `subscribers`— no se le ofrece a nadie. Esto
-// les fija la lista a los operadores que se nombran (los que ya los jugaban; hoy, `betaso`). Sólo
+// les fija la lista a los proveedores que se nombran (los que ya los jugaban; hoy, `betaso`). Sólo
 // toca los compartidos SIN el campo, así que correrlo dos veces no cambia nada la segunda vez.
 //
 // Lee la base de `MONGO_URI` (del `.env` del servicio o del entorno; `src/env.ts` exige además

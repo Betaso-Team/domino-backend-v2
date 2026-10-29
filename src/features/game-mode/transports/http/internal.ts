@@ -13,9 +13,9 @@ export const INTERNAL_GAME_MODES_ROUTE = "/internal/game-modes";
 //
 // `data` son todos los modos activos —compartidos y propios— con su dueño y sus
 // suscriptores (una lista explícita: `[]` es nadie). Con eso arma el catálogo
-// efectivo de cada operador y decide qué modo puede pedir cada jugador; el dominó no lo verifica al
+// efectivo de cada proveedor y decide qué modo puede pedir cada jugador; el dominó no lo verifica al
 // abrir la mesa. `?includeInactive=1` suma los dados de baja, para resolver el modo de una partida
-// vieja. `catalogs` son las FUENTES que se apartan del default: un operador que no aparece está en
+// vieja. `catalogs` son las FUENTES que se apartan del default: un proveedor que no aparece está en
 // `shared` (compartidos activos suscritos); uno en `own` juega sólo sus propios activos. Van en la
 // misma respuesta para que el orquestador no pueda leer modos y fuentes de dos momentos distintos.
 //

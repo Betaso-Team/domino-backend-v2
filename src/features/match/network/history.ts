@@ -201,7 +201,7 @@ export interface BetMultiplierProposal {
  * dominó no convierte a la moneda del jugador ni sabe qué reembolsó el orquestador—:
  *
  *   · `chargedInUC`   la entrada que el orquestador CONFIRMÓ, más el aumento que quedó cobrado.
- *   · `prizePaidInUC` el premio que el resultado publicado le asigna (`settlementOf`). Lo paga el
+ *   · `prizePaidInUC` el premio que el resultado publicado le asigna (`payoutOf`). Lo paga el
  *                     orquestador; esto es lo que se le pidió pagar.
  */
 export interface SeatMoney {

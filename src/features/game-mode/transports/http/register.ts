@@ -6,7 +6,7 @@ import { adminRoutes } from "./admin";
 import { catalogRoutes } from "./catalog";
 import { internalRoutes } from "./internal";
 
-// LAS SIETE RUTAS DEL CATÁLOGO DE v1 (más las de los operadores y la del orquestador), con sus métodos, sus paths y su envelope
+// LAS SIETE RUTAS DEL CATÁLOGO DE v1 (más las de los proveedores y la del orquestador), con sus métodos, sus paths y su envelope
 // (`Betaso-Domino-Backend/src/game-modes/routes.ts`). Este archivo hace DOS cosas y ninguna más:
 // ruteo y traducción de errores a códigos HTTP. La forma de lo que entra y sale vive en
 // `schemas.ts`; qué es un duplicado y qué se puede reactivar lo decide el servicio.

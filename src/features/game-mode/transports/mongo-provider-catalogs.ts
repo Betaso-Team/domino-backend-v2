@@ -11,7 +11,7 @@ import type { Clock, CollectionSource } from "./mongo-repository";
 // dominó es su único escritor y un nombre configurable sería un catálogo que se descubre vacío.
 export const PROVIDER_CATALOG_COLLECTION = "provider_catalogs";
 
-// Un documento por operador que alguna vez cambió su fuente. Ausente = `shared`.
+// Un documento por proveedor que alguna vez cambió su fuente. Ausente = `shared`.
 interface ProviderCatalogDocument {
   providerId: string;
   source: CatalogSource;
@@ -44,7 +44,7 @@ export class MongoProviderCatalogs implements ProviderCatalogRepository {
     return found.map(catalogOf);
   }
 
-  // UN UPSERT POR OPERADOR: el índice único de `providerId` deja un documento por operador aunque
+  // UN UPSERT POR PROVEEDOR: el índice único de `providerId` deja un documento por proveedor aunque
   // dos instancias escribieran a la vez (el lease del escritor ya lo evita).
   async set(
     providerId: string,
