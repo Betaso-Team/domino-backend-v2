@@ -212,7 +212,7 @@ Un juego nunca mueve dinero: el dominó no tiene billetera, ni ledger, ni creden
 - Con la mesa completa, la sala le pide al orquestador que cobre la entrada, y no arranca sin el sí.
 - El aumento de apuesta se negocia en el motor y se le pide cobrar al orquestador; si no cobra, el
   aumento se anula (`MULTIPLIER_REVOKED`).
-- `settlementOf` proyecta el premio, y el resultado viaja al orquestador por el outbox de
+- `payoutOf` proyecta el premio, y el resultado viaja al orquestador por el outbox de
   `betaso_games`. Quien paga es el orquestador, a través de billing-auth.
 - La ventana de revancha se abre con la compuerta cerrada (`eligible: false`): una revancha
   necesitaría que el orquestador vuelva a cobrar, y eso no existe todavía.

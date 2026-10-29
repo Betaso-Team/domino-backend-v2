@@ -372,9 +372,24 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
   anula (`MULTIPLIER_REVOKED`).
 - **El resultado** sale por un outbox durable al exchange `betaso_games` (broker y vhost de
   `BETASO_GAMES_RABBITMQ_URL`), con `mandatory` y publisher confirm: `domino.match.finished` al
-  dictaminarse (participantes, apuesta de la mesa y el premio de `settlementOf`, ya con el aumento) y
+  dictaminarse (participantes, apuesta de la mesa y los premios en `payouts`, ya con el aumento) y
   `domino.match.aborted` al cerrarse sin veredicto (sin montos: el orquestador devuelve lo que cobró).
   `messageId = <matchId>:finished|aborted`.
+
+`domino.match.finished` (`MatchFinishedPayload`, en `network/match-results.ts`):
+
+| Campo | Qué es |
+|---|---|
+| `gameSlug`, `matchId`, `roomId`, `gameModeId`, `rateId` | La mesa; `matchId` es el del orquestador |
+| `endedAt` | ISO 8601, el instante del veredicto |
+| `reason` | `SCORE` o `ABANDONMENT` |
+| `stakes` | `{ entryFee, prize, multiplier, isFreeRoom, bet: { level, extra } \| null }`, en UC |
+| `participants` | `[{ userId, teamId, result }]`; `result` es `won`, `lost` o `abandoned` (el asiento que juega la máquina cuenta como `abandoned`) |
+| `payouts` | `[{ userId, amountUc }]`: los premios que se deben, calculados por `payoutOf` (bots y retirados no cobran; el aumento aceptado va adentro). Solo créditos: el juego no dice qué se cobró |
+
+`domino.match.aborted` (`MatchAbortedPayload`): `gameSlug`, `matchId`, `roomId`, `gameModeId`,
+`abortedAt`, `reason` (`NEVER_STARTED`, `TILES_NOT_SEEN`, `NEVER_PLAYED`, `INTERRUPTED` o `CHARGE_REJECTED`) y
+`participants: [{ userId }]`.
 
 El contrato completo vive en el monorepo del orquestador:
 `docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`.
@@ -389,8 +404,8 @@ flowchart LR
   Domain --> History["Historial de soporte"]
   Platform --> History
   Domain --> Clients["Clientes de la sala"]
-  Domain --> Settlement["settlementOf\nproyección de dinero"]
-  Settlement --> Result["Resultado al orquestador\n(outbox → betaso_games)"]
+  Domain --> Payouts["payoutOf\nproyección de dinero"]
+  Payouts --> Result["Resultado al orquestador\n(outbox → betaso_games)"]
 ```
 
 Los eventos de dominio describen consecuencias (`ROUND_STARTED` en cada reparto, `ROUND_RESOLVED`,

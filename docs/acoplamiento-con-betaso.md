@@ -105,7 +105,7 @@ Betaso en cuatro puntos:
   aumentos y el reparto:
   - `src/features/game-mode/core/game-mode.ts`
   - `src/features/match/core/config.ts`
-  - `src/features/match/network/settlement.ts`
+  - `src/features/match/network/payout.ts`
   - el campo `amountUc` del resultado (`match-results.ts`)
 - **`rateId`.** El contrato lo trata como opaco, pero los comentarios y los tests lo explican como el
   `_id` de Mongo del documento de tasas de Betaso (`match-contract.ts`, `match-contract.test.ts:186`,

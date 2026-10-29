@@ -21,6 +21,9 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
   le pide al orquestador que cobre la entrada (`chargeEntry`) y cada aumento
   (`OrchestratorBetCharger`), y le publica el resultado por el outbox de `betaso_games`
   (`MatchResultRecorder`). Tampoco reporta ranking ni liga, ni sirve `/me/matches` o `/me/metrics`.
+  Los premios viajan en el campo `payouts` de `domino.match.finished` y los calcula `payoutOf`
+  (`network/payout.ts`); el historial de abajo los llama por su nombre viejo, `settlement` /
+  `settlementOf`, que se cambió porque el orquestador usa «settlement» para algo más amplio.
 - **Un solo emisor de tokens: billing-auth.** El `JwtVerifier` acepta solo ES256 contra
   `BILLING_AUTH_PUBLIC_KEY` (obligatoria); no hay HS256 ni secreto compartido con el backend de
   Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
