@@ -7,8 +7,8 @@ import { UUID_PARAMS, toDTO } from "./schemas";
 // LAS DOS LECTURAS DEL CATÁLOGO, públicas: el jugador necesita la lista para entrar a una mesa.
 //
 // SÓLO LOS COMPARTIDOS ACTIVOS, con la forma de siempre (sin dueño ni suscriptores). Un modo propio es
-// la configuración de UN operador: no se lista, y `/:uuid` lo contesta 404 como a uno que no existe.
-// Lo que cada operador ofrece de verdad —sus propios y los compartidos que juega— lo arma el
+// la configuración de UN proveedor: no se lista, y `/:uuid` lo contesta 404 como a uno que no existe.
+// Lo que cada proveedor ofrece de verdad —sus propios y los compartidos que juega— lo arma el
 // orquestador con `GET /internal/game-modes`; esta lista es la de Betaso Games, como antes.
 export function catalogRoutes({ service }: { readonly service: GameModeService }): Router {
   const router = Router();

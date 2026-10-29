@@ -10,7 +10,7 @@ describe("uuidV5", () => {
     );
   });
 
-  it("es el mismo para el mismo origen y operador, y distinto si cambia cualquiera", () => {
+  it("es el mismo para el mismo origen y proveedor, y distinto si cambia cualquiera", () => {
     const origen = "11111111-2222-4333-8444-555555555555";
 
     expect(uuidV5(origen, "parley")).toBe("bb041643-c230-559e-9082-526e5f05487b");

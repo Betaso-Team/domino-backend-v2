@@ -5,7 +5,7 @@ import type { NetworkMatchEvent } from "./events";
 import type { MatchClose, MatchHistory, MatchSetup, SeatMoney } from "./history";
 import type { MatchEventSink } from "./listeners";
 import type { MatchAbortReason } from "./match-results";
-import { settlementOf } from "./settlement";
+import { payoutOf } from "./payout";
 
 // LAS DOS PUNTAS DEL REGISTRO QUE NO SON DEL GRABADOR: con qué se armó la mesa —que la sala sabe al
 // nacer— y cómo terminó —que se cuenta con la plata, y la plata es de la sala y del orquestador—.
@@ -88,7 +88,7 @@ export interface EndingFacts {
 
 /**
  * EL DESENLACE COMO LO CUENTA EL REGISTRO, o `undefined` si el evento no es un desenlace. La plata sale
- * de las MISMAS fuentes que el resultado que recibe el orquestador: el premio de `settlementOf` y el
+ * de las MISMAS fuentes que el resultado que recibe el orquestador: el premio de `payoutOf` y el
  * aumento del ESTADO, así que lo que el registro dice que se pidió pagar es lo que se publicó.
  */
 export function matchCloseOf(
@@ -103,7 +103,7 @@ export function matchCloseOf(
   const entryFee = config.entryFee + (extra?.additionalEntryFee ?? 0);
   const prizes = new Map<string, number>();
   if (event.type === "MATCH_RESOLVED") {
-    for (const { userId, amount } of settlementOf(event, match, config)?.entries ?? [])
+    for (const { userId, amount } of payoutOf(event, match, config)?.entries ?? [])
       prizes.set(userId, amount);
   }
   const money: Record<string, SeatMoney> = Object.fromEntries(
@@ -182,7 +182,7 @@ export function recordEndingSink(
     });
   return (events) => {
     for (const event of events) {
-      // SE PROYECTA YA, aunque haya que esperar: una invariante rota (`settlementOf`) lanza adentro del
+      // SE PROYECTA YA, aunque haya que esperar: una invariante rota (`payoutOf`) lanza adentro del
       // comando que cerró la mesa, como en el resultado, y no como una promesa rechazada que nadie mira.
       const ending = endingOf(event);
       if (!ending) continue;

@@ -56,8 +56,8 @@ const betLevels = z
     });
   });
 
-// EL ID DE UN OPERADOR, con la misma forma que el uuid de la ruta y por lo mismo: entra del cliente y
-// termina en el log y en la base. El dominó no conoce los operadores —son de billing-auth—, así que no
+// EL ID DE UN PROVEEDOR, con la misma forma que el uuid de la ruta y por lo mismo: entra del cliente y
+// termina en el log y en la base. El dominó no conoce los proveedores —son de billing-auth—, así que no
 // se valida que exista: un id que nadie tiene es una suscripción que no ofrece nada a nadie.
 function providerIdOf(label: string) {
   return z
@@ -118,7 +118,7 @@ export const CREATE_BODY = z.strictObject({
   enableBots: fields.enableBots.optional(),
   betLevels: fields.betLevels.default([]),
   // DE QUIÉN ES EL MODO: ausente o `null` es un compartido de Betaso Games; un id es un modo propio de
-  // ese operador. Un admin de operador puede omitirlo (se lo pone el servicio) o mandar el suyo; el
+  // ese proveedor. Un admin de proveedor puede omitirlo (se lo pone el servicio) o mandar el suyo; el
   // de otro, o `null`, es 403. No se edita: no está en `UPDATE_BODY`.
   ownerProviderId: providerIdOf("ownerProviderId").nullable().optional(),
 });
@@ -165,12 +165,12 @@ export const UUID_PARAMS = z.object({
     .regex(/^\P{Cc}+$/u, "uuid inválido"),
 });
 
-// EL OPERADOR SOBRE EL QUE SE ACTÚA NO VIAJA EN EL PATH NI EN EL CUERPO: sale del token. Un admin de
-// operador ya dice quién es; sólo Betaso Games (token sin `prv`, o la llave) lo nombra, con
+// EL PROVEEDOR SOBRE EL QUE SE ACTÚA NO VIAJA EN EL PATH NI EN EL CUERPO: sale del token. Un admin de
+// proveedor ya dice quién es; sólo Betaso Games (token sin `prv`, o la llave) lo nombra, con
 // `?providerId=`. Lo resuelve `providerOf` (`admin.ts`); acá sólo se valida la forma.
 export const PROVIDER_QUERY = z.object({ providerId: providerIdOf("providerId").optional() });
 
-// LA FUENTE DEL CATÁLOGO: el operador sale del token (o de `?providerId=`), la fuente va en el cuerpo.
+// LA FUENTE DEL CATÁLOGO: el proveedor sale del token (o de `?providerId=`), la fuente va en el cuerpo.
 export const CATALOG_SOURCE_BODY = z.strictObject({ source: z.enum(["shared", "own"]) });
 
 export interface ProviderCatalogDTO {
@@ -257,7 +257,7 @@ export function toDTO(mode: GameMode): GameModeDTO {
   };
 }
 
-// LO QUE VE EL PANEL: el DTO de v1 más el dueño. Betaso Games ve la lista de suscriptores; un operador
+// LO QUE VE EL PANEL: el DTO de v1 más el dueño. Betaso Games ve la lista de suscriptores; un proveedor
 // no ve quién más juega un compartido (es información comercial de los otros), sólo `subscribed`: si
 // él está suscrito. En un modo propio `subscribed` no viene: nadie se suscribe a lo suyo.
 export interface AdminGameModeDTO extends GameModeDTO {

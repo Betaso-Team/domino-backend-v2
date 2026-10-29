@@ -3,14 +3,14 @@ import type { DominoMatchConfig } from "../core/config";
 import type { MatchState } from "../core/state";
 import type { AbortReason, NetworkMatchEvent } from "./events";
 import type { MatchEventSink } from "./listeners";
-import { settlementOf } from "./settlement";
+import { payoutOf } from "./payout";
 
 // EL RESULTADO DE UNA MESA DEL ORQUESTADOR, como hecho que dominó le publica. Es la mitad de dominó
 // del contrato `2026-10-05-dinero-mock-resultados-y-reportes-design` (games-orchestrator): exchange
 // `betaso_games`, routing keys `domino.match.finished` / `domino.match.aborted`.
 //
 // DOMINÓ NO MUEVE DINERO, Y TAMPOCO LO OMITE: dice qué pasó. El premio sí viaja —la regla de quién
-// cobra y cuánto es del juego (`settlementOf`)—, y los reembolsos NO: el orquestador devuelve lo que
+// cobra y cuánto es del juego (`payoutOf`)—, y los reembolsos NO: el orquestador devuelve lo que
 // su ficha dice que cobró, que es lo único que sabe con certeza quién pagó.
 //
 // TODA MESA lo publica: el orquestador es la única puerta de entrada, así que toda mesa es suya.
@@ -44,7 +44,7 @@ export interface MatchFinishedPayload {
     readonly teamId: string;
     readonly result: "won" | "lost" | "abandoned";
   }[];
-  readonly settlement: readonly { readonly userId: string; readonly amountUc: number }[];
+  readonly payouts: readonly { readonly userId: string; readonly amountUc: number }[];
 }
 
 export interface MatchAbortedPayload {
@@ -98,9 +98,9 @@ export function matchResultOf(
     };
   }
   if (event.type !== "MATCH_RESOLVED") return undefined;
-  // EL PREMIO SALE DE `settlementOf` Y NO SE RECALCULA ACÁ: es la única regla de quién cobra
+  // EL PREMIO SALE DE `payoutOf` Y NO SE RECALCULA ACÁ: es la única regla de quién cobra
   // (bots y retirados no; el aumento aceptado adentro), y dos copias derivan.
-  const reward = settlementOf(event, match, config);
+  const reward = payoutOf(event, match, config);
   const userOf = new Map(config.seats.map((seat) => [seat.playerId, seat.userId]));
   return {
     routingKey: MATCH_FINISHED_KEY,
@@ -132,7 +132,7 @@ export function matchResultOf(
               ? "won"
               : "lost",
       })),
-      settlement: (reward?.entries ?? []).map(({ userId, amount }) => ({
+      payouts: (reward?.entries ?? []).map(({ userId, amount }) => ({
         userId,
         amountUc: amount,
       })),
@@ -192,7 +192,7 @@ export class MatchResultRecorder {
     return (events) => {
       for (const event of events) {
         // El instante y el motivo son los del cierre, no los de después de la espera. Se proyecta YA
-        // aunque haya que esperar: una invariante rota (`settlementOf`) sigue lanzando adentro del
+        // aunque haya que esperar: una invariante rota (`payoutOf`) sigue lanzando adentro del
         // comando, que es lo que cierra la mesa, y no como una promesa rechazada que nadie mira.
         const at = new Date(this.deps.now());
         const reason = abortReason();

@@ -27,7 +27,7 @@ const sameKey = (provided: string, expected: string): boolean => {
 export type AdminRole = "admin" | "support";
 
 /**
- * QUIÉN ESTÁ DEL OTRO LADO de una ruta de administración. `provider` es el operador al que pertenece
+ * QUIÉN ESTÁ DEL OTRO LADO de una ruta de administración. `provider` es el proveedor al que pertenece
  * el admin (`null` = Betaso Games, el dueño del sistema) y `role` qué puede hacer. Lo arma el
  * verificador del token de billing-auth, o la llave, que vale como un admin de Betaso Games.
  */
@@ -38,7 +38,7 @@ export interface Admin {
 }
 
 // LA LLAVE ES UN ADMIN DE BETASO GAMES: autoriza todo lo que autorizaba antes de que existieran los
-// operadores. No identifica a una persona, así que el nombre dice de dónde vino y nada más.
+// proveedores. No identifica a una persona, así que el nombre dice de dónde vino y nada más.
 export const API_KEY_ADMIN: Admin = { name: "ADMIN_API_KEY", provider: null, role: "admin" };
 
 /**
@@ -53,8 +53,8 @@ export type AdminTokenCheck = (token: string) => Promise<Admin | undefined>;
  * cerrado: una ruta que no dice nada es de escritura y sólo de Betaso Games.
  *
  * - `read`: la ruta sólo lee, así que también entra `support`.
- * - `providers`: entran los admins de un operador. La ruta se compromete a acotar ella misma lo que
- *   cada operador ve y toca; la puerta sólo dice quién es.
+ * - `providers`: entran los admins de un proveedor. La ruta se compromete a acotar ella misma lo que
+ *   cada proveedor ve y toca; la puerta sólo dice quién es.
  */
 export interface AdminAccess {
   readonly read?: boolean;
@@ -69,17 +69,17 @@ const deny = (response: Response, status: 401 | 403): void => {
 // - la llave (`x-internal-api-key`), que autoriza pero no identifica: dice que habla el panel o un
 //   script, no qué persona apretó el botón. Vale como admin de Betaso Games;
 // - el token de admin (`Authorization: Bearer`), que emite billing-auth cuando un admin inicia sesión.
-//   Ese sí identifica, y dice además de qué operador es y con qué rol.
+//   Ese sí identifica, y dice además de qué proveedor es y con qué rol.
 //
 // ⚠ EL DEFAULT CERRADO ES LA DECISIÓN. Hasta este cambio el token abría todo lo que abría la llave, y
-// billing-auth empieza a emitir tokens de ADMINS DE OPERADOR: con el default abierto, un admin de
+// billing-auth empieza a emitir tokens de ADMINS DE PROVEEDOR: con el default abierto, un admin de
 // Parley entraría como admin total del dominó —el historial de todas las mesas, la configuración en
 // caliente, el catálogo entero— el mismo día en que billing-auth despliega, sin una línea cambiada
 // acá. Por eso toda ruta que no declare `providers` es de Betaso Games, y toda la que no declare
 // `read` exige el rol `admin`. Un 403 de más se ve y se arregla; uno de menos es una fuga.
 //
 // Lo que deja pasar queda en `response.locals.admin` (un `Admin`), para que la ruta acote lo que ve
-// cada operador. `adminOf` lo lee.
+// cada proveedor. `adminOf` lo lee.
 export const requireAdminKey =
   (expected: string, adminTokens?: AdminTokenCheck, access: AdminAccess = {}): RequestHandler =>
   (request, response, next) => {

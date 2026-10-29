@@ -128,7 +128,7 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     const payload = enqueue.mock.calls.find((call) => call[0] === key)?.[2];
     expect(payload).toMatchObject({
       stakes: { bet: null },
-      settlement: [{ amountUc: configOfRoom(match.roomId).prize }],
+      payouts: [{ amountUc: configOfRoom(match.roomId).prize }],
     });
   });
 

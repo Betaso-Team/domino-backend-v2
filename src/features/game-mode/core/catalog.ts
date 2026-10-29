@@ -28,9 +28,9 @@ export interface GameModeRepository extends GameModeReader {
   update(uuid: string, input: UpdateGameMode): Promise<GameMode | undefined>;
 
   // CREA CON UN UUID DADO, O DEVUELVE EL QUE YA ESTABA con ese uuid, sin tocarlo. Es la escritura de
-  // la copia de los compartidos a un operador (`createCopies`): el uuid es determinista, así que un
+  // la copia de los compartidos a un proveedor (`createCopies`): el uuid es determinista, así que un
   // reintento después de una copia a medias completa lo que faltó y no duplica nada. `created` dice
-  // cuál de las dos pasó. Lo que había NO se pisa: el operador puede haber editado su copia.
+  // cuál de las dos pasó. Lo que había NO se pisa: el proveedor puede haber editado su copia.
   insertIfAbsent(
     uuid: string,
     input: CreateGameMode,
@@ -46,7 +46,7 @@ export interface GameModeRepository extends GameModeReader {
 }
 
 // QUIÉN PIDE, para el ámbito: `provider` nulo es Betaso Games, que ve y toca todo; un id es un admin
-// de ese operador. Es la mitad del `Admin` de `shared/http/api-key.ts` que el catálogo necesita, y se
+// de ese proveedor. Es la mitad del `Admin` de `shared/http/api-key.ts` que el catálogo necesita, y se
 // redeclara acá para que el core no dependa de la frontera HTTP (el tipado estructural las une).
 export interface CatalogActor {
   readonly provider: string | null;
@@ -54,7 +54,7 @@ export interface CatalogActor {
 
 export const BETASO_GAMES: CatalogActor = { provider: null };
 
-// QUÉ MODOS SE LE OFRECEN A UN OPERADOR: los suyos, y los compartidos que lo tienen en la lista de
+// QUÉ MODOS SE LE OFRECEN A UN PROVEEDOR: los suyos, y los compartidos que lo tienen en la lista de
 // suscriptores (explícita: sin lista, nadie). Es la regla de lo que JUEGA: la usa la copia de los
 // compartidos, y el orquestador aplica la misma sobre `GET /internal/game-modes`.
 export function offeredTo(mode: GameMode, provider: string): boolean {
@@ -62,9 +62,9 @@ export function offeredTo(mode: GameMode, provider: string): boolean {
   return mode.subscribers.includes(provider);
 }
 
-// QUÉ MODOS VE UN OPERADOR EN EL PANEL, que es más que lo que juega: además de lo que se le ofrece,
+// QUÉ MODOS VE UN PROVEEDOR EN EL PANEL, que es más que lo que juega: además de lo que se le ofrece,
 // todos los compartidos ACTIVOS, para que elija a cuáles suscribirse (`subscribed` en el DTO dice en
-// cuáles está). Un compartido dado de baja sólo lo ve si estaba suscrito; uno propio de otro operador,
+// cuáles está). Un compartido dado de baja sólo lo ve si estaba suscrito; uno propio de otro proveedor,
 // nunca. Betaso Games ve todo.
 export function visibleTo(mode: GameMode, actor: CatalogActor): boolean {
   if (actor.provider === null) return true;
@@ -126,20 +126,20 @@ export class GameModeWriteBusyError extends Error {
   override readonly name = "GameModeWriteBusyError";
 }
 
-// UN OPERADOR PIDIENDO ALGO QUE NO ES SUYO: editar un compartido —que no es secreto, lo lista el
-// catálogo público—, crear un modo para otro operador, suscribir a otro. 403. Un modo PROPIO de otro
-// operador no llega acá: sale como «no existe» (404), porque decir 403 le confirmaría que existe.
+// UN PROVEEDOR PIDIENDO ALGO QUE NO ES SUYO: editar un compartido —que no es secreto, lo lista el
+// catálogo público—, crear un modo para otro proveedor, suscribir a otro. 403. Un modo PROPIO de otro
+// proveedor no llega acá: sale como «no existe» (404), porque decir 403 le confirmaría que existe.
 export class GameModeForbiddenError extends Error {
   override readonly name = "GameModeForbiddenError";
 }
 
-// ── LA FUENTE DEL CATÁLOGO DE CADA OPERADOR ───────────────────────────────────────────────────────
+// ── LA FUENTE DEL CATÁLOGO DE CADA PROVEEDOR ───────────────────────────────────────────────────────
 //
-// QUÉ CATÁLOGO JUEGA UN OPERADOR, entero y no modo a modo: `shared` es el compartido —los
+// QUÉ CATÁLOGO JUEGA UN PROVEEDOR, entero y no modo a modo: `shared` es el compartido —los
 // compartidos activos a los que está suscrito—, `own` son sólo sus modos propios activos. Quien
-// arma el catálogo efectivo es el orquestador (que además sabe si el operador juega contra todos,
+// arma el catálogo efectivo es el orquestador (que además sabe si el proveedor juega contra todos,
 // en cuyo caso siempre usa el compartido); acá vive la elección porque el dominó es el dueño de los
-// modos. Un operador sin registro está en `shared`, y es el reposo: nadie queda sin lobby por no
+// modos. Un proveedor sin registro está en `shared`, y es el reposo: nadie queda sin lobby por no
 // haber elegido.
 export type CatalogSource = "shared" | "own";
 
@@ -148,12 +148,12 @@ export const DEFAULT_CATALOG_SOURCE: CatalogSource = "shared";
 export interface ProviderCatalog {
   readonly providerId: string;
   readonly source: CatalogSource;
-  // Quién la cambió por última vez y cuándo; `null` en un operador que nunca la cambió.
+  // Quién la cambió por última vez y cuándo; `null` en un proveedor que nunca la cambió.
   readonly updatedAt: Date | null;
   readonly updatedBy: string | null;
 }
 
-// EL PUERTO DE LAS FUENTES. `of` nunca devuelve `undefined`: un operador sin registro tiene la fuente
+// EL PUERTO DE LAS FUENTES. `of` nunca devuelve `undefined`: un proveedor sin registro tiene la fuente
 // por default. `nonShared` es lo que lee el orquestador: sólo los que se apartan del default, porque
 // el resto —la inmensa mayoría— no necesita viajar.
 export interface ProviderCatalogRepository {

@@ -55,7 +55,7 @@ describe("matchResultOf", () => {
           { userId: "p-ana", teamId: winnerTeamId, result: "won" },
           { userId: "p-beto", teamId: teamOf(match, 1), result: "lost" },
         ],
-        settlement: [{ userId: "p-ana", amountUc: 18 }],
+        payouts: [{ userId: "p-ana", amountUc: 18 }],
       },
     });
   });
@@ -75,7 +75,7 @@ describe("matchResultOf", () => {
 
     expect(result?.payload).toMatchObject({
       stakes: { bet: { level: 2, extra: 1 } },
-      settlement: [{ userId: "p-ana", amountUc: 36 }],
+      payouts: [{ userId: "p-ana", amountUc: 36 }],
     });
   });
 
@@ -262,7 +262,7 @@ describe("MatchResultRecorder", () => {
     await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
     expect(enqueue.mock.calls[0]?.[2]).toMatchObject({
       stakes: { bet: null },
-      settlement: [{ userId: "p-ana", amountUc: 18 }],
+      payouts: [{ userId: "p-ana", amountUc: 18 }],
     });
   });
 

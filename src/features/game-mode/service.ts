@@ -17,15 +17,15 @@ import {
 } from "./core/catalog";
 import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode";
 
-// EL ÁMBITO DE LOS OPERADORES, en tres reglas que todas las operaciones de acá comparten:
+// EL ÁMBITO DE LOS PROVEEDORES, en tres reglas que todas las operaciones de acá comparten:
 //
-// 1. **Un modo propio de OTRO operador no existe**: sale como 404 en toda operación, nunca como 403.
+// 1. **Un modo propio de OTRO proveedor no existe**: sale como 404 en toda operación, nunca como 403.
 //    Decir «no podés» sobre algo que no ve le confirmaría que existe.
 // 2. **Un compartido no es secreto pero no es suyo**: lo lista el catálogo público, así que tocarlo
 //    es 403 y no 404. Se lee y se juega; lo editan, lo dan de baja y lo reactivan sólo en Betaso
 //    Games.
-// 3. **Cada operador habla por sí mismo**: crea modos propios suyos, se suscribe él, copia para él.
-//    Pedirlo para otro es 403 antes de leer nada. El operador sobre el que se actúa llega YA RESUELTO
+// 3. **Cada proveedor habla por sí mismo**: crea modos propios suyos, se suscribe él, copia para él.
+//    Pedirlo para otro es 403 antes de leer nada. El proveedor sobre el que se actúa llega YA RESUELTO
 //    por la frontera HTTP (el del token, o el `?providerId=` de Betaso Games); el chequeo de acá es la
 //    segunda llave, para el día que otro llamador se olvide de la primera.
 //
@@ -33,10 +33,10 @@ import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode"
 // HTTP antes de llegar acá: este servicio sólo sabe de QUIÉN es cada modo.
 //
 // ⚠ EL DUEÑO NO SE VERIFICA AL ABRIR UNA MESA. `POST /internal/matches` resuelve el modo activo por
-// uuid sin preguntar de qué operador es (`match-contract.ts`): que un jugador sólo use los modos de
-// su operador lo garantiza el ORQUESTADOR, que es quien arma el catálogo efectivo de cada uno.
+// uuid sin preguntar de qué proveedor es (`match-contract.ts`): que un jugador sólo use los modos de
+// su proveedor lo garantiza el ORQUESTADOR, que es quien arma el catálogo efectivo de cada uno.
 
-// LA COPIA DE UN COMPARTIDO A UN OPERADOR: qué pasó con cada modo de origen.
+// LA COPIA DE UN COMPARTIDO A UN PROVEEDOR: qué pasó con cada modo de origen.
 export interface CopiedMode {
   readonly sourceUuid: string;
   readonly uuid: string;
@@ -46,7 +46,7 @@ export interface SkippedCopy {
   readonly sourceUuid: string;
   readonly name: string;
   readonly playersQuantity: 2 | 4;
-  // `NAME_TAKEN`: el operador ya tiene un modo propio con ese nombre y esa cantidad, con OTRO uuid
+  // `NAME_TAKEN`: el proveedor ya tiene un modo propio con ese nombre y esa cantidad, con OTRO uuid
   // —uno que creó él—, y la regla de unicidad lo impide. `INVALID_SOURCE_UUID`: el origen no tiene
   // un uuid del que derivar el de la copia (los legados de v1 no garantizan la forma).
   readonly reason: "NAME_TAKEN" | "INVALID_SOURCE_UUID";
@@ -55,7 +55,7 @@ export interface SkippedCopy {
 
 export interface CopiesResult {
   readonly created: readonly CopiedMode[];
-  // Ya estaban, de una copia anterior: se dejan como están, el operador puede haberlas editado.
+  // Ya estaban, de una copia anterior: se dejan como están, el proveedor puede haberlas editado.
   readonly existing: readonly CopiedMode[];
   readonly skipped: readonly SkippedCopy[];
 }
@@ -114,7 +114,7 @@ export class GameModeService {
   // nada que una lectura pueda romper.
   //
   // LO PÚBLICO SON LOS COMPARTIDOS ACTIVOS, y nada más: un modo propio es la configuración de UN
-  // operador y no se publica a quien no se identificó. Tampoco viajan los suscriptores.
+  // proveedor y no se publica a quien no se identificó. Tampoco viajan los suscriptores.
   async listPublic(): Promise<readonly GameMode[]> {
     return (await this.repository.active()).filter((mode) => mode.ownerProviderId === null);
   }
@@ -128,11 +128,11 @@ export class GameModeService {
   }
 
   // EL CATÁLOGO ENTERO PARA EL ORQUESTADOR, con dueños y suscriptores: es quien arma el catálogo
-  // efectivo de cada operador. Los inactivos van sólo si los pide, para resolver el modo de una
+  // efectivo de cada proveedor. Los inactivos van sólo si los pide, para resolver el modo de una
   // partida vieja.
   //
   // VA CON LAS FUENTES QUE SE APARTAN DEL DEFAULT (`own`): con eso el orquestador decide, por
-  // operador, si su catálogo es el compartido suscrito o sólo sus propios. Un operador ausente está
+  // proveedor, si su catálogo es el compartido suscrito o sólo sus propios. Un proveedor ausente está
   // en `shared`.
   async listInternal({ includeInactive }: { includeInactive: boolean }): Promise<{
     readonly modes: readonly GameMode[];
@@ -145,31 +145,31 @@ export class GameModeService {
     return { modes, catalogs };
   }
 
-  // LA FUENTE DEL CATÁLOGO DE UN OPERADOR. La lee cualquier rol del operador o de Betaso Games; otro
-  // operador es 403 (los ids de operador no son secretos, la fuente de un competidor sí).
+  // LA FUENTE DEL CATÁLOGO DE UN PROVEEDOR. La lee cualquier rol del proveedor o de Betaso Games; otro
+  // proveedor es 403 (los ids de proveedor no son secretos, la fuente de un competidor sí).
   catalogOf(actor: CatalogActor, providerId: string): Promise<ProviderCatalog> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo ve la fuente de su propio catálogo");
+      refuseForeign(actor, providerId, "un proveedor sólo ve la fuente de su propio catálogo");
     } catch (error) {
       return Promise.reject(error);
     }
     return this.catalogs.of(providerId);
   }
 
-  // CAMBIAR LA FUENTE. Pasar a `own` exige AL MENOS UN MODO PROPIO ACTIVO del operador: sin eso el
-  // operador quedaría con un catálogo vacío, o sea sin lobby. Volver a `shared` siempre se puede.
+  // CAMBIAR LA FUENTE. Pasar a `own` exige AL MENOS UN MODO PROPIO ACTIVO del proveedor: sin eso el
+  // proveedor quedaría con un catálogo vacío, o sea sin lobby. Volver a `shared` siempre se puede.
   // Adentro del lease y la cola, como toda escritura del catálogo: la comprobación y la escritura
   // no se cruzan con una baja del último propio.
   //
   // Lo que NO se impide es dar de baja después el último propio con la fuente en `own`: eso lo ve
-  // el operador en su propio panel, y el orquestador no ofrece mesas de un catálogo vacío.
+  // el proveedor en su propio panel, y el orquestador no ofrece mesas de un catálogo vacío.
   setCatalogSource(
     actor: CatalogActor & { readonly name: string },
     providerId: string,
     source: CatalogSource,
   ): Promise<ProviderCatalog> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo elige la fuente de su propio catálogo");
+      refuseForeign(actor, providerId, "un proveedor sólo elige la fuente de su propio catálogo");
     } catch (error) {
       return Promise.reject(error);
     }
@@ -180,7 +180,7 @@ export class GameModeService {
         );
         if (!owned) {
           throw new GameModeStateConflictError(
-            `el operador ${providerId} no tiene modos propios activos: no puede jugar sólo con los suyos`,
+            `el proveedor ${providerId} no tiene modos propios activos: no puede jugar sólo con los suyos`,
           );
         }
       }
@@ -190,13 +190,13 @@ export class GameModeService {
 
   // LAS DOS LECTURAS DEL PANEL: ven también a los dados de baja, porque reactivar exige poder
   // listarlos y abrirlos primero. Igual que las públicas, sin lease; la frontera HTTP las
-  // pone detrás de la llave, no el servicio. Cada operador ve lo que `visibleTo` le deja.
+  // pone detrás de la llave, no el servicio. Cada proveedor ve lo que `visibleTo` le deja.
   //
-  // CON `providerId`, LO QUE VE ESE OPERADOR: así Betaso Games mira el catálogo de uno desde el panel
-  // (`?providerId=`). Un operador sólo puede pedir el suyo, que es lo mismo que no pedir nada.
+  // CON `providerId`, LO QUE VE ESE PROVEEDOR: así Betaso Games mira el catálogo de uno desde el panel
+  // (`?providerId=`). Un proveedor sólo puede pedir el suyo, que es lo mismo que no pedir nada.
   async listFor(actor: CatalogActor, providerId?: string): Promise<readonly GameMode[]> {
     if (providerId !== undefined)
-      refuseForeign(actor, providerId, "un operador sólo ve su propio catálogo");
+      refuseForeign(actor, providerId, "un proveedor sólo ve su propio catálogo");
     const viewer = providerId === undefined ? actor : { provider: providerId };
     return (await this.repository.all()).filter((mode) => visibleTo(mode, viewer));
   }
@@ -207,9 +207,9 @@ export class GameModeService {
   }
 
   create(actor: CatalogActor, input: CreateGameMode): Promise<GameMode> {
-    // EL DUEÑO SE DECIDE ANTES DE TOCAR NADA: un operador crea sólo modos propios suyos —sin el campo,
+    // EL DUEÑO SE DECIDE ANTES DE TOCAR NADA: un proveedor crea sólo modos propios suyos —sin el campo,
     // se lo pone el servicio; con el de otro, o con `null` (compartido), es 403—; Betaso Games crea
-    // compartidos por default o propios del operador que nombre.
+    // compartidos por default o propios del proveedor que nombre.
     let owner: string | null;
     try {
       owner = ownerFor(actor, input.ownerProviderId);
@@ -224,8 +224,8 @@ export class GameModeService {
       // «Clásica» de dos y «Clásica» de cuatro, que son mesas distintas con premios distintos.
       //
       // POR DUEÑO: la regla compara contra los modos del MISMO dueño (los compartidos entre sí, los
-      // de cada operador entre sí). Un operador que copia «Clásica» de los compartidos no choca con
-      // la compartida, y dos operadores pueden tener cada uno su «Clásica».
+      // de cada proveedor entre sí). Un proveedor que copia «Clásica» de los compartidos no choca con
+      // la compartida, y dos proveedores pueden tener cada uno su «Clásica».
       if (
         await this.nameTakenBy(
           input.name,
@@ -290,7 +290,7 @@ export class GameModeService {
       // en silencio cualquier cambio que haya entrado entre la lectura y la escritura.
       //
       // LOS SUSCRIPTORES SE QUEDAN: la baja de un compartido no los vacía, así que reactivarlo lo
-      // vuelve a ofrecer a los mismos operadores. El catálogo efectivo ya excluye los inactivos.
+      // vuelve a ofrecer a los mismos proveedores. El catálogo efectivo ya excluye los inactivos.
       await this.refuseEmptyingOwnCatalog(current);
       return this.write(uuid, { isActive: false });
     });
@@ -306,7 +306,7 @@ export class GameModeService {
     });
   }
 
-  // UN OPERADOR SE SUSCRIBE A UN COMPARTIDO ACTIVO, o se da de baja. Betaso Games puede hacerlo por
+  // UN PROVEEDOR SE SUSCRIBE A UN COMPARTIDO ACTIVO, o se da de baja. Betaso Games puede hacerlo por
   // cualquiera. No mueve la revisión (ver el puerto).
   subscribe(actor: CatalogActor, uuid: string, providerId: string): Promise<GameMode> {
     return this.changeSubscription(actor, uuid, providerId, "add");
@@ -316,12 +316,12 @@ export class GameModeService {
     return this.changeSubscription(actor, uuid, providerId, "remove");
   }
 
-  // LA COPIA DE LOS COMPARTIDOS QUE UN OPERADOR JUEGA a modos propios suyos: lo que pide pasar a
+  // LA COPIA DE LOS COMPARTIDOS QUE UN PROVEEDOR JUEGA a modos propios suyos: lo que pide pasar a
   // jugar con valores propios: los compartidos activos con él en la lista de suscriptores.
   //
-  // UNA SOLA VEZ POR MODO Y DETERMINISTA: el uuid de la copia es el v5 de (origen, operador), así que
+  // UNA SOLA VEZ POR MODO Y DETERMINISTA: el uuid de la copia es el v5 de (origen, proveedor), así que
   // reintentar después de una copia a medias crea lo que faltó y deja como está lo que ya se copió
-  // —aunque el operador lo haya editado o dado de baja—. Un modo propio que el operador ya tenía con
+  // —aunque el proveedor lo haya editado o dado de baja—. Un modo propio que el proveedor ya tenía con
   // el mismo nombre y la misma cantidad, con OTRO uuid, no se pisa ni se duplica: se saltea y se
   // informa.
   //
@@ -330,7 +330,7 @@ export class GameModeService {
   // por modo —el reintento ya es seguro—, no la regla.
   createCopies(actor: CatalogActor, providerId: string): Promise<CopiesResult> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo copia los compartidos para sí mismo");
+      refuseForeign(actor, providerId, "un proveedor sólo copia los compartidos para sí mismo");
     } catch (error) {
       return Promise.reject(error);
     }
@@ -384,14 +384,14 @@ export class GameModeService {
     change: "add" | "remove",
   ): Promise<GameMode> {
     try {
-      refuseForeign(actor, providerId, "un operador sólo se suscribe o se da de baja a sí mismo");
+      refuseForeign(actor, providerId, "un proveedor sólo se suscribe o se da de baja a sí mismo");
     } catch (error) {
       return Promise.reject(error);
     }
     return this.mutating(async () => {
       const current = await this.found(uuid);
       if (current.ownerProviderId !== null) {
-        // Uno propio de OTRO operador no existe para éste (regla 1).
+        // Uno propio de OTRO proveedor no existe para éste (regla 1).
         if (actor.provider !== null && current.ownerProviderId !== actor.provider) {
           throw notFound(uuid);
         }
@@ -414,8 +414,8 @@ export class GameModeService {
     return updated;
   }
 
-  // EL ÚLTIMO PROPIO ACTIVO DE UN OPERADOR EN `own` NO SE DA DE BAJA: dejaría su catálogo vacío, o
-  // sea al operador sin lobby. Es la otra mitad de la regla de `setCatalogSource` (pasar a `own` exige
+  // EL ÚLTIMO PROPIO ACTIVO DE UN PROVEEDOR EN `own` NO SE DA DE BAJA: dejaría su catálogo vacío, o
+  // sea al proveedor sin lobby. Es la otra mitad de la regla de `setCatalogSource` (pasar a `own` exige
   // un propio activo), y corre en el mismo turno del lease y la cola, así que una baja y un cambio de
   // fuente no se cruzan. Primero se vuelve a `shared`, después se da de baja.
   private async refuseEmptyingOwnCatalog(current: GameMode): Promise<void> {
@@ -501,7 +501,7 @@ export class GameModeService {
   }
 }
 
-// LA REGLA 3 en una línea: un operador actúa sólo sobre sí mismo; Betaso Games, sobre cualquiera.
+// LA REGLA 3 en una línea: un proveedor actúa sólo sobre sí mismo; Betaso Games, sobre cualquiera.
 function refuseForeign(actor: CatalogActor, providerId: string, message: string): void {
   if (actor.provider !== null && actor.provider !== providerId) {
     throw new GameModeForbiddenError(message);
@@ -512,15 +512,15 @@ function notFound(uuid: string): GameModeNotFoundError {
   return new GameModeNotFoundError(`no existe el modo ${uuid}`);
 }
 
-// EL DUEÑO DE UN MODO NUEVO (regla 3). Un operador: el suyo, mande o no el campo; otro —o `null`, que
+// EL DUEÑO DE UN MODO NUEVO (regla 3). Un proveedor: el suyo, mande o no el campo; otro —o `null`, que
 // es pedir un compartido— es 403. Betaso Games: el que nombre, o compartido.
 function ownerFor(actor: CatalogActor, requested: string | null | undefined): string | null {
   if (actor.provider === null) return requested ?? null;
   if (requested === undefined || requested === actor.provider) return actor.provider;
-  throw new GameModeForbiddenError("un operador sólo crea modos propios suyos");
+  throw new GameModeForbiddenError("un proveedor sólo crea modos propios suyos");
 }
 
-// LA COPIA: los mismos números y niveles que el compartido, con el operador de dueño. Campo por campo
+// LA COPIA: los mismos números y niveles que el compartido, con el proveedor de dueño. Campo por campo
 // y no un spread del modo: la identidad, las fechas, la revisión y los suscriptores del origen no son
 // de la copia.
 function copyOf(source: GameMode, providerId: string): CreateGameMode {

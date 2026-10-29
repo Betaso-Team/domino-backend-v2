@@ -210,7 +210,7 @@ export class UnknownGameModeError extends Error {
 /**
  * ⚠ ESTE MOTOR SIENTA MESAS DE DOS Y DE CUATRO, Y NADA MÁS. La de cuatro se abrió trayendo la
  * regla de reparto de v1 —cada ganador cobra `prize` entero, el socio que se fue no cobra y su
- * mitad se queda en la casa (`domino-room-state.ts:672-678`)— y el piso de `settlementOf` sigue
+ * mitad se queda en la casa (`domino-room-state.ts:672-678`)— y el piso de `payoutOf` sigue
  * siendo la última red: un equipo ganador sin nadie que cobre cierra la partida en vez de pagar.
  *
  * Lo que este error rechaza ahora es una mesa de tres, de seis o de uno: cantidades que ni las

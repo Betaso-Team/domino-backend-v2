@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
 import { replayConfigOf } from "../../transports/match-contract";
 import type { AbortReason } from "../events";
-import { settlementOf } from "../settlement";
+import { payoutOf } from "../payout";
 
-// EL SNAPSHOT DE LA MESA, Y SE ARMA CON `replayConfigOf` Y NO CON `configOf`. Lo que `settlementOf`
+// EL SNAPSHOT DE LA MESA, Y SE ARMA CON `replayConfigOf` Y NO CON `configOf`. Lo que `payoutOf`
 // recibe es la mesa YA CONGELADA —asientos numerados, dinero adentro—, que es exactamente lo que
 // esta función valida; `configOf` pide además el `GameMode` resuelto, o sea que armar estas mesas
 // con él obligaría a inventar un catálogo para medir una proyección que no lo consulta.
@@ -75,12 +75,12 @@ const abortReasons: readonly AbortReason[] = [
   "INTERRUPTED",
 ];
 
-describe("settlementOf", () => {
+describe("payoutOf", () => {
   it("premia al ganador con su identidad y la moneda cobrada", () => {
     const match = matchOf();
     const winnerTeamId = match.players[0]?.teamId as "A" | "B";
     expect(
-      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, config),
+      payoutOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, config),
     ).toEqual({
       matchId: "money-1",
       rateId: options.rateId,
@@ -99,7 +99,7 @@ describe("settlementOf", () => {
   it.each(abortReasons)(
     "reembolsa a todos la inscripción, sea cual sea el motivo (%s)",
     (reason) => {
-      expect(settlementOf({ type: "MATCH_ABORTED", reason }, matchOf(), config)).toEqual(
+      expect(payoutOf({ type: "MATCH_ABORTED", reason }, matchOf(), config)).toEqual(
         refundOfMoney1,
       );
     },
@@ -110,22 +110,23 @@ describe("settlementOf", () => {
   it("no le devuelve la inscripción al que se fue habiendo levantado sus fichas", () => {
     const match = matchOf();
     Object.assign(match.players[0] ?? {}, { hasAbandoned: true, hasSeenTiles: true });
-    expect(
-      settlementOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config),
-    ).toEqual({ ...refundOfMoney1, entries: [refundOfMoney1.entries[1]] });
+    expect(payoutOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config)).toEqual({
+      ...refundOfMoney1,
+      entries: [refundOfMoney1.entries[1]],
+    });
   });
 
   it("el que se fue SIN levantar sí recupera la inscripción", () => {
     const match = matchOf();
     Object.assign(match.players[0] ?? {}, { hasAbandoned: true, hasSeenTiles: false });
-    expect(
-      settlementOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config),
-    ).toEqual(refundOfMoney1);
+    expect(payoutOf({ type: "MATCH_ABORTED", reason: "TILES_NOT_SEEN" }, match, config)).toEqual(
+      refundOfMoney1,
+    );
   });
 
   it("reembolsa las cuatro entradas de una mesa de cuatro, cada una en su moneda", () => {
     const fourSeatConfig = replayConfigOf(fourSeatOptions);
-    const result = settlementOf(
+    const result = payoutOf(
       { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
       createMatchState(fourSeatConfig),
       fourSeatConfig,
@@ -166,19 +167,19 @@ describe("settlementOf", () => {
   it("no proyecta los eventos que no son un desenlace", () => {
     const match = matchOf();
     expect(
-      settlementOf({ type: "PLAYER_DISCONNECTED", playerId: "seat-1" }, match, config),
+      payoutOf({ type: "PLAYER_DISCONNECTED", playerId: "seat-1" }, match, config),
     ).toBeUndefined();
     expect(
-      settlementOf({ type: "PLAYER_RECONNECTED", playerId: "seat-1" }, match, config),
+      payoutOf({ type: "PLAYER_RECONNECTED", playerId: "seat-1" }, match, config),
     ).toBeUndefined();
-    expect(settlementOf({ type: "DEADLINE_EXPIRED", kind: "TURN" }, match, config)).toBeUndefined();
+    expect(payoutOf({ type: "DEADLINE_EXPIRED", kind: "TURN" }, match, config)).toBeUndefined();
   });
 
   it("rechaza un veredicto sobre un equipo donde no queda nadie que cobre", () => {
     const match = matchOf();
     for (const player of match.players) player.teamId = "B";
     expect(() =>
-      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
+      payoutOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, config),
     ).toThrow(/al menos un ganador que cobre, y el equipo A no tiene ninguno/);
   });
 });
@@ -186,7 +187,7 @@ describe("settlementOf", () => {
 // LA MESA DE CUATRO PAGA, y hasta este incremento no podía: la guarda pedía EXACTAMENTE un
 // ganador, que era lo que mantenía inerte la falta de una regla de reparto. La regla existía y
 // estaba en v1.
-describe("settlementOf — el aumento de apuesta aceptado", () => {
+describe("payoutOf — el aumento de apuesta aceptado", () => {
   // EL AUMENTO MULTIPLICA LA MESA ENTERA (`betAmountsOf`, la regla de v1): aceptado el nivel N, la
   // entrada vale `entryFee × N` y el premio `prize × N`. La config está CONGELADA al nacer, así que
   // el nivel se lee del ESTADO; sin eso, el que ganó una mesa a x3 cobraba el premio de x1.
@@ -201,31 +202,24 @@ describe("settlementOf — el aumento de apuesta aceptado", () => {
     const match = withBet(3);
     const winnerTeamId = match.players[0]?.teamId as "A" | "B";
     expect(
-      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, config)
-        ?.entries,
+      payoutOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, config)?.entries,
     ).toEqual([{ userId: "ada", currency: "VES", amount: 750, idempotencyKey: rewardKey }]);
   });
 
   it("reembolsa la entrada con el nivel aceptado", () => {
     expect(
-      settlementOf(
-        { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
-        withBet(2),
-        config,
-      )?.entries.map(({ amount }) => amount),
+      payoutOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, withBet(2), config)?.entries.map(
+        ({ amount }) => amount,
+      ),
     ).toEqual([250, 250]);
   });
 });
 
-describe("settlementOf — el premio de la pareja", () => {
+describe("payoutOf — el premio de la pareja", () => {
   const fourSeatConfig = replayConfigOf(fourSeatOptions);
   const fourSeatMatch = () => createMatchState(fourSeatConfig);
   const resolve = (match: ReturnType<typeof fourSeatMatch>) =>
-    settlementOf(
-      { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
-      match,
-      fourSeatConfig,
-    );
+    payoutOf({ type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" }, match, fourSeatConfig);
 
   // ⚠ CADA GANADOR COBRA `prize` ENTERO Y NO LA MITAD, y ésa es la regla de v1: el premio del
   // catálogo es POR CABEZA, no un pozo a repartir. Dividirlo entre los cobradores es el error que
@@ -294,7 +288,7 @@ describe("settlementOf — el premio de la pareja", () => {
   });
 });
 
-describe("settlementOf — el resto", () => {
+describe("payoutOf — el resto", () => {
   // EL FALLO QUE NO HACE RUIDO. Los `playerId` son posicionales, así que `seat-1` existe en
   // las dos mesas: sin la guarda esto NO daría cero ni dos ganadores —daría exactamente uno—
   // y emitiría una instrucción impecable, con el `matchId` y el `rateId` de la mesa de
@@ -304,14 +298,14 @@ describe("settlementOf — el resto", () => {
     const twoSeatMatch = matchOf();
     const fourSeatConfig = replayConfigOf(fourSeatOptions);
     expect(() =>
-      settlementOf(
+      payoutOf(
         { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
         twoSeatMatch,
         fourSeatConfig,
       ),
     ).toThrow(/no son de la misma mesa money-4p: 2 jugadores contra 4 asientos/);
     expect(() =>
-      settlementOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, twoSeatMatch, fourSeatConfig),
+      payoutOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, twoSeatMatch, fourSeatConfig),
     ).toThrow(/no son de la misma mesa/);
   });
 
@@ -329,7 +323,7 @@ describe("settlementOf — el resto", () => {
       ]),
     });
     expect(() =>
-      settlementOf(
+      payoutOf(
         { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
         createMatchState(otherTable),
         config,
@@ -358,7 +352,7 @@ describe("settlementOf — el resto", () => {
     const winnerTeamId = match.players[0]?.teamId as "A" | "B";
 
     expect(
-      settlementOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, match, decimalTable),
+      payoutOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, match, decimalTable),
     ).toMatchObject({
       kind: "REFUND",
       entries: [
@@ -367,15 +361,15 @@ describe("settlementOf — el resto", () => {
       ],
     });
     expect(
-      settlementOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, decimalTable),
+      payoutOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, decimalTable),
     ).toMatchObject({ kind: "REWARD", entries: [{ amount: 2.75 }] });
   });
 
   // La mesa GRATIS emite igual, con sus entradas en cero: es la decisión escrita en
-  // `settlement.ts`, y sin test alguien la "optimiza" y deja a una liquidación sin rastro.
+  // `payout.ts`, y sin test alguien la "optimiza" y deja a una liquidación sin rastro.
   it("emite el reembolso de una mesa gratis con las entradas en cero", () => {
     const free = replayConfigOf({ ...options, matchId: "money-free", entryFee: 0 });
-    const result = settlementOf(
+    const result = payoutOf(
       { type: "MATCH_ABORTED", reason: "NEVER_STARTED" },
       createMatchState(free),
       free,

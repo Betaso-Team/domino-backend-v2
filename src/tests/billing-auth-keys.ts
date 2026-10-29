@@ -41,7 +41,7 @@ export function mintAdminToken(
   return signAdmin(name, scope);
 }
 
-/** Un token de admin de ANTES de los operadores, sin `prv` ni `role`: el verificador lo rechaza. */
+/** Un token de admin de ANTES de los proveedores, sin `prv` ni `role`: el verificador lo rechaza. */
 export function mintLegacyAdminToken(name: string) {
   return signAdmin(name, {});
 }

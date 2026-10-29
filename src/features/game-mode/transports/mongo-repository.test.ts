@@ -299,10 +299,10 @@ describe("MongoGameModeRepository: la edición en la base", () => {
   });
 });
 
-// EL DOCUMENTO DE ANTES: los de v1 y de antes de los operadores no tienen `ownerProviderId` ni
+// EL DOCUMENTO DE ANTES: los de v1 y de antes de los proveedores no tienen `ownerProviderId` ni
 // `subscribers`. Se leen como compartido SIN NADIE (`[]`): la lista es explícita, y los que ya se
 // jugaban se suscriben una vez con `npm run modes:subscribe-existing`.
-describe("MongoGameModeRepository: el documento de antes de los operadores", () => {
+describe("MongoGameModeRepository: el documento de antes de los proveedores", () => {
   function withLegacy() {
     const h = harness();
     const legacy = {

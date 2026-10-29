@@ -4,4 +4,4 @@ export * from "./events";
 export * from "./history";
 export * from "./listeners";
 export * from "./pieces";
-export * from "./settlement";
+export * from "./payout";

@@ -8,6 +8,11 @@ estar en cómo lo resolvió truco.
 
 El resto de este archivo es el registro de los incrementos, en orden; esta sección es la foto de hoy.
 
+**Vocabulario.** Un **proveedor** es la plataforma que ofrece el dominó a sus jugadores (Betaso,
+Parley): `providerId` en el código, `prv` en el token. **Operador** es una persona que opera el
+sistema (soporte, quien despliega, un usuario del panel), nunca una plataforma. Una **ficha** es una
+pieza del dominó.
+
 - **El dominó es un game backend del orquestador de Betaso Juegos**
   (`betaso-games-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
   entrada**: admite, empareja, tiene el único interruptor de mantenimiento y abre cada mesa por la API
@@ -21,17 +26,20 @@ El resto de este archivo es el registro de los incrementos, en orden; esta secci
   le pide al orquestador que cobre la entrada (`chargeEntry`) y cada aumento
   (`OrchestratorBetCharger`), y le publica el resultado por el outbox de `betaso_games`
   (`MatchResultRecorder`). Tampoco reporta ranking ni liga, ni sirve `/me/matches` o `/me/metrics`.
+  Los premios viajan en el campo `payouts` de `domino.match.finished` y los calcula `payoutOf`
+  (`network/payout.ts`); el historial de abajo los llama por su nombre viejo, `settlement` /
+  `settlementOf`, que se cambió porque el orquestador usa «settlement» para algo más amplio.
 - **Un solo emisor de tokens: billing-auth.** El `JwtVerifier` acepta solo ES256 contra
   `BILLING_AUTH_PUBLIC_KEY` (obligatoria); no hay HS256 ni secreto compartido con el backend de
   Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
   llave nuestra, no la de un cliente.
-- **Cada admin tiene operador y rol.** El token de admin de billing-auth trae `prv` (el operador;
+- **Cada admin tiene proveedor y rol.** El token de admin de billing-auth trae `prv` (el proveedor;
   `null` = Betaso Games) y `role` (`admin` | `support`), **obligatorios**: sin alguno, 401. `requireAdminKey` **cierra por default**: una ruta es de Betaso Games y de escritura salvo
-  que declare `read` (entra `support`) o `providers` (entran los operadores, y la ruta acota). Hoy sólo
+  que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Hoy sólo
   el catálogo declara `providers`; el historial, los registros, `/game-data` y `/internal/settings`
   son de Betaso Games. Ver «Incremento completo — modos con dueño y suscripciones».
-- **Los modos tienen dueño** (`ownerProviderId`: `null` compartido, un id propio de ese operador) y los
-  compartidos, suscriptores **explícitos** (`subscribers`; ausente = `[]` = nadie). Cada operador
+- **Los modos tienen dueño** (`ownerProviderId`: `null` compartido, un id propio de ese proveedor) y los
+  compartidos, suscriptores **explícitos** (`subscribers`; ausente = `[]` = nadie). Cada proveedor
   elige la **fuente** de su catálogo entero (`provider_catalogs`: `shared` | `own`, ausente =
   `shared`). El público `GET /game-modes` sirve sólo compartidos; el orquestador lee modos y fuentes
   por `GET /internal/game-modes`. **El catálogo no publica a ningún broker**: el exchange `betaso`,
@@ -2477,32 +2485,32 @@ Desde `main`. Se programó contra el contrato de token que billing-auth está sa
   panel un TTL entero— y ESTRICTO con lo presente: un rol desconocido o un `prv` que no es texto es
   `undefined`, no el default.
 - ⚠ **EL HUECO ENTRE DESPLIEGUES (B4) SE CIERRA ACÁ Y NO EN CADA RUTA.** Antes el token abría todo lo
-  que abría la llave, así que el día que billing-auth emitiera un token de operador, ese admin entraba
+  que abría la llave, así que el día que billing-auth emitiera un token de proveedor, ese admin entraba
   como admin total del dominó. `requireAdminKey(expected, tokens, { read?, providers? })` cierra por
-  default: sin `providers`, un operador es 403; sin `read`, `support` es 403. Una ruta nueva que se
+  default: sin `providers`, un proveedor es 403; sin `read`, `support` es 403. Una ruta nueva que se
   olvide de decir algo queda cerrada, que es el error que se ve. Lo fija
   `src/tests/admin-scope.e2e.test.ts` contra la app montada. `requireApiKey` (el orquestador) ya no es
   la misma puerta: no deja principal, porque el orquestador no es un admin.
-- **Dos reglas de ámbito en el servicio** (`service.ts`): un modo propio de OTRO operador no existe
+- **Dos reglas de ámbito en el servicio** (`service.ts`): un modo propio de OTRO proveedor no existe
   (404 en todo); un compartido no es secreto —lo lista el público— así que tocarlo sin poder es 403
-  (`GameModeForbiddenError`, el sexto error). Cada operador habla por sí mismo: crea propios suyos, se
+  (`GameModeForbiddenError`, el sexto error). Cada proveedor habla por sí mismo: crea propios suyos, se
   suscribe él, copia para él.
 - **Sin migración ni apagón**: `ownerProviderId` y `subscribers` ausentes se leen `null`. `null` en
   `subscribers` es LEGADO y se ofrece a todos, igual que antes; un compartido nuevo nace con `[]`. Sumar
-  o sacar un operador de un legado es 409 hasta que Betaso Games fije la lista
+  o sacar un proveedor de un legado es 409 hasta que Betaso Games fije la lista
   (`PUT /game-modes/:uuid/subscribers`): sumarlo lo dejaría ofrecido sólo a ése. El adaptador Mongo lo
   impide también en la base (`subscribers: { $type: "array" }` en el filtro: `$addToSet` sobre un campo
   ausente lo crearía con un solo elemento).
 - **Los suscriptores no avanzan `__v` ni `updatedAt`.** `__v` es la revisión del outbox: si avanzara,
   cada suscripción publicaría un `game_mode.updated` idéntico a Betaso —contándole la actividad de los
-  otros operadores—. La baja de un compartido sigue escribiendo sólo `isActive`, así que reactivarlo
-  lo devuelve a los mismos operadores.
+  otros proveedores—. La baja de un compartido sigue escribiendo sólo `isActive`, así que reactivarlo
+  lo devuelve a los mismos proveedores.
 - **La unicidad es por dueño** y conserva la asimetría de v1 (par al crear, nombre al renombrar) y el
   hueco heredado, con un test pineado por dueño además del original.
 - **La copia de los compartidos** (~~`POST /game-modes/copy-shared`~~ → `POST /game-modes/copies`, ver
-  «el operador sale del token») usa uuid v5 (`copy-uuid.ts`,
+  «el proveedor sale del token») usa uuid v5 (`copy-uuid.ts`,
   `node:crypto`, vector del RFC en su test) e `insertIfAbsent` (`$setOnInsert` con upsert): reintentar
-  completa una copia a medias y no pisa lo que el operador editó. Un propio homónimo con otro uuid se
+  completa una copia a medias y no pisa lo que el proveedor editó. Un propio homónimo con otro uuid se
   saltea y se informa (`NAME_TAKEN`); un origen sin forma de UUID, `INVALID_SOURCE_UUID`. Todo en un
   turno del lease.
 - **Al exchange `betaso` sólo salen los compartidos** (`publishable`, `outbox.ts`), filtrado en los dos
@@ -2511,7 +2519,7 @@ Desde `main`. Se programó contra el contrato de token que billing-auth está sa
   Betaso-Backend lea el catálogo del orquestador.
 - **`GET /internal/game-modes`** (`transports/http/internal.ts`): con `ORCHESTRATOR_API_KEY`, fail
   closed, activos con dueño y suscriptores; `?includeInactive=1` suma los dados de baja.
-- ⚠ **El dominó no verifica el operador al abrir una mesa**: `POST /internal/matches` resuelve el modo
+- ⚠ **El dominó no verifica el proveedor al abrir una mesa**: `POST /internal/matches` resuelve el modo
   activo por uuid sin mirar su dueño. Lo garantiza el orquestador.
 - **El público `/game-modes/:uuid` contesta 404 a un modo propio.** El front de dominó lee esa ruta para
   la config de la mesa (`table-config.ts`): una mesa con un modo propio no la va a encontrar hasta que
@@ -2523,7 +2531,7 @@ Desde `main`. Se programó contra el contrato de token que billing-auth está sa
 
 `develop` tiene `GET /internal/players/:userId/matches` (`players.ts`) detrás de
 `requireAdminKey(adminApiKey, adminTokens)`. Con el default cerrado queda de Betaso Games con rol
-`admin`: si `support` tiene que leerlo, va `{ read: true }`. Ningún operador debe entrar (no hay ámbito
+`admin`: si `support` tiene que leerlo, va `{ read: true }`. Ningún proveedor debe entrar (no hay ámbito
 de partidas). El filtro por motivo del listado no cambia nada de esto.
 
 ## Incremento completo — modos con dueño: fuente del catálogo y sin exchange `betaso` (misma rama)
@@ -2549,41 +2557,41 @@ Emmanuel». Varias entradas del bloque anterior quedan desactualizadas; las vige
 - **La fuente del catálogo** (`provider_catalogs`, `{ providerId, source, updatedAt, updatedBy }`,
   ausente = `shared`): ~~`GET /game-modes/catalogs/:providerId` (cualquier rol del ámbito) y
   `PUT … {source}`~~ → `source` en `GET /game-modes/admin` y `PUT /game-modes/source {source}`, ver
-  «el operador sale del token» (rol `admin` del ámbito; Betaso Games cualquiera), bajo el lease y la cola. `own`
+  «el proveedor sale del token» (rol `admin` del ámbito; Betaso Games cualquiera), bajo el lease y la cola. `own`
   sin un modo propio ACTIVO es 409. No se impide dar de baja después el último propio con la fuente
   en `own`: lo resuelve el orquestador (catálogo vacío, no ofrece mesas).
 - **`GET /internal/game-modes`** = `{ status, data: [modos], catalogs: { [providerId]: "own" } }`, sólo
   las fuentes que no son `shared`; `?includeInactive=1` igual que antes.
 - ~~`copy-shared` se queda~~ (ahora `POST /game-modes/copies`); copia los compartidos activos a los
-  que el operador está suscrito.
+  que el proveedor está suscrito.
 
-## Incremento completo — el operador sale del token (rama `refactor/modos-sin-proveedor-en-la-ruta`)
+## Incremento completo — el proveedor sale del token (rama `refactor/modos-sin-proveedor-en-la-ruta`)
 
 Del plan «tasas y emparejamiento con nombres claros, rutas sin proveedor redundante y permisos de
 usuarios del panel» (sección Dominó). Desde `main`. Rompe la API del panel a propósito: nada está en
 producción, y no quedan alias.
 
-- **El operador sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo.
+- **El proveedor sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo.
   `providerOf` (`transports/http/admin.ts`, el mismo patrón que los webhooks del orquestador): un
-  admin de operador actúa sobre el suyo (`?providerId=` igual se acepta, distinto es
+  admin de proveedor actúa sobre el suyo (`?providerId=` igual se acepta, distinto es
   `403 {status:"error", code:"FORBIDDEN"}`); Betaso Games (token con `prv: null`, o la llave) lo nombra
   con `?providerId=`, y sin él es `400 {status:"error", code:"PROVIDER_REQUIRED"}`. La credencial y
-  el rol se miran antes (la puerta), la forma después (`validated`, `PROVIDER_QUERY`) y el operador
+  el rol se miran antes (la puerta), la forma después (`validated`, `PROVIDER_QUERY`) y el proveedor
   al final.
 - **Rutas:** `PUT|DELETE /game-modes/:uuid/subscriptions/:providerId` → `PUT|DELETE
   /game-modes/:uuid/subscription`; `POST /game-modes/copy-shared {providerId}` → `POST
   /game-modes/copies` (sin cuerpo; misma respuesta y mismo uuid v5); `GET|PUT
   /game-modes/catalogs/:providerId` → `PUT /game-modes/source {source}`. Las viejas dan 404.
   `POST /game-modes` (con `ownerProviderId`) y `GET /internal/game-modes` no cambian.
-- **La fuente se lee en `GET /game-modes/admin`**: con un operador resuelto (token de operador, o
+- **La fuente se lee en `GET /game-modes/admin`**: con un proveedor resuelto (token de proveedor, o
   Betaso Games con `?providerId=`) responde `{ status, data, source }`, y `data` es lo que ve ESE
-  operador (Betaso Games sigue viendo `subscribers`); Betaso Games sin `?providerId=` recibe todos los
+  proveedor (Betaso Games sigue viendo `subscribers`); Betaso Games sin `?providerId=` recibe todos los
   modos y ningún `source`. El GET de la fuente sola se fue.
 - ⚠ **`PUT /game-modes/source` va ANTES de `PUT /game-modes/:uuid`**: es un solo segmento, y al revés
   todo cambio de fuente sería la edición del modo de uuid `source`. Lo pinea el test del orden de
   registro (`register.int.test.ts`).
 - **Servicio:** `copyShared` → `createCopies` (`CopySharedResult` → `CopiesResult`); `listFor(actor,
-  providerId?)` filtra por lo que ve ese operador. Las firmas reciben el operador ya resuelto, y el
+  providerId?)` filtra por lo que ve ese proveedor. Las firmas reciben el proveedor ya resuelto, y el
   servicio conserva la regla 3 (`refuseForeign`) como segunda llave.
 
 ## Cómo se ejecuta una tarea

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 import { env } from "@/env";
 import type { GameMode } from "@/features/game-mode";
-import { settlementOf } from "@/features/match";
+import { payoutOf } from "@/features/match";
 import type { DominoMatchConfig } from "@/features/match/core/config";
 import { createMatchState } from "@/features/match/core/engine/genesis";
 import { boneyardCountOf } from "@/features/match/core/engine/state-projections";
@@ -157,7 +157,7 @@ async function historyOf(matchId: string): Promise<readonly HistoryLine[]> {
   return body.entries ?? [];
 }
 
-function assertSettlements(
+function assertPayouts(
   history: readonly HistoryLine[],
   state: MatchState,
   config: DominoMatchConfig,
@@ -169,18 +169,14 @@ function assertSettlements(
   assert.ok(winnerTeamId === "A" || winnerTeamId === "B", "winnerTeamId inválido");
   assert.equal(reason, "SCORE", "el smoke terminó sin jugar hasta el puntaje");
 
-  const settlementState = createMatchState(config);
-  for (const player of settlementState.players) {
+  const payoutState = createMatchState(config);
+  for (const player of payoutState.players) {
     const deployed = state.players.find(({ playerId }) => playerId === player.playerId);
     assert.ok(deployed, `el deploy no devolvió ${player.playerId}`);
     player.teamId = deployed.teamId;
   }
 
-  const reward = settlementOf(
-    { type: "MATCH_RESOLVED", winnerTeamId, reason },
-    settlementState,
-    config,
-  );
+  const reward = payoutOf({ type: "MATCH_RESOLVED", winnerTeamId, reason }, payoutState, config);
   const winnerId = state.players.find(({ teamId }) => teamId === winnerTeamId)?.playerId;
   const winner = config.seats.find(({ playerId }) => playerId === winnerId);
   assert.ok(winner, "config sin asiento ganador");
@@ -198,11 +194,7 @@ function assertSettlements(
     ],
   });
 
-  const refund = settlementOf(
-    { type: "MATCH_ABORTED", reason: "INTERRUPTED" },
-    settlementState,
-    config,
-  );
+  const refund = payoutOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, payoutState, config);
   assert.equal(refund?.kind, "REFUND");
   assert.deepEqual(
     refund?.entries.map(({ userId, currency, amount }) => ({ userId, currency, amount })),
@@ -361,7 +353,7 @@ async function run(): Promise<void> {
       history = await historyOf(config.matchId);
       return history.some(({ type }) => type === "MATCH_RESOLVED");
     });
-    assertSettlements(history, first.state, config);
+    assertPayouts(history, first.state, config);
     logger.info("smoke completo", { matchId: config.matchId, history: history.length });
   } finally {
     await Promise.allSettled([roomA?.leave(), roomB?.leave()]);

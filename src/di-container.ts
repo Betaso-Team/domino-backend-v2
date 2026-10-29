@@ -185,7 +185,7 @@ rootContainer.register("PlayerLog", { useValue: history });
 const gameModeRepository = mongo
   ? new MongoGameModeRepository(mongo, clock)
   : new MemoryGameModeRepository(clock);
-// LAS FUENTES DEL CATÁLOGO DE CADA OPERADOR (`shared` | `own`), en la misma base que los modos.
+// LAS FUENTES DEL CATÁLOGO DE CADA PROVEEDOR (`shared` | `own`), en la misma base que los modos.
 const providerCatalogs = mongo
   ? new MongoProviderCatalogs(mongo, clock)
   : new MemoryProviderCatalogs(clock);

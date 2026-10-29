@@ -106,7 +106,7 @@ export function roundActivePlayers(match: MatchState): PlayerState[] {
  * cuatro asientos: se va uno, se le sienta un bot, se va su compañero — y como el bot no está
  * marcado como retirado, el equipo entero de máquinas sigue contando como presente. La partida
  * continúa con un bot jugando solo contra dos personas, y puede GANARLA: ahí el premio va a un
- * equipo donde nadie cobra (`settlementOf` excluye bots y retirados), o sea plata trabada.
+ * equipo donde nadie cobra (`payoutOf` excluye bots y retirados), o sea plata trabada.
  *
  * Es el `checkOnlyOneTeam` de v1 (`on-leave.ts:96-100`), que filtra los bots por lo mismo. El bot
  * existe para que el compañero que quedó pueda seguir jugando; sin ese compañero no hay nada que
