@@ -5,6 +5,7 @@ import { Router } from "express";
 import type { Clock } from "../../core/engine/clock";
 import type { HistoryReader, MatchArchive } from "../../network/history";
 import type { PlayerLog } from "../../network/player-log";
+import type { PlayerStatsStore } from "../../network/player-stats";
 import type { ColyseusMatchGateway } from "../colyseus/gateway";
 import type { MatchRegistry } from "../match-registry";
 import { historyRoutes } from "./history";
@@ -35,6 +36,8 @@ export interface MatchHttpDeps {
   readonly archive: MatchArchive;
   /** Lo que jugó cada cuenta, para `GET /me/matches` y el panel. Ver `meRoutes` y `playerRoutes`. */
   readonly players: PlayerLog;
+  /** Las estadísticas de cada cuenta, para `GET /me/stats`. Ver `meRoutes`. */
+  readonly stats: PlayerStatsStore;
   /** `undefined` ⇒ las rutas internas NO se registran. Ver `historyRoutes` y `recordRoutes`. */
   readonly adminApiKey: string | undefined;
   /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */

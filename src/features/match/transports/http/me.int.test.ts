@@ -8,6 +8,7 @@ import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MatchListTimeoutError } from "../../network/history";
 import type { PlayerLog } from "../../network/player-log";
+import { EMPTY_STATS, type PlayerStats, type PlayerStatsStore } from "../../network/player-stats";
 import { MemoryHistory } from "../../network/transports/memory-history";
 import { CLOSING, SETUP } from "../../network/transports/tests/history-contract";
 import { meRoutes } from "./me";
@@ -28,10 +29,13 @@ const verifier: TokenVerifier = {
 };
 
 const servers: Server[] = [];
-async function serve(players: PlayerLog): Promise<string> {
+async function serve(
+  players: PlayerLog,
+  stats: PlayerStatsStore = { apply: vi.fn(), of: () => Promise.resolve(EMPTY_STATS) },
+): Promise<string> {
   const app = express()
     .use(express.json())
-    .use(meRoutes({ players, verifier, logger: fakeLogger() }))
+    .use(meRoutes({ players, stats, verifier, logger: fakeLogger() }))
     .use(httpErrorHandler(fakeLogger()));
   const server = app.listen(0, "127.0.0.1");
   servers.push(server);
@@ -57,7 +61,15 @@ async function seeded(): Promise<MemoryHistory> {
 
 describe("GET /me/matches: lo que jugó el dueño del token", () => {
   it("sin verificador no se registra", () => {
-    expect(routesOf(meRoutes({ players: new MemoryHistory(), logger: fakeLogger() }))).toEqual([]);
+    expect(
+      routesOf(
+        meRoutes({
+          players: new MemoryHistory(),
+          stats: { apply: vi.fn(), of: vi.fn() },
+          logger: fakeLogger(),
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it("sin token o con uno inválido es 401, y no consulta", async () => {
@@ -101,5 +113,67 @@ describe("GET /me/matches: lo que jugó el dueño del token", () => {
     const base = await serve({ pageOf: () => Promise.reject(new MatchListTimeoutError()) });
 
     expect((await get(`${base}/me/matches`, "tok-u1")).status).toBe(503);
+  });
+});
+
+describe("GET /me/stats: las estadísticas del dueño del token", () => {
+  const played3: PlayerStats = {
+    gamesPlayed: 3,
+    gamesWon: 2,
+    gamesWonFourPlayers: 1,
+    gamesAbandoned: 1,
+    currentStreak: 1,
+    maxStreak: 2,
+  };
+
+  it("sin verificador no se registra", () => {
+    const router = meRoutes({
+      players: new MemoryHistory(),
+      stats: { apply: vi.fn(), of: vi.fn() },
+      logger: fakeLogger(),
+    });
+    expect(routesOf(router)).toEqual([]);
+  });
+
+  it("sin token o con uno inválido es 401, y no consulta", async () => {
+    const of = vi.fn();
+    const base = await serve(new MemoryHistory(), { apply: vi.fn(), of });
+
+    expect((await get(`${base}/me/stats`)).status).toBe(401);
+    expect((await get(`${base}/me/stats`, "otro")).status).toBe(401);
+    expect(of).not.toHaveBeenCalled();
+  });
+
+  it("un jugador sin partidas recibe todo en cero", async () => {
+    const base = await serve(new MemoryHistory());
+    const response = await get(`${base}/me/stats`, "tok-u1");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      gamesPlayed: 0,
+      gamesWon: 0,
+      gamesWonFourPlayers: 0,
+      gamesAbandoned: 0,
+      winRate: 0,
+      maxWinStreak: 0,
+    });
+  });
+
+  // LA CUENTA SALE DEL TOKEN: un `userId` en el query no cambia de quién se contesta.
+  it("con 3 jugadas y 2 ganadas, winRate 0.67, y responde las del sub del token", async () => {
+    const of = vi.fn().mockResolvedValue(played3);
+    const base = await serve(new MemoryHistory(), { apply: vi.fn(), of });
+    const body = await (await get(`${base}/me/stats?userId=u2`, "tok-u1")).json();
+
+    expect(of).toHaveBeenCalledWith("u1");
+    expect(body).toEqual({
+      gamesPlayed: 3,
+      gamesWon: 2,
+      gamesWonFourPlayers: 1,
+      gamesAbandoned: 1,
+      winRate: 0.67,
+      maxWinStreak: 2,
+    });
   });
 });
