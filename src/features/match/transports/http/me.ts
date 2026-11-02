@@ -4,7 +4,6 @@ import { type Response, Router } from "express";
 import { z } from "zod";
 import { MatchListTimeoutError } from "../../network/history";
 import type { MatchRow, Paginated, PlayerLog } from "../../network/player-log";
-
 import type { PlayerStats, PlayerStatsStore } from "../../network/player-stats";
 
 export const ME_MATCHES_ROUTE = "/me/matches";
@@ -38,6 +37,7 @@ export const PAGE_QUERY = z.object({
 });
 
 const TIMEOUT_MESSAGE = "El historial tardó demasiado; inténtalo de nuevo";
+const STATS_TIMEOUT_MESSAGE = "Las estadísticas tardaron demasiado; inténtalo de nuevo";
 
 /**
  * LA PÁGINA DE UNA CUENTA, la misma para el dueño del token y para el panel (`./players.ts`): cambia
@@ -87,8 +87,15 @@ export function meRoutes(deps: {
   router.get(
     ME_STATS_ROUTE,
     authenticated(verifier, {}, async (identity, _input, response) => {
-      const stats = await deps.stats.of(identity.userId);
-      response.set("Cache-Control", "no-store").json(statsView(stats));
+      try {
+        const stats = await deps.stats.of(identity.userId);
+        response.set("Cache-Control", "no-store").json(statsView(stats));
+      } catch (error) {
+        // Como el historial: el plazo vencido es 503 y lo demás sube.
+        if (!(error instanceof MatchListTimeoutError)) throw error;
+        deps.logger.warn("estadísticas del jugador: la base excedió el plazo");
+        response.status(503).json({ status: "error", message: STATS_TIMEOUT_MESSAGE });
+      }
     }),
   );
   return router;

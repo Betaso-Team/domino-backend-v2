@@ -46,6 +46,8 @@ export class PlayerStatsRecorder {
 
   // No espera: queda en vuelo y `drain()` lo espera.
   afterClose(matchId: string, closing: MatchClosing): void {
+    // Una partida anulada no cuenta: nunca queda `statsPending`, así que no hay nada que dar por resuelto.
+    if (closing.status !== "finished") return;
     const run = (async () => {
       try {
         await this.applyAll(matchId, linesOf(closing as unknown as StoredMatchRecord));

@@ -1,5 +1,6 @@
 import type { Logger } from "@/logger";
 import { type Collection, MongoServerError } from "mongodb";
+import { MatchListTimeoutError } from "../history";
 import {
   EMPTY_STATS,
   type PlayerStats,
@@ -11,6 +12,9 @@ import type { HistoryStore } from "./mongo-history";
 export const PLAYER_STATS_COLLECTION = "player_stats";
 
 const DUPLICATE_KEY = 11000;
+// El mismo plazo que el listado: una base colgada no cuelga /me/stats.
+const READ_MAX_TIME_MS = 5_000;
+const MAX_TIME_MS_EXPIRED = 50;
 
 // `_id` es el `userId`. `lastEndedAt` es la marca que hace idempotente la escritura.
 interface StatsDocument {
@@ -103,20 +107,29 @@ export class MongoPlayerStats implements PlayerStatsStore {
 
   async of(userId: string): Promise<PlayerStats> {
     const collection = await this.store.collection<StatsDocument>(PLAYER_STATS_COLLECTION);
-    const found = await collection.findOne(
-      { _id: userId },
-      {
-        projection: {
-          _id: 0,
-          gamesPlayed: 1,
-          gamesWon: 1,
-          gamesWonFourPlayers: 1,
-          gamesAbandoned: 1,
-          currentStreak: 1,
-          maxStreak: 1,
+    let found: Partial<StatsDocument> | null;
+    try {
+      found = await collection.findOne(
+        { _id: userId },
+        {
+          maxTimeMS: READ_MAX_TIME_MS,
+          projection: {
+            _id: 0,
+            gamesPlayed: 1,
+            gamesWon: 1,
+            gamesWonFourPlayers: 1,
+            gamesAbandoned: 1,
+            currentStreak: 1,
+            maxStreak: 1,
+          },
         },
-      },
-    );
+      );
+    } catch (error) {
+      if (error instanceof MongoServerError && error.code === MAX_TIME_MS_EXPIRED) {
+        throw new MatchListTimeoutError(error);
+      }
+      throw error;
+    }
     if (!found) return EMPTY_STATS;
     return {
       gamesPlayed: found.gamesPlayed ?? 0,

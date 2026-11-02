@@ -52,7 +52,7 @@ describe("GET /me/stats después de una partida", () => {
 
     // El cierre aplica las estadísticas justo después, sin esperar al pedido: se sondea.
     await waitUntil(async () => (await statsOf("st-b")).gamesPlayed === 1);
-    expect(await statsOf("st-b")).toMatchObject({ gamesPlayed: 1, gamesWon: 0 });
+    expect(await statsOf("st-b")).toMatchObject({ gamesPlayed: 1, gamesWon: 0, gamesAbandoned: 1 });
     await waitUntil(async () => (await statsOf("st-a")).gamesPlayed === 1);
     expect(await statsOf("st-a")).toMatchObject({ gamesPlayed: 1, gamesWon: 1, maxWinStreak: 1 });
   });

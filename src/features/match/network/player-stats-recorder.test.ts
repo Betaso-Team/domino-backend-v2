@@ -41,6 +41,15 @@ describe("PlayerStatsRecorder", () => {
     expect(await history.pending(FAR, 10)).toEqual([]);
   });
 
+  it("una partida anulada no aplica nada ni queda pendiente", async () => {
+    const { history, memory, recorder } = build();
+    const port = recordingStats(history, recorder);
+    port.close("m-1", { ...CLOSING, status: "aborted" });
+    await port.drain();
+    expect((await memory.of("u1")).gamesPlayed).toBe(0);
+    expect(await history.pending(FAR, 10)).toEqual([]);
+  });
+
   it("un close repetido deja los contadores en 1", async () => {
     const { history, memory, recorder } = build();
     const port = recordingStats(history, recorder);
