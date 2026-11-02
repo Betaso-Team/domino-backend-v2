@@ -33,6 +33,7 @@ import {
   paginated,
   rowOf,
 } from "../player-log";
+import type { StatsBacklog } from "../player-stats";
 import {
   type HistoryAdapterOptions,
   LARGE_LAST,
@@ -101,11 +102,13 @@ export type MatchHistoryDocument = {
   updatedAt: Date;
   timeline?: StoredEntry[];
   rounds?: ClosedRound[];
+  /** Hay estadísticas por confirmar: lo deja el primer cierre de una terminada. */
+  statsPending?: true;
   /** La forma vieja, anterior a la v2.1: sólo se lee. */
   entries?: HistoryEntry[];
 };
 
-// LOS SEIS ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS SIETE ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -125,6 +128,7 @@ export type MatchHistoryDocument = {
 //   · `matchEndReason` con el orden del listado detrás: el filtro por motivo del cierre. Son siete
 //     valores sobre millones de filas, así que sin el orden detrás la página de «abandonos» leería y
 //     ordenaría todos los abandonos de la historia para mostrar veinte.
+//   · `matchEndedAt` PARCIAL (`statsPending`): lo que el barrido de estadísticas todavía no confirmó.
 //   · `status` con el orden del listado detrás: el filtro por estado (abierta, terminada, abortada),
 //     por lo mismo que el del motivo: tres valores sobre millones de filas. Con el jugador o la sala
 //     no tiene compuesto propio, a propósito: Mongo usa uno y filtra el otro leyendo de más.
@@ -134,6 +138,11 @@ export type MatchHistoryDocument = {
 // EN DOS PEDIDOS Y NO EN UNO, porque `createIndexes` es todo o nada (medido contra Mongo 7): con dos
 // documentos viejos de la misma partida el único falla, y en el mismo pedido se llevaba a los otros
 // dos con él — el listado quedaba recorriendo la colección entera hasta que alguien limpiara las filas.
+// El índice parcial de lo pendiente. `pending` NO lo fuerza con `hint`: los índices se crean en segundo
+// plano y un `hint` a uno que todavía no existe FALLA la consulta (medido); como el filtro lleva
+// `statsPending: true`, el planificador lo elige solo, y el `explain` de la suite lo mide.
+export const PENDING_INDEX = "matchEndedAt_1_statsPending";
+
 const HISTORY_INDEXES: readonly IndexDescription[][] = [
   [{ key: { matchId: 1 }, name: "matchId_1", unique: true }],
   [
@@ -150,6 +159,12 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
     {
       key: { status: 1, createdAt: -1, _id: -1 },
       name: "status_1_createdAt_-1__id_-1",
+    },
+    // PARCIAL: sólo lo pendiente, que es una fracción mínima de la colección y casi siempre vacía.
+    {
+      key: { matchEndedAt: 1 },
+      name: PENDING_INDEX,
+      partialFilterExpression: { statsPending: true },
     },
   ],
 ];
@@ -307,7 +322,9 @@ const stampsAt = (now: Date) => ({
   updatedAt: now,
 });
 
-export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive, PlayerLog {
+export class MongoHistory
+  implements HistoryPort, HistoryReader, MatchArchive, PlayerLog, StatsBacklog
+{
   // UNA ESCRITURA A LA VEZ POR PARTIDA. Cada verbo es fire-and-forget, así que sin esto llegan a la
   // base a la vez — y dos upserts que no encuentran el documento INSERTAN uno cada uno, partiendo la
   // partida en dos filas. Fija también el ORDEN de las escrituras, que es cómo se leen los arreglos.
@@ -533,6 +550,35 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive, P
       if (isTimeout(error)) throw new MatchListTimeoutError(error);
       throw error;
     }
+  }
+
+  // LO PENDIENTE, por el índice parcial (lo elige el planificador, ver `PENDING_INDEX`) y sin los
+  // arreglos grandes. El más viejo primero, para que el barrido aplique en orden de cierre.
+  async pending(endedBefore: Date, limit: number): Promise<StoredMatchRecord[]> {
+    const collection = await this.collection();
+    try {
+      const found = await collection
+        .find(
+          { statsPending: true, matchEndedAt: { $lt: endedBefore } },
+          {
+            projection: { timeline: 0, rounds: 0, entries: 0 },
+            sort: { matchEndedAt: 1 },
+            limit,
+            maxTimeMS: LIST_MAX_TIME_MS,
+          },
+        )
+        .toArray();
+      return found.map((document) => ({ ...document, _id: String(document._id) }));
+    } catch (error) {
+      if (isTimeout(error)) throw new MatchListTimeoutError(error);
+      throw error;
+    }
+  }
+
+  // ESPERADO y no por la fila `write`, que no promete: quien llama necesita saber que la marca se fue
+  // antes de seguir. Sin documento o sin marca, `updateOne` no hace nada.
+  async settled(matchId: string): Promise<void> {
+    await (await this.collection()).updateOne({ matchId }, { $unset: { statsPending: "" } });
   }
 
   // Todo verbo pasa por acá: encolado por partida, anotado para el drenado y con el fallo logueado y

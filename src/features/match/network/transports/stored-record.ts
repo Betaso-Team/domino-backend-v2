@@ -28,6 +28,9 @@ export function storedClosingOf(closing: MatchClosing): Record<string, unknown> 
   const { matchStartedAt, matchEndedAt, players, betMultiplier, ...rest } = closing;
   return {
     ...rest,
+    // Sólo el PRIMER cierre de una terminada: va adentro del cierre que gana, así que uno repetido no lo
+    // repone. Una abortada no cuenta para nadie.
+    ...(closing.status === "finished" ? { statsPending: true } : {}),
     ...(matchStartedAt === undefined ? {} : { matchStartedAt: dateOf(matchStartedAt) }),
     matchEndedAt: dateOf(matchEndedAt),
     players: players.map(({ exit, connection, ...player }) => ({

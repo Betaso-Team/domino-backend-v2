@@ -22,6 +22,7 @@ import {
   paginated,
   rowOf,
 } from "../player-log";
+import type { StatsBacklog } from "../player-stats";
 import {
   type HistoryAdapterOptions,
   LARGE_LAST,
@@ -53,7 +54,9 @@ const MAX_MATCHES = 200;
 
 type Stored = Record<string, unknown>;
 
-export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive, PlayerLog {
+export class MemoryHistory
+  implements HistoryPort, HistoryReader, MatchArchive, PlayerLog, StatsBacklog
+{
   private readonly byMatch = new Map<string, Stored>();
   private readonly now: () => Date;
   private readonly countCap: number;
@@ -188,6 +191,36 @@ export class MemoryHistory implements HistoryPort, HistoryReader, MatchArchive, 
       page,
       perPage,
     );
+  }
+
+  // LO PENDIENTE, como la consulta de Mongo: `statsPending` y cerrado antes del límite, el más viejo
+  // primero, sin los arreglos grandes.
+  pending(endedBefore: Date, limit: number): Promise<StoredMatchRecord[]> {
+    const found = [...this.byMatch.values()]
+      .filter(
+        (document) =>
+          document.statsPending === true &&
+          document.matchEndedAt instanceof Date &&
+          document.matchEndedAt.getTime() < endedBefore.getTime(),
+      )
+      .sort((a, b) => (a.matchEndedAt as Date).getTime() - (b.matchEndedAt as Date).getTime())
+      .slice(0, limit)
+      .map((document) => {
+        const { rounds, timeline, entries, ...rest } = document;
+        return rest as StoredMatchRecord;
+      });
+    return Promise.resolve(found);
+  }
+
+  // Quita la marca; sin documento o sin marca no hace nada. No pasa por `write`: no es un verbo del
+  // registro y no toca `updatedAt`.
+  settled(matchId: string): Promise<void> {
+    const document = this.byMatch.get(matchId);
+    if (document) {
+      const { statsPending, ...rest } = document;
+      this.byMatch.set(matchId, rest);
+    }
+    return Promise.resolve();
   }
 
   private write(matchId: string, next: (current: Stored | undefined, now: Date) => Stored): void {

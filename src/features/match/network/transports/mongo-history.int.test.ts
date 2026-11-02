@@ -8,12 +8,13 @@ import {
   HISTORY_COLLECTION,
   LIST_MAX_TIME_MS,
   MongoHistory,
+  PENDING_INDEX,
   countQueryOf,
   pageQueryOf,
   playerPageQueryOf,
 } from "./mongo-history";
 import type { HistoryAdapterOptions } from "./stored-record";
-import { SETUP, describeHistoryContract, entry } from "./tests/history-contract";
+import { CLOSING, SETUP, describeHistoryContract, entry } from "./tests/history-contract";
 import { describePlayerLogContract } from "./tests/player-log-contract";
 
 // EL CONTRATO CONTRA UN MONGO DE VERDAD, y es el único lugar donde se puede medir: la cabecera y el
@@ -33,6 +34,7 @@ const ALL_INDEXES = [
   "_id_",
   "createdAt_-1__id_-1",
   "matchEndReason_1_createdAt_-1__id_-1",
+  "matchEndedAt_1_statsPending",
   "matchId_1",
   "roomId_1_createdAt_-1__id_-1",
   "seats.userId_1_createdAt_-1__id_-1",
@@ -63,7 +65,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
   describeHistoryContract("MongoHistory", (options) => fresh(undefined, options));
   describePlayerLogContract("MongoHistory", (options) => fresh(undefined, options));
 
-  it("crea sus seis índices, con el de `matchId` único", async () => {
+  it("crea sus siete índices, con el de `matchId` único", async () => {
     const history = await fresh();
     history.record([entry(1)]);
     await history.drain();
@@ -499,5 +501,37 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       expect(pageQueryOf({ pageSize: PAGE }).options.maxTimeMS).toBe(LIST_MAX_TIME_MS);
       expect(countQueryOf({ pageSize: PAGE, from }, 10).options.maxTimeMS).toBe(LIST_MAX_TIME_MS);
     });
+  });
+  // LO PENDIENTE SALE DEL ÍNDICE PARCIAL: el barrido corre cada rato sobre millones de documentos, y lo
+  // pendiente es casi nada. Se mide el plan de la misma consulta que corre `pending`.
+  it("`pending` sale del índice parcial, sin COLLSCAN", async () => {
+    const history = await fresh();
+    history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+    history.close("m-1", { ...CLOSING, matchEndedAt: 61_000 });
+    await history.drain();
+    await vi.waitFor(async () => expect(await indexNames()).toEqual(ALL_INDEXES), INDEX_WAIT);
+
+    const explain = (await (
+      await collection()
+    )
+      .find(
+        { statsPending: true, matchEndedAt: { $lt: new Date() } },
+        { sort: { matchEndedAt: 1 }, limit: 10 },
+      )
+      .explain("executionStats")) as Document;
+    const stages: string[] = [];
+    const walkPlan = (node: unknown) => {
+      if (node && typeof node === "object") {
+        const record = node as Record<string, unknown>;
+        if (typeof record.stage === "string") stages.push(record.stage);
+        for (const child of Object.values(record)) walkPlan(child);
+      }
+    };
+    walkPlan(explain.queryPlanner.winningPlan);
+    expect(stages).toContain("IXSCAN");
+    expect(stages).not.toContain("COLLSCAN");
+    expect(stages).not.toContain("SORT");
+    expect(JSON.stringify(explain.queryPlanner.winningPlan)).toContain(PENDING_INDEX);
+    expect(explain.executionStats.nReturned).toBe(1);
   });
 });
