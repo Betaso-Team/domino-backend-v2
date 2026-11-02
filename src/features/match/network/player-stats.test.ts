@@ -59,6 +59,17 @@ describe("linesOf", () => {
     expect(lines.every((l) => l.fourPlayers)).toBe(true);
   });
 
+  it("sin matchConfig cuenta los asientos de players", () => {
+    const lines = linesOf(
+      document({
+        matchConfig: undefined,
+        winnerIds: ["seat-1"],
+        players: [1, 2, 3, 4].map((n) => ({ id: `seat-${n}`, userId: `u${n}` })),
+      }),
+    );
+    expect(lines.find((l) => l.result === "win")?.fourPlayers).toBe(true);
+  });
+
   it("una abortada no da líneas", () => {
     expect(linesOf(document({ status: "aborted" }))).toEqual([]);
   });

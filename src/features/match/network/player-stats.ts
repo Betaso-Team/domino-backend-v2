@@ -50,13 +50,9 @@ const dateOf = (value: unknown): Date | undefined => {
   return undefined;
 };
 
-const userIdsOf = (document: StoredMatchRecord): string[] => {
+const seatsOf = (document: StoredMatchRecord): { userId?: unknown }[] => {
   const field = Array.isArray(document.players) ? "players" : "seats";
-  const seats = (Array.isArray(document[field]) ? document[field] : []) as {
-    userId?: unknown;
-  }[];
-  const ids = seats.flatMap((seat) => (typeof seat.userId === "string" ? [seat.userId] : []));
-  return [...new Set(ids)];
+  return (Array.isArray(document[field]) ? document[field] : []) as { userId?: unknown }[];
 };
 
 /** Sólo las TERMINADAS: una abortada o en curso no cuenta para nadie. */
@@ -64,8 +60,11 @@ export function linesOf(document: StoredMatchRecord): StatsLine[] {
   const endedAt = dateOf(document.matchEndedAt);
   if (document.status !== "finished" || endedAt === undefined) return [];
   const config = (document.matchConfig ?? {}) as { playersQuantity?: number };
-  const ids = userIdsOf(document);
-  const fourPlayers = (config.playersQuantity ?? ids.length) === 4;
+  const seats = seatsOf(document);
+  const ids = [
+    ...new Set(seats.flatMap((seat) => (typeof seat.userId === "string" ? [seat.userId] : []))),
+  ];
+  const fourPlayers = (config.playersQuantity ?? seats.length) === 4;
   return ids.flatMap((userId) => {
     const result = resultFor(userId, document);
     return result === "canceled" ? [] : [{ userId, endedAt, result, fourPlayers }];
