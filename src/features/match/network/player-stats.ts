@@ -63,9 +63,10 @@ const userIdsOf = (document: StoredMatchRecord): string[] => {
 export function linesOf(document: StoredMatchRecord): StatsLine[] {
   const endedAt = dateOf(document.matchEndedAt);
   if (document.status !== "finished" || endedAt === undefined) return [];
-  const table = (document.table ?? {}) as { playersQuantity?: number };
-  const fourPlayers = table.playersQuantity === 4;
-  return userIdsOf(document).flatMap((userId) => {
+  const config = (document.matchConfig ?? {}) as { playersQuantity?: number };
+  const ids = userIdsOf(document);
+  const fourPlayers = (config.playersQuantity ?? ids.length) === 4;
+  return ids.flatMap((userId) => {
     const result = resultFor(userId, document);
     return result === "canceled" ? [] : [{ userId, endedAt, result, fourPlayers }];
   });

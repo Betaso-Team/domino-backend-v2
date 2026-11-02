@@ -6,7 +6,7 @@ const ENDED = 1_700_000_000_000;
 const document = (over: Record<string, unknown> = {}) => ({
   status: "finished",
   matchEndedAt: new Date(ENDED),
-  table: { playersQuantity: 2 },
+  matchConfig: { playersQuantity: 2 },
   winnerIds: ["seat-1"],
   players: [
     { id: "seat-1", userId: "ana" },
@@ -38,7 +38,7 @@ describe("linesOf", () => {
   it("en 4P el que se fue y cuyo equipo ganó, ganó", () => {
     const lines = linesOf(
       document({
-        table: { playersQuantity: 4 },
+        matchConfig: { playersQuantity: 4 },
         winnerIds: ["seat-1", "seat-3"],
         players: [
           { id: "seat-1", userId: "ana" },
@@ -52,6 +52,11 @@ describe("linesOf", () => {
       result: "win",
       fourPlayers: true,
     });
+  });
+
+  it("lee la cantidad de matchConfig aunque table no la traiga", () => {
+    const lines = linesOf(document({ table: { name: "x" }, matchConfig: { playersQuantity: 4 } }));
+    expect(lines.every((l) => l.fourPlayers)).toBe(true);
   });
 
   it("una abortada no da líneas", () => {
