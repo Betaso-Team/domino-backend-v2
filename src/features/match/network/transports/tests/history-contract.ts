@@ -10,6 +10,7 @@ import type {
   MatchListQuery,
   MatchSetup,
 } from "../../history";
+import type { StatsBacklog } from "../../player-stats";
 import type { HistoryAdapterOptions } from "../stored-record";
 
 // EL CONTRATO DEL REGISTRO, ESCRITO UNA SOLA VEZ Y CORRIDO CONTRA LOS DOS ADAPTADORES, por el criterio
@@ -24,7 +25,7 @@ import type { HistoryAdapterOptions } from "../stored-record";
 // TODOS LOS VERBOS DEL PUERTO SON `void`, así que el contrato espera con `drain()`, que es la única
 // pregunta "¿terminaste?" que el puerto ofrece.
 
-export type HistoryHarness = HistoryPort & HistoryReader & MatchArchive;
+export type HistoryHarness = HistoryPort & HistoryReader & MatchArchive & StatsBacklog;
 
 export const SETUP: MatchSetup = {
   roomId: "room-1",
@@ -204,6 +205,93 @@ export function describeHistoryContract(
   harness: (options?: HistoryAdapterOptions) => Promise<HistoryHarness> | HistoryHarness,
 ): void {
   describe(`${name}: el contrato del registro`, () => {
+    // EL PENDIENTE DE ESTADÍSTICAS: lo deja el PRIMER cierre de una terminada, y sólo ése.
+    describe("el pendiente de estadísticas", () => {
+      const FAR = new Date(Date.parse("2100-01-01T00:00:00.000Z"));
+      const closeAt = async (history: HistoryHarness, matchId: string, endedAt: number) => {
+        history.open(matchId, { ...SETUP, matchStartedAt: 1_000 });
+        history.close(matchId, { ...CLOSING, matchEndedAt: endedAt });
+        await history.drain();
+      };
+      const ids = async (history: HistoryHarness, before: Date = FAR, limit = 10) =>
+        (await history.pending(before, limit)).map((record) => record.matchId);
+
+      it("una terminada queda pendiente, con lo que la regla lee y sin timeline ni rounds", async () => {
+        const history = await harness();
+        history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+        history.record([entry(1, { matchId: "m-1" })]);
+        history.round("m-1", ROUND);
+        history.close("m-1", CLOSING);
+        await history.drain();
+
+        const [found] = await history.pending(FAR, 10);
+        expect(found).toMatchObject({
+          matchId: "m-1",
+          status: "finished",
+          winnerIds: ["seat-1"],
+          statsPending: true,
+        });
+        expect(found?.matchEndedAt).toBeInstanceOf(Date);
+        expect(found?.players).toHaveLength(2);
+        expect(found?.seats).toHaveLength(2);
+        expect(found?.matchConfig).toBeDefined();
+        expect(found).not.toHaveProperty("timeline");
+        expect(found).not.toHaveProperty("rounds");
+      });
+
+      it("una abortada no queda pendiente", async () => {
+        const history = await harness();
+        history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+        history.close("m-1", { ...CLOSING, status: "aborted", winnerIds: [] });
+        await history.drain();
+
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("`settled` la saca, y de una partida que no existe no lanza", async () => {
+        const history = await harness();
+        await closeAt(history, "m-1", 61_000);
+        expect(await ids(history)).toEqual(["m-1"]);
+
+        await history.settled("m-1");
+        await history.settled("m-1");
+        await history.settled("no-existe");
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("`settled` pedido justo después de `close`, sin esperar el drain, queda detrás del cierre", async () => {
+        const history = await harness();
+        history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+        history.close("m-1", CLOSING);
+        await history.settled("m-1");
+        await history.drain();
+
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("un segundo cierre de una ya asentada no la vuelve a dejar pendiente", async () => {
+        const history = await harness();
+        await closeAt(history, "m-1", 61_000);
+        await history.settled("m-1");
+
+        history.close("m-1", { ...CLOSING, matchEndedAt: 99_000 });
+        await history.drain();
+
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("sólo lo cerrado antes del límite, del más viejo al más nuevo y hasta `limit`", async () => {
+        const history = await harness();
+        await closeAt(history, "m-c", 300_000);
+        await closeAt(history, "m-a", 100_000);
+        await closeAt(history, "m-b", 200_000);
+
+        expect(await ids(history)).toEqual(["m-a", "m-b", "m-c"]);
+        expect(await ids(history, new Date(250_000))).toEqual(["m-a", "m-b"]);
+        expect(await ids(history, new Date(100_000))).toEqual([]);
+        expect(await ids(history, FAR, 2)).toEqual(["m-a", "m-b"]);
+      });
+    });
     it("al abrir: la versión, el armado, el estado `started` y el arranque como fecha", async () => {
       const history = await harness();
       history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });

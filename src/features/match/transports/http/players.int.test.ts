@@ -34,7 +34,9 @@ async function serve(players: PlayerLog): Promise<string> {
   const app = express()
     .use(express.json())
     .use(playerRoutes({ players, logger: fakeLogger(), adminApiKey: KEY }))
-    .use(meRoutes({ players, verifier, logger: fakeLogger() }))
+    .use(
+      meRoutes({ players, stats: { apply: vi.fn(), of: vi.fn() }, verifier, logger: fakeLogger() }),
+    )
     .use(httpErrorHandler(fakeLogger()));
   const server = app.listen(0, "127.0.0.1");
   servers.push(server);

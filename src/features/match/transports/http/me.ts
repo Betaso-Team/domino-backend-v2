@@ -4,8 +4,30 @@ import { type Response, Router } from "express";
 import { z } from "zod";
 import { MatchListTimeoutError } from "../../network/history";
 import type { MatchRow, Paginated, PlayerLog } from "../../network/player-log";
+import type { PlayerStats, PlayerStatsStore } from "../../network/player-stats";
 
 export const ME_MATCHES_ROUTE = "/me/matches";
+export const ME_STATS_ROUTE = "/me/stats";
+
+/** La forma pública de las estadísticas: `winRate` con dos decimales y la racha máxima de victorias. */
+export function statsView(stats: PlayerStats): {
+  gamesPlayed: number;
+  gamesWon: number;
+  gamesWonFourPlayers: number;
+  gamesAbandoned: number;
+  winRate: number;
+  maxWinStreak: number;
+} {
+  return {
+    gamesPlayed: stats.gamesPlayed,
+    gamesWon: stats.gamesWon,
+    gamesWonFourPlayers: stats.gamesWonFourPlayers,
+    gamesAbandoned: stats.gamesAbandoned,
+    winRate:
+      stats.gamesPlayed === 0 ? 0 : Math.round((stats.gamesWon / stats.gamesPlayed) * 100) / 100,
+    maxWinStreak: stats.maxStreak,
+  };
+}
 
 // LA PÁGINA, con la ventana que pide el cliente. Con techo porque el tamaño lo manda el que llama, y
 // una página de diez mil es un pedido que lee una cuenta entera. Los mismos nombres y límites que truco.
@@ -15,6 +37,7 @@ export const PAGE_QUERY = z.object({
 });
 
 const TIMEOUT_MESSAGE = "El historial tardó demasiado; inténtalo de nuevo";
+const STATS_TIMEOUT_MESSAGE = "Las estadísticas tardaron demasiado; inténtalo de nuevo";
 
 /**
  * LA PÁGINA DE UNA CUENTA, la misma para el dueño del token y para el panel (`./players.ts`): cambia
@@ -45,6 +68,7 @@ export async function sendPlayerPage(
  */
 export function meRoutes(deps: {
   readonly players: PlayerLog;
+  readonly stats: PlayerStatsStore;
   readonly verifier?: TokenVerifier;
   readonly logger: Logger;
 }): Router {
@@ -57,6 +81,22 @@ export function meRoutes(deps: {
     authenticated(verifier, { query: PAGE_QUERY }, (identity, { query }, response) =>
       sendPlayerPage(deps, identity.userId, query, response),
     ),
+  );
+
+  // LAS ESTADÍSTICAS DEL DUEÑO DEL TOKEN: el `userId` de un query no cambia de quién se contesta.
+  router.get(
+    ME_STATS_ROUTE,
+    authenticated(verifier, {}, async (identity, _input, response) => {
+      try {
+        const stats = await deps.stats.of(identity.userId);
+        response.set("Cache-Control", "no-store").json(statsView(stats));
+      } catch (error) {
+        // Como el historial: el plazo vencido es 503 y lo demás sube.
+        if (!(error instanceof MatchListTimeoutError)) throw error;
+        deps.logger.warn("estadísticas del jugador: la base excedió el plazo");
+        response.status(503).json({ status: "error", message: STATS_TIMEOUT_MESSAGE });
+      }
+    }),
   );
   return router;
 }
