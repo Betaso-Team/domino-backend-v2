@@ -91,6 +91,36 @@ export function playerStatsContract(
       expect((await stats.of("ana")).gamesPlayed).toBe(1);
     });
 
+    // DOS LÍNEAS DISTINTAS PARA UN JUGADOR SIN DOCUMENTO: la MÁS NUEVA nunca se pierde. Si la vieja gana el
+    // insert, se cuentan las dos; si gana la nueva, la vieja ya es más vieja que la última y se saltea (es
+    // la regla, no una pérdida). Sin el reintento del adaptador de Mongo, la nueva podía recibir un E11000
+    // del insert y descartarse (cerca de la mitad de las veces: por eso se repite).
+    it("dos líneas distintas en carrera sobre un jugador nuevo nunca pierden la más nueva", async () => {
+      const stats = await make();
+      for (let round = 0; round < 20; round += 1) {
+        const userId = `carrera-${round}`;
+        const [older, newer] = await Promise.all([
+          stats.apply(line(1, { userId })),
+          stats.apply(line(2, { userId })),
+        ]);
+
+        expect(newer).toBe("applied");
+        const result = await stats.of(userId);
+        const applied = older === "applied" ? 2 : 1;
+        expect(result.gamesPlayed).toBe(applied);
+        expect(result.currentStreak).toBe(applied);
+      }
+    });
+
+    it("la misma línea en carrera sobre un documento existente cuenta una sola", async () => {
+      const stats = await make();
+      await stats.apply(line(1));
+      const outcomes = await Promise.all([stats.apply(line(2)), stats.apply(line(2))]);
+
+      expect([...outcomes].sort()).toEqual(["applied", "skipped"]);
+      expect((await stats.of("ana")).gamesPlayed).toBe(2);
+    });
+
     it("los jugadores no se mezclan", async () => {
       const stats = await make();
       await stats.apply(line(1));

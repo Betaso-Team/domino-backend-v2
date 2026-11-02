@@ -1,5 +1,5 @@
 import type { Logger } from "@/logger";
-import { MongoServerError } from "mongodb";
+import { type Collection, MongoServerError } from "mongodb";
 import {
   EMPTY_STATS,
   type PlayerStats,
@@ -52,39 +52,53 @@ export class MongoPlayerStats implements PlayerStatsStore {
   }
 
   async apply(line: StatsLine): Promise<"applied" | "skipped"> {
-    const won = line.result === "win";
     const collection = await this.store.collection<StatsDocument>(PLAYER_STATS_COLLECTION);
     try {
-      const result = await collection.updateOne(
-        { _id: line.userId, lastEndedAt: { $lt: line.endedAt } },
-        [
-          {
-            $set: {
-              gamesPlayed: count("gamesPlayed", 1),
-              gamesWon: count("gamesWon", won ? 1 : 0),
-              gamesWonFourPlayers: count("gamesWonFourPlayers", won && line.fourPlayers ? 1 : 0),
-              gamesAbandoned: count("gamesAbandoned", line.result === "abandoned" ? 1 : 0),
-              currentStreak: won ? { $add: [{ $ifNull: ["$currentStreak", 0] }, 1] } : 0,
-            },
-          },
-          {
-            $set: {
-              maxStreak: { $max: [{ $ifNull: ["$maxStreak", 0] }, "$currentStreak"] },
-              lastEndedAt: line.endedAt,
-              updatedAt: this.now(),
-            },
-          },
-        ],
-        { upsert: true },
-      );
-      return result.modifiedCount + result.upsertedCount === 1 ? "applied" : "skipped";
+      return await this.update(collection, line);
     } catch (error) {
-      if (isDuplicateKey(error)) {
-        this.logger.debug("estadística ya aplicada o más vieja", { userId: line.userId });
-        return "skipped";
-      }
-      throw error;
+      if (!isDuplicateKey(error)) throw error;
     }
+    // UN E11000 NO ES SIEMPRE "YA APLICADA". Con el documento ausente, dos líneas DISTINTAS compiten por
+    // el insert y Mongo no reintenta el upsert cuando el filtro lleva `$lt`: la que pierde recibe E11000
+    // aunque sea la más nueva (medido: ~la mitad de las carreras). Se repite UNA vez: ahora el documento
+    // existe y el filtro `$lt` decide de verdad. Un segundo E11000 sí es "skipped".
+    try {
+      return await this.update(collection, line);
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
+      this.logger.debug("estadística ya aplicada o más vieja", { userId: line.userId });
+      return "skipped";
+    }
+  }
+
+  private async update(
+    collection: Collection<StatsDocument>,
+    line: StatsLine,
+  ): Promise<"applied" | "skipped"> {
+    const won = line.result === "win";
+    const result = await collection.updateOne(
+      { _id: line.userId, lastEndedAt: { $lt: line.endedAt } },
+      [
+        {
+          $set: {
+            gamesPlayed: count("gamesPlayed", 1),
+            gamesWon: count("gamesWon", won ? 1 : 0),
+            gamesWonFourPlayers: count("gamesWonFourPlayers", won && line.fourPlayers ? 1 : 0),
+            gamesAbandoned: count("gamesAbandoned", line.result === "abandoned" ? 1 : 0),
+            currentStreak: won ? { $add: [{ $ifNull: ["$currentStreak", 0] }, 1] } : 0,
+          },
+        },
+        {
+          $set: {
+            maxStreak: { $max: [{ $ifNull: ["$maxStreak", 0] }, "$currentStreak"] },
+            lastEndedAt: line.endedAt,
+            updatedAt: this.now(),
+          },
+        },
+      ],
+      { upsert: true },
+    );
+    return result.modifiedCount + result.upsertedCount === 1 ? "applied" : "skipped";
   }
 
   async of(userId: string): Promise<PlayerStats> {
