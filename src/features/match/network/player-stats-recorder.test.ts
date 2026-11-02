@@ -119,10 +119,46 @@ describe("PlayerStatsRecorder", () => {
     expect(log.error).toHaveBeenCalled();
   });
 
-  it("el drain del decorador espera el del historial de adentro", async () => {
+  it("el drain del decorador ESPERA el del historial de adentro", async () => {
     const { history, recorder } = build();
-    const spy = vi.spyOn(history, "drain");
-    await recordingStats(history, recorder).drain();
-    expect(spy).toHaveBeenCalled();
+    let release: () => void = () => undefined;
+    let finished = false;
+    vi.spyOn(history, "drain").mockReturnValue(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }).then(() => {
+        finished = true;
+      }),
+    );
+    const draining = recordingStats(history, recorder)
+      .drain()
+      .then(() => finished);
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    expect(await draining).toBe(true);
+  });
+
+  it("dos sweep superpuestos corren uno solo, y drain espera al lento", async () => {
+    const { history, recorder } = build();
+    let release: (value: []) => void = () => undefined;
+    const pending = vi.spyOn(history, "pending").mockReturnValue(
+      new Promise<[]>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const first = recorder.sweep();
+    const second = recorder.sweep();
+    let drained = false;
+    const draining = recorder.drain().then(() => {
+      drained = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(pending).toHaveBeenCalledTimes(1);
+    expect(drained).toBe(false);
+    release([]);
+    await Promise.all([first, second, draining]);
+    expect(drained).toBe(true);
+    await recorder.sweep();
+    expect(pending).toHaveBeenCalledTimes(2);
   });
 });

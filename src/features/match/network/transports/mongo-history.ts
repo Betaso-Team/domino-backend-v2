@@ -575,10 +575,14 @@ export class MongoHistory
     }
   }
 
-  // ESPERADO y no por la fila `write`, que no promete: quien llama necesita saber que la marca se fue
-  // antes de seguir. Sin documento o sin marca, `updateOne` no hace nada.
-  async settled(matchId: string): Promise<void> {
-    await (await this.collection()).updateOne({ matchId }, { $unset: { statsPending: "" } });
+  // POR LA COLA DE LA PARTIDA, así queda detrás de su `close` sin esperar a ninguna otra escritura del
+  // proceso, y ESPERADO: quien llama necesita saber que la marca se fue. A diferencia de `write`, el fallo
+  // sube a quien llama (el aplicador lo loguea y lo reintenta el barrido). Sin documento o sin marca,
+  // `updateOne` no hace nada.
+  settled(matchId: string): Promise<void> {
+    return this.queued(matchId, async () => {
+      await (await this.collection()).updateOne({ matchId }, { $unset: { statsPending: "" } });
+    });
   }
 
   // Todo verbo pasa por acá: encolado por partida, anotado para el drenado y con el fallo logueado y

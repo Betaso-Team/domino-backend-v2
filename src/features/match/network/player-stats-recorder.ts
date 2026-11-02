@@ -24,6 +24,7 @@ const SWEEP_BATCH = 50;
 // cuando TODAS sus líneas terminaron.
 export class PlayerStatsRecorder {
   private readonly inFlight = new Set<Promise<void>>();
+  private sweeping: Promise<void> | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly sweepEveryMs: number;
   private readonly settleAfterMs: number;
@@ -43,17 +44,10 @@ export class PlayerStatsRecorder {
     this.settleAfterMs = deps.settleAfterMs ?? 10_000;
   }
 
-  // No espera: queda en vuelo y `drain()` lo espera. `ready` es lo que tiene que haber terminado antes
-  // de marcar la partida (el decorador pasa el `drain` del historial: `settled` no pasa por la fila de
-  // escrituras del cierre y, sin esperar, quitaría una marca que todavía no se escribió).
-  afterClose(
-    matchId: string,
-    closing: MatchClosing,
-    ready: Promise<unknown> = Promise.resolve(),
-  ): void {
+  // No espera: queda en vuelo y `drain()` lo espera.
+  afterClose(matchId: string, closing: MatchClosing): void {
     const run = (async () => {
       try {
-        await ready;
         await this.applyAll(matchId, linesOf(closing as unknown as StoredMatchRecord));
       } catch (error) {
         this.deps.logger.error("no se pudieron aplicar las estadísticas", { matchId, error });
@@ -63,8 +57,18 @@ export class PlayerStatsRecorder {
     void run.finally(() => this.inFlight.delete(run));
   }
 
-  // Un turno del barrido. Nunca rechaza: el siguiente tick reintenta.
-  async sweep(): Promise<void> {
+  // Un turno del barrido. Nunca rechaza: el siguiente tick reintenta. Uno solo a la vez en el proceso:
+  // el lease excluye PROCESOS y no llamadas, y un segundo `within` liberaría el lease del primero.
+  sweep(): Promise<void> {
+    if (this.sweeping) return this.sweeping;
+    const running = this.runSweep().finally(() => {
+      this.sweeping = undefined;
+    });
+    this.sweeping = running;
+    return running;
+  }
+
+  private async runSweep(): Promise<void> {
     try {
       await this.deps.lease.within(SWEEP_LEASE, SWEEP_LEASE_TTL_MS, async () => {
         const endedBefore = new Date(this.deps.now().getTime() - this.settleAfterMs);
@@ -95,7 +99,9 @@ export class PlayerStatsRecorder {
   }
 
   async drain(): Promise<void> {
-    while (this.inFlight.size > 0) await Promise.all([...this.inFlight]);
+    while (this.inFlight.size > 0 || this.sweeping) {
+      await Promise.all([...this.inFlight, ...(this.sweeping ? [this.sweeping] : [])]);
+    }
   }
 
   // En serie, y `settled` sólo si ninguna lanzó. Un "skipped" no se distingue de un reaplicado
@@ -122,7 +128,7 @@ export function recordingStats(history: HistoryPort, recorder: PlayerStatsRecord
     round: (matchId: string, round: ClosedRound) => history.round(matchId, round),
     close(matchId: string, closing: MatchClosing) {
       history.close(matchId, closing);
-      recorder.afterClose(matchId, closing, history.drain());
+      recorder.afterClose(matchId, closing);
     },
     async drain() {
       await history.drain();

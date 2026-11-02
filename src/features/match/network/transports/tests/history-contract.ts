@@ -259,6 +259,16 @@ export function describeHistoryContract(
         expect(await ids(history)).toEqual([]);
       });
 
+      it("`settled` pedido justo después de `close`, sin esperar el drain, queda detrás del cierre", async () => {
+        const history = await harness();
+        history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+        history.close("m-1", CLOSING);
+        await history.settled("m-1");
+        await history.drain();
+
+        expect(await ids(history)).toEqual([]);
+      });
+
       it("un segundo cierre de una ya asentada no la vuelve a dejar pendiente", async () => {
         const history = await harness();
         await closeAt(history, "m-1", 61_000);
