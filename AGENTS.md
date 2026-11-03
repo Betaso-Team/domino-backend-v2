@@ -2814,8 +2814,11 @@ la del socket. Las respuestas de éxito no cambian, y `/health` y `/ready` tampo
   (`sendCatalogError`, antes `sendError`) sólo elige el status y pasa el mensaje como `detail`; los 404
   no llevan `detail`.
 - **Lo de otro proveedor es 404:** un `?providerId=` ajeno en el panel del catálogo pasó de `403
-  FORBIDDEN` a `404 UNKNOWN_PROVIDER`. Un `ownerProviderId` ajeno en el cuerpo de `POST /game-modes`
-  sigue siendo `403 FORBIDDEN` (es un pedido que no se puede hacer, no algo que se lee).
+  FORBIDDEN` a `404 UNKNOWN_PROVIDER`. ~~Un `ownerProviderId` ajeno en el cuerpo de `POST /game-modes`
+  sigue siendo `403 FORBIDDEN` (es un pedido que no se puede hacer, no algo que se lee).~~ En la
+  integración (decisión del usuario: lo de otro proveedor responde siempre 404) también es `404
+  UNKNOWN_PROVIDER` (`UnknownProviderError`, que lanzan `ownerFor` y `refuseForeign`); `null`
+  (pedir un compartido) sigue siendo `403 FORBIDDEN`, y un 403 por rol también.
 - **Renombres de código:** `/config/:roomId` `NOT_FOUND` → `ROOM_NOT_FOUND` (como `/matches/:roomId`);
   `/internal/matches/:matchId/history` `NOT_FOUND` → `MATCH_NOT_FOUND`; el detalle y el listado del panel
   `{status:"error",message}` → `MATCH_NOT_FOUND` / `MATCH_LIST_TIMEOUT`; `/me/matches` y

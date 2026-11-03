@@ -9,6 +9,7 @@ import {
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
+  UnknownProviderError,
   offeredTo,
 } from "./core/catalog";
 import type { GameMode } from "./core/game-mode";
@@ -629,14 +630,14 @@ describe("GameModeService: el dueño de un modo nuevo", () => {
   });
 
   it.each([
-    ["para otro proveedor", "rival"],
-    ["compartido", null],
-  ])("un proveedor no crea un modo %s, y no se escribe nada", async (_label, owner) => {
+    ["para otro proveedor (no existe para él)", "rival", UnknownProviderError],
+    ["compartido", null, GameModeForbiddenError],
+  ])("un proveedor no crea un modo %s, y no se escribe nada", async (_label, owner, refusal) => {
     const { service, repository } = harness();
 
     await expect(
       service.create(PARLEY, clasica({ ownerProviderId: owner })),
-    ).rejects.toBeInstanceOf(GameModeForbiddenError);
+    ).rejects.toBeInstanceOf(refusal);
     expect(await repository.all()).toEqual([]);
   });
 
@@ -737,7 +738,7 @@ describe("GameModeService: lo que ve y toca cada proveedor", () => {
 
     expect(await names(GAMES, "parley")).toEqual(["De los dos", "De otros", "Propio", "Suscrito"]);
     expect(await names(PARLEY, "parley")).toEqual(["De los dos", "De otros", "Propio", "Suscrito"]);
-    await expect(service.listFor(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
+    await expect(service.listFor(PARLEY, "rival")).rejects.toBeInstanceOf(UnknownProviderError);
   });
 
   it("getFor no le muestra a un proveedor el propio de otro; sí cualquier compartido activo", async () => {
@@ -812,10 +813,10 @@ describe("GameModeService: las suscripciones", () => {
     const modo = await service.create(GAMES, clasica());
 
     await expect(service.subscribe(PARLEY, modo.uuid, "rival")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     await expect(service.unsubscribe(PARLEY, modo.uuid, "rival")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     expect((await repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
   });
@@ -1013,7 +1014,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     const antes = await repository.all();
 
     await expect(service.createCopies(PARLEY, "rival")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     expect(await repository.all()).toEqual(antes);
   });
@@ -1073,9 +1074,9 @@ describe("GameModeService: la fuente del catálogo de cada proveedor", () => {
     const { service, repository } = harness();
     await repository.create(clasica({ ownerProviderId: "rival" }));
 
-    await expect(service.catalogOf(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
+    await expect(service.catalogOf(PARLEY, "rival")).rejects.toBeInstanceOf(UnknownProviderError);
     await expect(service.setCatalogSource(PIA, "rival", "own")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     expect((await service.catalogOf(RIVAL, "rival")).source).toBe("shared");
   });

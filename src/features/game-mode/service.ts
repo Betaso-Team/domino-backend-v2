@@ -12,6 +12,7 @@ import {
   GameModeWriteBusyError,
   type ProviderCatalog,
   type ProviderCatalogRepository,
+  UnknownProviderError,
   offeredTo,
   visibleTo,
 } from "./core/catalog";
@@ -25,7 +26,8 @@ import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode"
 //    es 403 y no 404. Se lee y se juega; lo editan, lo dan de baja y lo reactivan sólo en Betaso
 //    Games.
 // 3. **Cada proveedor habla por sí mismo**: crea modos propios suyos, se suscribe él, copia para él.
-//    Pedirlo para otro es 403 antes de leer nada. El proveedor sobre el que se actúa llega YA RESUELTO
+//    Pedirlo para otro es 404 `UNKNOWN_PROVIDER` antes de leer nada (otro proveedor no existe para
+//    él, como en la regla 1). El proveedor sobre el que se actúa llega YA RESUELTO
 //    por la frontera HTTP (el del token, o el `?providerId=` de Betaso Games); el chequeo de acá es la
 //    segunda llave, para el día que otro llamador se olvide de la primera.
 //
@@ -178,7 +180,7 @@ export class GameModeService {
   }
 
   // LA FUENTE DEL CATÁLOGO DE UN PROVEEDOR. La lee cualquier rol del proveedor o de Betaso Games; otro
-  // proveedor es 403 (los ids de proveedor no son secretos, la fuente de un competidor sí).
+  // proveedor es 404 UNKNOWN_PROVIDER (regla 3).
   catalogOf(actor: CatalogActor, providerId: string): Promise<ProviderCatalog> {
     try {
       refuseForeign(actor, providerId, "un proveedor sólo ve la fuente de su propio catálogo");
@@ -241,8 +243,8 @@ export class GameModeService {
 
   create(actor: CatalogActor, input: CreateGameMode): Promise<GameMode> {
     // EL DUEÑO SE DECIDE ANTES DE TOCAR NADA: un proveedor crea sólo modos propios suyos —sin el campo,
-    // se lo pone el servicio; con el de otro, o con `null` (compartido), es 403—; Betaso Games crea
-    // compartidos por default o propios del proveedor que nombre.
+    // se lo pone el servicio; con `null` (compartido) es 403 y con el de otro, 404 UNKNOWN_PROVIDER—;
+    // Betaso Games crea compartidos por default o propios del proveedor que nombre.
     let owner: string | null;
     try {
       owner = ownerFor(actor, input.ownerProviderId);
@@ -556,9 +558,11 @@ export class GameModeService {
 }
 
 // LA REGLA 3 en una línea: un proveedor actúa sólo sobre sí mismo; Betaso Games, sobre cualquiera.
+// Otro proveedor no existe para él: 404 `UNKNOWN_PROVIDER`, como el `?providerId=` ajeno que la
+// frontera HTTP ya corta antes (esto es la segunda llave).
 function refuseForeign(actor: CatalogActor, providerId: string, message: string): void {
   if (actor.provider !== null && actor.provider !== providerId) {
-    throw new GameModeForbiddenError(message);
+    throw new UnknownProviderError(message);
   }
 }
 
@@ -566,12 +570,16 @@ function notFound(uuid: string): GameModeNotFoundError {
   return new GameModeNotFoundError(`no existe el modo ${uuid}`);
 }
 
-// EL DUEÑO DE UN MODO NUEVO (regla 3). Un proveedor: el suyo, mande o no el campo; otro —o `null`, que
-// es pedir un compartido— es 403. Betaso Games: el que nombre, o compartido.
+// EL DUEÑO DE UN MODO NUEVO (regla 3). Un proveedor: el suyo, mande o no el campo; `null`, que es pedir
+// un compartido, es 403 (los compartidos los administra Betaso Games); otro proveedor es 404
+// `UNKNOWN_PROVIDER` (no existe para él). Betaso Games: el que nombre, o compartido.
 function ownerFor(actor: CatalogActor, requested: string | null | undefined): string | null {
   if (actor.provider === null) return requested ?? null;
   if (requested === undefined || requested === actor.provider) return actor.provider;
-  throw new GameModeForbiddenError("un proveedor sólo crea modos propios suyos");
+  if (requested === null) {
+    throw new GameModeForbiddenError("un modo compartido lo crea Betaso Games");
+  }
+  throw new UnknownProviderError("un proveedor sólo crea modos propios suyos");
 }
 
 // LA COPIA: los mismos números y niveles que el compartido, con el proveedor de dueño. Campo por campo

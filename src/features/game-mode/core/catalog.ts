@@ -148,12 +148,21 @@ export class GameModeWriteBusyError extends Error {
   readonly code = "CATALOG_BUSY";
 }
 
-// UN PROVEEDOR PIDIENDO ALGO QUE NO ES SUYO: editar un compartido —que no es secreto, lo lista el
-// catálogo público—, crear un modo para otro proveedor, suscribir a otro. 403. Un modo PROPIO de otro
-// proveedor no llega acá: sale como «no existe» (404), porque decir 403 le confirmaría que existe.
+// UN PROVEEDOR PIDIENDO ALGO QUE VE PERO NO ES SUYO: editar un compartido —que no es secreto, lo
+// lista el catálogo público— o crear uno. 403. Un modo PROPIO de otro proveedor no llega acá: sale
+// como «no existe» (404), porque decir 403 le confirmaría que existe; y actuar SOBRE otro proveedor
+// tampoco: es `UnknownProviderError`.
 export class GameModeForbiddenError extends Error {
   override readonly name = "GameModeForbiddenError";
   readonly code = "FORBIDDEN";
+}
+
+// UN PROVEEDOR NOMBRANDO A OTRO: crear un modo para él (`ownerProviderId` en el cuerpo), o leer,
+// copiar, suscribir o cambiar la fuente de otro. Lo de otro proveedor no existe para éste: 404, igual
+// que un `?providerId=` ajeno en la frontera HTTP y que sus modos propios. Sin `detail`.
+export class UnknownProviderError extends Error {
+  override readonly name = "UnknownProviderError";
+  readonly code = "UNKNOWN_PROVIDER";
 }
 
 // ── LA FUENTE DEL CATÁLOGO DE CADA PROVEEDOR ───────────────────────────────────────────────────────

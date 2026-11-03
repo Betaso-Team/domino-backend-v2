@@ -869,16 +869,21 @@ describe("el panel de un proveedor", () => {
     });
   });
 
-  it("crear para otro proveedor es 403 y no deja nada", async () => {
+  // LO DE OTRO PROVEEDOR NO EXISTE para éste: 404, igual que un `?providerId=` ajeno. Pedir un
+  // compartido sí es un 403: los compartidos se ven, pero los crea Betaso Games.
+  it("crear para otro proveedor es 404 UNKNOWN_PROVIDER, un compartido es 403, y no deja nada", async () => {
     const app = harness();
+    const body = { name: "X", prize: 1, entryFee: 1, playersQuantity: 2 };
 
-    const response = await app.post(
-      "/game-modes",
-      { name: "X", prize: 1, entryFee: 1, playersQuantity: 2, ownerProviderId: "rival" },
-      as("parley"),
+    expect(
+      await app.post("/game-modes", { ...body, ownerProviderId: "rival" }, as("parley")),
+    ).toEqual({ status: 404, body: { code: "UNKNOWN_PROVIDER" } });
+    expect(await app.post("/game-modes", { ...body, ownerProviderId: null }, as("parley"))).toEqual(
+      {
+        status: 403,
+        body: { code: "FORBIDDEN", detail: "un modo compartido lo crea Betaso Games" },
+      },
     );
-
-    expect(response.status).toBe(403);
     expect(await app.repository.all()).toEqual([]);
   });
 });

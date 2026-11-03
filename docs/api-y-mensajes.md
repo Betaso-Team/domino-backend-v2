@@ -166,8 +166,10 @@ catálogo público): tocarlo sin poder responde `403 { code: "FORBIDDEN", detail
 ### Modos con dueño y suscripciones
 
 Cada modo tiene un dueño, `ownerProviderId`: `null` es un modo **compartido** de Betaso Games; un id es
-un modo **propio** de ese proveedor, que sólo juegan sus jugadores. Los compartidos llevan además
-`subscribers`, los proveedores que los juegan:
+un modo **propio** de ese proveedor, que sólo juegan sus jugadores. Un admin de proveedor crea sólo
+modos propios suyos: sin el campo se lo pone el servicio; con `null` es `403 FORBIDDEN` y con el id de
+otro proveedor, `404 UNKNOWN_PROVIDER` (lo de otro proveedor no existe para él). Los compartidos llevan
+además `subscribers`, los proveedores que los juegan:
 
 - **La lista es explícita.** Un compartido se ofrece sólo a los proveedores de su lista; un documento
   sin el campo se lee `[]`, igual que un compartido nuevo: no se ofrece a nadie hasta que se
@@ -487,7 +489,7 @@ antes de mirar la forma.
 | `GET /internal/players/:userId/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
 | `GET /game-modes/admin[?providerId=]` | `404 UNKNOWN_PROVIDER` |
 | `GET /game-modes/admin/:uuid` | `404 MODE_NOT_FOUND` |
-| `POST /game-modes` | `400 FREE_ROOM_WITH_ENTRY`, `403 FORBIDDEN` (un proveedor crea para otro), `409 MODE_DUPLICATE`, `503 CATALOG_BUSY` |
+| `POST /game-modes` | `400 FREE_ROOM_WITH_ENTRY`, `403 FORBIDDEN` (un proveedor pide un compartido, `ownerProviderId: null`), `404 UNKNOWN_PROVIDER` (un proveedor crea para otro), `409 MODE_DUPLICATE`, `503 CATALOG_BUSY` |
 | `PUT /game-modes/:uuid` | `400 FREE_ROOM_WITH_ENTRY`, `403 FORBIDDEN` (un proveedor sobre un compartido), `404 MODE_NOT_FOUND`, `409 MODE_DUPLICATE`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
 | `DELETE /game-modes/:uuid` | `403 FORBIDDEN`, `404 MODE_NOT_FOUND`, `409 MODE_ALREADY_INACTIVE`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
 | `GET /game-modes/reactive/:uuid` | `403 FORBIDDEN`, `404 MODE_NOT_FOUND`, `409 MODE_ALREADY_ACTIVE`, `503 CATALOG_BUSY` |

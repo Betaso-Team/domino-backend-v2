@@ -7,6 +7,7 @@ import {
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
+  UnknownProviderError,
 } from "../../core/catalog";
 
 // LO QUE COMPARTEN LAS DOS MITADES DEL CATÁLOGO —las lecturas del jugador y las mutaciones del panel—:
@@ -38,7 +39,7 @@ export function sendModeNotFound(response: Response): void {
   sendError(response, 404, "MODE_NOT_FOUND");
 }
 
-// LA TRADUCCIÓN DE LOS SEIS ERRORES DE APLICACIÓN, Y EL `throw` DEL FINAL ES LA MITAD DEL ARCHIVO.
+// LA TRADUCCIÓN DE LOS SIETE ERRORES DE APLICACIÓN, Y EL `throw` DEL FINAL ES LA MITAD DEL ARCHIVO.
 // Lo que no reconoce se RELANZA: `validated` lo reenvía a `next` y el manejador compartido lo loguea
 // con stack y contesta 500. v1 hacía lo contrario —un `catch (error)` por ruta que convertía
 // cualquier cosa en 500 con un mensaje genérico—, y ahí se le perdían los dos casos que esta tarea
@@ -61,6 +62,12 @@ export function sendCatalogError(response: Response, error: unknown): void {
   // Comparten status porque los dos son un choque con el estado actual, no con la forma del pedido.
   if (error instanceof DuplicateGameModeError || error instanceof GameModeStateConflictError) {
     sendError(response, 409, error.code, error.message);
+    return;
+  }
+  // 404 SIN `detail`, como el `?providerId=` ajeno: otro proveedor no existe para éste (crear un modo
+  // para él, o cualquier operación sobre él). Confirmar que existe sería decir un 403.
+  if (error instanceof UnknownProviderError) {
+    sendError(response, 404, error.code);
     return;
   }
   // 403: un proveedor pidiendo algo de un modo que ve pero no es suyo. Lo que no ve sale como el 404

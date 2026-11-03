@@ -7,6 +7,7 @@ import {
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
+  UnknownProviderError,
 } from "../../core/catalog";
 import { sendCatalogError } from "./responses";
 
@@ -57,6 +58,15 @@ describe("sendCatalogError", () => {
     const { response, sent } = fakeResponse();
     sendCatalogError(response, new GameModeNotFoundError("no existe el modo m-1"));
     expect(sent).toEqual({ status: 404, body: { code: "MODE_NOT_FOUND" } });
+  });
+
+  it("otro proveedor es 404 UNKNOWN_PROVIDER, sin detalle", () => {
+    const { response, sent } = fakeResponse();
+    sendCatalogError(
+      response,
+      new UnknownProviderError("un proveedor sólo crea modos propios suyos"),
+    );
+    expect(sent).toEqual({ status: 404, body: { code: "UNKNOWN_PROVIDER" } });
   });
 
   it("lo que no reconoce lo relanza, para que sea un 500", () => {
