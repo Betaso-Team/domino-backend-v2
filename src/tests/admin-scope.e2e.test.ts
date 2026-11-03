@@ -97,6 +97,7 @@ describe("el ámbito de los admins (integración)", () => {
   it("las mesas son sólo del orquestador: ningún token de admin las abre", async () => {
     for (const who of ["games", "parley"] as const) {
       expect((await call(who, "GET", "/internal/census")).status).toBe(401);
+      expect((await call(who, "GET", "/internal/players/u-1/match")).status).toBe(401);
       expect((await call(who, "GET", "/internal/game-modes")).status).toBe(401);
     }
     expect((await call("key", "GET", "/internal/game-modes")).status).toBe(401);

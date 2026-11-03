@@ -1,8 +1,14 @@
-import { MemoryKeyValueStore } from "@/shared/kv";
+import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG } from "../core/config";
 import { replayConfigOf } from "./match-contract";
-import { HEARTBEAT_MS, MatchRegistry, TTL_SECONDS, publicTimeoutsOf } from "./match-registry";
+import {
+  HEARTBEAT_MS,
+  MatchRegistry,
+  TTL_SECONDS,
+  publicConfigOf,
+  publicTimeoutsOf,
+} from "./match-registry";
 
 // El config se arma con el CONTRATO y no a mano: lo que el registro indexa son las parejas
 // del snapshot REAL, y un objeto escrito a mano podría describir una mesa que el contrato
@@ -65,6 +71,8 @@ describe("MatchRegistry", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      isFreeRoom: false,
+      enableBots: false,
       timeouts: { turnMs: 45_000, extraTimeMs: 25_000, dealingMs: 15_000, betResponseMs: 8_000 },
     });
   });
@@ -92,9 +100,9 @@ describe("MatchRegistry", () => {
   });
 
   // LOS NIVELES QUE LA MESA OFRECE, para pintar el aumento ANTES de proponer (truco `58ce78f`). Sale
-  // el `level` y los puntos que el front muestra; el `extra` es cómo se calcula el ranking, no algo
-  // que mostrar. El precio lo deriva el cliente con `betAmountsOf`.
-  it("publica los niveles de aumento sin el extra", async () => {
+  // el `level`, los puntos y el `extra` del catálogo, que el front muestra junto al nivel. El precio
+  // lo deriva el cliente con `betAmountsOf`.
+  it("publica los niveles de aumento con el extra", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
     await registry.register(
       "room-1",
@@ -103,8 +111,36 @@ describe("MatchRegistry", () => {
     );
 
     expect((await registry.publicConfigOf("room-1"))?.betLevels).toEqual([
-      { level: 3, additionalPoints: 15 },
+      { level: 3, extra: 7, additionalPoints: 15 },
     ]);
+  });
+
+  // LAS DOS REGLAS DE LA MESA QUE EL FRONT NECESITA PARA DIBUJARLA: si es gratis (no hay aumento ni
+  // entrada que mostrar) y si un retirado deja una máquina en su lugar.
+  it("publica si la mesa es gratis y si sienta máquinas", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register(
+      "room-1",
+      replayConfigOf({ ...roomOptions, isFreeRoom: true, enableBots: true }),
+      timeouts,
+    );
+
+    expect(await registry.publicConfigOf("room-1")).toMatchObject({
+      isFreeRoom: true,
+      enableBots: true,
+    });
+  });
+
+  // EL MISMO DTO PARA EL REGISTRO Y PARA EL MENSAJE `config` DE LA SALA: los dos salen de la función
+  // pura, así que lo que estampa el almacén y lo que recibe el jugador al entrar no pueden divergir.
+  it("publicConfigOf es lo que el registro estampa, y nunca lleva la semilla", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", config, timeouts);
+
+    const pure = publicConfigOf(config, timeouts);
+    expect(await registry.publicConfigOf("room-1")).toEqual(pure);
+    expect(JSON.stringify(pure)).not.toContain("secreto-que-no-sale");
+    expect(pure).not.toHaveProperty("seed");
   });
 
   // La allowlist ahora también decide qué SE ESCRIBE en el almacén compartido, no solo qué se
@@ -164,6 +200,8 @@ describe("MatchRegistry", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      isFreeRoom: false,
+      enableBots: false,
       timeouts,
     });
     expect(await procesoB.matchOf("u1")).toBe("room-1");
@@ -391,5 +429,152 @@ describe("MatchRegistry: censo del lobby", () => {
       playersInMatch: 0,
       byGameMode: new Map(),
     });
+  });
+});
+
+// UN ALMACÉN QUE CUENTA: envuelve al de memoria y anota cada llamada, para medir cuánto I/O cuesta
+// cada latido. Las lecturas cuentan igual que las escrituras: un `get` también es un viaje a Redis.
+function countingStore() {
+  const inner = new MemoryKeyValueStore();
+  const calls: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const track =
+    <A extends unknown[], R>(name: string, fn: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      calls.push(`${name}:${String(args[0])}`);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      // Un tick de por medio, como la red: sin él todo resuelve en el acto y el paralelo no se ve.
+      await Promise.resolve();
+      try {
+        return await fn(...args);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+  const store: KeyValueStore = {
+    get: track("get", (key) => inner.get(key)),
+    set: track("set", (key, value) => inner.set(key, value)),
+    setex: track("setex", (key, value, seconds) => inner.setex(key, value, seconds)),
+    del: (key) => {
+      calls.push(`del:${key}`);
+      inner.del(key);
+    },
+    sadd: track("sadd", (key, value) => inner.sadd(key, value)),
+    srem: track("srem", (key, value) => inner.srem(key, value)),
+    smembers: track("smembers", (key) => inner.smembers(key)),
+    expire: track("expire", (key, seconds) => inner.expire(key, seconds)),
+    hset: track("hset", (key, field, value) => inner.hset(key, field, value)),
+    hgetall: track("hgetall", (key) => inner.hgetall(key)),
+    hdel: track("hdel", (key, field) => inner.hdel(key, field)),
+  };
+  return {
+    store,
+    calls,
+    maxInFlight: () => maxInFlight,
+    reset: () => {
+      calls.length = 0;
+      maxInFlight = 0;
+    },
+  };
+}
+
+describe("MatchRegistry: el latido por hecho no escribe de más", () => {
+  it("settle sin nadie que haya soltado no toca el almacén", async () => {
+    const counting = countingStore();
+    const registry = new MatchRegistry(counting.store);
+    await registry.register("room-1", config, timeouts);
+    counting.reset();
+
+    await registry.settle("room-1", ["u1", "u2"]);
+    // Un id que no es de esta mesa no cuenta como asiento nuevo: soltar es lo único que cambia.
+    await registry.settle("room-1", ["u1", "u2", "u9"]);
+
+    expect(counting.calls).toEqual([]);
+  });
+
+  it("settle suelta solo al que salió y reescribe el censo, sin renovar a nadie", async () => {
+    const counting = countingStore();
+    const registry = new MatchRegistry(counting.store);
+    await registry.register("room-1", config, timeouts);
+    counting.reset();
+
+    await registry.settle("room-1", ["u2"]);
+
+    expect(counting.calls).toEqual([
+      "get:player_match:u1",
+      "del:player_match:u1",
+      "hset:live_seats",
+    ]);
+    expect(await registry.matchOf("u1")).toBeUndefined();
+    expect(await registry.matchOf("u2")).toBe("room-1");
+    expect(await registry.census()).toMatchObject({ playersInMatch: 1 });
+  });
+
+  // Soltar es irreversible también por `settle`: después de soltar, la misma lista ya no es cambio, y
+  // un latido completo posterior no revive al soltado.
+  it("lo soltado por settle queda soltado", async () => {
+    const counting = countingStore();
+    const registry = new MatchRegistry(counting.store);
+    await registry.register("room-1", config, timeouts);
+    await registry.settle("room-1", ["u2"]);
+    counting.reset();
+
+    await registry.settle("room-1", ["u2"]);
+    await registry.settle("room-1", ["u1", "u2"]);
+    expect(counting.calls).toEqual([]);
+
+    await registry.keepAlive("room-1", ["u1", "u2"]);
+    expect(await registry.matchOf("u1")).toBeUndefined();
+    expect(await registry.matchOf("u2")).toBe("room-1");
+  });
+
+  it("settle no suelta al jugador que ya se sentó en otra mesa", async () => {
+    const compartido = new MemoryKeyValueStore();
+    const vieja = new MatchRegistry(compartido);
+    const nueva = new MatchRegistry(compartido);
+    await vieja.register("room-1", config, timeouts);
+    await nueva.register(
+      "room-2",
+      replayConfigOf({ ...roomOptions, matchId: "m2", seats: [seat("u1", 0), seat("u3", 1)] }),
+      timeouts,
+    );
+
+    await vieja.settle("room-1", []);
+
+    expect(await nueva.matchOf("u1")).toBe("room-2");
+    expect(await vieja.matchOf("u2")).toBeUndefined();
+  });
+
+  it("settle de una sala que este proceso no anotó no hace nada", async () => {
+    const counting = countingStore();
+    const registry = new MatchRegistry(counting.store);
+
+    await registry.settle("room-x", []);
+
+    expect(counting.calls).toEqual([]);
+  });
+
+  it("keepAlive escribe la config y los asientos en paralelo, y el censo al final", async () => {
+    const counting = countingStore();
+    const registry = new MatchRegistry(counting.store);
+    await registry.register("room-1", config, timeouts);
+    counting.reset();
+
+    await registry.keepAlive("room-1", ["u2"]);
+
+    // config + el `setex` de u2 + el `get` del release de u1, los tres a la vez.
+    expect(counting.maxInFlight()).toBe(3);
+    expect(counting.calls.at(-1)).toBe("hset:live_seats");
+    expect(counting.calls).toHaveLength(5);
+    expect(counting.calls).toEqual(
+      expect.arrayContaining([
+        "setex:match_config:room-1",
+        "setex:player_match:u2",
+        "get:player_match:u1",
+        "del:player_match:u1",
+      ]),
+    );
   });
 });

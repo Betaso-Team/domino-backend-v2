@@ -78,6 +78,23 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     await expect((await collection()).insertOne({ matchId: "m-1" })).rejects.toThrow(/duplicate/);
   });
 
+  // UN `$push` POR TRABAJO (ver `record`): los lotes del mismo tick se juntan, la mano sella el
+  // pendiente, y la timeline de la base queda en el orden del `seq` igual que con un `$push` por lote.
+  it("los lotes juntados y sellados quedan en orden en la timeline y en las manos", async () => {
+    const history = await fresh();
+    history.record([entry(1)]);
+    history.record([entry(2), entry(3)]);
+    history.round("m-1", { roundNumber: 1, endReason: "DOMINO", starterId: "seat-1", hands: [] });
+    history.record([entry(4)]);
+    history.record([entry(5)]);
+    await history.drain();
+
+    expect((await history.of("m-1")).map(({ seq }) => seq)).toEqual([1, 2, 3, 4, 5]);
+    const stored = await (await collection()).findOne({ matchId: "m-1" });
+    expect(stored?.rounds).toHaveLength(1);
+    expect(await (await collection()).countDocuments({ matchId: "m-1" })).toBe(1);
+  });
+
   // EL ORDEN FÍSICO, leído crudo y no por `recordOf` —que reordena al leer—: una lectura truncada de
   // la base pierde el final del documento, y el final tiene que ser lo grande. La timeline nace antes
   // que la cabecera cuando alguien se cae durante el sentado, y aun así queda al final.

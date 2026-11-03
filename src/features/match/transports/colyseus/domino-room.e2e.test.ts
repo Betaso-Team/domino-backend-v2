@@ -3,6 +3,7 @@ import {
   type ParticipantInput,
   bootTestServer,
   casualTable,
+  joinAs,
   mintToken,
   participantOf,
   waitUntil,
@@ -353,6 +354,47 @@ describe("DominoRoom", () => {
     });
 
     await Promise.all([room.disconnect(), nueva.disconnect()]);
+  });
+
+  // EL MENSAJE `config`: la sala manda su configuración pública con `serverNow` a cada uno que entra
+  // y a cada uno que vuelve, para que el front no tenga que ir a buscarla por HTTP. El handler se
+  // registra SIN `await` en el medio después del join: lo que la sala manda en `onJoin` llega apenas
+  // el cliente confirma la entrada, y el comodín de `src/tests/e2e.ts` se tragaría lo que nadie
+  // escucha todavía.
+  it("manda la config pública con serverNow al entrar y al volver", async () => {
+    const testServer = requiredServer();
+    const room = await testServer.createRoom<DominoRoom>("domino", options("match-config-msg"));
+    const before = Date.now();
+    // `joinById` y no `connectTo`: éste espera además el estado inicial, y para entonces el
+    // mensaje ya llegó y se lo llevó el comodín.
+    const a = await joinAs(testServer, room.roomId, "a");
+    const received: Record<string, unknown>[] = [];
+    a.onMessage("config", (message: Record<string, unknown>) => {
+      received.push(message);
+    });
+    await waitUntil(() => received.length === 1);
+
+    // EL MISMO DTO QUE EL REGISTRO ESTAMPA y que `GET /config/:roomId` sirve, más el reloj.
+    const stamped = await rootContainer.resolve(MatchRegistry).publicConfigOf(room.roomId);
+    expect(received[0]).toEqual({ ...stamped, serverNow: expect.any(Number) });
+    expect(received[0]?.serverNow).toBeGreaterThanOrEqual(before);
+    expect(received[0]).toMatchObject({ isFreeRoom: false, enableBots: false, betLevels: [] });
+    expect(JSON.stringify(received[0])).not.toContain("seed");
+
+    // UN BACHE DE RED: el SDK reintenta sobre la misma instancia, con los handlers intactos, y la
+    // sala vuelve a mandar la config en `onReconnect`.
+    a.reconnection.minUptime = 0;
+    let reconnected = false;
+    a.onReconnect(() => {
+      reconnected = true;
+    });
+    void a.leave(false);
+    await waitUntil(() => reconnected, 5_000);
+    await waitUntil(() => received.length === 2, 3_000);
+    expect(received[1]).toEqual({ ...stamped, serverNow: expect.any(Number) });
+    expect(received[1]?.serverNow).toBeGreaterThanOrEqual(received[0]?.serverNow as number);
+
+    await room.disconnect();
   });
 
   it("marca la configuración pública como no cacheable", async () => {

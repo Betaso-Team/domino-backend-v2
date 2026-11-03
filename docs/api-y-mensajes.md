@@ -30,6 +30,41 @@ sentó, normalizado con `trim()`.
 El cliente no envía `playerId`: el handler lo toma del asiento autenticado. Cada payload pasa por un
 decoder estricto antes de alcanzar el comando.
 
+## Mensajes del servidor
+
+Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
+
+| Tipo | A quién | Payload | Cuándo |
+|---|---|---|---|
+| `config` | Al que entra o vuelve | La config pública de la mesa más `serverNow` (forma abajo) | Al final de cada entrada (`onJoin`) y de cada reconexión (`onReconnect`) |
+| `events` | Toda la mesa | Lista de eventos del motor y de plataforma (`ROUND_STARTED`, `MATCH_RESOLVED`, `PLAYER_RECONNECTED`…) | Cada vez que la partida produce hechos |
+| `illegal` | El que mandó el mensaje | `{ code, detail? }`: `code` es el de la regla violada, `MALFORMED` (con `detail`) o `UNKNOWN_COMMAND` | Su mensaje no prosperó; el estado no cambió |
+| `matchCancelled` | Toda la mesa | `{ reason: "CHARGE_REJECTED" }` | El orquestador no cobró la entrada; la sala se cierra sin arrancar |
+
+**`config`** trae lo mismo que `GET /config/:roomId`, sin pedirlo por HTTP:
+
+```ts
+{
+  matchId: string;
+  gameModeId: string;
+  seats: string[];              // ids opacos: "seat-1", "seat-2"…
+  pointsToWin: number;
+  entryFee: number;             // UC completas
+  prize: number;                // UC completas
+  betLevels: { level: number; extra: number; additionalPoints: number }[]; // [] = no ofrece aumentar
+  isFreeRoom: boolean;
+  enableBots: boolean;
+  timeouts: { turnMs: number; extraTimeMs: number; dealingMs: number; betResponseMs: number };
+  serverNow: number;            // epoch ms del servidor al mandarlo, para el desfase de reloj
+}
+```
+
+Nunca lleva el `seed`, ni identidad, moneda o tasa. Lo que la sala manda en `onJoin` Colyseus lo
+encola hasta que el cliente confirma la entrada, así que llega apenas resuelve el `join` y antes de
+cualquier `events` posterior. El handler se registra **justo después del `join`, sin un `await` en
+el medio** (por ejemplo, no después de `waitForInitialState()`): si no, el mensaje llega antes que el
+handler. Un cliente que no lo escucha solo ve un aviso del SDK.
+
 ## Estado visible
 
 `StateView` filtra el árbol por cliente:
@@ -49,7 +84,7 @@ decoder estricto antes de alcanzar el comando.
 |---|---|
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
-| `GET /config/:roomId` | Config pública de una mesa (con `betLevels: [{ level, additionalPoints }]`, vacío si no ofrece aumentar) y `serverNow`; nunca devuelve el seed |
+| `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
 | `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`). Página de 1 a 50, 10 por defecto |
 | `GET /game-modes` | Modos **compartidos** activos del catálogo, con el DTO de siempre (sin dueño ni suscriptores) |
@@ -296,7 +331,7 @@ con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Cuatro rutas que sólo usa el orquestador de Betaso Juegos; las tres de las mesas son la única puerta
+Cinco rutas que sólo usa el orquestador de Betaso Juegos; las de las mesas son la única puerta
 de entrada a una partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
@@ -325,6 +360,17 @@ Betaso).
 | `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
 | `500` | | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+
+**`GET /internal/players/:userId/match`** dice en qué mesa está sentado un jugador, **sin reservar
+asiento**: dos lecturas del registro compartido y ninguna llamada a Colyseus. Es lo que el orquestador
+pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `POST .../seat`.
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status: "success", data: { matchId, roomId } }` | Sigue en una mesa viva; el `matchId` es el del orquestador |
+| `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
+| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló) |
 
 **`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
 orquestador lo muestra en los números de su lobby.

@@ -16,7 +16,8 @@ pieza del dominó.
 - **El dominó es un game backend del orquestador de Betaso Juegos**
   (`betaso-games-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
   entrada**: admite, empareja, tiene el único interruptor de mantenimiento y abre cada mesa por la API
-  interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/census`,
+  interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`,
+  `GET /internal/players/:userId/match`, `GET /internal/census`,
   en `features/match/transports/http/tables.ts`). Toda sala `domino` nace de un `CreateMatchRequest`.
 - **No hay lobby, emparejador ni mantenimiento propios.** No hay sala `lobby`, ni `GET /maintenance`,
   ni `GET /players-in-match`, ni `POST /internal/lobby/maintenance`. La configuración en caliente
@@ -69,6 +70,18 @@ pieza del dominó.
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
+
+- **El registro de partidas vivas (Redis) renueva por reloj y suelta por hecho.** El latido de 30 s
+  re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
+  (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
+  escribe de más».
+- **El historial manda un `$push` por trabajo de la cola, no uno por lote**: los lotes de una partida
+  se juntan hasta que su trabajo arranca, y `open`/`round`/`close`/`settled` sellan el pendiente para
+  conservar el orden. Ver «Incremento completo — el historial, un `$push` por lote pendiente».
+- **La sala manda su config pública al que entra o vuelve** (mensaje `config`, con `serverNow`), y
+  `PublicMatchConfig` trae `isFreeRoom`, `enableBots` y `betLevels[].extra`. El orquestador pregunta
+  la mesa de un jugador sin reservar con `GET /internal/players/:userId/match`. Ver «Incremento
+  completo — la mesa completa y el asiento sin reserva».
 
 ## El plan es la autoridad
 
@@ -2711,6 +2724,68 @@ producción, y no quedan alias.
 - **Servicio:** `copyShared` → `createCopies` (`CopySharedResult` → `CopiesResult`); `listFor(actor,
   providerId?)` filtra por lo que ve ese proveedor. Las firmas reciben el proveedor ya resuelto, y el
   servicio conserva la regla 3 (`refuseForeign`) como segunda llave.
+
+## Incremento completo — el latido por hecho no escribe de más (rama `perf/latido-sin-escrituras-de-mas`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR3). Desde `develop`.
+
+- **Dos latidos con trabajos distintos.** El del reloj de la sala (`HEARTBEAT_MS`, `beat(true)`)
+  llama `MatchRegistry.keepAlive`, que re-estampa config, asientos y censo con el plazo entero. El de
+  cada hecho del juego (el último sink del notificador, `beat()`) llama `settle(roomId, active)`, que
+  SOLO suelta: si la lista de los que siguen jugando no se achicó respecto de `seatsByRoomId`, no toca
+  el almacén (cero I/O, el caso de casi toda jugada). Si alguien salió, suelta su clave (con el mismo
+  chequeo de `release`: solo si sigue apuntando a esta sala) y reescribe el censo en el acto.
+- **Se compara contra lo anotado y no contra el latido anterior** porque soltar es irreversible: lo
+  soltado sale de `seatsByRoomId`, así que «no cambió» es exactamente «tiene el mismo largo».
+- **`keepAlive` escribe en paralelo** (`Promise.all` de los `setex` y los `release`) y el `hset` del
+  censo después. Antes eran 2 + N viajes en serie por latido, y uno de esos latidos por ficha jugada.
+- Ambos siguen en la fila `this.beats` y detrás de la guarda `disposed`: el apagado los espera antes de
+  borrar. Lo miden `match-registry.test.ts` (con un `KeyValueStore` que cuenta llamadas y
+  concurrencia) y los e2e de liberación de asiento (`orchestrator-tables`, `lifecycle`, `bot-4p`).
+
+## Incremento completo — el historial, un `$push` por lote pendiente (rama `perf/historial-un-push-por-lote`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR4). Apilada sobre la del latido.
+
+- **`MongoHistory.record` junta los lotes de una partida** en un pendiente (`unsealed`, por
+  `matchId`). Solo el lote que lo abre encola un trabajo en la cola de la partida; los que llegan
+  mientras ese trabajo no arrancó se suman al mismo arreglo. El trabajo **sella** el pendiente al
+  empezar —antes de pedir la colección, así que un fallo ahí también lo deja sellado— y lo manda con
+  UN `updateOne` (`$push {timeline: {$each}}` + `$set updatedAt` + `$setOnInsert`, el mismo update de
+  antes). El comando y sus eventos, que son dos lotes del mismo tick, viajan juntos; con la cola
+  trabada en Mongo, todo lo que se apiló viaja en la escritura siguiente y no en N.
+- ⚠ **`open`, `round`, `close` y `settled` sellan ANTES de encolarse.** Es lo que conserva el orden
+  que el resto del sistema da por hecho («el desenlace llega detrás de la entrada que lo cuenta»): lo
+  grabado antes de ellos viaja antes, y lo grabado después abre un pendiente nuevo detrás. Un verbo
+  nuevo que escriba el documento por la cola tiene que sellar también, o un lote anterior podría
+  quedar esperando en un pendiente que sale DESPUÉS de él.
+- `updatedAt` es el instante del trabajo, no el del primer lote. `drain()` no cambia: todo pendiente
+  tiene su trabajo en vuelo. `HistoryPort` y `MemoryHistory` tampoco.
+- Lo miden `mongo-history.test.ts` («un $push por lote pendiente») y un caso de
+  `mongo-history.int.test.ts` (con `MONGO_INT_URI`).
+
+## Incremento completo — la mesa completa y el asiento sin reserva (rama `feat/mesa-completa-y-asiento-sin-reserva`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR5). Apilada sobre la del historial.
+
+- **`publicConfigOf(config, timeouts)` es una función pura** en `match-registry.ts` (allowlist, nunca
+  el `seed`). La usan el registro (lo que estampa en `match_config:<roomId>`) y la sala (el mensaje
+  `config`), así que no pueden divergir. ⚠ El método `MatchRegistry.publicConfigOf(roomId)` (la lectura
+  del almacén) conserva su nombre: misma palabra, dos firmas.
+- **`PublicMatchConfig` suma `isFreeRoom`, `enableBots` y `betLevels[].extra`.** El orquestador ya los
+  mandaba en el modo; antes se recortaban. `GET /config/:roomId` y `GET /matches/:roomId` los traen
+  solos.
+- **Mensaje `config`** (`{...PublicMatchConfig, serverNow}`) al final de `onJoin` y en `onReconnect`.
+  ⚠ Lo enviado en `onJoin` Colyseus lo encola hasta el ack del `JOIN_ROOM`
+  (`@colyseus/core/build/Room.mjs` ~1418), así que llega apenas resuelve el `join` del SDK: el handler
+  se registra sin `await` en el medio. En los e2e eso significa `joinById` y NO `connectTo` (que
+  espera `waitForInitialState` y para entonces el comodín de `src/tests/e2e.ts` ya se tragó el
+  mensaje).
+- **`GET /internal/players/:userId/match`** (`tables.ts`, misma llave y `SEAT_PARAMS` que `.../seat`):
+  `matchOf` + `publicConfigOf` del registro, sin Colyseus ni reserva. 200 `{status, data: {matchId,
+  roomId}}`; 404 `{code: "NO_LIVE_MATCH"}` (ya con la forma de errores nueva, a propósito; la ruta
+  `.../seat` sigue con `{error}` hasta el PR de errores). `player_match:<userId>` no cambia.
+- Docs: «Mensajes del servidor» y la ruta nueva en `docs/api-y-mensajes.md`.
 
 ## Cómo se ejecuta una tarea
 
