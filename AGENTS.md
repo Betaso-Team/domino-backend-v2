@@ -67,6 +67,9 @@ pieza del dominó.
   re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
   (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
   escribe de más».
+- **El historial manda un `$push` por trabajo de la cola, no uno por lote**: los lotes de una partida
+  se juntan hasta que su trabajo arranca, y `open`/`round`/`close`/`settled` sellan el pendiente para
+  conservar el orden. Ver «Incremento completo — el historial, un `$push` por lote pendiente».
 
 ## El plan es la autoridad
 
@@ -2725,6 +2728,27 @@ Del plan «rendimiento del backend, roles y pendientes» (sección C, PR3). Desd
 - Ambos siguen en la fila `this.beats` y detrás de la guarda `disposed`: el apagado los espera antes de
   borrar. Lo miden `match-registry.test.ts` (con un `KeyValueStore` que cuenta llamadas y
   concurrencia) y los e2e de liberación de asiento (`orchestrator-tables`, `lifecycle`, `bot-4p`).
+
+## Incremento completo — el historial, un `$push` por lote pendiente (rama `perf/historial-un-push-por-lote`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR4). Apilada sobre la del latido.
+
+- **`MongoHistory.record` junta los lotes de una partida** en un pendiente (`unsealed`, por
+  `matchId`). Solo el lote que lo abre encola un trabajo en la cola de la partida; los que llegan
+  mientras ese trabajo no arrancó se suman al mismo arreglo. El trabajo **sella** el pendiente al
+  empezar —antes de pedir la colección, así que un fallo ahí también lo deja sellado— y lo manda con
+  UN `updateOne` (`$push {timeline: {$each}}` + `$set updatedAt` + `$setOnInsert`, el mismo update de
+  antes). El comando y sus eventos, que son dos lotes del mismo tick, viajan juntos; con la cola
+  trabada en Mongo, todo lo que se apiló viaja en la escritura siguiente y no en N.
+- ⚠ **`open`, `round`, `close` y `settled` sellan ANTES de encolarse.** Es lo que conserva el orden
+  que el resto del sistema da por hecho («el desenlace llega detrás de la entrada que lo cuenta»): lo
+  grabado antes de ellos viaja antes, y lo grabado después abre un pendiente nuevo detrás. Un verbo
+  nuevo que escriba el documento por la cola tiene que sellar también, o un lote anterior podría
+  quedar esperando en un pendiente que sale DESPUÉS de él.
+- `updatedAt` es el instante del trabajo, no el del primer lote. `drain()` no cambia: todo pendiente
+  tiene su trabajo en vuelo. `HistoryPort` y `MemoryHistory` tampoco.
+- Lo miden `mongo-history.test.ts` («un $push por lote pendiente») y un caso de
+  `mongo-history.int.test.ts` (con `MONGO_INT_URI`).
 
 ## Cómo se ejecuta una tarea
 
