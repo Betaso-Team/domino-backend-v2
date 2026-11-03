@@ -9,8 +9,15 @@ import type { Lease } from "./mongo-lease";
 // 1. **Quien encola nunca espera a Rabbit.** Escribe acá y sigue; el despachador publica después.
 // 2. **Una entrada se marca `SENT` solo después del confirm del broker**, dentro de un plazo.
 // 3. **No hay límite de intentos**: una caída larga del broker cuesta retraso, no datos.
-// 4. **No se adelanta**: `next()` no ofrece la segunda entrada mientras la primera espera su
-//    reintento. En los resultados, mantiene el orden en que las partidas terminaron.
+// 4. **No se adelanta**: `next()` ofrece siempre el pendiente más viejo, así que la segunda entrada
+//    no sale antes que la primera. En los resultados, mantiene el orden en que las partidas terminaron.
+//
+// LA ESPERA ES DEL BROKER, NO DE CADA ENTRADA. Antes cada entrada guardaba su `nextAttemptAt` con un
+// backoff de hasta cinco minutos, y como nadie se adelanta, una sola entrada que falló dejaba a toda
+// la cola esperando su plazo aunque el broker ya hubiera vuelto: bloqueo de cabeza. Ahora el que
+// espera es el despachador (`brokerDownUntil`, con techo de 30 s), cada publicación confirmada lo
+// resetea, y quien encola lo despierta ignorando la espera: el broker que volvió se nota con la
+// próxima partida que termina, o a los 30 s como mucho.
 //
 // LA ENTREGA ES AL MENOS UNA VEZ: un proceso que muere entre el confirm y la marca republica, y el
 // consumidor deduplica (por `messageId` en los resultados).
@@ -21,7 +28,7 @@ import type { Lease } from "./mongo-lease";
 export type OutboxStatus = "PENDING" | "SENT";
 
 // EL RELOJ INYECTADO, estructural como en `mongo-lease.ts`: sin él, medir el backoff exigiría esperar
-// cinco minutos de verdad.
+// de verdad.
 export interface OutboxClock {
   now(): number;
 }
@@ -39,7 +46,6 @@ export interface OutboxEntry<K extends string = string, P = unknown> {
   readonly status: OutboxStatus;
   readonly attempts: number;
   readonly createdAt: Date;
-  readonly nextAttemptAt: Date;
   readonly sentAt?: Date;
   readonly lastError?: string;
 }
@@ -49,16 +55,18 @@ export type OutboxRecord<K extends string = string, P = unknown> = Omit<OutboxEn
 
 // LO QUE EL DESPACHADOR NECESITA DE UN OUTBOX, y nada más.
 export interface OutboxQueue<K extends string = string, P = unknown> {
-  // El pendiente más viejo, SI YA LE TOCA. Devuelve vacío —y no el siguiente— cuando el más viejo
-  // todavía espera su reintento.
-  next(now: Date): Promise<OutboxEntry<K, P> | undefined>;
+  // Si hay algo pendiente. Es lo que el despachador pregunta ANTES de tomar el lease, una vez por
+  // segundo para siempre: tiene que ser barato (en Mongo, una consulta cubierta por el índice).
+  hasPending(): Promise<boolean>;
+  // El pendiente más viejo, sin mirar cuándo falló: la espera tras un fallo es del despachador.
+  next(): Promise<OutboxEntry<K, P> | undefined>;
   sent(id: string, at: Date): Promise<void>;
-  retry(id: string, error: string, nextAttemptAt: Date): Promise<void>;
+  // Anota el fallo: suma un intento y guarda el error. No agenda nada.
+  retry(id: string, error: string): Promise<void>;
 }
 
 // LO QUE UN ALMACÉN DE OUTBOX SABE HACER, que es la cola más encolar y preguntar por claves. Lo
-// implementan `MemoryOutboxStore` (abajo) y `MongoOutboxStore` (`mongo-outbox.ts`), y lo mide el
-// mismo contrato contra los dos (`tests/outbox-store-contract.ts`).
+// implementan `MemoryOutboxStore` (abajo) y `MongoOutboxStore` (`mongo-outbox.ts`).
 export interface OutboxStore<K extends string = string, P = unknown> extends OutboxQueue<K, P> {
   // IDEMPOTENTE POR `dedupeKey`: encolar dos veces la misma clave deja una sola entrada. Devuelve si
   // insertó. Cualquier fallo que no sea "ya estaba" sube.
@@ -71,8 +79,9 @@ export interface OutboxStore<K extends string = string, P = unknown> extends Out
 // contramedida es que adentro no vaya un trabajo largo: UNA entrada por adquisición.
 const LEASE_TTL_MS = 15_000;
 
-// UN TICK POR SEGUNDO. Es el piso de latencia de lo que nadie despertó —un reintento vencido—; el
-// camino normal no lo espera porque quien encola llama `wake()`.
+// UN TICK POR SEGUNDO. Es el piso de latencia de lo que nadie despertó —un reintento tras un fallo—;
+// el camino normal no lo espera porque quien encola llama `wake()`. Con la cola vacía, el tick es UNA
+// consulta (`hasPending`) y no toca el lease: el lease de Mongo escribe dos veces por adquisición.
 const TICK_MS = 1_000;
 
 // EL PLAZO DE LA PUBLICACIÓN, Y NO ES DECORACIÓN. `AmqpPublisher.publishTopic` **no rechaza solo con
@@ -81,10 +90,12 @@ const TICK_MS = 1_000;
 // deja de drenar sin un solo error en el log.
 const PUBLISH_TIMEOUT_MS = 5_000;
 
-// EL BACKOFF: duplica desde un segundo y se corta en cinco minutos. **SIN LÍMITE DE INTENTOS**: un
-// evento descartado al intento N es una pérdida silenciosa.
+// EL BACKOFF DEL BROKER: duplica desde un segundo con cada fallo SEGUIDO y se corta en 30 s. Cada
+// publicación confirmada lo vuelve a cero. **SIN LÍMITE DE INTENTOS**: un evento descartado al intento
+// N es una pérdida silenciosa. El techo es bajo a propósito: es el peor retraso de un resultado una vez
+// que el broker volvió, si nadie despierta al despachador.
 const BASE_BACKOFF_MS = 1_000;
-const MAX_BACKOFF_MS = 300_000;
+const MAX_BACKOFF_MS = 30_000;
 
 export interface TopicOutboxDispatcherOptions<K extends string, P> {
   readonly exchange: string;
@@ -116,23 +127,37 @@ export class TopicOutboxDispatcher<K extends string, P> {
   // que sin esta promesa compartida un `wake()` encima del tick programado publica la misma entrada
   // dos veces.
   private inFlight?: Promise<boolean>;
+  // UN `wake()` QUE LLEGÓ CON UN TICK EN VUELO: ese tick pudo haber salido por la ventana sin mirar la
+  // cola, así que al terminar se sondea otra vez. Sin esto, el resultado encolado justo ahí esperaría
+  // la ventana entera.
+  private wokenInFlight = false;
   private closed = false;
+  // LA VENTANA DEL BROKER CAÍDO: hasta este instante el tick programado no toca Mongo ni Rabbit.
+  private brokerDownUntil = 0;
+  // Fallos SEGUIDOS de publicación, el exponente del backoff.
+  private failures = 0;
 
   constructor(private readonly options: TopicOutboxDispatcherOptions<K, P>) {}
 
   start(): void {
     if (this.timer || this.closed) return;
     const timer = setInterval(() => {
-      this.wake();
+      this.run(false);
     }, TICK_MS);
     // DESREFERENCIADO: un intervalo referenciado mantiene vivo el event loop.
     timer.unref?.();
     this.timer = timer;
   }
 
-  // ADELANTA EL TICK tras encolar. No devuelve promesa a propósito: quien encola no espera a Rabbit.
+  // ADELANTA EL TICK tras encolar, IGNORANDO LA VENTANA del broker caído: sondea una vez, y si el
+  // broker volvió, publica todo lo que estaba esperando. No devuelve promesa a propósito: quien encola
+  // no espera a Rabbit.
   wake(): void {
-    void this.tick().catch((error: unknown) => {
+    this.run(true);
+  }
+
+  private run(ignoreWindow: boolean): void {
+    void this.tick(ignoreWindow).catch((error: unknown) => {
       // SE REGISTRA Y NO SE PROPAGA: una promesa rechazada sin manejador tumba el proceso.
       this.options.log.error(`el tick del outbox (${this.options.label}) falló`, {
         error: String(error),
@@ -140,12 +165,13 @@ export class TopicOutboxDispatcher<K extends string, P> {
     });
   }
 
-  // VACÍA LO QUE YA VENCIÓ. El bucle está AFUERA del lease: adentro iría un trabajo de duración
-  // desconocida contra un lease que no se renueva.
+  // VACÍA LO PENDIENTE mientras el broker confirme; respeta la ventana, como el tick programado. El
+  // bucle está AFUERA del lease: adentro iría un trabajo de duración desconocida contra un lease que
+  // no se renueva.
   async drain(): Promise<void> {
     let published = true;
     while (published) {
-      published = await this.tick();
+      published = await this.tick(false);
     }
   }
 
@@ -158,15 +184,25 @@ export class TopicOutboxDispatcher<K extends string, P> {
     await this.inFlight?.catch(() => false);
   }
 
-  private tick(): Promise<boolean> {
+  private tick(ignoreWindow: boolean): Promise<boolean> {
     if (this.closed) return Promise.resolve(false);
-    this.inFlight ??= this.runTick().finally(() => {
+    if (this.inFlight) {
+      if (ignoreWindow) this.wokenInFlight = true;
+      return this.inFlight;
+    }
+    this.inFlight = this.runTick(ignoreWindow).finally(() => {
       this.inFlight = undefined;
+      if (this.wokenInFlight) {
+        this.wokenInFlight = false;
+        this.wake();
+      }
     });
     return this.inFlight;
   }
 
-  private async runTick(): Promise<boolean> {
+  private async runTick(ignoreWindow: boolean): Promise<boolean> {
+    // DENTRO DE LA VENTANA EL TICK NO HACE NADA: ni Mongo, ni lease, ni Rabbit.
+    if (!ignoreWindow && this.options.clock.now() < this.brokerDownUntil) return false;
     const perTick = this.options.perTick ?? 1;
     let published = false;
     for (let round = 0; round < perTick && !this.closed; round += 1) {
@@ -177,9 +213,13 @@ export class TopicOutboxDispatcher<K extends string, P> {
   }
 
   private async runOnce(): Promise<boolean> {
-    const { lease, leaseName, queue, clock } = this.options;
+    const { lease, leaseName, queue } = this.options;
+    // LA PREGUNTA BARATA, ANTES DEL LEASE: con la cola vacía —casi siempre— el tick es una consulta
+    // cubierta y nada más.
+    if (!(await queue.hasPending())) return false;
     const published = await lease.within(leaseName, LEASE_TTL_MS, async () => {
-      const entry = await queue.next(new Date(clock.now()));
+      // SE RELEE ADENTRO: entre la pregunta y el lease, otro proceso pudo haberla publicado.
+      const entry = await queue.next();
       if (!entry) return false;
       return this.deliver(entry);
     });
@@ -195,9 +235,12 @@ export class TopicOutboxDispatcher<K extends string, P> {
         PUBLISH_TIMEOUT_MS,
       );
     } catch (error) {
-      // EL BACKOFF SE CALCULA CON LOS INTENTOS **YA ACUMULADOS**: el primer fallo espera un segundo.
-      const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** entry.attempts);
-      await queue.retry(entry.id, String(error), new Date(clock.now() + delay));
+      // EL BACKOFF ES DEL BROKER, por fallos SEGUIDOS de este proceso: el primero espera un segundo.
+      // Los intentos de la entrada se siguen contando, pero sólo para el log.
+      const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** this.failures);
+      this.failures += 1;
+      this.brokerDownUntil = clock.now() + delay;
+      await queue.retry(entry.id, String(error));
       const pendingMs = clock.now() - entry.createdAt.getTime();
       const detail = {
         id: entry.id,
@@ -216,6 +259,9 @@ export class TopicOutboxDispatcher<K extends string, P> {
     }
     // SE MARCA DESPUÉS DEL CONFIRM DEL BROKER: marcar antes daría por entregado un mensaje que el
     // broker nunca tomó.
+    // EL BROKER CONFIRMÓ: la ventana se cierra.
+    this.failures = 0;
+    this.brokerDownUntil = 0;
     await queue.sent(entry.id, new Date(clock.now()));
     return true;
   }
@@ -245,7 +291,7 @@ type StoredEntry<K extends string, P> = {
 
 // EL ALMACÉN DE LA INSTANCIA SIN MONGO, y NO un doble de test: la presencia de `MONGO_URI` elige, y sin
 // ella lo encolado vive en memoria. Lo que se pierde es la durabilidad y nada más: el orden, la
-// deduplicación y el no-adelantarse son los mismos que en Mongo, y lo mide el contrato compartido.
+// deduplicación y el no-adelantarse son los mismos que en Mongo.
 export class MemoryOutboxStore<K extends string = string, P = unknown>
   implements OutboxStore<K, P>
 {
@@ -269,8 +315,6 @@ export class MemoryOutboxStore<K extends string = string, P = unknown>
       status: "PENDING",
       attempts: 0,
       createdAt: now,
-      // NACE VENCIDA: el primer intento es AHORA.
-      nextAttemptAt: now,
     });
     return true;
   }
@@ -279,11 +323,14 @@ export class MemoryOutboxStore<K extends string = string, P = unknown>
     return new Set(keys.filter((key) => this.keys.has(key)));
   }
 
-  async next(now: Date): Promise<OutboxEntry<K, P> | undefined> {
+  async hasPending(): Promise<boolean> {
+    return this.entries.some((entry) => entry.status === "PENDING");
+  }
+
+  async next(): Promise<OutboxEntry<K, P> | undefined> {
+    // SIEMPRE EL MÁS VIEJO: la regla de no adelantarse.
     const oldest = this.entries.find((entry) => entry.status === "PENDING");
-    // SI EL MÁS VIEJO TODAVÍA NO VENCIÓ, NO SE OFRECE EL SIGUIENTE: la regla de no adelantarse.
-    if (!oldest || oldest.nextAttemptAt.getTime() > now.getTime()) return undefined;
-    return { ...oldest };
+    return oldest && { ...oldest };
   }
 
   async sent(id: string, at: Date): Promise<void> {
@@ -293,12 +340,11 @@ export class MemoryOutboxStore<K extends string = string, P = unknown>
     entry.sentAt = at;
   }
 
-  async retry(id: string, error: string, nextAttemptAt: Date): Promise<void> {
+  async retry(id: string, error: string): Promise<void> {
     const entry = this.entries.find((one) => one.id === id);
     if (!entry) return;
-    // SE ACUMULA, no se reescribe: el backoff del despachador se calcula con este número.
+    // SE ACUMULA, no se reescribe.
     entry.attempts += 1;
     entry.lastError = error;
-    entry.nextAttemptAt = nextAttemptAt;
   }
 }

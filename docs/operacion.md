@@ -256,8 +256,17 @@ Minimizar la app en el celular hoy sale como `NETWORK`. Cada hecho sale además 
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
 `betaso_games` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
-(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite, con espera
-creciente hasta 5 minutos.
+(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite y en orden
+(el más viejo primero; nada se adelanta).
+
+- **La espera es del broker, no de cada entrada.** Tras un fallo, el despachador deja de intentar
+  durante una ventana que duplica desde 1 s con cada fallo seguido, con techo de **30 s**; la primera
+  publicación confirmada la cierra. Cada partida que termina despierta al despachador y ese sondeo
+  ignora la ventana, así que cuando el broker vuelve, todo lo pendiente sale con la próxima partida o
+  a los 30 s como mucho. Con la cola vacía, el tick de cada segundo es una sola consulta cubierta por
+  el índice (`status_1__id_1`) y no toma el lease.
+- **`attempts` y `lastError`** de cada entrada se siguen anotando, para diagnóstico. Los documentos
+  anteriores traen un `nextAttemptAt` que ya nadie lee ni escribe.
 
 - **Un resultado trabado** deja un `warn` por cada fallo, y pasados **10 minutos** sin salir cada fallo
   es un `error` con `«el resultado de partida lleva demasiado sin salir»`. Es la línea que conviene
@@ -269,7 +278,7 @@ creciente hasta 5 minutos.
   ```js
   db.match_result_outbox.updateMany(
     { status: "SENT", sentAt: { $gte: ISODate("<instante anterior al incidente>") } },
-    { $set: { status: "PENDING", attempts: 0, nextAttemptAt: new Date() }, $unset: { sentAt: "" } },
+    { $set: { status: "PENDING", attempts: 0 }, $unset: { sentAt: "" } },
   )
   ```
 

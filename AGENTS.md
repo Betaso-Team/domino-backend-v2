@@ -59,6 +59,10 @@ pieza del dominó.
   con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
   ordena en memoria, y una página honda cuesta lo mismo que la primera. Ver «Incremento completo — el
   listado del panel con filtros y cursor».
+- **El outbox de resultados no se bloquea por la cabeza**: la espera tras un fallo es del broker
+  (ventana en el despachador, techo 30 s, se cierra con cada confirm) y no de cada entrada; `wake()`
+  la ignora, y con la cola vacía el tick no toma el lease. Ver «Incremento completo — el outbox sin
+  bloqueo de cabeza».
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
@@ -639,7 +643,7 @@ misma revisión, y la partida 2P terminada por `SCORE` con 119 entradas de histo
   401). Quien valida al admin es el futuro orquestador.
 - **La entrega es AL MENOS UNA VEZ y el consumidor debe deduplicar.** La mutación escribe Mongo y un
   outbox durable; el despachador publica después con confirmación del broker, una entrada por lease,
-  backoff hasta 300 s y **sin límite de intentos** —una caída larga no puede convertir un pendiente
+  ~~backoff hasta 300 s~~ (→ la espera es del broker, con techo de 30 s; ver «Incremento completo — el outbox sin bloqueo de cabeza») y **sin límite de intentos** —una caída larga no puede convertir un pendiente
   en pérdida silenciosa—. Una caída posterior al confirm reentrega, pero **nunca adelanta** la
   siguiente entrada: reordenar el historial del catálogo deja al consumidor con un modo viejo.
 - **No hay replica set, así que no hay transacción** entre `game_modes_domino` y `game_mode_outbox`.
@@ -885,9 +889,10 @@ Lo que dejó la Tarea 7:
   Mongo y escribe el outbox; el dispatcher publica después con confirmación del broker. La entrega es
   **al menos una vez** y está aceptado: un proceso que muere DESPUÉS del confirm y ANTES de marcar
   `SENT` republica, y el consumidor upsertea por `id`.
-- **LO QUE NO SE ACEPTA ES ADELANTARSE.** `next()` mira el PENDIENTE MÁS VIEJO y devuelve vacío si
-  todavía no venció su reintento, en vez de ofrecer el siguiente. La consulta NO filtra por
-  `nextAttemptAt` (`{status:"PENDING"}` ordenado por `_id`, y el plazo se compara después): con el
+- **LO QUE NO SE ACEPTA ES ADELANTARSE.** `next()` mira el PENDIENTE MÁS VIEJO ~~y devuelve vacío si
+  todavía no venció su reintento~~ (→ y lo ofrece siempre: ya no hay plazo por entrada, ver «Incremento completo — el outbox sin bloqueo de cabeza»), en vez de
+  ofrecer el siguiente. La consulta NO filtra por
+  `nextAttemptAt` (`{status:"PENDING"}` ordenado por `_id`): con el
   filtro adentro, el segundo `updated` sale antes que el primero y el consumidor se queda con el modo
   viejo **sin que nada falle**.
 - **LAS TRES CLAVES DE DEDUPLICACIÓN VIVEN EN `outbox.ts`, no en cada adaptador**, porque el formato
@@ -901,7 +906,8 @@ Lo que dejó la Tarea 7:
   como `updated`, que es la estrategia de recuperación del `/sync` de v1.
 - **NO HAY LÍMITE DE INTENTOS, y la ausencia es la decisión.** Descartar al intento N es una pérdida
   silenciosa; una caída larga del broker cuesta retraso, no datos. El backoff sí tiene techo:
-  `min(300_000, 1_000 * 2 ** attempts)`.
+  ~~`min(300_000, 1_000 * 2 ** attempts)`~~ → `min(30_000, 1_000 * 2 ** fallosSeguidos)` en el
+  despachador (ver «Incremento completo — el outbox sin bloqueo de cabeza»).
 - ⚠ **EL PLAZO DE 5 s NO ES DECORACIÓN.** `publishTopic` no rechaza solo con el broker caído: SE
   CUELGA (ver el bloque de la Tarea 6). Sin el plazo, el primer tick contra un Rabbit apagado espera
   para siempre con el lease tomado y el outbox deja de drenar sin un solo error en el log.
@@ -2941,3 +2947,29 @@ Un commit por tarea del plan, más los `docs:` de los defectos que encuentres.
 `codebase-memory-mcp` está configurado: usá `search_graph` / `trace_path` /
 `get_code_snippet` antes que grep para descubrir código. Reindexá con
 `index_repository` después de agregar archivos.
+
+## Incremento completo — el outbox sin bloqueo de cabeza (rama `fix/outbox-sin-bloqueo-de-cabeza`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR1). Toca el camino del dinero: el
+resultado de partida lleva los premios.
+
+- **El defecto:** cada entrada guardaba su `nextAttemptAt` con backoff de hasta 5 min, y `next()` no
+  ofrecía nada mientras la más vieja esperaba. Un solo fallo (un reinicio de Rabbit, un `mandatory`
+  devuelto) dejaba a TODA la cola parada hasta 5 min aunque el broker ya estuviera de vuelta.
+- **Ahora la espera es del broker** (`TopicOutboxDispatcher`): `brokerDownUntil` y `failures` en
+  memoria del proceso, `min(30 s, 1 s · 2^fallosSeguidos)`, y cada publicación confirmada los vuelve a
+  cero. Dentro de la ventana el tick programado sale sin tocar Mongo. `wake()` (lo llama
+  `MatchResultRecorder` al encolar) sondea una vez ignorando la ventana; si llega con un tick en vuelo,
+  se vuelve a sondear al terminar (`wokenInFlight`), porque ese tick pudo haber salido por la ventana.
+  `drain()` respeta la ventana.
+- **`hasPending()` antes del lease**: `findOne({status:"PENDING"}, {sort:{_id:1}, projection:{_id:1}})`,
+  cubierta por `status_1__id_1`. El `MongoLease` hace upsert + delete por adquisición: antes eran dos
+  escrituras por segundo con la cola vacía. Adentro del lease se relee con `next()`.
+- **`next()` ya no recibe `now` ni mira `nextAttemptAt`; `retry(id, error)` no agenda** (sólo `$inc`
+  de `attempts` y `lastError`, para diagnóstico); `enqueue` ya no escribe el campo. Los documentos
+  viejos lo traen y nadie lo lee: sin migración.
+- Se conserva: orden por `_id`, intentos ilimitados, `messageId = dedupeKey`, la alerta de 10 min
+  (`stuckAfterMs`, contra `createdAt`), `perTick: 20` y la guarda `inFlight`.
+- Tests: `src/shared/outbox.test.ts` (ventana, backoff 1→30 s, `wake` en orden, `wake` en vuelo, reset
+  tras el confirm, cola vacía sin lease) y `src/shared/mongo-outbox.test.ts` (consulta cubierta, cabeza
+  legada con `nextAttemptAt` futuro). Docs: `docs/operacion.md` §Resultados de partida.
