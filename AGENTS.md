@@ -63,6 +63,9 @@ pieza del dominó.
   (ventana en el despachador, techo 30 s, se cierra con cada confirm) y no de cada entrada; `wake()`
   la ignora, y con la cola vacía el tick no toma el lease. Ver «Incremento completo — el outbox sin
   bloqueo de cabeza».
+- **El cliente HTTP saliente (`shared/http/client.ts`) aborta con el plazo**: `AbortSignal.timeout`
+  cubre cabeceras y cuerpo, y al vencer es `DeadlineExceededError`. Ver «Incremento completo — el
+  cliente HTTP aborta con el plazo».
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
@@ -2973,3 +2976,23 @@ resultado de partida lleva los premios.
 - Tests: `src/shared/outbox.test.ts` (ventana, backoff 1→30 s, `wake` en orden, `wake` en vuelo, reset
   tras el confirm, cola vacía sin lease) y `src/shared/mongo-outbox.test.ts` (consulta cubierta, cabeza
   legada con `nextAttemptAt` futuro). Docs: `docs/operacion.md` §Resultados de partida.
+
+## Incremento completo — el cliente HTTP aborta con el plazo (rama `fix/cliente-http-aborta-con-el-plazo`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR2). Toca el camino del dinero: el
+cobro de la entrada y de cada aumento pasan por este cliente.
+
+- **El defecto:** `HttpClient.send` envolvía SÓLO `fetch` en `withTimeout`, que ni cancela ni mira el
+  cuerpo: `fetch` resuelve con las cabeceras, y `parse`/`safeText` leían el cuerpo FUERA del plazo. Un
+  orquestador que mandara las cabeceras y se colgara dejaba la mesa en `entryCharge: 'charging'`
+  para siempre (la entrada no pasa por `withTimeout` en ningún otro lado). Y el socket quedaba abierto.
+- **Ahora:** `AbortSignal.timeout(timeoutMs)` va en el `fetch` y cubre cabeceras y cuerpo; al vencer
+  corta la conexión. Si la señal disparó y el error no es `HttpError`, sale `DeadlineExceededError`
+  (`shared/deadline.ts`). Un `HttpError` cuyo cuerpo se cortó sigue siendo `HttpError` (con cuerpo
+  vacío): el `status` ya decide.
+- **El desenlace del cobro no cambia**: `HttpOrchestratorCharges` mapea el plazo a
+  `OrchestratorUnavailableError` como antes → `CHARGE_REJECTED`, y el orquestador devuelve lo cobrado.
+  `withTimeout` se queda en `OrchestratorBetCharger`.
+- Tests: `src/shared/http/client.int.test.ts` con `node:http` real (cuerpo colgado, sin cabeceras, 500
+  con cuerpo colgado: rechaza en plazo y el servidor ve el socket cerrado) y el caso colgado en
+  `orchestrator-charges.test.ts`. Los cuatro salen rojos con el cliente anterior.
