@@ -133,6 +133,9 @@ confirma, la mesa se cierra sin arrancar y sale abortada con `CHARGE_REJECTED`.
 El `sub` del JWT es el `userId` y debe coincidir con un asiento de la mesa. Un corte de red marca al
 jugador desconectado, pero conserva su asiento y su reloj durante la ventana de reconexión; si el
 cliente perdió la reserva, el orquestador le pide una nueva (`POST /internal/players/:userId/seat`).
+Para saber si un jugador ya tiene mesa, sin reservarle nada, el orquestador pregunta
+`GET /internal/players/:userId/match`. Al entrar y al volver, la sala le manda al cliente el mensaje
+`config` con la configuración pública de la mesa y `serverNow`.
 El censo (`GET /internal/census`) cuenta asientos vivos, no sockets momentáneamente conectados.
 
 ### Comandos

@@ -13,6 +13,9 @@ const post = (path: string, body: unknown = {}, key = env.orchestratorApiKey ?? 
     body: JSON.stringify(body),
   });
 
+const get = (path: string, key = env.orchestratorApiKey ?? "") =>
+  fetch(`${base}${path}`, { headers: { "x-internal-api-key": key } });
+
 type Opened = {
   data: { roomId: string; seats: { userId: string; reservation: Record<string, unknown> }[] };
 };
@@ -140,6 +143,35 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
       await server.sdk.consumeSeatReservation(data.reservation as never);
     }
     await waitUntil(() => server.getRoomById(opened.data.roomId).clients.length === 2);
+  });
+
+  // LA MESA DE UN JUGADOR SIN RESERVAR NADA: lo que el orquestador pregunta para no abrirle otra. Sin
+  // reservas en el camino, así que esperar el 404 con un bucle no retiene la sala.
+  it("dice en qué mesa está cada uno sin reservar, y deja de decirlo al soltarlo", async () => {
+    const table = casualTable(["o-m1", "o-m2"]);
+    const opened = (await (await post("/internal/matches", table)).json()) as Opened;
+    const room = server.getRoomById(opened.data.roomId);
+    const rooms = [];
+    for (const seat of opened.data.seats) {
+      server.sdk.auth.token = mintToken(seat.userId);
+      rooms.push(await server.sdk.consumeSeatReservation(seat.reservation as never));
+    }
+
+    const res = await get("/internal/players/o-m1/match");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      status: "success",
+      data: { matchId: table.matchId, roomId: opened.data.roomId },
+    });
+    // NINGUNA RESERVA NUEVA: la sala sigue con sus dos clientes y nada más.
+    expect(room.clients.length).toBe(2);
+
+    const [quitter] = rooms;
+    quitter?.send("ABANDON", {});
+    await waitUntil(async () => (await get("/internal/players/o-m1/match")).status === 404);
+    const gone = await get("/internal/players/o-m1/match");
+    expect(await gone.json()).toEqual({ code: "NO_LIVE_MATCH" });
+    expect((await get("/internal/players/nadie/match")).status).toBe(404);
   });
 
   it("contesta 404 a quien no está en ninguna mesa", async () => {

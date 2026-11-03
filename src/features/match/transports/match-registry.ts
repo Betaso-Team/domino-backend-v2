@@ -37,11 +37,54 @@ export interface PublicMatchConfig {
   readonly prize: number;
   /**
    * LOS NIVELES DE AUMENTO QUE LA MESA OFRECE (truco `58ce78f`), para que el front pinte el aumento
-   * ANTES de proponer. Sin el `extra`: es cómo se calcula el ranking, no algo que mostrar. Vacío =
-   * esta mesa no ofrece aumentar. El precio de cada uno lo deriva el cliente con `betAmountsOf`.
+   * ANTES de proponer. Con el `extra` del catálogo: el front lo muestra junto al nivel, y no es
+   * secreto —lo publica el catálogo de modos—. Vacío = esta mesa no ofrece aumentar. El precio de
+   * cada uno lo deriva el cliente con `betAmountsOf`.
    */
-  readonly betLevels: readonly { readonly level: number; readonly additionalPoints: number }[];
+  readonly betLevels: readonly {
+    readonly level: number;
+    readonly extra: number;
+    readonly additionalPoints: number;
+  }[];
+  /** Una mesa gratis no cobra entrada ni ofrece aumentar (`DominoMatchConfig.isFreeRoom`). */
+  readonly isFreeRoom: boolean;
+  /** Si la mesa sienta una máquina en el asiento del que se retira (`DominoMatchConfig.enableBots`). */
+  readonly enableBots: boolean;
   readonly timeouts: PublicMatchTimeouts;
+}
+
+// LA CONFIGURACIÓN PÚBLICA DE UNA MESA, pura: la usan el registro (lo que estampa en el almacén) y la
+// sala (el mensaje `config` que manda al entrar), y tienen que ser la misma. Allowlist explícita:
+// restar `seed` filtraría solo lo conocido hoy y una propiedad secreta agregada mañana se filtraría
+// al wire. Tampoco se exponen campos derivados de la ventana de reparto, ni identidad, moneda o tasa.
+export function publicConfigOf(
+  config: DominoMatchConfig,
+  timeouts: PublicMatchTimeouts,
+): PublicMatchConfig {
+  return {
+    matchId: config.matchId,
+    gameModeId: config.gameModeId,
+    seats: config.seats.map(({ playerId }) => playerId),
+    pointsToWin: config.pointsToWin,
+    // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot:
+    // el DTO público publica el mismo número que la mesa cobró, en UC completas.
+    entryFee: config.entryFee,
+    prize: config.prize,
+    betLevels: config.betLevels.map(({ level, extra, additionalPoints }) => ({
+      level,
+      extra,
+      additionalPoints,
+    })),
+    isFreeRoom: config.isFreeRoom,
+    enableBots: config.enableBots,
+    // Campo por campo y no con un spread: un objeto más ancho que el tipo también compila.
+    timeouts: {
+      turnMs: timeouts.turnMs,
+      extraTimeMs: timeouts.extraTimeMs,
+      dealingMs: timeouts.dealingMs,
+      betResponseMs: timeouts.betResponseMs,
+    },
+  };
 }
 
 export interface MatchConfigResponse extends PublicMatchConfig {
@@ -148,30 +191,7 @@ export class MatchRegistry {
     config: DominoMatchConfig,
     timeouts: PublicMatchTimeouts,
   ): Promise<void> {
-    // Allowlist explícita: restar `seed` filtraría solo lo conocido hoy y una propiedad
-    // secreta agregada mañana se filtraría al wire. Tampoco se exponen campos derivados
-    // de la ventana de reparto.
-    this.byRoomId.set(roomId, {
-      matchId: config.matchId,
-      gameModeId: config.gameModeId,
-      seats: config.seats.map(({ playerId }) => playerId),
-      pointsToWin: config.pointsToWin,
-      // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot:
-      // el DTO público publica el mismo número que la mesa cobró, en UC completas.
-      entryFee: config.entryFee,
-      prize: config.prize,
-      betLevels: config.betLevels.map(({ level, additionalPoints }) => ({
-        level,
-        additionalPoints,
-      })),
-      // Campo por campo y no con un spread: un objeto más ancho que el tipo también compila.
-      timeouts: {
-        turnMs: timeouts.turnMs,
-        extraTimeMs: timeouts.extraTimeMs,
-        dealingMs: timeouts.dealingMs,
-        betResponseMs: timeouts.betResponseMs,
-      },
-    });
+    this.byRoomId.set(roomId, publicConfigOf(config, timeouts));
     this.seatsByRoomId.set(
       roomId,
       config.seats.map(({ userId }) => userId),

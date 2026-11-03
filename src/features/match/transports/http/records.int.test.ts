@@ -83,6 +83,7 @@ describe("recordRoutes: el registro de las rutas", () => {
       "GET /internal/players/:userId/matches",
       "POST /internal/matches",
       "POST /internal/players/:userId/seat",
+      "GET /internal/players/:userId/match",
       "GET /internal/census",
     ]);
   });

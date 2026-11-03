@@ -41,7 +41,14 @@ import {
   OrchestratorUnavailableError,
 } from "../../network/orchestrator-charges";
 import { type SeatCredentials, UnknownGameModeError, configOf, requestOf } from "../match-contract";
-import { HEARTBEAT_MS, MatchRegistry, publicTimeoutsOf } from "../match-registry";
+import {
+  HEARTBEAT_MS,
+  type MatchConfigResponse,
+  MatchRegistry,
+  type PublicMatchConfig,
+  publicConfigOf,
+  publicTimeoutsOf,
+} from "../match-registry";
 import {
   type MatchHasOutcome,
   type MatchSeatGuard,
@@ -70,6 +77,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // al asiento opaco necesita la identidad externa, que el estado no sincroniza y el
   // registro no guarda. Se asigna en `onCreate`, antes de que la sala pueda recibir a nadie.
   private config!: DominoMatchConfig;
+  // LA CONFIGURACIÓN PÚBLICA DE LA MESA, la misma que el registro estampa y `GET /config/:roomId`
+  // sirve: la sala la manda en el mensaje `config` a cada uno que entra o vuelve, así el front no
+  // necesita ir a buscarla por HTTP. Recortada (`publicConfigOf`): nunca lleva el `seed`.
+  private publicConfig!: PublicMatchConfig;
   private closeRematch: RematchCloser = () => [];
   // EL MOTIVO QUE SOLO LA SALA SABE de por qué una mesa del orquestador se cerró sin veredicto: el
   // orquestador no pudo cobrar la entrada. Lo lee el resultado al publicarse.
@@ -349,6 +360,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // un `GET /config/:roomId` que llegue antes de que la clave esté escrita —y que caiga en otro
     // proceso, que es todo el punto de esto— responde 404 por una sala que existe.
     this.matches = rootContainer.resolve(MatchRegistry);
+    this.publicConfig = publicConfigOf(config, publicTimeoutsOf(global));
     await this.matches.register(this.roomId, config, publicTimeoutsOf(global));
 
     // EL LATIDO que renueva ese plazo. Va POR EL RELOJ DE LA SALA —el mismo que vence los
@@ -444,6 +456,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       reconnecting: isBack,
       displaced: previous.length,
     });
+    this.sendConfig(client);
     this.startIfSeated();
   }
 
@@ -492,6 +505,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.player(playerId).connected = true;
     this.noteConnection(playerId, () => this.connections.reconnected(playerId, this.roundNow()));
     this.probeSocket(playerId, client);
+    this.sendConfig(client);
     this.notifier.notify([{ type: "PLAYER_RECONNECTED", playerId }]);
     this.log.info("jugador reconectado", { playerId });
   }
@@ -551,6 +565,16 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // `?.` por el mismo motivo que el `scheduler` de arriba: si `onCreate` se cayó antes de
     // resolverlo, esta sala nunca se anotó y no hay nada que borrar.
     await this.matches?.remove(this.roomId);
+  }
+
+  // EL MENSAJE `config`: la configuración pública de la mesa con el `serverNow` del que el cliente
+  // saca su desfase de reloj, igual que `GET /config/:roomId`. Va al entrar y al volver. Lo que se
+  // manda en `onJoin` Colyseus lo encola hasta que el cliente confirma el `JOIN_ROOM`, así que llega
+  // después de la confirmación y antes que cualquier `events` posterior; un front que todavía no lo
+  // escucha solo ve un aviso del SDK.
+  private sendConfig(client: Client): void {
+    const message: MatchConfigResponse = { ...this.publicConfig, serverNow: Date.now() };
+    client.send("config", message);
   }
 
   // UN LATIDO. No se espera —la partida no depende de él— pero sí se ENCOLA, y un fallo se

@@ -252,6 +252,9 @@ describe("ciclo de vida de una partida", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      // LAS DOS REGLAS DE LA MESA QUE EL FRONT DIBUJA, del modo sembrado.
+      isFreeRoom: false,
+      enableBots: false,
       // LOS PLAZOS CON LOS QUE NACIÓ, los del entorno de la suite: el front dibuja el anillo con ellos.
       timeouts: {
         turnMs: env.turnTimeoutMs,

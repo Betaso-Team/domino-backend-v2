@@ -16,7 +16,8 @@ pieza del dominó.
 - **El dominó es un game backend del orquestador de Betaso Juegos**
   (`betaso-games-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
   entrada**: admite, empareja, tiene el único interruptor de mantenimiento y abre cada mesa por la API
-  interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/census`,
+  interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`,
+  `GET /internal/players/:userId/match`, `GET /internal/census`,
   en `features/match/transports/http/tables.ts`). Toda sala `domino` nace de un `CreateMatchRequest`.
 - **No hay lobby, emparejador ni mantenimiento propios.** No hay sala `lobby`, ni `GET /maintenance`,
   ni `GET /players-in-match`, ni `POST /internal/lobby/maintenance`. La configuración en caliente
@@ -70,6 +71,10 @@ pieza del dominó.
 - **El historial manda un `$push` por trabajo de la cola, no uno por lote**: los lotes de una partida
   se juntan hasta que su trabajo arranca, y `open`/`round`/`close`/`settled` sellan el pendiente para
   conservar el orden. Ver «Incremento completo — el historial, un `$push` por lote pendiente».
+- **La sala manda su config pública al que entra o vuelve** (mensaje `config`, con `serverNow`), y
+  `PublicMatchConfig` trae `isFreeRoom`, `enableBots` y `betLevels[].extra`. El orquestador pregunta
+  la mesa de un jugador sin reservar con `GET /internal/players/:userId/match`. Ver «Incremento
+  completo — la mesa completa y el asiento sin reserva».
 
 ## El plan es la autoridad
 
@@ -2749,6 +2754,29 @@ Del plan «rendimiento del backend, roles y pendientes» (sección C, PR4). Apil
   tiene su trabajo en vuelo. `HistoryPort` y `MemoryHistory` tampoco.
 - Lo miden `mongo-history.test.ts` («un $push por lote pendiente») y un caso de
   `mongo-history.int.test.ts` (con `MONGO_INT_URI`).
+
+## Incremento completo — la mesa completa y el asiento sin reserva (rama `feat/mesa-completa-y-asiento-sin-reserva`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR5). Apilada sobre la del historial.
+
+- **`publicConfigOf(config, timeouts)` es una función pura** en `match-registry.ts` (allowlist, nunca
+  el `seed`). La usan el registro (lo que estampa en `match_config:<roomId>`) y la sala (el mensaje
+  `config`), así que no pueden divergir. ⚠ El método `MatchRegistry.publicConfigOf(roomId)` (la lectura
+  del almacén) conserva su nombre: misma palabra, dos firmas.
+- **`PublicMatchConfig` suma `isFreeRoom`, `enableBots` y `betLevels[].extra`.** El orquestador ya los
+  mandaba en el modo; antes se recortaban. `GET /config/:roomId` y `GET /matches/:roomId` los traen
+  solos.
+- **Mensaje `config`** (`{...PublicMatchConfig, serverNow}`) al final de `onJoin` y en `onReconnect`.
+  ⚠ Lo enviado en `onJoin` Colyseus lo encola hasta el ack del `JOIN_ROOM`
+  (`@colyseus/core/build/Room.mjs` ~1418), así que llega apenas resuelve el `join` del SDK: el handler
+  se registra sin `await` en el medio. En los e2e eso significa `joinById` y NO `connectTo` (que
+  espera `waitForInitialState` y para entonces el comodín de `src/tests/e2e.ts` ya se tragó el
+  mensaje).
+- **`GET /internal/players/:userId/match`** (`tables.ts`, misma llave y `SEAT_PARAMS` que `.../seat`):
+  `matchOf` + `publicConfigOf` del registro, sin Colyseus ni reserva. 200 `{status, data: {matchId,
+  roomId}}`; 404 `{code: "NO_LIVE_MATCH"}` (ya con la forma de errores nueva, a propósito; la ruta
+  `.../seat` sigue con `{error}` hasta el PR de errores). `player_match:<userId>` no cambia.
+- Docs: «Mensajes del servidor» y la ruta nueva en `docs/api-y-mensajes.md`.
 
 ## Cómo se ejecuta una tarea
 

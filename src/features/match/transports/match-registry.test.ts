@@ -2,7 +2,13 @@ import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG } from "../core/config";
 import { replayConfigOf } from "./match-contract";
-import { HEARTBEAT_MS, MatchRegistry, TTL_SECONDS, publicTimeoutsOf } from "./match-registry";
+import {
+  HEARTBEAT_MS,
+  MatchRegistry,
+  TTL_SECONDS,
+  publicConfigOf,
+  publicTimeoutsOf,
+} from "./match-registry";
 
 // El config se arma con el CONTRATO y no a mano: lo que el registro indexa son las parejas
 // del snapshot REAL, y un objeto escrito a mano podría describir una mesa que el contrato
@@ -65,6 +71,8 @@ describe("MatchRegistry", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      isFreeRoom: false,
+      enableBots: false,
       timeouts: { turnMs: 45_000, extraTimeMs: 25_000, dealingMs: 15_000, betResponseMs: 8_000 },
     });
   });
@@ -92,9 +100,9 @@ describe("MatchRegistry", () => {
   });
 
   // LOS NIVELES QUE LA MESA OFRECE, para pintar el aumento ANTES de proponer (truco `58ce78f`). Sale
-  // el `level` y los puntos que el front muestra; el `extra` es cómo se calcula el ranking, no algo
-  // que mostrar. El precio lo deriva el cliente con `betAmountsOf`.
-  it("publica los niveles de aumento sin el extra", async () => {
+  // el `level`, los puntos y el `extra` del catálogo, que el front muestra junto al nivel. El precio
+  // lo deriva el cliente con `betAmountsOf`.
+  it("publica los niveles de aumento con el extra", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
     await registry.register(
       "room-1",
@@ -103,8 +111,36 @@ describe("MatchRegistry", () => {
     );
 
     expect((await registry.publicConfigOf("room-1"))?.betLevels).toEqual([
-      { level: 3, additionalPoints: 15 },
+      { level: 3, extra: 7, additionalPoints: 15 },
     ]);
+  });
+
+  // LAS DOS REGLAS DE LA MESA QUE EL FRONT NECESITA PARA DIBUJARLA: si es gratis (no hay aumento ni
+  // entrada que mostrar) y si un retirado deja una máquina en su lugar.
+  it("publica si la mesa es gratis y si sienta máquinas", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register(
+      "room-1",
+      replayConfigOf({ ...roomOptions, isFreeRoom: true, enableBots: true }),
+      timeouts,
+    );
+
+    expect(await registry.publicConfigOf("room-1")).toMatchObject({
+      isFreeRoom: true,
+      enableBots: true,
+    });
+  });
+
+  // EL MISMO DTO PARA EL REGISTRO Y PARA EL MENSAJE `config` DE LA SALA: los dos salen de la función
+  // pura, así que lo que estampa el almacén y lo que recibe el jugador al entrar no pueden divergir.
+  it("publicConfigOf es lo que el registro estampa, y nunca lleva la semilla", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", config, timeouts);
+
+    const pure = publicConfigOf(config, timeouts);
+    expect(await registry.publicConfigOf("room-1")).toEqual(pure);
+    expect(JSON.stringify(pure)).not.toContain("secreto-que-no-sale");
+    expect(pure).not.toHaveProperty("seed");
   });
 
   // La allowlist ahora también decide qué SE ESCRIBE en el almacén compartido, no solo qué se
@@ -164,6 +200,8 @@ describe("MatchRegistry", () => {
       entryFee: 125,
       prize: 250,
       betLevels: [],
+      isFreeRoom: false,
+      enableBots: false,
       timeouts,
     });
     expect(await procesoB.matchOf("u1")).toBe("room-1");
