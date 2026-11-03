@@ -126,6 +126,7 @@ describe("HttpOrchestratorCharges", () => {
   const seen: Array<{ url?: string; key?: string; body: string }> = [];
   let status = 200;
   let reply = "{}";
+  let hang = false;
 
   beforeAll(async () => {
     server = createServer((request, response) => {
@@ -135,16 +136,28 @@ describe("HttpOrchestratorCharges", () => {
       });
       request.on("end", () => {
         seen.push({ url: request.url, key: request.headers["x-internal-api-key"] as string, body });
-        response.writeHead(status, { "content-type": "application/json" }).end(reply);
+        const head = response.writeHead(status, { "content-type": "application/json" });
+        // CUERPO COLGADO: las cabeceras salen y el cuerpo no termina nunca.
+        if (hang) head.write('{"ok":');
+        else head.end(reply);
       });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
   });
-  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  afterAll(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
 
-  const client = () =>
-    new HttpOrchestratorCharges(new HttpClient({ baseUrl: base }), "callback-key-123456");
+  const client = (timeoutMs?: number) =>
+    new HttpOrchestratorCharges(
+      new HttpClient({ baseUrl: base, ...(timeoutMs !== undefined && { timeoutMs }) }),
+      "callback-key-123456",
+    );
 
   it("pide la entrada y el aumento con la llave del orquestador", async () => {
     status = 200;
@@ -174,5 +187,21 @@ describe("HttpOrchestratorCharges", () => {
     status = 401;
     reply = '{"error":"UNAUTHORIZED"}';
     await expect(client().chargeEntry("m-1")).rejects.toBeInstanceOf(OrchestratorUnavailableError);
+  });
+
+  // EL CUERPO COLGADO YA NO TRABA LA MESA en `charging`: el plazo del cliente lo corta, y para la
+  // mesa es "no se pudo preguntar", como cualquier otro plazo.
+  it("un 200 con el cuerpo colgado es no poder preguntar, dentro del plazo", async () => {
+    status = 200;
+    hang = true;
+    try {
+      const started = performance.now();
+      await expect(client(200).chargeEntry("m-1")).rejects.toThrow(
+        /el orquestador no contestó el cobro: DeadlineExceededError/,
+      );
+      expect(performance.now() - started).toBeLessThan(700);
+    } finally {
+      hang = false;
+    }
   });
 });

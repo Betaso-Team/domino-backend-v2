@@ -4,10 +4,9 @@ import type { AmqpDelivery, TopicPublishOptions } from "./amqp";
 import { MemoryLease } from "./mongo-lease";
 import { MemoryOutboxStore, TopicOutboxDispatcher } from "./outbox";
 
-// LO QUE EL DESPACHADOR COMPARTIDO AGREGA SOBRE EL DEL CATÁLOGO. Las reglas de siempre —no
-// adelantarse, marcar después del confirm, backoff sin límite, el lease— las mide
-// `features/game-mode/outbox.test.ts` a través de la capa del catálogo, que ahora es una envoltura
-// de éste; acá van las dos perillas que el segundo usuario necesita y el primero no usa.
+// EL DESPACHADOR DEL OUTBOX: no adelantarse, marcar después del confirm, la ventana del broker caído
+// con su backoff sin límite de intentos, `wake()` que la ignora, y el lease que sólo se toma si hay
+// algo pendiente. El camino entero del resultado lo mide `orchestrator-money.e2e.test.ts`.
 
 function fakeLogger(): Logger {
   const self: Logger = {
@@ -33,10 +32,12 @@ function clock() {
 function recording() {
   const published: Array<{ routingKey: string; body: unknown; options?: TopicPublishOptions }> = [];
   let failing = false;
+  let calls = 0;
   const port: AmqpDelivery = {
     async publishTopic(_exchange, routingKey, body, options) {
-      published.push({ routingKey, body, options });
+      calls += 1;
       if (failing) throw new Error("devuelto por el broker");
+      published.push({ routingKey, body, options });
     },
     async publishPattern() {
       throw new Error("el outbox publica al exchange, no a una cola");
@@ -45,8 +46,13 @@ function recording() {
   return {
     published,
     port,
+    // Intentos, confirmados o no.
+    attempts: () => calls,
     fails() {
       failing = true;
+    },
+    recovers() {
+      failing = false;
     },
   };
 }
@@ -56,12 +62,14 @@ function fixture(perTick?: number, stuckAfterMs?: number) {
   const log = fakeLogger();
   const store = new MemoryOutboxStore<string, { n: number }>(time);
   const delivery = recording();
+  const lease = new MemoryLease();
+  const within = vi.spyOn(lease, "within");
   const dispatcher = new TopicOutboxDispatcher({
     exchange: "betaso_games",
     leaseName: "match-result-publisher",
     queue: store,
     delivery: delivery.port,
-    lease: new MemoryLease(),
+    lease,
     clock: time,
     log,
     label: "resultado de partida",
@@ -69,7 +77,7 @@ function fixture(perTick?: number, stuckAfterMs?: number) {
     ...(perTick !== undefined && { perTick }),
     ...(stuckAfterMs !== undefined && { stuckAfterMs }),
   });
-  return { time, store, delivery, dispatcher, log };
+  return { time, store, delivery, dispatcher, log, within };
 }
 
 // Un turno del event loop: `wake()` no devuelve promesa.
@@ -113,17 +121,131 @@ describe("TopicOutboxDispatcher", () => {
     expect(delivery.published).toHaveLength(1);
   });
 
-  it("un rechazo corta el tick y deja la entrada para el reintento, sin adelantar la siguiente", async () => {
-    const { time, store, delivery, dispatcher } = fixture(5);
+  it("un rechazo corta el tick y deja la entrada primera, sin adelantar la siguiente", async () => {
+    const { store, delivery, dispatcher } = fixture(5);
     for (const n of [1, 2]) await store.enqueue(`m-${n}`, "domino.match.finished", { n });
     delivery.fails();
 
     await dispatcher.drain();
 
+    expect(delivery.attempts()).toBe(1);
+    const head = await store.next();
+    expect(head).toMatchObject({ dedupeKey: "m-1", attempts: 1, lastError: expect.any(String) });
+  });
+
+  it("con la cola vacía, el tick no toma el lease", async () => {
+    const { dispatcher, within } = fixture(20);
+
+    await dispatcher.drain();
+    dispatcher.wake();
+    await settle();
+    await dispatcher.close();
+
+    expect(within).not.toHaveBeenCalled();
+  });
+});
+
+// LA ESPERA ES DEL BROKER Y NO DE CADA ENTRADA: lo que antes era un `nextAttemptAt` de hasta cinco
+// minutos que bloqueaba a toda la cola detrás de la primera entrada.
+describe("TopicOutboxDispatcher: la ventana del broker caído", () => {
+  it("dentro de la ventana el tick programado no publica ni toca la cola", async () => {
+    const { time, store, delivery, dispatcher, within } = fixture(20);
+    await store.enqueue("m-1", "domino.match.finished", { n: 1 });
+    delivery.fails();
+    await dispatcher.drain();
+    expect(delivery.attempts()).toBe(1);
+    const hasPending = vi.spyOn(store, "hasPending");
+    within.mockClear();
+
+    delivery.recovers();
+    time.advance(999);
+    await dispatcher.drain();
+
+    expect(delivery.attempts()).toBe(1);
+    expect(hasPending).not.toHaveBeenCalled();
+    expect(within).not.toHaveBeenCalled();
+
+    time.advance(1);
+    await dispatcher.drain();
     expect(delivery.published.map((one) => one.body)).toEqual([{ n: 1 }]);
-    expect(await store.next(new Date(time.now()))).toBeUndefined();
+  });
+
+  it("el backoff duplica con cada fallo seguido y se corta en 30 s", async () => {
+    const { time, store, delivery, dispatcher } = fixture(20);
+    await store.enqueue("m-1", "domino.match.finished", { n: 1 });
+    delivery.fails();
+
+    const windows: number[] = [];
+    for (let failure = 0; failure < 8; failure += 1) {
+      await dispatcher.drain();
+      let waited = 0;
+      while (delivery.attempts() === failure + 1) {
+        time.advance(1_000);
+        waited += 1_000;
+        await dispatcher.drain();
+      }
+      windows.push(waited);
+    }
+
+    expect(windows).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]);
+    expect((await store.next())?.attempts).toBe(9);
+  });
+
+  it("`wake()` sondea dentro de la ventana y publica todo lo pendiente, en orden", async () => {
+    const { store, delivery, dispatcher } = fixture(20);
+    for (const n of [1, 2]) await store.enqueue(`m-${n}`, "domino.match.finished", { n });
+    delivery.fails();
+    await dispatcher.drain();
+
+    delivery.recovers();
+    await store.enqueue("m-3", "domino.match.finished", { n: 3 });
+    dispatcher.wake();
+    await settle();
+    await dispatcher.close();
+
+    expect(delivery.published.map((one) => one.body)).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+    expect(await store.hasPending()).toBe(false);
+  });
+
+  it("un `wake()` con un tick en vuelo vuelve a sondear al terminar", async () => {
+    const { store, delivery, dispatcher } = fixture(20);
+    await store.enqueue("m-1", "domino.match.finished", { n: 1 });
+    delivery.fails();
+    await dispatcher.drain();
+    delivery.recovers();
+
+    // El tick programado sale por la ventana; el `wake()` llega mientras está en vuelo.
+    const scheduled = dispatcher.drain();
+    dispatcher.wake();
+    await scheduled;
+    await settle();
+    await dispatcher.close();
+
+    expect(delivery.published.map((one) => one.body)).toEqual([{ n: 1 }]);
+  });
+
+  it("una publicación confirmada cierra la ventana y vuelve el backoff a un segundo", async () => {
+    const { time, store, delivery, dispatcher } = fixture(20);
+    await store.enqueue("m-1", "domino.match.finished", { n: 1 });
+    delivery.fails();
+    for (let failure = 0; failure < 4; failure += 1) {
+      await dispatcher.drain();
+      time.advance(30_000);
+    }
+    expect(delivery.attempts()).toBe(4);
+
+    delivery.recovers();
+    await dispatcher.drain();
+    expect(delivery.published).toHaveLength(1);
+
+    // Otro fallo: la ventana vuelve a ser de un segundo, no de dieciséis.
+    await store.enqueue("m-2", "domino.match.finished", { n: 2 });
+    delivery.fails();
+    await dispatcher.drain();
+    delivery.recovers();
     time.advance(1_000);
-    expect((await store.next(new Date(time.now())))?.dedupeKey).toBe("m-1");
+    await dispatcher.drain();
+    expect(delivery.published.map((one) => one.body)).toEqual([{ n: 1 }, { n: 2 }]);
   });
 });
 
@@ -150,6 +272,21 @@ describe("TopicOutboxDispatcher: lo que no sale", () => {
 });
 
 describe("MemoryOutboxStore", () => {
+  it("ofrece siempre el pendiente más viejo, aunque haya fallado", async () => {
+    const store = new MemoryOutboxStore<string, number>(clock());
+    expect(await store.hasPending()).toBe(false);
+    await store.enqueue("a", "r", 1);
+    await store.enqueue("b", "r", 2);
+
+    const first = await store.next();
+    await store.retry(first?.id ?? "", "caído");
+    expect(await store.next()).toMatchObject({ dedupeKey: "a", attempts: 1, lastError: "caído" });
+
+    await store.sent(first?.id ?? "", new Date());
+    expect((await store.next())?.dedupeKey).toBe("b");
+    expect(await store.hasPending()).toBe(true);
+  });
+
   it("encolar dos veces la misma clave deja una sola entrada, y lo dice", async () => {
     const store = new MemoryOutboxStore<string, number>(clock());
 

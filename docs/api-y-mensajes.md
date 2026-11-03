@@ -371,7 +371,9 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
 - **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
   (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
   cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
-  `CHARGE_REJECTED`.
+  `CHARGE_REJECTED`. El plazo del cliente HTTP cubre la respuesta entera, cabeceras y cuerpo, y al
+  vencer corta la conexión: un orquestador que manda las cabeceras y se cuelga en el cuerpo también es
+  un plazo vencido, y la mesa no queda esperando el cobro.
 - **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
   anula (`MULTIPLIER_REVOKED`).
 - **El resultado** sale por un outbox durable al exchange `betaso_games` (broker y vhost de
