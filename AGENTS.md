@@ -16,7 +16,8 @@ pieza del dominó.
 - **El dominó es un game backend del orquestador de Betaso Juegos**
   (`betaso-games-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
   entrada**: admite, empareja, tiene el único interruptor de mantenimiento y abre cada mesa por la API
-  interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/census`,
+  interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`,
+  `GET /internal/players/:userId/match`, `GET /internal/census`,
   en `features/match/transports/http/tables.ts`). Toda sala `domino` nace de un `CreateMatchRequest`.
 - **No hay lobby, emparejador ni mantenimiento propios.** No hay sala `lobby`, ni `GET /maintenance`,
   ni `GET /players-in-match`, ni `POST /internal/lobby/maintenance`. La configuración en caliente
@@ -59,9 +60,34 @@ pieza del dominó.
   con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
   ordena en memoria, y una página honda cuesta lo mismo que la primera. Ver «Incremento completo — el
   listado del panel con filtros y cursor».
+- **El outbox de resultados no se bloquea por la cabeza**: la espera tras un fallo es del broker
+  (ventana en el despachador, techo 30 s, se cierra con cada confirm) y no de cada entrada; `wake()`
+  la ignora, y con la cola vacía el tick no toma el lease. Ver «Incremento completo — el outbox sin
+  bloqueo de cabeza».
+- **El cliente HTTP saliente (`shared/http/client.ts`) aborta con el plazo**: `AbortSignal.timeout`
+  cubre cabeceras y cuerpo, y al vencer es `DeadlineExceededError`. Ver «Incremento completo — el
+  cliente HTTP aborta con el plazo».
+- **Todo error HTTP es `{ code, detail? }`** (`sendError` de `shared/http/errors.ts`): ninguna ruta
+  contesta `{ error }` ni `{ status: "error", message }`, y lo de otro proveedor es 404
+  (`?providerId=` ajeno → `UNKNOWN_PROVIDER`). La tabla ruta → códigos está en
+  `docs/api-y-mensajes.md` («Errores») y la pinea `src/tests/error-shape.e2e.test.ts`. ⚠ Rompe al panel
+  si se despliega antes de que el panel acepte `{ code, detail? }`. Ver «Incremento completo — errores
+  con código».
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
+
+- **El registro de partidas vivas (Redis) renueva por reloj y suelta por hecho.** El latido de 30 s
+  re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
+  (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
+  escribe de más».
+- **El historial manda un `$push` por trabajo de la cola, no uno por lote**: los lotes de una partida
+  se juntan hasta que su trabajo arranca, y `open`/`round`/`close`/`settled` sellan el pendiente para
+  conservar el orden. Ver «Incremento completo — el historial, un `$push` por lote pendiente».
+- **La sala manda su config pública al que entra o vuelve** (mensaje `config`, con `serverNow`), y
+  `PublicMatchConfig` trae `isFreeRoom`, `enableBots` y `betLevels[].extra`. El orquestador pregunta
+  la mesa de un jugador sin reservar con `GET /internal/players/:userId/match`. Ver «Incremento
+  completo — la mesa completa y el asiento sin reserva».
 
 ## El plan es la autoridad
 
@@ -639,7 +665,7 @@ misma revisión, y la partida 2P terminada por `SCORE` con 119 entradas de histo
   401). Quien valida al admin es el futuro orquestador.
 - **La entrega es AL MENOS UNA VEZ y el consumidor debe deduplicar.** La mutación escribe Mongo y un
   outbox durable; el despachador publica después con confirmación del broker, una entrada por lease,
-  backoff hasta 300 s y **sin límite de intentos** —una caída larga no puede convertir un pendiente
+  ~~backoff hasta 300 s~~ (→ la espera es del broker, con techo de 30 s; ver «Incremento completo — el outbox sin bloqueo de cabeza») y **sin límite de intentos** —una caída larga no puede convertir un pendiente
   en pérdida silenciosa—. Una caída posterior al confirm reentrega, pero **nunca adelanta** la
   siguiente entrada: reordenar el historial del catálogo deja al consumidor con un modo viejo.
 - **No hay replica set, así que no hay transacción** entre `game_modes_domino` y `game_mode_outbox`.
@@ -793,7 +819,9 @@ Lo que dejó la Tarea 9:
   `{code:"MALFORMED",detail}`** y no con el envelope histórico, porque lo emite `shared/http/
   validated.ts` y ése es el mismo vocabulario que el del socket; copiar el validador para cambiarle
   el cuerpo es justo la divergencia que su promoción vino a evitar, y v1 no contesta 400 en ninguna
-  ruta. Los otros tres códigos sí llevan `{status:"error",message}`.
+  ruta. ~~Los otros tres códigos sí llevan `{status:"error",message}`.~~ Desde
+  `refactor/errores-con-codigo` todos salen `{code, detail?}` (ver «Incremento completo — errores con
+  código»).
 - **LO DESCONOCIDO SE RELANZA** al manejador compartido en vez de traducirse: convertirlo en 404 le
   diría al panel que el modo no existe cuando lo que pasa es que la base no contesta, y manda al
   operador a auditar el modo equivocado.
@@ -885,9 +913,10 @@ Lo que dejó la Tarea 7:
   Mongo y escribe el outbox; el dispatcher publica después con confirmación del broker. La entrega es
   **al menos una vez** y está aceptado: un proceso que muere DESPUÉS del confirm y ANTES de marcar
   `SENT` republica, y el consumidor upsertea por `id`.
-- **LO QUE NO SE ACEPTA ES ADELANTARSE.** `next()` mira el PENDIENTE MÁS VIEJO y devuelve vacío si
-  todavía no venció su reintento, en vez de ofrecer el siguiente. La consulta NO filtra por
-  `nextAttemptAt` (`{status:"PENDING"}` ordenado por `_id`, y el plazo se compara después): con el
+- **LO QUE NO SE ACEPTA ES ADELANTARSE.** `next()` mira el PENDIENTE MÁS VIEJO ~~y devuelve vacío si
+  todavía no venció su reintento~~ (→ y lo ofrece siempre: ya no hay plazo por entrada, ver «Incremento completo — el outbox sin bloqueo de cabeza»), en vez de
+  ofrecer el siguiente. La consulta NO filtra por
+  `nextAttemptAt` (`{status:"PENDING"}` ordenado por `_id`): con el
   filtro adentro, el segundo `updated` sale antes que el primero y el consumidor se queda con el modo
   viejo **sin que nada falle**.
 - **LAS TRES CLAVES DE DEDUPLICACIÓN VIVEN EN `outbox.ts`, no en cada adaptador**, porque el formato
@@ -901,7 +930,8 @@ Lo que dejó la Tarea 7:
   como `updated`, que es la estrategia de recuperación del `/sync` de v1.
 - **NO HAY LÍMITE DE INTENTOS, y la ausencia es la decisión.** Descartar al intento N es una pérdida
   silenciosa; una caída larga del broker cuesta retraso, no datos. El backoff sí tiene techo:
-  `min(300_000, 1_000 * 2 ** attempts)`.
+  ~~`min(300_000, 1_000 * 2 ** attempts)`~~ → `min(30_000, 1_000 * 2 ** fallosSeguidos)` en el
+  despachador (ver «Incremento completo — el outbox sin bloqueo de cabeza»).
 - ⚠ **EL PLAZO DE 5 s NO ES DECORACIÓN.** `publishTopic` no rechaza solo con el broker caído: SE
   CUELGA (ver el bloque de la Tarea 6). Sin el plazo, el primer tick contra un Rabbit apagado espera
   para siempre con el lease tomado y el outbox deja de drenar sin un solo error en el log.
@@ -2335,7 +2365,7 @@ Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` e
 ### ~~Deuda abierta: el panel no puede entrar con su sesión~~
 
 Resuelta en `feat/emisor-betaso-games` (2026-10-13), sin el backend de Betaso: billing-auth emite el
-token del admin cuando inicia sesión (`POST /v1/admins/login`), y las rutas de admin aceptan
+token del admin cuando inicia sesión (`POST /v1/auth/login`), y las rutas de admin aceptan
 `Authorization: Bearer` con ese token además de `ADMIN_API_KEY` (`requireAdminKey`,
 `features/auth/transports/admin-token-verifier.ts`). ~~Las mutaciones piden el rol `catalog`~~: desde el
 2026-10-14 no hay roles, y un admin abre lo mismo que la llave. Lo de abajo queda como contexto de por
@@ -2683,8 +2713,10 @@ producción, y no quedan alias.
 - **El proveedor sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo.
   `providerOf` (`transports/http/admin.ts`, el mismo patrón que los webhooks del orquestador): un
   admin de proveedor actúa sobre el suyo (`?providerId=` igual se acepta, distinto es
-  `403 {status:"error", code:"FORBIDDEN"}`); Betaso Games (token con `prv: null`, o la llave) lo nombra
-  con `?providerId=`, y sin él es `400 {status:"error", code:"PROVIDER_REQUIRED"}`. La credencial y
+  ~~`403 {status:"error", code:"FORBIDDEN"}`~~ `404 {code:"UNKNOWN_PROVIDER"}` desde
+  `refactor/errores-con-codigo`); Betaso Games (token con `prv: null`, o la llave) lo nombra
+  con `?providerId=`, y sin él es ~~`400 {status:"error", code:"PROVIDER_REQUIRED"}`~~
+  `400 {code:"PROVIDER_REQUIRED", detail}`. La credencial y
   el rol se miran antes (la puerta), la forma después (`validated`, `PROVIDER_QUERY`) y el proveedor
   al final.
 - **Rutas:** `PUT|DELETE /game-modes/:uuid/subscriptions/:providerId` → `PUT|DELETE
@@ -2702,6 +2734,134 @@ producción, y no quedan alias.
 - **Servicio:** `copyShared` → `createCopies` (`CopySharedResult` → `CopiesResult`); `listFor(actor,
   providerId?)` filtra por lo que ve ese proveedor. Las firmas reciben el proveedor ya resuelto, y el
   servicio conserva la regla 3 (`refuseForeign`) como segunda llave.
+
+## Incremento completo — el latido por hecho no escribe de más (rama `perf/latido-sin-escrituras-de-mas`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR3). Desde `develop`.
+
+- **Dos latidos con trabajos distintos.** El del reloj de la sala (`HEARTBEAT_MS`, `beat(true)`)
+  llama `MatchRegistry.keepAlive`, que re-estampa config, asientos y censo con el plazo entero. El de
+  cada hecho del juego (el último sink del notificador, `beat()`) llama `settle(roomId, active)`, que
+  SOLO suelta: si la lista de los que siguen jugando no se achicó respecto de `seatsByRoomId`, no toca
+  el almacén (cero I/O, el caso de casi toda jugada). Si alguien salió, suelta su clave (con el mismo
+  chequeo de `release`: solo si sigue apuntando a esta sala) y reescribe el censo en el acto.
+- **Se compara contra lo anotado y no contra el latido anterior** porque soltar es irreversible: lo
+  soltado sale de `seatsByRoomId`, así que «no cambió» es exactamente «tiene el mismo largo».
+- **`keepAlive` escribe en paralelo** (`Promise.all` de los `setex` y los `release`) y el `hset` del
+  censo después. Antes eran 2 + N viajes en serie por latido, y uno de esos latidos por ficha jugada.
+- Ambos siguen en la fila `this.beats` y detrás de la guarda `disposed`: el apagado los espera antes de
+  borrar. Lo miden `match-registry.test.ts` (con un `KeyValueStore` que cuenta llamadas y
+  concurrencia) y los e2e de liberación de asiento (`orchestrator-tables`, `lifecycle`, `bot-4p`).
+
+## Incremento completo — el historial, un `$push` por lote pendiente (rama `perf/historial-un-push-por-lote`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR4). Apilada sobre la del latido.
+
+- **`MongoHistory.record` junta los lotes de una partida** en un pendiente (`unsealed`, por
+  `matchId`). Solo el lote que lo abre encola un trabajo en la cola de la partida; los que llegan
+  mientras ese trabajo no arrancó se suman al mismo arreglo. El trabajo **sella** el pendiente al
+  empezar —antes de pedir la colección, así que un fallo ahí también lo deja sellado— y lo manda con
+  UN `updateOne` (`$push {timeline: {$each}}` + `$set updatedAt` + `$setOnInsert`, el mismo update de
+  antes). El comando y sus eventos, que son dos lotes del mismo tick, viajan juntos; con la cola
+  trabada en Mongo, todo lo que se apiló viaja en la escritura siguiente y no en N.
+- ⚠ **`open`, `round`, `close` y `settled` sellan ANTES de encolarse.** Es lo que conserva el orden
+  que el resto del sistema da por hecho («el desenlace llega detrás de la entrada que lo cuenta»): lo
+  grabado antes de ellos viaja antes, y lo grabado después abre un pendiente nuevo detrás. Un verbo
+  nuevo que escriba el documento por la cola tiene que sellar también, o un lote anterior podría
+  quedar esperando en un pendiente que sale DESPUÉS de él.
+- `updatedAt` es el instante del trabajo, no el del primer lote. `drain()` no cambia: todo pendiente
+  tiene su trabajo en vuelo. `HistoryPort` y `MemoryHistory` tampoco.
+- Lo miden `mongo-history.test.ts` («un $push por lote pendiente») y un caso de
+  `mongo-history.int.test.ts` (con `MONGO_INT_URI`).
+
+## Incremento completo — la mesa completa y el asiento sin reserva (rama `feat/mesa-completa-y-asiento-sin-reserva`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR5). Apilada sobre la del historial.
+
+- **`publicConfigOf(config, timeouts)` es una función pura** en `match-registry.ts` (allowlist, nunca
+  el `seed`). La usan el registro (lo que estampa en `match_config:<roomId>`) y la sala (el mensaje
+  `config`), así que no pueden divergir. ⚠ El método `MatchRegistry.publicConfigOf(roomId)` (la lectura
+  del almacén) conserva su nombre: misma palabra, dos firmas.
+- **`PublicMatchConfig` suma `isFreeRoom`, `enableBots` y `betLevels[].extra`.** El orquestador ya los
+  mandaba en el modo; antes se recortaban. `GET /config/:roomId` y `GET /matches/:roomId` los traen
+  solos.
+- **Mensaje `config`** (`{...PublicMatchConfig, serverNow}`) al final de `onJoin` y en `onReconnect`.
+  ⚠ Lo enviado en `onJoin` Colyseus lo encola hasta el ack del `JOIN_ROOM`
+  (`@colyseus/core/build/Room.mjs` ~1418), así que llega apenas resuelve el `join` del SDK: el handler
+  se registra sin `await` en el medio. En los e2e eso significa `joinById` y NO `connectTo` (que
+  espera `waitForInitialState` y para entonces el comodín de `src/tests/e2e.ts` ya se tragó el
+  mensaje).
+- **`GET /internal/players/:userId/match`** (`tables.ts`, misma llave y `SEAT_PARAMS` que `.../seat`):
+  `matchOf` + `publicConfigOf` del registro, sin Colyseus ni reserva. 200 `{status, data: {matchId,
+  roomId}}`; 404 `{code: "NO_LIVE_MATCH"}` (con `sendError`, como `.../seat` desde los errores con código);
+  la llave y la forma dan los `401 UNAUTHORIZED` y `400 MALFORMED` comunes. `player_match:<userId>` no
+  cambia.
+- Docs: «Mensajes del servidor» y la ruta nueva en `docs/api-y-mensajes.md`.
+
+## Incremento completo — errores con código (rama `refactor/errores-con-codigo`)
+
+Había tres formas de error según quién escribió la ruta: `{ error: "X" }` (la puerta, el 500, las
+mesas, `/config`), `{ status: "error", message }` (el catálogo, los registros del panel, `/me`) y
+`{ code, detail }` (la validación, el Bearer, la configuración). Ahora hay una: **`{ code, detail? }`**,
+la del socket. Las respuestas de éxito no cambian, y `/health` y `/ready` tampoco (son sondas).
+
+- **`sendError(res, status, code, detail?)`** en `shared/http/errors.ts` (exportada en el índice). Toda
+  ruta que contesta un 4xx o 5xx pasa por ahí; no se escribe un cuerpo de error a mano.
+- **Los errores del catálogo traen su código** (`readonly code` en `core/catalog.ts`): `MODE_NOT_FOUND`,
+  `MODE_DUPLICATE`, `FREE_ROOM_WITH_ENTRY`, `CATALOG_BUSY`, `FORBIDDEN`, y
+  `GameModeStateConflictError` recibe el suyo en cada sitio del servicio (`MODE_ALREADY_INACTIVE`,
+  `MODE_ALREADY_ACTIVE`, `MODE_NOT_SHARED`, `MODE_INACTIVE`, `OWN_CATALOG_EMPTY`). `responses.ts`
+  (`sendCatalogError`, antes `sendError`) sólo elige el status y pasa el mensaje como `detail`; los 404
+  no llevan `detail`.
+- **Lo de otro proveedor es 404:** un `?providerId=` ajeno en el panel del catálogo pasó de `403
+  FORBIDDEN` a `404 UNKNOWN_PROVIDER`. ~~Un `ownerProviderId` ajeno en el cuerpo de `POST /game-modes`
+  sigue siendo `403 FORBIDDEN` (es un pedido que no se puede hacer, no algo que se lee).~~ En la
+  integración (decisión del usuario: lo de otro proveedor responde siempre 404) también es `404
+  UNKNOWN_PROVIDER` (`UnknownProviderError`, que lanzan `ownerFor` y `refuseForeign`); `null`
+  (pedir un compartido) sigue siendo `403 FORBIDDEN`, y un 403 por rol también.
+- **Renombres de código:** `/config/:roomId` `NOT_FOUND` → `ROOM_NOT_FOUND` (como `/matches/:roomId`);
+  `/internal/matches/:matchId/history` `NOT_FOUND` → `MATCH_NOT_FOUND`; el detalle y el listado del panel
+  `{status:"error",message}` → `MATCH_NOT_FOUND` / `MATCH_LIST_TIMEOUT`; `/me/matches` y
+  `/internal/players/:userId/matches` → `MATCH_LIST_TIMEOUT`; `/me/stats` → `STATS_TIMEOUT`.
+- **JSON roto ya no es 500:** `httpErrorHandler` reconoce los errores de body-parser —`entity.parse.failed`
+  es `400 MALFORMED`, `entity.too.large` es `413 PAYLOAD_TOO_LARGE`— antes de loguear un bug.
+- **El orquestador no se entera:** lee el `422` de `POST /internal/matches` con
+  `body.includes('UNKNOWN_GAME_MODE')` y el `404` del asiento por status; los dos siguen funcionando.
+- **El panel sí:** su `failure()` (`apps/api/src/shared/upstream/domino-api.ts` en
+  `tablea-gaming-panel`) lee `message`/`error`, y el detalle de partida compara `MATCH_404`. ⚠ **Se
+  despliega DESPUÉS del panel tolerante** (que acepte las dos formas).
+- **El guardarraíl:** `src/tests/error-shape.e2e.test.ts` recorre todas las rutas que la app registra
+  (`routesOf` sobre el router de Express) con seis credenciales y un JSON roto, y falla si un 4xx/5xx no
+  es JSON `{ code, detail? }`. Una ruta nueva que escriba su error a mano se pone roja ahí.
+- **Docs:** sección «Errores» de `docs/api-y-mensajes.md`, con la tabla ruta → códigos; la ruta de login
+  de billing-auth es `POST /v1/auth/login` (decía `/v1/admins/login`).
+
+Baseline **1042 unit / 426 int (+129 saltados) / 134 e2e** (+15 / +1 / +1), con `typecheck`, lint,
+`depcruise` y `docs:build` en verde.
+
+### Deudas abiertas de este incremento
+
+- Un path desconocido, o una ruta que no se registró por falta de llave, sigue contestando el 404 HTML
+  por defecto de Express. Un catch-all JSON tiene que ir sin pisar el chequeo de raíz de Colyseus
+  (`http-root-route.e2e.test.ts`), y no se hizo acá.
+
+## Incremento completo — el catálogo público en memoria (rama `perf/catalogo-publico-en-cache`)
+
+`GET /game-modes` lo pide cada cliente que entra y era una consulta a Mongo por pedido, con la misma
+respuesta para todos.
+
+- **`GameModeService.publicActive()`** guarda la PROMESA de `repository.active()` `PUBLIC_MEMO_MS` (5 s,
+  reloj inyectable: cuarto parámetro del constructor, `Date.now` por defecto). La usan sólo
+  `listPublic` y `getPublic`; pedidos simultáneos comparten la consulta y una consulta que falla no se
+  guarda.
+- **Se invalida al entrar y al salir de `mutating()`** (la salida en un `finally`, así que una mutación
+  que falla también la tira). Una mutación de OTRO proceso se ve a lo sumo 5 s tarde.
+- **No lo usan** las reglas dentro de `mutating` ni `GameModeReader.activeByUuid`, con el que la sala
+  resuelve el modo de una mesa: abrir una mesa lee fresco.
+- **`Cache-Control: public, max-age=10`** en los `200` de `GET /game-modes` y `GET /game-modes/:uuid`; el
+  `404` sale `no-store`.
+- ⚠ Un test que da de baja un modo **directo en el repositorio** (como otro proceso) y después lee lo
+  público tiene que adelantar el reloj `PUBLIC_MEMO_MS`; por el servicio no hace falta.
 
 ## Cómo se ejecuta una tarea
 
@@ -2941,3 +3101,49 @@ Un commit por tarea del plan, más los `docs:` de los defectos que encuentres.
 `codebase-memory-mcp` está configurado: usá `search_graph` / `trace_path` /
 `get_code_snippet` antes que grep para descubrir código. Reindexá con
 `index_repository` después de agregar archivos.
+
+## Incremento completo — el outbox sin bloqueo de cabeza (rama `fix/outbox-sin-bloqueo-de-cabeza`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR1). Toca el camino del dinero: el
+resultado de partida lleva los premios.
+
+- **El defecto:** cada entrada guardaba su `nextAttemptAt` con backoff de hasta 5 min, y `next()` no
+  ofrecía nada mientras la más vieja esperaba. Un solo fallo (un reinicio de Rabbit, un `mandatory`
+  devuelto) dejaba a TODA la cola parada hasta 5 min aunque el broker ya estuviera de vuelta.
+- **Ahora la espera es del broker** (`TopicOutboxDispatcher`): `brokerDownUntil` y `failures` en
+  memoria del proceso, `min(30 s, 1 s · 2^fallosSeguidos)`, y cada publicación confirmada los vuelve a
+  cero. Dentro de la ventana el tick programado sale sin tocar Mongo. `wake()` (lo llama
+  `MatchResultRecorder` al encolar) sondea una vez ignorando la ventana; si llega con un tick en vuelo,
+  se vuelve a sondear al terminar (`wokenInFlight`), porque ese tick pudo haber salido por la ventana.
+  `drain()` respeta la ventana.
+- **`hasPending()` antes del lease**: `findOne({status:"PENDING"}, {sort:{_id:1}, projection:{_id:1}})`,
+  cubierta por `status_1__id_1`. El `MongoLease` hace upsert + delete por adquisición: antes eran dos
+  escrituras por segundo con la cola vacía. Adentro del lease se relee con `next()`.
+- **`next()` ya no recibe `now` ni mira `nextAttemptAt`; `retry(id, error)` no agenda** (sólo `$inc`
+  de `attempts` y `lastError`, para diagnóstico); `enqueue` ya no escribe el campo. Los documentos
+  viejos lo traen y nadie lo lee: sin migración.
+- Se conserva: orden por `_id`, intentos ilimitados, `messageId = dedupeKey`, la alerta de 10 min
+  (`stuckAfterMs`, contra `createdAt`), `perTick: 20` y la guarda `inFlight`.
+- Tests: `src/shared/outbox.test.ts` (ventana, backoff 1→30 s, `wake` en orden, `wake` en vuelo, reset
+  tras el confirm, cola vacía sin lease) y `src/shared/mongo-outbox.test.ts` (consulta cubierta, cabeza
+  legada con `nextAttemptAt` futuro). Docs: `docs/operacion.md` §Resultados de partida.
+
+## Incremento completo — el cliente HTTP aborta con el plazo (rama `fix/cliente-http-aborta-con-el-plazo`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR2). Toca el camino del dinero: el
+cobro de la entrada y de cada aumento pasan por este cliente.
+
+- **El defecto:** `HttpClient.send` envolvía SÓLO `fetch` en `withTimeout`, que ni cancela ni mira el
+  cuerpo: `fetch` resuelve con las cabeceras, y `parse`/`safeText` leían el cuerpo FUERA del plazo. Un
+  orquestador que mandara las cabeceras y se colgara dejaba la mesa en `entryCharge: 'charging'`
+  para siempre (la entrada no pasa por `withTimeout` en ningún otro lado). Y el socket quedaba abierto.
+- **Ahora:** `AbortSignal.timeout(timeoutMs)` va en el `fetch` y cubre cabeceras y cuerpo; al vencer
+  corta la conexión. Si la señal disparó y el error no es `HttpError`, sale `DeadlineExceededError`
+  (`shared/deadline.ts`). Un `HttpError` cuyo cuerpo se cortó sigue siendo `HttpError` (con cuerpo
+  vacío): el `status` ya decide.
+- **El desenlace del cobro no cambia**: `HttpOrchestratorCharges` mapea el plazo a
+  `OrchestratorUnavailableError` como antes → `CHARGE_REJECTED`, y el orquestador devuelve lo cobrado.
+  `withTimeout` se queda en `OrchestratorBetCharger`.
+- Tests: `src/shared/http/client.int.test.ts` con `node:http` real (cuerpo colgado, sin cabeceras, 500
+  con cuerpo colgado: rechaza en plazo y el servidor ve el socket cerrado) y el caso colgado en
+  `orchestrator-charges.test.ts`. Los cuatro salen rojos con el cliente anterior.

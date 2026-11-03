@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y el
+`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/players/:userId/match` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y el
 broker de juegos (`BETASO_GAMES_RABBITMQ_URL`) son capacidades opcionales elegidas por la presencia de sus URLs; `RABBITMQ_URL` (el viejo broker de Betaso) ya no se lee.
 
 El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
@@ -256,8 +256,17 @@ Minimizar la app en el celular hoy sale como `NETWORK`. Cada hecho sale además 
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
 `betaso_games` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
-(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite, con espera
-creciente hasta 5 minutos.
+(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite y en orden
+(el más viejo primero; nada se adelanta).
+
+- **La espera es del broker, no de cada entrada.** Tras un fallo, el despachador deja de intentar
+  durante una ventana que duplica desde 1 s con cada fallo seguido, con techo de **30 s**; la primera
+  publicación confirmada la cierra. Cada partida que termina despierta al despachador y ese sondeo
+  ignora la ventana, así que cuando el broker vuelve, todo lo pendiente sale con la próxima partida o
+  a los 30 s como mucho. Con la cola vacía, el tick de cada segundo es una sola consulta cubierta por
+  el índice (`status_1__id_1`) y no toma el lease.
+- **`attempts` y `lastError`** de cada entrada se siguen anotando, para diagnóstico. Los documentos
+  anteriores traen un `nextAttemptAt` que ya nadie lee ni escribe.
 
 - **Un resultado trabado** deja un `warn` por cada fallo, y pasados **10 minutos** sin salir cada fallo
   es un `error` con `«el resultado de partida lleva demasiado sin salir»`. Es la línea que conviene
@@ -269,7 +278,7 @@ creciente hasta 5 minutos.
   ```js
   db.match_result_outbox.updateMany(
     { status: "SENT", sentAt: { $gte: ISODate("<instante anterior al incidente>") } },
-    { $set: { status: "PENDING", attempts: 0, nextAttemptAt: new Date() }, $unset: { sentAt: "" } },
+    { $set: { status: "PENDING", attempts: 0 }, $unset: { sentAt: "" } },
   )
   ```
 

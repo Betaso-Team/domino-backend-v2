@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { Lease } from "@/shared/mongo-lease";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DuplicateGameModeError,
   FreeRoomWithEntryError,
@@ -9,10 +9,11 @@ import {
   GameModeNotFoundError,
   GameModeStateConflictError,
   GameModeWriteBusyError,
+  UnknownProviderError,
   offeredTo,
 } from "./core/catalog";
 import type { GameMode } from "./core/game-mode";
-import { GameModeService } from "./service";
+import { GameModeService, PUBLIC_MEMO_MS } from "./service";
 import { MemoryProviderCatalogs } from "./transports/memory-provider-catalogs";
 import { MemoryGameModeRepository } from "./transports/memory-repository";
 import {
@@ -53,7 +54,7 @@ function harness(over: { lease?: Lease } = {}): Harness {
     },
   };
   const catalogs = new MemoryProviderCatalogs(clock);
-  const service = new GameModeService(repository, catalogs, lease);
+  const service = new GameModeService(repository, catalogs, lease, () => clock.now());
   return { service, repository, catalogs, clock, taken };
 }
 
@@ -66,6 +67,75 @@ const deniedLease: Lease = {
     return undefined;
   },
 };
+
+// EL MEMO DEL CATÁLOGO PÚBLICO: `GET /game-modes` lo pide cada cliente que entra, y sin memo cada
+// pedido era una consulta. Vale `PUBLIC_MEMO_MS` y lo tira cualquier mutación de este proceso.
+describe("GameModeService: el catálogo público en memoria", () => {
+  it("dentro del plazo no vuelve a consultar; vencido, sí", async () => {
+    const { service, repository, clock } = harness();
+    await repository.create(clasica());
+    const active = vi.spyOn(repository, "active");
+
+    await service.listPublic();
+    await service.getPublic("cualquiera");
+    clock.set(clock.now() + PUBLIC_MEMO_MS - 1);
+    await service.listPublic();
+    expect(active).toHaveBeenCalledTimes(1);
+
+    clock.set(clock.now() + 1);
+    await service.listPublic();
+    expect(active).toHaveBeenCalledTimes(2);
+  });
+
+  it("pedidos simultáneos comparten una sola consulta", async () => {
+    const { service, repository } = harness();
+    await repository.create(clasica());
+    const active = vi.spyOn(repository, "active");
+
+    await Promise.all([service.listPublic(), service.listPublic(), service.getPublic("x")]);
+
+    expect(active).toHaveBeenCalledTimes(1);
+  });
+
+  it("una mutación de este proceso se ve en el acto", async () => {
+    const { service } = harness();
+    expect(await service.listPublic()).toEqual([]);
+
+    const creada = await service.create(GAMES, clasica());
+    expect((await service.listPublic()).map((modo) => modo.uuid)).toEqual([creada.uuid]);
+    expect(await service.getPublic(creada.uuid)).toEqual(creada);
+
+    await service.softDelete(GAMES, creada.uuid);
+    expect(await service.listPublic()).toEqual([]);
+    expect(await service.getPublic(creada.uuid)).toBeUndefined();
+  });
+
+  // Una mutación que falla también tira el memo: la salida va en un `finally`.
+  it("una mutación que falla también lo invalida", async () => {
+    const { service, repository } = harness();
+    const creada = await service.create(GAMES, clasica());
+    await service.listPublic();
+    const active = vi.spyOn(repository, "active");
+
+    await expect(service.reactivate(GAMES, creada.uuid)).rejects.toMatchObject({
+      code: "MODE_ALREADY_ACTIVE",
+    });
+    await service.listPublic();
+
+    expect(active).toHaveBeenCalledTimes(1);
+  });
+
+  it("una consulta que falla no se guarda", async () => {
+    const { service, repository } = harness();
+    const active = vi
+      .spyOn(repository, "active")
+      .mockRejectedValueOnce(new Error("la base no contesta"));
+
+    await expect(service.listPublic()).rejects.toThrow("la base no contesta");
+    expect(await service.listPublic()).toEqual([]);
+    expect(active).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("GameModeService: lectura", () => {
   it("listPublic devuelve sólo los activos y no toma el lease", async () => {
@@ -86,6 +156,9 @@ describe("GameModeService: lectura", () => {
     expect(await service.getPublic(modo.uuid)).toEqual(modo);
 
     await repository.update(modo.uuid, { isActive: false });
+    // La baja va directo al repositorio —como la de OTRO proceso—, así que este proceso la ve cuando
+    // vence el memo del catálogo público.
+    clock.set(clock.now() + PUBLIC_MEMO_MS);
 
     // `undefined` Y NO UN THROW, y es lo correcto: desde afuera un modo retirado NO EXISTE, y la
     // frontera HTTP lo convierte en 404. Las mutaciones sí lanzan, porque devuelven `GameMode` a
@@ -407,6 +480,9 @@ describe("GameModeService: baja y reactivación", () => {
     await expect(service.softDelete(GAMES, creada.uuid)).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.softDelete(GAMES, creada.uuid)).rejects.toMatchObject({
+      code: "MODE_ALREADY_INACTIVE",
+    });
 
     expect((await repository.byUuid(creada.uuid))?.version).toBe(1);
   });
@@ -419,6 +495,9 @@ describe("GameModeService: baja y reactivación", () => {
     await expect(service.reactivate(GAMES, creada.uuid)).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.reactivate(GAMES, creada.uuid)).rejects.toMatchObject({
+      code: "MODE_ALREADY_ACTIVE",
+    });
 
     expect((await repository.byUuid(creada.uuid))?.version).toBe(0);
   });
@@ -551,14 +630,14 @@ describe("GameModeService: el dueño de un modo nuevo", () => {
   });
 
   it.each([
-    ["para otro proveedor", "rival"],
-    ["compartido", null],
-  ])("un proveedor no crea un modo %s, y no se escribe nada", async (_label, owner) => {
+    ["para otro proveedor (no existe para él)", "rival", UnknownProviderError],
+    ["compartido", null, GameModeForbiddenError],
+  ])("un proveedor no crea un modo %s, y no se escribe nada", async (_label, owner, refusal) => {
     const { service, repository } = harness();
 
     await expect(
       service.create(PARLEY, clasica({ ownerProviderId: owner })),
-    ).rejects.toBeInstanceOf(GameModeForbiddenError);
+    ).rejects.toBeInstanceOf(refusal);
     expect(await repository.all()).toEqual([]);
   });
 
@@ -659,7 +738,7 @@ describe("GameModeService: lo que ve y toca cada proveedor", () => {
 
     expect(await names(GAMES, "parley")).toEqual(["De los dos", "De otros", "Propio", "Suscrito"]);
     expect(await names(PARLEY, "parley")).toEqual(["De los dos", "De otros", "Propio", "Suscrito"]);
-    await expect(service.listFor(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
+    await expect(service.listFor(PARLEY, "rival")).rejects.toBeInstanceOf(UnknownProviderError);
   });
 
   it("getFor no le muestra a un proveedor el propio de otro; sí cualquier compartido activo", async () => {
@@ -734,10 +813,10 @@ describe("GameModeService: las suscripciones", () => {
     const modo = await service.create(GAMES, clasica());
 
     await expect(service.subscribe(PARLEY, modo.uuid, "rival")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     await expect(service.unsubscribe(PARLEY, modo.uuid, "rival")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     expect((await repository.byUuid(modo.uuid))?.subscribers).toEqual([]);
   });
@@ -765,9 +844,15 @@ describe("GameModeService: las suscripciones", () => {
     await expect(service.subscribe(PARLEY, retirado.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.subscribe(PARLEY, retirado.uuid, "parley")).rejects.toMatchObject({
+      code: "MODE_INACTIVE",
+    });
     await expect(service.subscribe(PARLEY, propio.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.subscribe(PARLEY, propio.uuid, "parley")).rejects.toMatchObject({
+      code: "MODE_NOT_SHARED",
+    });
     // El propio de OTRO proveedor no existe para éste.
     await expect(service.subscribe(RIVAL, propio.uuid, "rival")).rejects.toBeInstanceOf(
       GameModeNotFoundError,
@@ -929,7 +1014,7 @@ describe("GameModeService: la copia de los compartidos", () => {
     const antes = await repository.all();
 
     await expect(service.createCopies(PARLEY, "rival")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     expect(await repository.all()).toEqual(antes);
   });
@@ -960,6 +1045,9 @@ describe("GameModeService: la fuente del catálogo de cada proveedor", () => {
     await expect(service.setCatalogSource(PIA, "parley", "own")).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.setCatalogSource(PIA, "parley", "own")).rejects.toMatchObject({
+      code: "OWN_CATALOG_EMPTY",
+    });
     expect((await service.catalogOf(GAMES, "parley")).source).toBe("shared");
   });
 
@@ -986,9 +1074,9 @@ describe("GameModeService: la fuente del catálogo de cada proveedor", () => {
     const { service, repository } = harness();
     await repository.create(clasica({ ownerProviderId: "rival" }));
 
-    await expect(service.catalogOf(PARLEY, "rival")).rejects.toBeInstanceOf(GameModeForbiddenError);
+    await expect(service.catalogOf(PARLEY, "rival")).rejects.toBeInstanceOf(UnknownProviderError);
     await expect(service.setCatalogSource(PIA, "rival", "own")).rejects.toBeInstanceOf(
-      GameModeForbiddenError,
+      UnknownProviderError,
     );
     expect((await service.catalogOf(RIVAL, "rival")).source).toBe("shared");
   });
@@ -1006,6 +1094,9 @@ describe("GameModeService: la fuente del catálogo de cada proveedor", () => {
     await expect(service.softDelete(GAMES, unico.uuid)).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.softDelete(GAMES, unico.uuid)).rejects.toMatchObject({
+      code: "OWN_CATALOG_EMPTY",
+    });
     await expect(service.update(PARLEY, unico.uuid, { isActive: false })).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );

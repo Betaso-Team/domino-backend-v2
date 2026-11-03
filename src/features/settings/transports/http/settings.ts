@@ -1,4 +1,5 @@
 import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
+import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import type { Logger } from "@/shared/logger";
 import { type Request, Router } from "express";
@@ -104,7 +105,7 @@ export function settingsRoutes(deps: SettingsRoutesDeps): Router {
   // DESPUÉS de las secciones, así un nombre que nadie cableó contesta en el mismo idioma que el resto
   // en vez de caer al HTML de Express.
   router.all(`${SETTINGS_ROUTE}/:section`, admin, (_req, res) => {
-    res.status(404).json({ code: "SETTINGS_SECTION_NOT_FOUND" });
+    sendError(res, 404, "SETTINGS_SECTION_NOT_FOUND");
   });
   return router;
 }

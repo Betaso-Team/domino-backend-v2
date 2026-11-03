@@ -119,7 +119,7 @@ export const CREATE_BODY = z.strictObject({
   betLevels: fields.betLevels.default([]),
   // DE QUIÉN ES EL MODO: ausente o `null` es un compartido de Betaso Games; un id es un modo propio de
   // ese proveedor. Un admin de proveedor puede omitirlo (se lo pone el servicio) o mandar el suyo; el
-  // de otro, o `null`, es 403. No se edita: no está en `UPDATE_BODY`.
+  // `null` es 403 y el de otro, 404 UNKNOWN_PROVIDER. No se edita: no está en `UPDATE_BODY`.
   ownerProviderId: providerIdOf("ownerProviderId").nullable().optional(),
 });
 

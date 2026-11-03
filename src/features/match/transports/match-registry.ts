@@ -37,11 +37,54 @@ export interface PublicMatchConfig {
   readonly prize: number;
   /**
    * LOS NIVELES DE AUMENTO QUE LA MESA OFRECE (truco `58ce78f`), para que el front pinte el aumento
-   * ANTES de proponer. Sin el `extra`: es cómo se calcula el ranking, no algo que mostrar. Vacío =
-   * esta mesa no ofrece aumentar. El precio de cada uno lo deriva el cliente con `betAmountsOf`.
+   * ANTES de proponer. Con el `extra` del catálogo: el front lo muestra junto al nivel, y no es
+   * secreto —lo publica el catálogo de modos—. Vacío = esta mesa no ofrece aumentar. El precio de
+   * cada uno lo deriva el cliente con `betAmountsOf`.
    */
-  readonly betLevels: readonly { readonly level: number; readonly additionalPoints: number }[];
+  readonly betLevels: readonly {
+    readonly level: number;
+    readonly extra: number;
+    readonly additionalPoints: number;
+  }[];
+  /** Una mesa gratis no cobra entrada ni ofrece aumentar (`DominoMatchConfig.isFreeRoom`). */
+  readonly isFreeRoom: boolean;
+  /** Si la mesa sienta una máquina en el asiento del que se retira (`DominoMatchConfig.enableBots`). */
+  readonly enableBots: boolean;
   readonly timeouts: PublicMatchTimeouts;
+}
+
+// LA CONFIGURACIÓN PÚBLICA DE UNA MESA, pura: la usan el registro (lo que estampa en el almacén) y la
+// sala (el mensaje `config` que manda al entrar), y tienen que ser la misma. Allowlist explícita:
+// restar `seed` filtraría solo lo conocido hoy y una propiedad secreta agregada mañana se filtraría
+// al wire. Tampoco se exponen campos derivados de la ventana de reparto, ni identidad, moneda o tasa.
+export function publicConfigOf(
+  config: DominoMatchConfig,
+  timeouts: PublicMatchTimeouts,
+): PublicMatchConfig {
+  return {
+    matchId: config.matchId,
+    gameModeId: config.gameModeId,
+    seats: config.seats.map(({ playerId }) => playerId),
+    pointsToWin: config.pointsToWin,
+    // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot:
+    // el DTO público publica el mismo número que la mesa cobró, en UC completas.
+    entryFee: config.entryFee,
+    prize: config.prize,
+    betLevels: config.betLevels.map(({ level, extra, additionalPoints }) => ({
+      level,
+      extra,
+      additionalPoints,
+    })),
+    isFreeRoom: config.isFreeRoom,
+    enableBots: config.enableBots,
+    // Campo por campo y no con un spread: un objeto más ancho que el tipo también compila.
+    timeouts: {
+      turnMs: timeouts.turnMs,
+      extraTimeMs: timeouts.extraTimeMs,
+      dealingMs: timeouts.dealingMs,
+      betResponseMs: timeouts.betResponseMs,
+    },
+  };
 }
 
 export interface MatchConfigResponse extends PublicMatchConfig {
@@ -148,30 +191,7 @@ export class MatchRegistry {
     config: DominoMatchConfig,
     timeouts: PublicMatchTimeouts,
   ): Promise<void> {
-    // Allowlist explícita: restar `seed` filtraría solo lo conocido hoy y una propiedad
-    // secreta agregada mañana se filtraría al wire. Tampoco se exponen campos derivados
-    // de la ventana de reparto.
-    this.byRoomId.set(roomId, {
-      matchId: config.matchId,
-      gameModeId: config.gameModeId,
-      seats: config.seats.map(({ playerId }) => playerId),
-      pointsToWin: config.pointsToWin,
-      // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot:
-      // el DTO público publica el mismo número que la mesa cobró, en UC completas.
-      entryFee: config.entryFee,
-      prize: config.prize,
-      betLevels: config.betLevels.map(({ level, additionalPoints }) => ({
-        level,
-        additionalPoints,
-      })),
-      // Campo por campo y no con un spread: un objeto más ancho que el tipo también compila.
-      timeouts: {
-        turnMs: timeouts.turnMs,
-        extraTimeMs: timeouts.extraTimeMs,
-        dealingMs: timeouts.dealingMs,
-        betResponseMs: timeouts.betResponseMs,
-      },
-    });
+    this.byRoomId.set(roomId, publicConfigOf(config, timeouts));
     this.seatsByRoomId.set(
       roomId,
       config.seats.map(({ userId }) => userId),
@@ -192,22 +212,54 @@ export class MatchRegistry {
   // Soltar es PARA SIEMPRE: lo soltado sale de la lista de esta sala, así que omitir el parámetro
   // —el primer latido, el de `register`— renueva a los que quedaban y no revive a nadie. Retirarse y
   // terminar son irreversibles en el juego, y el registro no puede ser menos.
+  //
+  // LAS ESCRITURAS VAN EN PARALELO y el censo al final. Cada `setex` y cada `release` toca una
+  // clave distinta, así que en serie solo sumaban viajes a Redis: con cuatro asientos eran seis
+  // idas y vueltas por latido. El censo va después porque cuenta a los que quedaron.
   async keepAlive(roomId: string, activeUserIds?: readonly string[]): Promise<void> {
     const config = this.byRoomId.get(roomId);
     const seats = this.seatsByRoomId.get(roomId);
     if (!config || !seats) return;
     const active = activeUserIds ? seats.filter((userId) => activeUserIds.includes(userId)) : seats;
+    const released = seats.filter((userId) => !active.includes(userId));
 
-    await this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS);
-    for (const userId of active) {
-      await this.store.setex(playerKey(userId), roomId, TTL_SECONDS);
-    }
-    for (const userId of seats) {
-      if (!active.includes(userId)) await this.release(userId, roomId);
-    }
+    await Promise.all([
+      this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS),
+      ...active.map((userId) => this.store.setex(playerKey(userId), roomId, TTL_SECONDS)),
+      ...released.map((userId) => this.release(userId, roomId)),
+    ]);
     this.seatsByRoomId.set(roomId, active);
-    // El censo cuenta ASIENTOS QUE SIGUEN JUGANDO, como truco: el que perdió la señal sigue
-    // contando —su reloj corre—, el que se retiró o terminó ya no está en ninguna partida.
+    await this.writeCensus(roomId, config, active);
+  }
+
+  // EL LATIDO POR HECHO: solo SUELTA, no renueva. Los plazos los renueva el reloj de la sala cada
+  // `HEARTBEAT_MS` con `keepAlive`; lo único que un hecho del juego puede cambiar es quién sigue
+  // jugando, y eso solo se achica —soltar es irreversible—. Así que si la lista no se achicó
+  // respecto de lo que este proceso anotó, no hay nada que escribir: CERO I/O, que es el caso de
+  // casi todos los hechos (una ficha jugada, un paso, un robo).
+  //
+  // Si alguien salió: se suelta su clave (con el mismo chequeo de `release`) y el censo se reescribe
+  // en el acto, para que el orquestador pueda sentarlo en otra mesa sin esperar al próximo latido.
+  async settle(roomId: string, activeUserIds: readonly string[]): Promise<void> {
+    const config = this.byRoomId.get(roomId);
+    const seats = this.seatsByRoomId.get(roomId);
+    if (!config || !seats) return;
+    const active = seats.filter((userId) => activeUserIds.includes(userId));
+    if (active.length === seats.length) return;
+    const released = seats.filter((userId) => !active.includes(userId));
+
+    await Promise.all(released.map((userId) => this.release(userId, roomId)));
+    this.seatsByRoomId.set(roomId, active);
+    await this.writeCensus(roomId, config, active);
+  }
+
+  // El censo cuenta ASIENTOS QUE SIGUEN JUGANDO, como truco: el que perdió la señal sigue
+  // contando —su reloj corre—, el que se retiró o terminó ya no está en ninguna partida.
+  private async writeCensus(
+    roomId: string,
+    config: PublicMatchConfig,
+    active: readonly string[],
+  ): Promise<void> {
     await this.store.hset(
       CENSUS_KEY,
       roomId,

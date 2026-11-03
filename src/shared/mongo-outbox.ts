@@ -16,7 +16,8 @@ const DUPLICATE_KEY = 11000;
 // LOS DOS ÍNDICES, y el TTL solo si el uso lo pide.
 //
 // `dedupeKey` único es LA idempotencia: no es una consulta previa, es la base rechazando el segundo
-// insert. `{status, _id}` es la consulta de `next()`, que corre una vez por segundo para siempre.
+// insert. `{status, _id}` es la consulta de `next()` y la de `hasPending()`, que corre una vez por
+// segundo para siempre y el índice CUBRE: no lee ningún documento.
 //
 // EL TTL ES OPCIONAL porque un outbox con reconciliación necesitaría sus `SENT` para siempre. Los
 // RESULTADOS vencen (`sentRetentionSeconds`): nadie los reconcilia, y una partida no se cierra dos veces con días de diferencia. El TTL va sobre `sentAt`, que una entrada
@@ -32,6 +33,9 @@ const OUTBOX_INDEXES: IndexDescription[] = [
 // comparable entre procesos. Opcional porque el insert NO lo manda: lo asigna la base.
 export interface OutboxDocument<K extends string = string, P = unknown> extends OutboxRecord<K, P> {
   _id?: ObjectId;
+  // LEGADO: el plazo de reintento por entrada, que causaba bloqueo de cabeza. Lo traen los documentos
+  // escritos antes; nadie lo escribe ni lo lee.
+  nextAttemptAt?: Date;
 }
 
 export class MongoOutboxStore<K extends string = string, P = unknown> implements OutboxStore<K, P> {
@@ -54,8 +58,6 @@ export class MongoOutboxStore<K extends string = string, P = unknown> implements
       status: "PENDING",
       attempts: 0,
       createdAt: now,
-      // NACE VENCIDA: el primer intento es AHORA.
-      nextAttemptAt: now,
     };
     try {
       await (await this.collection()).insertOne(document as OutboxDocument<K, P>);
@@ -77,15 +79,23 @@ export class MongoOutboxStore<K extends string = string, P = unknown> implements
     return new Set(found.map((document) => document.dedupeKey));
   }
 
-  async next(now: Date): Promise<OutboxEntry<K, P> | undefined> {
-    // EL PENDIENTE MÁS VIEJO, y sin filtrar por `nextAttemptAt` en la consulta: con el filtro adentro
-    // saldría el SIGUIENTE cuando el primero todavía espera su reintento. El plazo se compara DESPUÉS.
+  async hasPending(): Promise<boolean> {
+    // CUBIERTA por `status_1__id_1`: filtra por `status`, ordena por `_id` y proyecta sólo `_id`.
+    const found = await (await this.collection()).findOne(
+      { status: "PENDING" },
+      { sort: { _id: 1 }, projection: { _id: 1 } },
+    );
+    return found !== null;
+  }
+
+  async next(): Promise<OutboxEntry<K, P> | undefined> {
+    // EL PENDIENTE MÁS VIEJO, sin mirar `nextAttemptAt` (legado): la espera tras un fallo es del
+    // despachador, y un plazo por entrada bloqueaba a toda la cola detrás de la primera.
     const oldest = await (await this.collection()).findOne(
       { status: "PENDING" },
       { sort: { _id: 1 } },
     );
-    if (!oldest || oldest.nextAttemptAt.getTime() > now.getTime()) return undefined;
-    return entryOf(oldest as WithId<OutboxDocument<K, P>>);
+    return oldest ? entryOf(oldest as WithId<OutboxDocument<K, P>>) : undefined;
   }
 
   async sent(id: string, at: Date): Promise<void> {
@@ -95,13 +105,13 @@ export class MongoOutboxStore<K extends string = string, P = unknown> implements
     );
   }
 
-  async retry(id: string, error: string, nextAttemptAt: Date): Promise<void> {
+  async retry(id: string, error: string): Promise<void> {
     await (await this.collection()).updateOne(
       { _id: new ObjectId(id) },
       {
-        $set: { nextAttemptAt, lastError: error },
+        $set: { lastError: error },
         // LOS INTENTOS SON UN `$inc` DE LA BASE y no `leído + 1`: entre leer y escribir puede haber
-        // otro proceso cuyo lease venció, y el backoff se quedaría clavado en el primer escalón.
+        // otro proceso cuyo lease venció, y la cuenta perdería un intento.
         $inc: { attempts: 1 },
       },
     );
@@ -142,7 +152,6 @@ function entryOf<K extends string, P>(document: WithId<OutboxDocument<K, P>>): O
     status: document.status,
     attempts: document.attempts,
     createdAt: document.createdAt,
-    nextAttemptAt: document.nextAttemptAt,
     sentAt: document.sentAt,
     lastError: document.lastError,
   };

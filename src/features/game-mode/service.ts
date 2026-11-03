@@ -12,6 +12,7 @@ import {
   GameModeWriteBusyError,
   type ProviderCatalog,
   type ProviderCatalogRepository,
+  UnknownProviderError,
   offeredTo,
   visibleTo,
 } from "./core/catalog";
@@ -25,7 +26,8 @@ import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode"
 //    es 403 y no 404. Se lee y se juega; lo editan, lo dan de baja y lo reactivan sólo en Betaso
 //    Games.
 // 3. **Cada proveedor habla por sí mismo**: crea modos propios suyos, se suscribe él, copia para él.
-//    Pedirlo para otro es 403 antes de leer nada. El proveedor sobre el que se actúa llega YA RESUELTO
+//    Pedirlo para otro es 404 `UNKNOWN_PROVIDER` antes de leer nada (otro proveedor no existe para
+//    él, como en la regla 1). El proveedor sobre el que se actúa llega YA RESUELTO
 //    por la frontera HTTP (el del token, o el `?providerId=` de Betaso Games); el chequeo de acá es la
 //    segunda llave, para el día que otro llamador se olvide de la primera.
 //
@@ -87,6 +89,9 @@ function refuseChargedFreeRoom(mode: { isFreeRoom?: boolean; entryFee: number })
 // escrituras.
 const LEASE_TTL_MS = 15_000;
 
+// Cuánto vale la lista de activos que lee el catálogo público (ver `publicActive`).
+export const PUBLIC_MEMO_MS = 5_000;
+
 export class GameModeService {
   // LA COLA DEL PROCESO, Y NO ALCANZA CON EL LEASE. `MongoLease` excluye PROCESOS y no llamadas —su
   // dueño es por proceso, así que el filtro de adquisición matchea por `owner` y dos `POST
@@ -103,10 +108,24 @@ export class GameModeService {
   // está en el camino de una partida.
   private tail: Promise<unknown> = Promise.resolve();
 
+  // LOS ACTIVOS QUE LEE EL CATÁLOGO PÚBLICO, guardados `PUBLIC_MEMO_MS`. `GET /game-modes` lo pide cada
+  // cliente que entra, y es la misma lista para todos: sin esto cada pedido era una consulta a Mongo.
+  // Se guarda la PROMESA y no el valor, así que cien pedidos simultáneos hacen una sola consulta. Se
+  // invalida al entrar y al salir de cada mutación de ESTE proceso; una mutación en otro proceso se ve
+  // a lo sumo `PUBLIC_MEMO_MS` tarde.
+  //
+  // SÓLO LO PÚBLICO: las reglas de las mutaciones (`mutating`) y `GameModeReader.activeByUuid` —con el
+  // que la sala resuelve el modo de una mesa— leen fresco. Una mesa no puede nacer con un modo que se
+  // dio de baja hace cuatro segundos; una lista que lo muestra cuatro segundos de más, sí.
+  private publicMemo:
+    | { readonly at: number; readonly value: Promise<readonly GameMode[]> }
+    | undefined;
+
   constructor(
     private readonly repository: GameModeRepository,
     private readonly catalogs: ProviderCatalogRepository,
     private readonly lease: Lease,
+    private readonly now: () => number = Date.now,
   ) {}
 
   // LAS LECTURAS NO TOMAN EL LEASE, y no es una optimización: un GET público que compitiera por el
@@ -116,15 +135,30 @@ export class GameModeService {
   // LO PÚBLICO SON LOS COMPARTIDOS ACTIVOS, y nada más: un modo propio es la configuración de UN
   // proveedor y no se publica a quien no se identificó. Tampoco viajan los suscriptores.
   async listPublic(): Promise<readonly GameMode[]> {
-    return (await this.repository.active()).filter((mode) => mode.ownerProviderId === null);
+    return (await this.publicActive()).filter((mode) => mode.ownerProviderId === null);
   }
 
   // `undefined` y no un throw, igual que el puerto: desde afuera, un modo dado de baja NO EXISTE, y
   // la frontera HTTP lo convierte en 404. Las mutaciones sí lanzan porque prometen un `GameMode` a
   // secas y no tienen cómo decir "no estaba". Un modo propio tampoco existe desde afuera.
   async getPublic(uuid: string): Promise<GameMode | undefined> {
-    const mode = await this.repository.activeByUuid(uuid);
+    const mode = (await this.publicActive()).find((candidate) => candidate.uuid === uuid);
     return mode?.ownerProviderId === null ? mode : undefined;
+  }
+
+  // Los activos, del memo si tiene menos de `PUBLIC_MEMO_MS`. Una consulta que falla no se guarda: el
+  // próximo pedido vuelve a preguntar en vez de heredar el error durante cinco segundos.
+  private publicActive(): Promise<readonly GameMode[]> {
+    const now = this.now();
+    const memo = this.publicMemo;
+    if (memo && now - memo.at < PUBLIC_MEMO_MS) return memo.value;
+    const value = this.repository.active();
+    const entry = { at: now, value };
+    this.publicMemo = entry;
+    value.catch(() => {
+      if (this.publicMemo === entry) this.publicMemo = undefined;
+    });
+    return value;
   }
 
   // EL CATÁLOGO ENTERO PARA EL ORQUESTADOR, con dueños y suscriptores: es quien arma el catálogo
@@ -146,7 +180,7 @@ export class GameModeService {
   }
 
   // LA FUENTE DEL CATÁLOGO DE UN PROVEEDOR. La lee cualquier rol del proveedor o de Betaso Games; otro
-  // proveedor es 403 (los ids de proveedor no son secretos, la fuente de un competidor sí).
+  // proveedor es 404 UNKNOWN_PROVIDER (regla 3).
   catalogOf(actor: CatalogActor, providerId: string): Promise<ProviderCatalog> {
     try {
       refuseForeign(actor, providerId, "un proveedor sólo ve la fuente de su propio catálogo");
@@ -180,6 +214,7 @@ export class GameModeService {
         );
         if (!owned) {
           throw new GameModeStateConflictError(
+            "OWN_CATALOG_EMPTY",
             `el proveedor ${providerId} no tiene modos propios activos: no puede jugar sólo con los suyos`,
           );
         }
@@ -208,8 +243,8 @@ export class GameModeService {
 
   create(actor: CatalogActor, input: CreateGameMode): Promise<GameMode> {
     // EL DUEÑO SE DECIDE ANTES DE TOCAR NADA: un proveedor crea sólo modos propios suyos —sin el campo,
-    // se lo pone el servicio; con el de otro, o con `null` (compartido), es 403—; Betaso Games crea
-    // compartidos por default o propios del proveedor que nombre.
+    // se lo pone el servicio; con `null` (compartido) es 403 y con el de otro, 404 UNKNOWN_PROVIDER—;
+    // Betaso Games crea compartidos por default o propios del proveedor que nombre.
     let owner: string | null;
     try {
       owner = ownerFor(actor, input.ownerProviderId);
@@ -283,7 +318,10 @@ export class GameModeService {
     return this.mutating(async () => {
       const current = await this.editable(actor, uuid);
       if (!current.isActive) {
-        throw new GameModeStateConflictError(`el modo ${uuid} ya está inactivo`);
+        throw new GameModeStateConflictError(
+          "MODE_ALREADY_INACTIVE",
+          `el modo ${uuid} ya está inactivo`,
+        );
       }
       // SÓLO `isActive`, y por eso no se pasa `current` entero de vuelta: reescribir los demás
       // campos con lo que se acaba de leer convertiría una baja en una edición completa, y pisaría
@@ -300,7 +338,10 @@ export class GameModeService {
     return this.mutating(async () => {
       const current = await this.editable(actor, uuid);
       if (current.isActive) {
-        throw new GameModeStateConflictError(`el modo ${uuid} ya está activo`);
+        throw new GameModeStateConflictError(
+          "MODE_ALREADY_ACTIVE",
+          `el modo ${uuid} ya está activo`,
+        );
       }
       return this.write(uuid, { isActive: true });
     });
@@ -395,10 +436,13 @@ export class GameModeService {
         if (actor.provider !== null && current.ownerProviderId !== actor.provider) {
           throw notFound(uuid);
         }
-        throw new GameModeStateConflictError(`el modo ${uuid} es propio y no tiene suscriptores`);
+        throw new GameModeStateConflictError(
+          "MODE_NOT_SHARED",
+          `el modo ${uuid} es propio y no tiene suscriptores`,
+        );
       }
       if (!current.isActive) {
-        throw new GameModeStateConflictError(`el modo ${uuid} está inactivo`);
+        throw new GameModeStateConflictError("MODE_INACTIVE", `el modo ${uuid} está inactivo`);
       }
       const updated =
         change === "add"
@@ -427,6 +471,7 @@ export class GameModeService {
     );
     if (!others) {
       throw new GameModeStateConflictError(
+        "OWN_CATALOG_EMPTY",
         `el modo ${current.uuid} es el último propio activo de ${owner}, que juega sólo con sus propios (fuente own): primero volvé la fuente a shared`,
       );
     }
@@ -478,14 +523,25 @@ export class GameModeService {
 
   private mutating<T>(work: () => Promise<T>): Promise<T> {
     return this.queued(async () => {
-      const done = await this.lease.within(CATALOG_LEASE, LEASE_TTL_MS, work);
-      // `undefined` ES "NO LO CONSEGUÍ" y es un desenlace NORMAL: lo tiene otro proceso. Sale como
-      // 503 y no como 500 —nadie hizo nada mal y reintentar es la respuesta correcta—. El precio del
-      // contrato está escrito en `shared/mongo-lease.ts`: un `work()` que devolviera `undefined` de
-      // verdad no se distinguiría, y ninguna de estas operaciones lo hace.
-      if (done === undefined) throw new GameModeWriteBusyError("el catálogo está ocupado");
-      return done;
+      // EL MEMO PÚBLICO SE TIRA AL ENTRAR Y AL SALIR: una lectura que empiece durante la escritura
+      // puede guardar el estado de antes, y la de la salida la tira.
+      this.publicMemo = undefined;
+      try {
+        return await this.leased(work);
+      } finally {
+        this.publicMemo = undefined;
+      }
     });
+  }
+
+  private async leased<T>(work: () => Promise<T>): Promise<T> {
+    const done = await this.lease.within(CATALOG_LEASE, LEASE_TTL_MS, work);
+    // `undefined` ES "NO LO CONSEGUÍ" y es un desenlace NORMAL: lo tiene otro proceso. Sale como
+    // 503 y no como 500 —nadie hizo nada mal y reintentar es la respuesta correcta—. El precio del
+    // contrato está escrito en `shared/mongo-lease.ts`: un `work()` que devolviera `undefined` de
+    // verdad no se distinguiría, y ninguna de estas operaciones lo hace.
+    if (done === undefined) throw new GameModeWriteBusyError("el catálogo está ocupado");
+    return done;
   }
 
   // LA COLA, en cuatro líneas. `tail` nunca rechaza —se neutraliza abajo— así que una mutación que
@@ -502,9 +558,11 @@ export class GameModeService {
 }
 
 // LA REGLA 3 en una línea: un proveedor actúa sólo sobre sí mismo; Betaso Games, sobre cualquiera.
+// Otro proveedor no existe para él: 404 `UNKNOWN_PROVIDER`, como el `?providerId=` ajeno que la
+// frontera HTTP ya corta antes (esto es la segunda llave).
 function refuseForeign(actor: CatalogActor, providerId: string, message: string): void {
   if (actor.provider !== null && actor.provider !== providerId) {
-    throw new GameModeForbiddenError(message);
+    throw new UnknownProviderError(message);
   }
 }
 
@@ -512,12 +570,16 @@ function notFound(uuid: string): GameModeNotFoundError {
   return new GameModeNotFoundError(`no existe el modo ${uuid}`);
 }
 
-// EL DUEÑO DE UN MODO NUEVO (regla 3). Un proveedor: el suyo, mande o no el campo; otro —o `null`, que
-// es pedir un compartido— es 403. Betaso Games: el que nombre, o compartido.
+// EL DUEÑO DE UN MODO NUEVO (regla 3). Un proveedor: el suyo, mande o no el campo; `null`, que es pedir
+// un compartido, es 403 (los compartidos los administra Betaso Games); otro proveedor es 404
+// `UNKNOWN_PROVIDER` (no existe para él). Betaso Games: el que nombre, o compartido.
 function ownerFor(actor: CatalogActor, requested: string | null | undefined): string | null {
   if (actor.provider === null) return requested ?? null;
   if (requested === undefined || requested === actor.provider) return actor.provider;
-  throw new GameModeForbiddenError("un proveedor sólo crea modos propios suyos");
+  if (requested === null) {
+    throw new GameModeForbiddenError("un modo compartido lo crea Betaso Games");
+  }
+  throw new UnknownProviderError("un proveedor sólo crea modos propios suyos");
 }
 
 // LA COPIA: los mismos números y niveles que el compartido, con el proveedor de dueño. Campo por campo

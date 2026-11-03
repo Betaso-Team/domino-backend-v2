@@ -1,5 +1,6 @@
 import type { Logger } from "@/logger";
 import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
+import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import { z } from "zod";
@@ -95,7 +96,7 @@ export function historyRoutes({
       // contesta" con "no hay nada" manda al operador a investigar la mesa equivocada.
       const entries = [...(await history.of(params.matchId))].sort((a, b) => a.seq - b.seq);
       if (entries.length === 0) {
-        response.status(404).json({ error: "NOT_FOUND" });
+        sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }
       // El `matchId` que sale es el PARSEADO, no `request.params`: lo que se refleja al

@@ -103,6 +103,9 @@ describe("MongoHistory: escritura", () => {
       entry(1),
       entry(2, { source: "SYSTEM", kind: "EVENT", type: "MATCH_RESOLVED" }),
     ]);
+    // Con la escritura anterior ya hecha: dos lotes del MISMO tick viajan juntos (ver «un `$push`
+    // por trabajo»), así que para ver dos `updateOne` el segundo llega después.
+    await settle();
     history.record([entry(3)]);
     await settle();
 
@@ -161,6 +164,158 @@ describe("MongoHistory: escritura", () => {
       expect.stringContaining("historial"),
       expect.objectContaining({ matchId: "m-1" }),
     );
+  });
+});
+
+// UN `$push` POR TRABAJO DE LA COLA. El comando y sus eventos son dos lotes del mismo tick, y con
+// la escritura anterior todavía en vuelo se apilan más: cada uno era un `updateOne`. El lote se
+// suma al pendiente de la partida hasta que su trabajo arranca y lo sella.
+describe("MongoHistory: un $push por lote pendiente", () => {
+  const seqsOf = (call: unknown[] | undefined) =>
+    (call?.[1] as { $push: { timeline: { $each: HistoryEntry[] } } }).$push.timeline.$each.map(
+      (e) => e.seq,
+    );
+  const ROUND = { roundNumber: 1, endReason: "DOMINO" as const, starterId: "seat-1", hands: [] };
+
+  it("el comando y sus eventos del mismo tick viajan en un solo updateOne, en orden", async () => {
+    const { store, updateOne } = storeWith();
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1)]);
+    history.record([entry(2, { source: "SYSTEM", kind: "EVENT", type: "MATCH_RESOLVED" })]);
+    await settle();
+
+    expect(updateOne).toHaveBeenCalledTimes(1);
+    expect(seqsOf(updateOne.mock.calls[0])).toEqual([1, 2]);
+  });
+
+  it("con la escritura anterior colgada, los lotes que llegan se juntan en el siguiente", async () => {
+    let liberar: (() => void) | undefined;
+    const { store, updateOne } = storeWith();
+    updateOne.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          liberar = () => resolve();
+        }),
+    );
+    const history = new MongoHistory(store, fakeLogger());
+    history.record([entry(1)]);
+    await settle();
+    expect(updateOne).toHaveBeenCalledTimes(1);
+
+    history.record([entry(2)]);
+    history.record([entry(3)]);
+    history.record([entry(4)]);
+    await settle();
+    // Todavía no: la cola es por partida y la primera no volvió.
+    expect(updateOne).toHaveBeenCalledTimes(1);
+
+    liberar?.();
+    await history.drain();
+    expect(updateOne).toHaveBeenCalledTimes(2);
+    expect(seqsOf(updateOne.mock.calls[0])).toEqual([1]);
+    expect(seqsOf(updateOne.mock.calls[1])).toEqual([2, 3, 4]);
+  });
+
+  // EL DESENLACE LLEGA DETRÁS DE LA ENTRADA QUE LO CUENTA, y lo que se graba después del cierre no
+  // se cuela delante: la mano y el cierre sellan el pendiente antes de encolarse.
+  it("la mano y el cierre sellan: lo de antes va antes y lo de después, después", async () => {
+    const { store, updateOne } = storeWith();
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1)]);
+    history.round("m-1", ROUND);
+    history.record([entry(2)]);
+    history.record([entry(3)]);
+    await history.drain();
+
+    const calls = updateOne.mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(seqsOf(calls[0])).toEqual([1]);
+    expect(calls[1]?.[1].$push.rounds).toEqual(ROUND);
+    expect(seqsOf(calls[2])).toEqual([2, 3]);
+  });
+
+  it("la marca de estadísticas también sella", async () => {
+    const { store, updateOne } = storeWith();
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1)]);
+    const marca = history.settled("m-1");
+    history.record([entry(2)]);
+    await marca;
+    await history.drain();
+
+    const calls = updateOne.mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(seqsOf(calls[0])).toEqual([1]);
+    expect(calls[1]?.[1]).toEqual({ $unset: { statsPending: "" } });
+    expect(seqsOf(calls[2])).toEqual([2]);
+  });
+
+  it("cada partida junta solo lo suyo", async () => {
+    const { store, updateOne } = storeWith();
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1)]);
+    history.record([entry(1, { matchId: "m-2" })]);
+    history.record([entry(2)]);
+    await history.drain();
+
+    expect(updateOne).toHaveBeenCalledTimes(2);
+    expect(updateOne.mock.calls[0]?.[0]).toEqual({ matchId: "m-1" });
+    expect(seqsOf(updateOne.mock.calls[0])).toEqual([1, 2]);
+    expect(seqsOf(updateOne.mock.calls[1])).toEqual([1]);
+  });
+
+  it("el drenado espera también a lo pendiente que todavía no salió", async () => {
+    const { store, updateOne } = storeWith();
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1)]);
+    history.record([entry(2)]);
+    await history.drain();
+
+    expect(updateOne).toHaveBeenCalledTimes(1);
+    expect(seqsOf(updateOne.mock.calls[0])).toEqual([1, 2]);
+  });
+
+  // UN LOTE FALLIDO SE PIERDE Y SE LOGUEA, como antes; el pendiente quedó sellado igual, así que lo
+  // que llega después viaja en su propio `updateOne` y no queda pegado a un trabajo muerto.
+  it("un fallo no envenena: el lote siguiente viaja en su propia escritura", async () => {
+    const { store, updateOne } = storeWith();
+    updateOne.mockRejectedValueOnce(new Error("sin conexión"));
+    const logger = fakeLogger();
+    const history = new MongoHistory(store, logger);
+
+    history.record([entry(1)]);
+    history.record([entry(2)]);
+    await history.drain();
+    history.record([entry(3)]);
+    await history.drain();
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("lote"),
+      expect.objectContaining({ matchId: "m-1", entries: 2 }),
+    );
+    expect(updateOne).toHaveBeenCalledTimes(2);
+    expect(seqsOf(updateOne.mock.calls[1])).toEqual([3]);
+  });
+
+  // Y SI FALLA ANTES DE ESCRIBIR —la colección no se pudo preparar—, el pendiente también queda
+  // sellado: si no, todo lo que llegara después se sumaría a un arreglo que nadie va a mandar.
+  it("un fallo al pedir la colección deja el pendiente sellado", async () => {
+    const { store, updateOne, collection } = storeWith();
+    collection.mockRejectedValueOnce(new Error("mongo caído"));
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1)]);
+    await history.drain();
+    history.record([entry(2)]);
+    await history.drain();
+
+    expect(updateOne).toHaveBeenCalledTimes(1);
+    expect(seqsOf(updateOne.mock.calls[0])).toEqual([2]);
   });
 });
 
@@ -336,7 +491,9 @@ describe("MongoHistory: la cabecera y el cierre", () => {
     const logger = fakeLogger();
     const history = new MongoHistory(store, logger);
 
+    // Dos escrituras de verdad: dos lotes del mismo tick viajarían juntos en una.
     history.record([entry(1)]);
+    await history.drain();
     history.record([entry(2)]);
     await history.drain();
 

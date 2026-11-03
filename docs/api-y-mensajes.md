@@ -30,6 +30,41 @@ sentó, normalizado con `trim()`.
 El cliente no envía `playerId`: el handler lo toma del asiento autenticado. Cada payload pasa por un
 decoder estricto antes de alcanzar el comando.
 
+## Mensajes del servidor
+
+Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
+
+| Tipo | A quién | Payload | Cuándo |
+|---|---|---|---|
+| `config` | Al que entra o vuelve | La config pública de la mesa más `serverNow` (forma abajo) | Al final de cada entrada (`onJoin`) y de cada reconexión (`onReconnect`) |
+| `events` | Toda la mesa | Lista de eventos del motor y de plataforma (`ROUND_STARTED`, `MATCH_RESOLVED`, `PLAYER_RECONNECTED`…) | Cada vez que la partida produce hechos |
+| `illegal` | El que mandó el mensaje | `{ code, detail? }`: `code` es el de la regla violada, `MALFORMED` (con `detail`) o `UNKNOWN_COMMAND` | Su mensaje no prosperó; el estado no cambió |
+| `matchCancelled` | Toda la mesa | `{ reason: "CHARGE_REJECTED" }` | El orquestador no cobró la entrada; la sala se cierra sin arrancar |
+
+**`config`** trae lo mismo que `GET /config/:roomId`, sin pedirlo por HTTP:
+
+```ts
+{
+  matchId: string;
+  gameModeId: string;
+  seats: string[];              // ids opacos: "seat-1", "seat-2"…
+  pointsToWin: number;
+  entryFee: number;             // UC completas
+  prize: number;                // UC completas
+  betLevels: { level: number; extra: number; additionalPoints: number }[]; // [] = no ofrece aumentar
+  isFreeRoom: boolean;
+  enableBots: boolean;
+  timeouts: { turnMs: number; extraTimeMs: number; dealingMs: number; betResponseMs: number };
+  serverNow: number;            // epoch ms del servidor al mandarlo, para el desfase de reloj
+}
+```
+
+Nunca lleva el `seed`, ni identidad, moneda o tasa. Lo que la sala manda en `onJoin` Colyseus lo
+encola hasta que el cliente confirma la entrada, así que llega apenas resuelve el `join` y antes de
+cualquier `events` posterior. El handler se registra **justo después del `join`, sin un `await` en
+el medio** (por ejemplo, no después de `waitForInitialState()`): si no, el mensaje llega antes que el
+handler. Un cliente que no lo escucha solo ve un aviso del SDK.
+
 ## Estado visible
 
 `StateView` filtra el árbol por cliente:
@@ -49,11 +84,17 @@ decoder estricto antes de alcanzar el comando.
 |---|---|
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
-| `GET /config/:roomId` | Config pública de una mesa (con `betLevels: [{ level, additionalPoints }]`, vacío si no ofrece aumentar) y `serverNow`; nunca devuelve el seed |
+| `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
 | `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`). Página de 1 a 50, 10 por defecto |
 | `GET /game-modes` | Modos **compartidos** activos del catálogo, con el DTO de siempre (sin dueño ni suscriptores) |
 | `GET /game-modes/:uuid` | Un modo compartido activo; uno dado de baja o propio de un proveedor responde 404 |
+
+Los dos `GET /game-modes` responden los `200` con `Cache-Control: public, max-age=10` (el `404`, con
+`no-store`), y el servidor guarda la lista de activos 5 s por proceso: una edición hecha en otra
+instancia puede tardar hasta 5 s en verse en ésta, más lo que la guarde un caché intermedio. La
+instancia que atiende la edición la ve en el acto. Abrir una mesa nunca usa esa lista: lee el modo
+fresco.
 
 Todas las respuestas HTTP exponen el header `Date`, que permite recalcular el desfase del reloj del
 cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
@@ -65,16 +106,17 @@ Estas rutas requieren una de dos credenciales:
 - el header `x-internal-api-key` con la llave de administración (scripts y soporte). Vale como un
   admin de **Betaso Games** con rol `admin`;
 - `Authorization: Bearer <token>` con el token de admin que billing-auth emite cuando un admin inicia
-  sesión (`POST /v1/admins/login` de billing-auth): ES256, audiencia `betaso-games-admin` y
+  sesión (`POST /v1/auth/login` de billing-auth): ES256, audiencia `betaso-games-admin` y
   `typ: admin`. Sus claims `prv` (el proveedor del admin; `null` es Betaso Games) y `role` (`admin` o
   `support`) dicen qué abre, y son **obligatorias**: un token sin `prv` (texto o `null` explícito) o
   sin `role` es `401`, igual que un rol desconocido o un `prv` vacío o que no es texto.
 
-Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas.
+Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas. Los errores de todas
+salen `{ code, detail? }` (ver [«Errores»](#errores)).
 
 **Quién entra.** El default es el cerrado: una ruta es de Betaso Games y de escritura salvo que diga
 lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las rutas del catálogo que
-acotan su ámbito; en todas las demás recibe `403 {"error":"FORBIDDEN"}`.
+acotan su ámbito; en todas las demás recibe `403 { code: "FORBIDDEN" }`.
 
 | Rutas | Betaso Games `admin` (y la llave) | Betaso Games `support` | Proveedor `admin` | Proveedor `support` |
 |---|---|---|---|---|
@@ -90,14 +132,14 @@ acotan su ámbito; en todas las demás recibe `403 {"error":"FORBIDDEN"}`.
 
 **El proveedor sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo. Un admin de
 proveedor no lo nombra: es el suyo (un `?providerId=` igual al suyo se acepta; uno distinto responde
-`403 {"status":"error","code":"FORBIDDEN",…}`). Betaso Games (token sin `prv`, o la llave) lo nombra
-con `?providerId=`, obligatorio en las rutas que actúan sobre un proveedor (suscripción, copias,
-fuente): sin él, `400 {"status":"error","code":"PROVIDER_REQUIRED",…}`. En `GET /game-modes/admin` es
-opcional.
+`404 { code: "UNKNOWN_PROVIDER" }`: otro proveedor no existe para él, como sus modos propios). Betaso
+Games (token sin `prv`, o la llave) lo nombra con `?providerId=`, obligatorio en las rutas que actúan
+sobre un proveedor (suscripción, copias, fuente): sin él, `400 { code: "PROVIDER_REQUIRED", detail }`.
+En `GET /game-modes/admin` es opcional.
 
 Dentro del catálogo, un modo **propio de otro proveedor** no existe para un proveedor: toda operación
-sobre él responde `404`. Un modo **compartido** no es secreto (lo lista el catálogo público): tocarlo
-sin poder responde `403 {"status":"error","message":…}`.
+sobre él responde `404 { code: "MODE_NOT_FOUND" }`. Un modo **compartido** no es secreto (lo lista el
+catálogo público): tocarlo sin poder responde `403 { code: "FORBIDDEN", detail }`.
 
 | Método y ruta | Uso |
 |---|---|
@@ -124,8 +166,10 @@ sin poder responde `403 {"status":"error","message":…}`.
 ### Modos con dueño y suscripciones
 
 Cada modo tiene un dueño, `ownerProviderId`: `null` es un modo **compartido** de Betaso Games; un id es
-un modo **propio** de ese proveedor, que sólo juegan sus jugadores. Los compartidos llevan además
-`subscribers`, los proveedores que los juegan:
+un modo **propio** de ese proveedor, que sólo juegan sus jugadores. Un admin de proveedor crea sólo
+modos propios suyos: sin el campo se lo pone el servicio; con `null` es `403 FORBIDDEN` y con el id de
+otro proveedor, `404 UNKNOWN_PROVIDER` (lo de otro proveedor no existe para él). Los compartidos llevan
+además `subscribers`, los proveedores que los juegan:
 
 - **La lista es explícita.** Un compartido se ofrece sólo a los proveedores de su lista; un documento
   sin el campo se lee `[]`, igual que un compartido nuevo: no se ofrece a nadie hasta que se
@@ -192,12 +236,9 @@ o Betaso Games con `?providerId=`): la respuesta suma `source` junto a `data`. B
 (quedaría sin lobby). Volver a `shared` siempre se puede. Y al revés: con la fuente en `own`, dar de baja (o
 desactivar por `PUT` con `isActive: false`) el **último** modo propio activo del proveedor es `409`;
 primero hay que volver a `shared`. Un proveedor sólo lee y cambia la suya
-(`403` sobre otra); `support` lee y no cambia.
+(`404 UNKNOWN_PROVIDER` sobre otra); `support` lee y no cambia.
 
-Códigos del catálogo: `400 {code:"MALFORMED"}` forma inválida, `400 {status:"error"}` mesa gratis con
-entrada, `400 {code:"PROVIDER_REQUIRED"}` Betaso Games sin `?providerId=`, `403` ámbito, `404` no existe o no lo ve, `409` duplicado o choque de estado (ya inactivo,
-propio sin suscriptores, `own` sin modos propios activos), `503` el catálogo está ocupado (otro proceso tiene el lease;
-reintentar).
+Los códigos del catálogo, ruta por ruta, están en [«Errores»](#errores).
 
 ### El registro de cada partida
 
@@ -266,19 +307,19 @@ un rango vacío, no un error.
   algún filtro se cuenta hasta 10 000 (`totalExact: true`, o `total: 10000` y `totalExact: false` si
   hay más); con `after` no se cuenta (`total: null`, `totalExact: false`).
 - **Plazo**: cada consulta tiene 5 s. Si la base no contesta a tiempo:
-  `503 { status: "error", message: "La búsqueda tardó demasiado; acota el rango de fechas" }`.
+  `503 { code: "MATCH_LIST_TIMEOUT", detail: "La búsqueda tardó demasiado; acota el rango de fechas" }`.
 
 Cada fila es un resumen: sin `timeline` ni `rounds`. Un documento viejo aparece con lo que tiene
 (`_id`, `matchId`, `game`, `createdAt`, `updatedAt`) y sale en todo listado que no filtre por sala.
 
 **`GET /internal/matches/:matchId`** — `200 { status: "success", data: <documento> }`, con el `_id`
-como texto y `rounds`/`timeline` al final; `404 { status: "error", message: "Partida no encontrada" }`.
+como texto y `rounds`/`timeline` al final; `404 { code: "MATCH_NOT_FOUND" }`.
 
 **`GET /game-data/:roomId`** — el contrato del backend principal, igual que en truco: `200` con el
-documento pelado (sin envelope y sin `_id`) y `404 { error: "MATCH_NOT_FOUND" }`. Busca por `roomId` y,
+documento pelado (sin envelope y sin `_id`) y `404 { code: "MATCH_NOT_FOUND" }`. Busca por `roomId` y,
 si no, por `matchId` (los documentos viejos no guardaban la sala).
 
-Las tres van con la llave o el token de admin; sin credencial, `401 { error: "UNAUTHORIZED" }` antes de
+Las tres van con la llave o el token de admin; sin credencial, `401 { code: "UNAUTHORIZED" }` antes de
 mirar la forma. El `POST /internal/matches` del orquestador es otra ruta, con su llave.
 
 **Niveles de aumento de un modo.** `POST` y `PUT /game-modes` aceptan `betLevels`:
@@ -296,10 +337,10 @@ con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Cuatro rutas que sólo usa el orquestador de Betaso Juegos; las tres de las mesas son la única puerta
+Cinco rutas que sólo usa el orquestador de Betaso Juegos; las de las mesas son la única puerta
 de entrada a una partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
-Un `401 {"error":"UNAUTHORIZED"}` es una llave ausente o equivocada, y se decide ANTES de mirar el
+Un `401 { code: "UNAUTHORIZED" }` es una llave ausente o equivocada, y se decide ANTES de mirar el
 cuerpo.
 
 **`POST /internal/matches`** abre una mesa. Cuerpo (`CreateMatchRequest`, estricto: una clave de más
@@ -312,9 +353,9 @@ Betaso).
 |---|---|---|
 | `201` | `{ status, data: { roomId, seats: [{ userId, reservation }] } }` | La sala nació; cada jugador consume su `reservation` |
 | `400` | `{ code: "MALFORMED", detail }` | El cuerpo no cumple la forma |
-| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `422` | `{ error: "UNKNOWN_GAME_MODE" }`, `"UNSUPPORTED_GAME_MODE"` o `"SEAT_COUNT_MISMATCH"` | La sala rechazó la mesa: modo inexistente o dado de baja, 4P, o cantidad que no coincide con el modo |
-| `500` | | Cualquier otra falla es nuestra |
+| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `422` | `{ code: "UNKNOWN_GAME_MODE" }`, `"UNSUPPORTED_GAME_MODE"` o `"SEAT_COUNT_MISMATCH"` | La sala rechazó la mesa: modo inexistente o dado de baja, 4P, o cantidad que no coincide con el modo |
+| `500` | `{ code: "INTERNAL" }` | Cualquier otra falla es nuestra |
 
 **`POST /internal/players/:userId/seat`** devuelve el asiento de quien sigue jugando (sin cuerpo).
 
@@ -322,9 +363,20 @@ Betaso).
 |---|---|---|
 | `200` | `{ status, data: { matchId, reservation } }` | Sigue en una mesa; el `matchId` es el del orquestador |
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
-| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `404` | `{ error: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
-| `500` | | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
+| `500` | `{ code: "INTERNAL" }` | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+
+**`GET /internal/players/:userId/match`** dice en qué mesa está sentado un jugador, **sin reservar
+asiento**: dos lecturas del registro compartido y ninguna llamada a Colyseus. Es lo que el orquestador
+pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `POST .../seat`.
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status: "success", data: { matchId, roomId } }` | Sigue en una mesa viva; el `matchId` es el del orquestador |
+| `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
+| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló) |
 
 **`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
 orquestador lo muestra en los números de su lobby.
@@ -332,7 +384,7 @@ orquestador lo muestra en los números de su lobby.
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
 | `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }] } }` | Siempre; un modo sin nadie jugando no aparece |
-| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 
 **`GET /internal/game-modes`** devuelve, en una sola lectura, lo que el orquestador necesita para
 armar el catálogo efectivo de cada proveedor: los modos activos —compartidos y propios— con el DTO de
@@ -356,7 +408,7 @@ proveedor ausente del mapa juega el compartido suscrito. Hoy el único valor pos
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
 | `200` | `{ status, data: [GameModeDTO & { ownerProviderId, subscribers }], catalogs: { [providerId]: "own" } }` | Siempre |
-| `401` | `{ error: "UNAUTHORIZED" }` | Llave ausente o equivocada (la del panel tampoco la abre) |
+| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada (la del panel tampoco la abre) |
 
 ⚠ **El dominó no verifica el proveedor al abrir una mesa.** `POST /internal/matches` resuelve el modo
 activo por uuid sin mirar su dueño: que un jugador sólo use los modos de su proveedor lo garantiza el
@@ -371,7 +423,9 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
 - **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
   (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
   cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
-  `CHARGE_REJECTED`.
+  `CHARGE_REJECTED`. El plazo del cliente HTTP cubre la respuesta entera, cabeceras y cuerpo, y al
+  vencer corta la conexión: un orquestador que manda las cabeceras y se cuelga en el cuerpo también es
+  un plazo vencido, y la mesa no queda esperando el cobro.
 - **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
   anula (`MULTIPLIER_REVOKED`).
 - **El resultado** sale por un outbox durable al exchange `betaso_games` (broker y vhost de
@@ -397,6 +451,67 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
 
 El contrato completo vive en el monorepo del orquestador:
 `docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`.
+
+## Errores
+
+**Todo error HTTP del dominó es `{ code, detail? }`.** `code` es una constante en mayúsculas que el
+cliente compara; `detail`, cuando viaja, es texto para una persona y no se parsea. Es el mismo
+vocabulario que los rechazos del socket (`{ code: "MALFORMED", detail }`). Las respuestas de éxito no
+cambian (`{ status: "success", data }` del catálogo y del panel, `{ status: "success", message }` de
+la baja y la reactivación), y `/health` y `/ready` siguen siendo sondas del balanceador con su propia
+forma (`503 { status: "not-ready", missing }`).
+
+**Comunes a toda ruta** (no se repiten abajo):
+
+| Estado | `code` | Cuándo |
+|---|---|---|
+| `400` | `MALFORMED` (+ `detail`) | El path, el query o el cuerpo no cumplen la forma, o el cuerpo no es JSON válido |
+| `413` | `PAYLOAD_TOO_LARGE` | El cuerpo pasa el límite del parser de JSON |
+| `500` | `INTERNAL` | Un bug nuestro; el detalle queda en el log, nunca en la respuesta |
+
+**Comunes a las rutas con credencial:** `401 UNAUTHORIZED` (sin credencial, o una inválida: llave
+equivocada, token vencido, sin `prv` o sin `role`), y en las del panel `403 FORBIDDEN` (la credencial
+vale pero esta ruta no abre a ese rol o a ese proveedor; ver «Quién entra»). La credencial se decide
+antes de mirar la forma.
+
+| Ruta | Códigos propios |
+|---|---|
+| `GET /config/:roomId` | `404 ROOM_NOT_FOUND` |
+| `GET /matches/:roomId` | `401 UNAUTHORIZED`, `404 ROOM_NOT_FOUND` |
+| `GET /me/matches` | `401 UNAUTHORIZED`, `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
+| `GET /me/stats` | `401 UNAUTHORIZED`, `503 STATS_TIMEOUT` (+ `detail`) |
+| `GET /game-modes` | — |
+| `GET /game-modes/:uuid` | `404 MODE_NOT_FOUND` |
+| `GET /internal/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
+| `GET /internal/matches/:matchId` | `404 MATCH_NOT_FOUND` |
+| `GET /internal/matches/:matchId/history` | `404 MATCH_NOT_FOUND` |
+| `GET /game-data/:roomId` | `404 MATCH_NOT_FOUND` |
+| `GET /internal/players/:userId/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
+| `GET /game-modes/admin[?providerId=]` | `404 UNKNOWN_PROVIDER` |
+| `GET /game-modes/admin/:uuid` | `404 MODE_NOT_FOUND` |
+| `POST /game-modes` | `400 FREE_ROOM_WITH_ENTRY`, `403 FORBIDDEN` (un proveedor pide un compartido, `ownerProviderId: null`), `404 UNKNOWN_PROVIDER` (un proveedor crea para otro), `409 MODE_DUPLICATE`, `503 CATALOG_BUSY` |
+| `PUT /game-modes/:uuid` | `400 FREE_ROOM_WITH_ENTRY`, `403 FORBIDDEN` (un proveedor sobre un compartido), `404 MODE_NOT_FOUND`, `409 MODE_DUPLICATE`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
+| `DELETE /game-modes/:uuid` | `403 FORBIDDEN`, `404 MODE_NOT_FOUND`, `409 MODE_ALREADY_INACTIVE`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
+| `GET /game-modes/reactive/:uuid` | `403 FORBIDDEN`, `404 MODE_NOT_FOUND`, `409 MODE_ALREADY_ACTIVE`, `503 CATALOG_BUSY` |
+| `PUT`/`DELETE /game-modes/:uuid/subscription[?providerId=]` | `400 PROVIDER_REQUIRED`, `404 UNKNOWN_PROVIDER`, `404 MODE_NOT_FOUND`, `409 MODE_NOT_SHARED`, `409 MODE_INACTIVE`, `503 CATALOG_BUSY` |
+| `POST /game-modes/copies[?providerId=]` | `400 PROVIDER_REQUIRED`, `404 UNKNOWN_PROVIDER`, `503 CATALOG_BUSY` |
+| `PUT /game-modes/source[?providerId=]` | `400 PROVIDER_REQUIRED`, `404 UNKNOWN_PROVIDER`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
+| `GET`/`PATCH`/`DELETE /internal/settings/:section` | `404 SETTINGS_SECTION_NOT_FOUND` |
+| `GET /internal/settings` | — |
+| `POST /internal/matches` (orquestador) | `422 UNKNOWN_GAME_MODE` \| `UNSUPPORTED_GAME_MODE` \| `SEAT_COUNT_MISMATCH` |
+| `POST /internal/players/:userId/seat` (orquestador) | `404 NO_LIVE_MATCH` |
+| `GET /internal/players/:userId/match` (orquestador) | `404 NO_LIVE_MATCH` |
+| `GET /internal/census` (orquestador) | — |
+| `GET /internal/game-modes` (orquestador) | — |
+
+Los `409`, `403`, `400 FREE_ROOM_WITH_ENTRY` y `503 CATALOG_BUSY` del catálogo llevan en `detail` el
+mensaje del servicio (por ejemplo, «el modo … es el último propio activo de parley…: primero volvé la
+fuente a shared»). Los `404` no llevan `detail`: un modo, una partida o un proveedor de otro proveedor
+responden igual que uno que no existe.
+
+Fuera de esta tabla quedan las rutas que no se registran (sin `ADMIN_API_KEY` u
+`ORCHESTRATOR_API_KEY`) y cualquier path desconocido: los contesta el 404 por defecto de Express, en
+HTML.
 
 ## Eventos y salidas
 

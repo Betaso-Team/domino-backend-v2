@@ -330,6 +330,10 @@ export class MongoHistory
   // partida en dos filas. Fija también el ORDEN de las escrituras, que es cómo se leen los arreglos.
   // Por proceso alcanza: una partida vive en una sala, y una sala en un proceso.
   private readonly writing = new Map<string, Promise<void>>();
+  // EL LOTE PENDIENTE DE CADA PARTIDA: entradas ya encoladas en un trabajo que todavía no salió.
+  // `record` suma acá mientras no esté sellado (ver `seal`). Se vacía solo: cada pendiente tiene
+  // un trabajo en la cola que lo sella al correr.
+  private readonly unsealed = new Map<string, HistoryEntry[]>();
   // LOS LOTES QUE TODAVÍA ESTÁN VIAJANDO. Es lo único que hace falta para que el apagado
   // pueda esperarlos, y es un `Set` y no un contador porque lo que se espera son las
   // promesas mismas.
@@ -358,6 +362,7 @@ export class MongoHistory
   // que falta se completa.
   open(matchId: string, opening: MatchOpening): void {
     const now = this.now();
+    this.seal(matchId);
     this.write(matchId, "no se pudo grabar el inicio", {}, (collection) =>
       collection.updateOne(
         { matchId },
@@ -387,6 +392,13 @@ export class MongoHistory
   // Devolver la promesa "por si alguien quiere esperarla" rompería el contrato de a poco:
   // el primer llamador que le ponga `await` mete la latencia de Mongo dentro del manejo de
   // un mensaje del socket, que es el camino sincrónico que `architecture.test.ts` protege.
+  //
+  // UN `$push` POR TRABAJO DE LA COLA, no uno por lote. Un comando produce dos lotes en el mismo
+  // tick —el comando y sus eventos—, y con la cola ocupada se apilan más: cada uno era un
+  // `updateOne` propio. Ahora el lote se suma al PENDIENTE de la partida si hay uno sin sellar, y
+  // solo el primero encola el trabajo; el trabajo sella el pendiente al empezar y lo
+  // manda entero con un solo `$each`. Lo que llega después del sello abre un pendiente nuevo, con su
+  // propio trabajo detrás del anterior: nada se pierde ni se desordena.
   record(entries: readonly HistoryEntry[]): void {
     if (entries.length === 0) return;
     // Todas las entradas de un lote son de la misma partida: las arma `MatchHistory`, que es
@@ -394,29 +406,46 @@ export class MongoHistory
     // caso que la clase de arriba no puede producir.
     const matchId = entries[0]?.matchId;
     if (!matchId) return;
-    const now = this.now();
-    this.write(matchId, "no se pudo grabar el lote", { entries: entries.length }, (collection) =>
-      collection.updateOne(
-        { matchId },
-        {
-          // `$push` con `$each` y NUNCA `$set` sobre la timeline: cada lote se agrega al final,
-          // que es lo que hace que el `seq` siga siendo el orden. Con `$set` el documento
-          // quedaría con el último lote y el historial sería siempre la última jugada.
-          $push: { timeline: { $each: entries.map(storedEntryOf) } },
-          $set: { updatedAt: now },
-          // La cabecera de la FILA se escribe UNA SOLA VEZ, con la primera escritura. `$setOnInsert`
-          // y no `$set` porque describe el nacimiento del documento: con `$set`, `createdAt`
-          // avanzaría con cada jugada y dejaría de ser el instante en que la partida empezó a
-          // grabarse.
-          $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
-        },
-        { upsert: true },
-      ),
+    const open = this.unsealed.get(matchId);
+    if (open) {
+      open.push(...entries);
+      return;
+    }
+    const batch = [...entries];
+    this.unsealed.set(matchId, batch);
+    this.write(
+      matchId,
+      "no se pudo grabar el lote",
+      () => ({ entries: batch.length }),
+      (collection) => {
+        const now = this.now();
+        return collection.updateOne(
+          { matchId },
+          {
+            // `$push` con `$each` y NUNCA `$set` sobre la timeline: cada lote se agrega al final,
+            // que es lo que hace que el `seq` siga siendo el orden. Con `$set` el documento
+            // quedaría con el último lote y el historial sería siempre la última jugada.
+            $push: { timeline: { $each: batch.map(storedEntryOf) } },
+            $set: { updatedAt: now },
+            // La cabecera de la FILA se escribe UNA SOLA VEZ, con la primera escritura. `$setOnInsert`
+            // y no `$set` porque describe el nacimiento del documento: con `$set`, `createdAt`
+            // avanzaría con cada jugada y dejaría de ser el instante en que la partida empezó a
+            // grabarse.
+            $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
+          },
+          { upsert: true },
+        );
+      },
+      // EL SELLO, al empezar el trabajo y antes que nada que pueda fallar (pedir la colección
+      // incluido): desde acá lo que llegue abre un pendiente nuevo, y este arreglo ya no cambia
+      // mientras viaja. Un trabajo que falla antes de escribir igual deja el pendiente sellado.
+      () => this.seal(matchId, batch),
     );
   }
 
   round(matchId: string, round: ClosedRound): void {
     const now = this.now();
+    this.seal(matchId);
     this.write(matchId, "no se pudo grabar la mano", { roundNumber: round.roundNumber }, (c) =>
       c.updateOne(
         { matchId },
@@ -436,6 +465,7 @@ export class MongoHistory
    */
   close(matchId: string, closing: MatchClosing): void {
     const now = this.now();
+    this.seal(matchId);
     this.write(matchId, "no se pudo grabar el cierre", { status: closing.status }, (collection) =>
       collection.updateOne(
         { matchId },
@@ -580,6 +610,7 @@ export class MongoHistory
   // sube a quien llama (el aplicador lo loguea y lo reintenta el barrido). Sin documento o sin marca,
   // `updateOne` no hace nada.
   settled(matchId: string): Promise<void> {
+    this.seal(matchId);
     return this.queued(matchId, async () => {
       await (await this.collection()).updateOne({ matchId }, { $unset: { statsPending: "" } });
     });
@@ -592,13 +623,19 @@ export class MongoHistory
   private write(
     matchId: string,
     failure: string,
-    detail: Record<string, unknown>,
+    detail: Record<string, unknown> | (() => Record<string, unknown>),
     update: (collection: Collection<MatchHistoryDocument>) => Promise<unknown>,
+    start?: () => void,
   ): void {
     const writing = this.queued(matchId, async () => {
+      start?.();
       await update(await this.collection());
     }).catch((error) =>
-      this.logger.error(`historial: ${failure}`, { matchId, ...detail, error: String(error) }),
+      this.logger.error(`historial: ${failure}`, {
+        matchId,
+        ...(typeof detail === "function" ? detail() : detail),
+        error: String(error),
+      }),
     );
     this.inFlight.add(writing);
     void writing.finally(() => this.inFlight.delete(writing));
@@ -619,6 +656,16 @@ export class MongoHistory
         if (this.writing.get(matchId) === next) this.writing.delete(matchId);
       });
     return next;
+  }
+
+  // SELLA EL PENDIENTE DE UNA PARTIDA: lo que `record` agregue desde acá abre otro, con su trabajo
+  // DETRÁS del que se está encolando. La cabecera, la mano, el cierre y la marca de estadísticas
+  // sellan antes de encolarse, así que un lote grabado antes que ellos viaja antes que ellos —el
+  // desenlace llega detrás de la entrada que lo cuenta— y uno grabado después, después. Con
+  // `batch`, sella solo si el pendiente sigue siendo ése: el trabajo de un lote no le puede cerrar
+  // el pendiente a otro.
+  private seal(matchId: string, batch?: HistoryEntry[]): void {
+    if (batch === undefined || this.unsealed.get(matchId) === batch) this.unsealed.delete(matchId);
   }
 
   private collection(): Promise<Collection<MatchHistoryDocument>> {
