@@ -304,8 +304,8 @@ describe("recordRoutes: lo que contestan", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      status: "error",
-      message: "La búsqueda tardó demasiado; acota el rango de fechas",
+      code: "MATCH_LIST_TIMEOUT",
+      detail: "La búsqueda tardó demasiado; acota el rango de fechas",
     });
   });
 
@@ -339,7 +339,7 @@ describe("recordRoutes: lo que contestan", () => {
     const response = await get(`${base}/internal/matches/no-existe`);
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ status: "error", message: "Partida no encontrada" });
+    expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
   });
 
   // EL CONTRATO DEL BACKEND PRINCIPAL (truco `4472332`): el documento pelado, sin envelope ni `_id`.
@@ -362,7 +362,7 @@ describe("recordRoutes: lo que contestan", () => {
     const response = await get(`${base}/game-data/no-existe`);
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "MATCH_NOT_FOUND" });
+    expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
   });
 
   // LA LLAVE PRIMERO: sin ella las tres contestan 401, y antes de validar la forma.

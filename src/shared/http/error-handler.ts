@@ -1,5 +1,6 @@
 import type { Logger } from "@/logger";
 import type { ErrorRequestHandler } from "express";
+import { sendError } from "./errors";
 
 // LA RED de la capa HTTP: lo que un handler tiró y nadie manejó. Sin esto, Express responde
 // su página de error HTML por defecto —con el stack adentro mientras `NODE_ENV` no sea
@@ -8,8 +9,8 @@ import type { ErrorRequestHandler } from "express";
 // construye el transporte de Colyseus (`WebSocketTransport.getExpressApp`) PELADO: sin
 // parser de cuerpo y sin manejador de errores. Nadie más iba a poner esto.
 //
-// Acá sale un JSON con la misma forma que el resto de la capa (`{ error: ... }`, como el 404
-// y el 401 de las rutas internas) y el detalle se queda en el log del servidor: un 500 es un BUG
+// Acá sale un JSON con la misma forma que el resto de la capa (`{ code }`, ver `./errors.ts`) y
+// el detalle se queda en el log del servidor: un 500 es un BUG
 // NUESTRO, así que el cliente no necesita saber cuál — y decírselo sería filtrar la cocina,
 // que con plata de por medio es el nombre técnico de un vector.
 //
@@ -34,12 +35,33 @@ export function httpErrorHandler(logger: Logger): ErrorRequestHandler {
       next(error);
       return;
     }
+    // UN CUERPO QUE NO ES JSON NO ES UN BUG NUESTRO: `express.json()` lo rechaza antes de que
+    // corra ninguna ruta, con `type` y `status` puestos por body-parser. Es un 400 `MALFORMED` como
+    // el de `validated` —el cliente mandó algo con forma imposible—, no un 500 que mande a
+    // buscar un bug que no existe. Un cuerpo demasiado grande, igual: 413.
+    const parserFailure = bodyParserFailureOf(error);
+    if (parserFailure === "entity.parse.failed") {
+      sendError(response, 400, "MALFORMED", "el cuerpo no es JSON válido");
+      return;
+    }
+    if (parserFailure === "entity.too.large") {
+      sendError(response, 413, "PAYLOAD_TOO_LARGE");
+      return;
+    }
     // El STACK, no el Error. `JSON.stringify(new Error(...))` da `{}` —message y stack no
     // son enumerables—, así que pasar el objeto crudo por los campos del logger deja el log
     // vacío justo cuando alguien lo necesita. El stack de V8 ya empieza por "Name: message".
     const detail =
       error instanceof Error ? (error.stack ?? `${error.name}: ${error.message}`) : String(error);
     logger.error("error HTTP sin manejar", { detail });
-    response.status(500).json({ error: "INTERNAL" });
+    sendError(response, 500, "INTERNAL");
   };
+}
+
+// El `type` que body-parser le pone a sus errores (`entity.parse.failed`, `entity.too.large`…), o
+// `undefined` si el error no es suyo.
+function bodyParserFailureOf(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const type = (error as { type?: unknown }).type;
+  return typeof type === "string" ? type : undefined;
 }

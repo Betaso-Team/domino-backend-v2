@@ -45,7 +45,7 @@ describe("httpErrorHandler", () => {
     httpErrorHandler(logger)(new Error("bug"), request, response, vi.fn() as NextFunction);
 
     expect(sent.status).toBe(500);
-    expect(sent.body).toEqual({ error: "INTERNAL" });
+    expect(sent.body).toEqual({ code: "INTERNAL" });
   });
 
   // El detalle es de quien OPERA el servidor, no del cliente: un 500 es un bug nuestro y
@@ -63,6 +63,38 @@ describe("httpErrorHandler", () => {
     // El nombre del archivo es lo que aparece en cualquier stack de este repo: si alguna vez
     // el cuerpo lo llevara, la filtración se vería acá y no en producción.
     expect(JSON.stringify(sent.body)).not.toContain("error-handler");
+  });
+
+  // EL JSON ROTO ES DEL CLIENTE: body-parser lo rechaza antes de la ruta, y contestarlo 500 mandaría
+  // a buscar un bug nuestro que no existe.
+  it("un cuerpo que no es JSON es 400 MALFORMED, no 500", () => {
+    const { logger, calls } = recordingLogger();
+    const { response, sent } = fakeResponse();
+    const parseFailed = Object.assign(new SyntaxError("Unexpected token"), {
+      type: "entity.parse.failed",
+      status: 400,
+    });
+
+    httpErrorHandler(logger)(parseFailed, request, response, vi.fn() as NextFunction);
+
+    expect(sent).toEqual({
+      status: 400,
+      body: { code: "MALFORMED", detail: "el cuerpo no es JSON válido" },
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("un cuerpo demasiado grande es 413 PAYLOAD_TOO_LARGE", () => {
+    const { logger } = recordingLogger();
+    const { response, sent } = fakeResponse();
+    const tooLarge = Object.assign(new Error("request entity too large"), {
+      type: "entity.too.large",
+      status: 413,
+    });
+
+    httpErrorHandler(logger)(tooLarge, request, response, vi.fn() as NextFunction);
+
+    expect(sent).toEqual({ status: 413, body: { code: "PAYLOAD_TOO_LARGE" } });
   });
 
   // Con la respuesta ya en vuelo no hay 500 que mandar: el status y las cabeceras ya salieron.

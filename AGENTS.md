@@ -67,6 +67,12 @@ pieza del dominó.
 - **El cliente HTTP saliente (`shared/http/client.ts`) aborta con el plazo**: `AbortSignal.timeout`
   cubre cabeceras y cuerpo, y al vencer es `DeadlineExceededError`. Ver «Incremento completo — el
   cliente HTTP aborta con el plazo».
+- **Todo error HTTP es `{ code, detail? }`** (`sendError` de `shared/http/errors.ts`): ninguna ruta
+  contesta `{ error }` ni `{ status: "error", message }`, y lo de otro proveedor es 404
+  (`?providerId=` ajeno → `UNKNOWN_PROVIDER`). La tabla ruta → códigos está en
+  `docs/api-y-mensajes.md` («Errores») y la pinea `src/tests/error-shape.e2e.test.ts`. ⚠ Rompe al panel
+  si se despliega antes de que el panel acepte `{ code, detail? }`. Ver «Incremento completo — errores
+  con código».
 - **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
@@ -813,7 +819,9 @@ Lo que dejó la Tarea 9:
   `{code:"MALFORMED",detail}`** y no con el envelope histórico, porque lo emite `shared/http/
   validated.ts` y ése es el mismo vocabulario que el del socket; copiar el validador para cambiarle
   el cuerpo es justo la divergencia que su promoción vino a evitar, y v1 no contesta 400 en ninguna
-  ruta. Los otros tres códigos sí llevan `{status:"error",message}`.
+  ruta. ~~Los otros tres códigos sí llevan `{status:"error",message}`.~~ Desde
+  `refactor/errores-con-codigo` todos salen `{code, detail?}` (ver «Incremento completo — errores con
+  código»).
 - **LO DESCONOCIDO SE RELANZA** al manejador compartido en vez de traducirse: convertirlo en 404 le
   diría al panel que el modo no existe cuando lo que pasa es que la base no contesta, y manda al
   operador a auditar el modo equivocado.
@@ -2357,7 +2365,7 @@ Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` e
 ### ~~Deuda abierta: el panel no puede entrar con su sesión~~
 
 Resuelta en `feat/emisor-betaso-games` (2026-10-13), sin el backend de Betaso: billing-auth emite el
-token del admin cuando inicia sesión (`POST /v1/admins/login`), y las rutas de admin aceptan
+token del admin cuando inicia sesión (`POST /v1/auth/login`), y las rutas de admin aceptan
 `Authorization: Bearer` con ese token además de `ADMIN_API_KEY` (`requireAdminKey`,
 `features/auth/transports/admin-token-verifier.ts`). ~~Las mutaciones piden el rol `catalog`~~: desde el
 2026-10-14 no hay roles, y un admin abre lo mismo que la llave. Lo de abajo queda como contexto de por
@@ -2705,8 +2713,10 @@ producción, y no quedan alias.
 - **El proveedor sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo.
   `providerOf` (`transports/http/admin.ts`, el mismo patrón que los webhooks del orquestador): un
   admin de proveedor actúa sobre el suyo (`?providerId=` igual se acepta, distinto es
-  `403 {status:"error", code:"FORBIDDEN"}`); Betaso Games (token con `prv: null`, o la llave) lo nombra
-  con `?providerId=`, y sin él es `400 {status:"error", code:"PROVIDER_REQUIRED"}`. La credencial y
+  ~~`403 {status:"error", code:"FORBIDDEN"}`~~ `404 {code:"UNKNOWN_PROVIDER"}` desde
+  `refactor/errores-con-codigo`); Betaso Games (token con `prv: null`, o la llave) lo nombra
+  con `?providerId=`, y sin él es ~~`400 {status:"error", code:"PROVIDER_REQUIRED"}`~~
+  `400 {code:"PROVIDER_REQUIRED", detail}`. La credencial y
   el rol se miran antes (la puerta), la forma después (`validated`, `PROVIDER_QUERY`) y el proveedor
   al final.
 - **Rutas:** `PUT|DELETE /game-modes/:uuid/subscriptions/:providerId` → `PUT|DELETE
@@ -2783,9 +2793,72 @@ Del plan «rendimiento del backend, roles y pendientes» (sección C, PR5). Apil
   mensaje).
 - **`GET /internal/players/:userId/match`** (`tables.ts`, misma llave y `SEAT_PARAMS` que `.../seat`):
   `matchOf` + `publicConfigOf` del registro, sin Colyseus ni reserva. 200 `{status, data: {matchId,
-  roomId}}`; 404 `{code: "NO_LIVE_MATCH"}` (ya con la forma de errores nueva, a propósito; la ruta
-  `.../seat` sigue con `{error}` hasta el PR de errores). `player_match:<userId>` no cambia.
+  roomId}}`; 404 `{code: "NO_LIVE_MATCH"}` (con `sendError`, como `.../seat` desde los errores con código);
+  la llave y la forma dan los `401 UNAUTHORIZED` y `400 MALFORMED` comunes. `player_match:<userId>` no
+  cambia.
 - Docs: «Mensajes del servidor» y la ruta nueva en `docs/api-y-mensajes.md`.
+
+## Incremento completo — errores con código (rama `refactor/errores-con-codigo`)
+
+Había tres formas de error según quién escribió la ruta: `{ error: "X" }` (la puerta, el 500, las
+mesas, `/config`), `{ status: "error", message }` (el catálogo, los registros del panel, `/me`) y
+`{ code, detail }` (la validación, el Bearer, la configuración). Ahora hay una: **`{ code, detail? }`**,
+la del socket. Las respuestas de éxito no cambian, y `/health` y `/ready` tampoco (son sondas).
+
+- **`sendError(res, status, code, detail?)`** en `shared/http/errors.ts` (exportada en el índice). Toda
+  ruta que contesta un 4xx o 5xx pasa por ahí; no se escribe un cuerpo de error a mano.
+- **Los errores del catálogo traen su código** (`readonly code` en `core/catalog.ts`): `MODE_NOT_FOUND`,
+  `MODE_DUPLICATE`, `FREE_ROOM_WITH_ENTRY`, `CATALOG_BUSY`, `FORBIDDEN`, y
+  `GameModeStateConflictError` recibe el suyo en cada sitio del servicio (`MODE_ALREADY_INACTIVE`,
+  `MODE_ALREADY_ACTIVE`, `MODE_NOT_SHARED`, `MODE_INACTIVE`, `OWN_CATALOG_EMPTY`). `responses.ts`
+  (`sendCatalogError`, antes `sendError`) sólo elige el status y pasa el mensaje como `detail`; los 404
+  no llevan `detail`.
+- **Lo de otro proveedor es 404:** un `?providerId=` ajeno en el panel del catálogo pasó de `403
+  FORBIDDEN` a `404 UNKNOWN_PROVIDER`. Un `ownerProviderId` ajeno en el cuerpo de `POST /game-modes`
+  sigue siendo `403 FORBIDDEN` (es un pedido que no se puede hacer, no algo que se lee).
+- **Renombres de código:** `/config/:roomId` `NOT_FOUND` → `ROOM_NOT_FOUND` (como `/matches/:roomId`);
+  `/internal/matches/:matchId/history` `NOT_FOUND` → `MATCH_NOT_FOUND`; el detalle y el listado del panel
+  `{status:"error",message}` → `MATCH_NOT_FOUND` / `MATCH_LIST_TIMEOUT`; `/me/matches` y
+  `/internal/players/:userId/matches` → `MATCH_LIST_TIMEOUT`; `/me/stats` → `STATS_TIMEOUT`.
+- **JSON roto ya no es 500:** `httpErrorHandler` reconoce los errores de body-parser —`entity.parse.failed`
+  es `400 MALFORMED`, `entity.too.large` es `413 PAYLOAD_TOO_LARGE`— antes de loguear un bug.
+- **El orquestador no se entera:** lee el `422` de `POST /internal/matches` con
+  `body.includes('UNKNOWN_GAME_MODE')` y el `404` del asiento por status; los dos siguen funcionando.
+- **El panel sí:** su `failure()` (`apps/api/src/shared/upstream/domino-api.ts` en
+  `tablea-gaming-panel`) lee `message`/`error`, y el detalle de partida compara `MATCH_404`. ⚠ **Se
+  despliega DESPUÉS del panel tolerante** (que acepte las dos formas).
+- **El guardarraíl:** `src/tests/error-shape.e2e.test.ts` recorre todas las rutas que la app registra
+  (`routesOf` sobre el router de Express) con seis credenciales y un JSON roto, y falla si un 4xx/5xx no
+  es JSON `{ code, detail? }`. Una ruta nueva que escriba su error a mano se pone roja ahí.
+- **Docs:** sección «Errores» de `docs/api-y-mensajes.md`, con la tabla ruta → códigos; la ruta de login
+  de billing-auth es `POST /v1/auth/login` (decía `/v1/admins/login`).
+
+Baseline **1042 unit / 426 int (+129 saltados) / 134 e2e** (+15 / +1 / +1), con `typecheck`, lint,
+`depcruise` y `docs:build` en verde.
+
+### Deudas abiertas de este incremento
+
+- Un path desconocido, o una ruta que no se registró por falta de llave, sigue contestando el 404 HTML
+  por defecto de Express. Un catch-all JSON tiene que ir sin pisar el chequeo de raíz de Colyseus
+  (`http-root-route.e2e.test.ts`), y no se hizo acá.
+
+## Incremento completo — el catálogo público en memoria (rama `perf/catalogo-publico-en-cache`)
+
+`GET /game-modes` lo pide cada cliente que entra y era una consulta a Mongo por pedido, con la misma
+respuesta para todos.
+
+- **`GameModeService.publicActive()`** guarda la PROMESA de `repository.active()` `PUBLIC_MEMO_MS` (5 s,
+  reloj inyectable: cuarto parámetro del constructor, `Date.now` por defecto). La usan sólo
+  `listPublic` y `getPublic`; pedidos simultáneos comparten la consulta y una consulta que falla no se
+  guarda.
+- **Se invalida al entrar y al salir de `mutating()`** (la salida en un `finally`, así que una mutación
+  que falla también la tira). Una mutación de OTRO proceso se ve a lo sumo 5 s tarde.
+- **No lo usan** las reglas dentro de `mutating` ni `GameModeReader.activeByUuid`, con el que la sala
+  resuelve el modo de una mesa: abrir una mesa lee fresco.
+- **`Cache-Control: public, max-age=10`** en los `200` de `GET /game-modes` y `GET /game-modes/:uuid`; el
+  `404` sale `no-store`.
+- ⚠ Un test que da de baja un modo **directo en el repositorio** (como otro proceso) y después lee lo
+  público tiene que adelantar el reloj `PUBLIC_MEMO_MS`; por el servicio no hace falta.
 
 ## Cómo se ejecuta una tarea
 

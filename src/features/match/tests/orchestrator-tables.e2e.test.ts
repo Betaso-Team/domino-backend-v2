@@ -181,7 +181,7 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
   it("contesta 422 a un modo que no existe", async () => {
     const res = await post("/internal/matches", casualTable(["o-e", "o-f"], "seed", "no-existe"));
     expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ error: "UNKNOWN_GAME_MODE" });
+    expect(await res.json()).toEqual({ code: "UNKNOWN_GAME_MODE" });
   });
 
   it("no abre nada con la llave del panel: cada llave abre lo suyo", async () => {

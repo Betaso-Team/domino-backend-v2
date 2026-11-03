@@ -1,5 +1,6 @@
 import type { Logger } from "@/logger";
 import { requireApiKey } from "@/shared/http/api-key";
+import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import { z } from "zod";
@@ -61,7 +62,7 @@ export function tablesRoutes(deps: TablesDeps): Router {
         const code = error instanceof Error ? REFUSAL.exec(error.message)?.[1] : undefined;
         // Todo lo que no es un rechazo de la sala es NUESTRO: 500, no un 422 que lo disfrace.
         if (!code) throw error;
-        response.status(422).json({ error: code });
+        sendError(response, 422, code);
       }
     }),
   );
@@ -74,7 +75,7 @@ export function tablesRoutes(deps: TablesDeps): Router {
       const config = roomId ? await deps.registry.publicConfigOf(roomId) : undefined;
       const reservation = roomId && config ? await deps.tables.seatBack(roomId) : undefined;
       if (!config || reservation === undefined) {
-        response.status(404).json({ error: "NO_LIVE_MATCH" });
+        sendError(response, 404, "NO_LIVE_MATCH");
         return;
       }
       response.json({ status: "success", data: { matchId: config.matchId, reservation } });
@@ -91,7 +92,7 @@ export function tablesRoutes(deps: TablesDeps): Router {
       const roomId = await deps.registry.matchOf(params.userId);
       const config = roomId ? await deps.registry.publicConfigOf(roomId) : undefined;
       if (!roomId || !config) {
-        response.status(404).json({ code: "NO_LIVE_MATCH" });
+        sendError(response, 404, "NO_LIVE_MATCH");
         return;
       }
       response.json({ status: "success", data: { matchId: config.matchId, roomId } });

@@ -1,5 +1,6 @@
 import type { RequestHandler, Response } from "express";
 import { z } from "zod";
+import { sendError } from "./errors";
 
 // VALIDA + TIPA la entrada de un endpoint HTTP, en el mismo molde que el `MessageDecoder`
 // del wire de Colyseus (`../../features/match/transports/colyseus/commands/decoders.ts`): el
@@ -73,7 +74,7 @@ export function validated<S extends RouteSchemas>(
       if (!schema) continue;
       const parsed = schema.safeParse(request[source]);
       if (!parsed.success) {
-        response.status(400).json({ code: MALFORMED, detail: z.prettifyError(parsed.error) });
+        sendError(response, 400, MALFORMED, z.prettifyError(parsed.error));
         return;
       }
       input[source] = parsed.data;

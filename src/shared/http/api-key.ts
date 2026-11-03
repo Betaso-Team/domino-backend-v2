@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { RequestHandler, Response } from "express";
+import { sendError } from "./errors";
 
 // SON TRES LLAVES DE SERVIDOR, y cruzan esta frontera en las dos direcciones. Las dos de ENTRADA: la
 // de ADMINISTRACIÓN (`ADMIN_API_KEY`) y la del ORQUESTADOR de Betaso Juegos
@@ -61,8 +62,11 @@ export interface AdminAccess {
   readonly providers?: boolean;
 }
 
+// 401 `UNAUTHORIZED` (no hay credencial válida) o 403 `FORBIDDEN` (la hay, pero esta ruta no abre a
+// ese proveedor o a ese rol). Sin `detail`: decir cuál de las dos reglas cerró sólo le sirve al que
+// prueba credenciales.
 const deny = (response: Response, status: 401 | 403): void => {
-  response.status(status).json({ error: status === 401 ? "UNAUTHORIZED" : "FORBIDDEN" });
+  sendError(response, status, status === 401 ? "UNAUTHORIZED" : "FORBIDDEN");
 };
 
 // LA PUERTA DE ENTRADA DEL PANEL, con dos credenciales:

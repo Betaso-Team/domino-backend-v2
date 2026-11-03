@@ -1,5 +1,6 @@
 import { type TokenVerifier, authenticated } from "@/features/auth";
 import type { Logger } from "@/logger";
+import { sendError } from "@/shared/http/errors";
 import { type Response, Router } from "express";
 import { z } from "zod";
 import { MatchListTimeoutError } from "../../network/history";
@@ -57,7 +58,7 @@ export async function sendPlayerPage(
     // EL PLAZO VENCIDO NO ES UN BUG NUESTRO: 503, como el listado del panel. Lo demás sube.
     if (!(error instanceof MatchListTimeoutError)) throw error;
     deps.logger.warn("historial del jugador: la base excedió el plazo", { page: query.page });
-    response.status(503).json({ status: "error", message: TIMEOUT_MESSAGE });
+    sendError(response, 503, "MATCH_LIST_TIMEOUT", TIMEOUT_MESSAGE);
   }
 }
 
@@ -94,7 +95,7 @@ export function meRoutes(deps: {
         // Como el historial: el plazo vencido es 503 y lo demás sube.
         if (!(error instanceof MatchListTimeoutError)) throw error;
         deps.logger.warn("estadísticas del jugador: la base excedió el plazo");
-        response.status(503).json({ status: "error", message: STATS_TIMEOUT_MESSAGE });
+        sendError(response, 503, "STATS_TIMEOUT", STATS_TIMEOUT_MESSAGE);
       }
     }),
   );

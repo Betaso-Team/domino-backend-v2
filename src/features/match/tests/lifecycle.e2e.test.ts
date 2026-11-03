@@ -289,6 +289,7 @@ describe("ciclo de vida de una partida", () => {
     const larguisimo = await fetch(`http://localhost:2585/config/${"x".repeat(65)}`);
 
     expect(inexistente.status).toBe(404);
+    expect(await inexistente.json()).toEqual({ code: "ROOM_NOT_FOUND" });
     expect(conPuntos.status).toBe(400);
     expect(await conPuntos.json()).toMatchObject({ code: "MALFORMED" });
     expect(larguisimo.status).toBe(400);
@@ -313,7 +314,7 @@ describe("ciclo de vida de una partida", () => {
     const response = await fetch(HISTORY_URL("m-con%0Asalto"));
 
     expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ error: "UNAUTHORIZED" });
+    expect(await response.json()).toEqual({ code: "UNAUTHORIZED" });
   });
 
   // El endpoint de SOPORTE: es de dónde sale el historial que después se rebobina.
@@ -339,7 +340,7 @@ describe("ciclo de vida de una partida", () => {
     const response = await fetch(HISTORY_URL("m-no-existe"), { headers: INTERNAL_HEADERS });
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "NOT_FOUND" });
+    expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
   });
 
   // La llave NO es opcional ni "cuando exista": el matchId es enumerable y esto sirve el
@@ -369,7 +370,7 @@ describe("ciclo de vida de una partida", () => {
     expect(mismoLargo).toHaveLength(env.adminApiKey?.length ?? 0);
     expect(mismoLargo).not.toBe(env.adminApiKey);
     expect(sinLlave.status).toBe(401);
-    expect(await sinLlave.json()).toEqual({ error: "UNAUTHORIZED" });
+    expect(await sinLlave.json()).toEqual({ code: "UNAUTHORIZED" });
     expect(conLlaveCorta.status).toBe(401);
     expect(conLlaveDelMismoLargo.status).toBe(401);
   });

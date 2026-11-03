@@ -79,10 +79,10 @@ describe("el ámbito de los admins (integración)", () => {
     // UN TOKEN SIN `prv` NI `role` NO ENTRA: sin tolerancia a los tokens de antes de los proveedores.
     expect(await call("legacy", method, path)).toEqual({
       status: 401,
-      body: { error: "UNAUTHORIZED" },
+      body: { code: "UNAUTHORIZED" },
     });
     for (const who of ["parley", "parleySupport"] as const) {
-      expect(await call(who, method, path)).toEqual({ status: 403, body: { error: "FORBIDDEN" } });
+      expect(await call(who, method, path)).toEqual({ status: 403, body: { code: "FORBIDDEN" } });
     }
   });
 
@@ -156,11 +156,12 @@ describe("el ámbito de los admins (integración)", () => {
     expect(
       (await call("support", "PUT", `/game-modes/${uuid}/subscription?providerId=parley`)).status,
     ).toBe(403);
-    // Parley se suscribe a sí mismo sin nombrarse; a otro no; el compartido no lo edita.
+    // Parley se suscribe a sí mismo sin nombrarse; a otro no —otro proveedor no existe para él: 404
+    // UNKNOWN_PROVIDER—; el compartido no lo edita.
     expect((await call("parley", "PUT", `/game-modes/${uuid}/subscription`)).status).toBe(200);
     expect(
-      (await call("parley", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
-    ).toBe(403);
+      await call("parley", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`),
+    ).toEqual({ status: 404, body: { code: "UNKNOWN_PROVIDER" } });
     // Betaso Games nombra al proveedor; sin `?providerId=` es 400.
     expect(await call("games", "PUT", `/game-modes/${uuid}/subscription`)).toMatchObject({
       status: 400,
@@ -176,7 +177,10 @@ describe("el ámbito de los admins (integración)", () => {
     expect((await call("games", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
       404,
     );
-    expect((await call("parley", "PUT", `/game-modes/${uuid}`, { prize: 1 })).status).toBe(403);
+    expect(await call("parley", "PUT", `/game-modes/${uuid}`, { prize: 1 })).toMatchObject({
+      status: 403,
+      body: { code: "FORBIDDEN" },
+    });
     expect((await call("games", "GET", `/game-modes/admin/${uuid}`)).body).toMatchObject({
       data: { subscribers: ["parley"] },
     });
@@ -202,7 +206,8 @@ describe("el ámbito de los admins (integración)", () => {
 
     const baja = await call("rival", "DELETE", `/game-modes/${uuid}`);
     expect(baja.status).toBe(409);
-    expect((baja.body as { message: string }).message).toContain("shared");
+    expect(baja.body).toMatchObject({ code: "OWN_CATALOG_EMPTY" });
+    expect((baja.body as { detail: string }).detail).toContain("shared");
     expect((await call("rival", "PUT", `/game-modes/${uuid}`, { isActive: false })).status).toBe(
       409,
     );
@@ -212,9 +217,8 @@ describe("el ámbito de los admins (integración)", () => {
       400,
     );
     expect(
-      (await call("parley", "PUT", "/game-modes/source?providerId=rival", { source: "shared" }))
-        .status,
-    ).toBe(403);
+      await call("parley", "PUT", "/game-modes/source?providerId=rival", { source: "shared" }),
+    ).toEqual({ status: 404, body: { code: "UNKNOWN_PROVIDER" } });
     expect(
       (await call("games", "PUT", "/game-modes/source?providerId=rival", { source: "shared" }))
         .status,
@@ -224,8 +228,16 @@ describe("el ámbito de los admins (integración)", () => {
 
   it("la copia de los compartidos: el proveedor del token, o el que nombre Betaso Games", async () => {
     expect((await call("parley", "POST", "/game-modes/copies")).status).toBe(200);
-    expect((await call("parley", "POST", "/game-modes/copies?providerId=rival")).status).toBe(403);
+    expect(await call("parley", "POST", "/game-modes/copies?providerId=rival")).toEqual({
+      status: 404,
+      body: { code: "UNKNOWN_PROVIDER" },
+    });
     expect((await call("parleySupport", "POST", "/game-modes/copies")).status).toBe(403);
+    // La lectura tampoco: el listado de otro proveedor no existe para éste.
+    expect(await call("parley", "GET", "/game-modes/admin?providerId=rival")).toEqual({
+      status: 404,
+      body: { code: "UNKNOWN_PROVIDER" },
+    });
     expect((await call("games", "POST", "/game-modes/copies")).status).toBe(400);
     expect((await call("key", "POST", "/game-modes/copies?providerId=parley")).status).toBe(200);
   });
