@@ -55,6 +55,12 @@ decoder estricto antes de alcanzar el comando.
 | `GET /game-modes` | Modos **compartidos** activos del catálogo, con el DTO de siempre (sin dueño ni suscriptores) |
 | `GET /game-modes/:uuid` | Un modo compartido activo; uno dado de baja o propio de un proveedor responde 404 |
 
+Los dos `GET /game-modes` responden los `200` con `Cache-Control: public, max-age=10` (el `404`, con
+`no-store`), y el servidor guarda la lista de activos 5 s por proceso: una edición hecha en otra
+instancia puede tardar hasta 5 s en verse en ésta, más lo que la guarde un caché intermedio. La
+instancia que atiende la edición la ve en el acto. Abrir una mesa nunca usa esa lista: lee el modo
+fresco.
+
 Todas las respuestas HTTP exponen el header `Date`, que permite recalcular el desfase del reloj del
 cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 

@@ -53,6 +53,8 @@ interface Harness {
   post(path: string, body?: unknown, key?: string): Promise<Response>;
   put(path: string, body?: unknown, key?: string): Promise<Response>;
   del(path: string, key?: string): Promise<Response>;
+  /** El `Cache-Control` de un GET sin credencial. */
+  cacheControlOf(path: string): Promise<string | null>;
 }
 
 function fakeLogger(): Logger {
@@ -151,6 +153,13 @@ function harness(
     post: (path, body, key) => call("POST", path, body, key),
     put: (path, body, key) => call("PUT", path, body, key),
     del: (path, key) => call("DELETE", path, undefined, key),
+    cacheControlOf: async (path) => {
+      await ready;
+      const { port } = server.address() as AddressInfo;
+      const response = await fetch(`http://127.0.0.1:${port}${path}`);
+      await response.arrayBuffer();
+      return response.headers.get("cache-control");
+    },
   };
 }
 
@@ -339,6 +348,19 @@ describe("GET /game-modes", () => {
       status: 200,
       body: { status: "success", data: [] },
     });
+  });
+});
+
+// LO PÚBLICO SE CACHEA DIEZ SEGUNDOS, y sólo cuando existe: un 404 cacheado dejaría «inexistente»
+// durante diez segundos a un modo que se publica en este momento.
+describe("Cache-Control del catálogo público", () => {
+  it("los 200 son public, max-age=10 y el 404 no-store", async () => {
+    const app = harness();
+    const seeded = await app.repository.create(clasica());
+
+    expect(await app.cacheControlOf("/game-modes")).toBe("public, max-age=10");
+    expect(await app.cacheControlOf(`/game-modes/${seeded.uuid}`)).toBe("public, max-age=10");
+    expect(await app.cacheControlOf("/game-modes/no-existe")).toBe("no-store");
   });
 });
 

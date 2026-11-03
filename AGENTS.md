@@ -2757,6 +2757,24 @@ Baseline **1042 unit / 426 int (+129 saltados) / 134 e2e** (+15 / +1 / +1), con 
   por defecto de Express. Un catch-all JSON tiene que ir sin pisar el chequeo de raíz de Colyseus
   (`http-root-route.e2e.test.ts`), y no se hizo acá.
 
+## Incremento completo — el catálogo público en memoria (rama `perf/catalogo-publico-en-cache`)
+
+`GET /game-modes` lo pide cada cliente que entra y era una consulta a Mongo por pedido, con la misma
+respuesta para todos.
+
+- **`GameModeService.publicActive()`** guarda la PROMESA de `repository.active()` `PUBLIC_MEMO_MS` (5 s,
+  reloj inyectable: cuarto parámetro del constructor, `Date.now` por defecto). La usan sólo
+  `listPublic` y `getPublic`; pedidos simultáneos comparten la consulta y una consulta que falla no se
+  guarda.
+- **Se invalida al entrar y al salir de `mutating()`** (la salida en un `finally`, así que una mutación
+  que falla también la tira). Una mutación de OTRO proceso se ve a lo sumo 5 s tarde.
+- **No lo usan** las reglas dentro de `mutating` ni `GameModeReader.activeByUuid`, con el que la sala
+  resuelve el modo de una mesa: abrir una mesa lee fresco.
+- **`Cache-Control: public, max-age=10`** en los `200` de `GET /game-modes` y `GET /game-modes/:uuid`; el
+  `404` sale `no-store`.
+- ⚠ Un test que da de baja un modo **directo en el repositorio** (como otro proceso) y después lee lo
+  público tiene que adelantar el reloj `PUBLIC_MEMO_MS`; por el servicio no hace falta.
+
 ## Cómo se ejecuta una tarea
 
 Usá la skill `executing-plans`. El orden de los Steps del plan no es decorativo: es TDD.
