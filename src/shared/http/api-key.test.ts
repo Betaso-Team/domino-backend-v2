@@ -70,7 +70,7 @@ describe("la puerta de la llave interna", () => {
     const { sent, next } = knock(guard, key);
 
     expect(sent.status).toBe(401);
-    expect(sent.body).toEqual({ error: "UNAUTHORIZED" });
+    expect(sent.body).toEqual({ code: "UNAUTHORIZED" });
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -151,9 +151,9 @@ describe("la puerta con un token de admin", () => {
 
   it("un token que no es de admin es 401, y sin verificador ningún token abre", async () => {
     const bad = await knockWithBearer(requireAdminKey("la-llave", adminTokens), "basura");
-    expect(bad.sent).toEqual({ status: 401, body: { error: "UNAUTHORIZED" } });
+    expect(bad.sent).toEqual({ status: 401, body: { code: "UNAUTHORIZED" } });
     const keyOnly = await knockWithBearer(requireAdminKey("la-llave"), "token-de-ana");
-    expect(keyOnly.sent).toEqual({ status: 401, body: { error: "UNAUTHORIZED" } });
+    expect(keyOnly.sent).toEqual({ status: 401, body: { code: "UNAUTHORIZED" } });
   });
 });
 
@@ -190,7 +190,7 @@ describe("lo que abre cada puerta", () => {
       expect(locals.admin).toEqual(BY_TOKEN[token]);
     } else {
       expect(next).not.toHaveBeenCalled();
-      expect(sent).toEqual({ status: 403, body: { error: "FORBIDDEN" } });
+      expect(sent).toEqual({ status: 403, body: { code: "FORBIDDEN" } });
       expect(locals.admin).toBeUndefined();
     }
   });
@@ -212,7 +212,7 @@ describe("la puerta de una llave de servidor", () => {
     expect((res as unknown as { locals: Record<string, unknown> }).locals.admin).toBeUndefined();
 
     const token = await knockWithBearer(requireApiKey("la-llave"), "token-de-ana");
-    expect(token.sent).toEqual({ status: 401, body: { error: "UNAUTHORIZED" } });
+    expect(token.sent).toEqual({ status: 401, body: { code: "UNAUTHORIZED" } });
     expect(knock(requireApiKey(""), "").sent.status).toBe(401);
   });
 });

@@ -180,6 +180,7 @@ export class GameModeService {
         );
         if (!owned) {
           throw new GameModeStateConflictError(
+            "OWN_CATALOG_EMPTY",
             `el proveedor ${providerId} no tiene modos propios activos: no puede jugar sólo con los suyos`,
           );
         }
@@ -283,7 +284,10 @@ export class GameModeService {
     return this.mutating(async () => {
       const current = await this.editable(actor, uuid);
       if (!current.isActive) {
-        throw new GameModeStateConflictError(`el modo ${uuid} ya está inactivo`);
+        throw new GameModeStateConflictError(
+          "MODE_ALREADY_INACTIVE",
+          `el modo ${uuid} ya está inactivo`,
+        );
       }
       // SÓLO `isActive`, y por eso no se pasa `current` entero de vuelta: reescribir los demás
       // campos con lo que se acaba de leer convertiría una baja en una edición completa, y pisaría
@@ -300,7 +304,10 @@ export class GameModeService {
     return this.mutating(async () => {
       const current = await this.editable(actor, uuid);
       if (current.isActive) {
-        throw new GameModeStateConflictError(`el modo ${uuid} ya está activo`);
+        throw new GameModeStateConflictError(
+          "MODE_ALREADY_ACTIVE",
+          `el modo ${uuid} ya está activo`,
+        );
       }
       return this.write(uuid, { isActive: true });
     });
@@ -395,10 +402,13 @@ export class GameModeService {
         if (actor.provider !== null && current.ownerProviderId !== actor.provider) {
           throw notFound(uuid);
         }
-        throw new GameModeStateConflictError(`el modo ${uuid} es propio y no tiene suscriptores`);
+        throw new GameModeStateConflictError(
+          "MODE_NOT_SHARED",
+          `el modo ${uuid} es propio y no tiene suscriptores`,
+        );
       }
       if (!current.isActive) {
-        throw new GameModeStateConflictError(`el modo ${uuid} está inactivo`);
+        throw new GameModeStateConflictError("MODE_INACTIVE", `el modo ${uuid} está inactivo`);
       }
       const updated =
         change === "add"
@@ -427,6 +437,7 @@ export class GameModeService {
     );
     if (!others) {
       throw new GameModeStateConflictError(
+        "OWN_CATALOG_EMPTY",
         `el modo ${current.uuid} es el último propio activo de ${owner}, que juega sólo con sus propios (fuente own): primero volvé la fuente a shared`,
       );
     }

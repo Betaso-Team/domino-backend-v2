@@ -1,4 +1,4 @@
-import { type RouteSchemas, type Validated, validated } from "@/shared/http";
+import { type RouteSchemas, type Validated, sendError, validated } from "@/shared/http";
 import type { RequestHandler, Response } from "express";
 import { type Identity, InvalidTokenError, type TokenVerifier } from "../identity";
 
@@ -15,7 +15,7 @@ function tokenOf(header = ""): string | undefined {
 // helps the client on the socket, where the session is held; on a one-off query, saying so only
 // helps whoever is trying tokens out.
 function refuse(res: Response, e: unknown, next: (e?: unknown) => void): void {
-  if (e instanceof InvalidTokenError) res.status(401).json({ code: "UNAUTHORIZED" });
+  if (e instanceof InvalidTokenError) sendError(res, 401, "UNAUTHORIZED");
   else next(e);
 }
 

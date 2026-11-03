@@ -1,3 +1,4 @@
+import { sendError } from "@/shared/http/errors";
 import type { Response } from "express";
 import {
   DuplicateGameModeError,
@@ -9,12 +10,13 @@ import {
 } from "../../core/catalog";
 
 // LO QUE COMPARTEN LAS DOS MITADES DEL CATÁLOGO —las lecturas del jugador y las mutaciones del panel—:
-// la raíz de los paths, los mensajes literales de v1 y el envelope histórico.
+// la raíz de los paths, los mensajes literales de v1 y el envelope histórico de las respuestas de
+// éxito. Los ERRORES no usan ese envelope: salen `{ code, detail? }` como el resto del dominó
+// (`@/shared/http/errors`).
 export const BASE = "/game-modes";
 
-// LOS MENSAJES LITERALES DE v1, y son parte del contrato: el panel los muestra. El del 404 sale en
-// las cuatro rutas que v1 lo tenía (`routes.ts:41-44`, `:71-74`, `:121-124`, `:162-165`).
-export const NOT_FOUND_MESSAGE = "Modo de juego no encontrado";
+// LOS MENSAJES LITERALES DE v1 de las respuestas de éxito, y son parte del contrato: el panel los
+// muestra.
 export const DELETED_MESSAGE = "Modo de juego eliminado correctamente";
 export const REACTIVATED_MESSAGE = "Modo de juego reactivado correctamente";
 
@@ -29,6 +31,13 @@ export function sendMessage(response: Response, message: string): void {
   response.json({ status: "success", message });
 }
 
+// EL 404 DE UN MODO, para las rutas que lo deciden ellas (una lectura que no encontró nada) y no un
+// error del servicio. Sin `detail`: el código lo dice todo, y es el mismo que sale de
+// `sendCatalogError` cuando el servicio no encuentra el modo.
+export function sendModeNotFound(response: Response): void {
+  sendError(response, 404, "MODE_NOT_FOUND");
+}
+
 // LA TRADUCCIÓN DE LOS SEIS ERRORES DE APLICACIÓN, Y EL `throw` DEL FINAL ES LA MITAD DEL ARCHIVO.
 // Lo que no reconoce se RELANZA: `validated` lo reenvía a `next` y el manejador compartido lo loguea
 // con stack y contesta 500. v1 hacía lo contrario —un `catch (error)` por ruta que convertía
@@ -37,34 +46,37 @@ export function sendMessage(response: Response, message: string): void {
 //
 // Traducir lo desconocido a 404 sería peor todavía: le diría al panel que el modo no existe cuando
 // lo que pasa es que la base no contesta, y manda al operador a auditar el modo equivocado.
-export function sendError(response: Response, error: unknown): void {
+//
+// EL CÓDIGO LO TRAE EL ERROR (`error.code`, ver `core/catalog.ts`) y acá sólo se elige el status;
+// el mensaje del servicio viaja como `detail`, para una persona.
+export function sendCatalogError(response: Response, error: unknown): void {
   if (error instanceof GameModeNotFoundError) {
-    // EL MENSAJE LITERAL DE v1 Y NO EL DEL ERROR: es el que el panel muestra, y el del servicio
-    // ("no existe el modo <uuid>") está escrito para el log del operador.
-    response.status(404).json({ status: "error", message: NOT_FOUND_MESSAGE });
+    // SIN `detail`: el mensaje del servicio ("no existe el modo <uuid>") es para el log, y el 404 es
+    // el mismo que el de un modo de otro proveedor, que no tiene que poder distinguirse.
+    sendModeNotFound(response);
     return;
   }
   // 409 LOS DOS, y con nombres distintos a propósito: el duplicado es la regla de unicidad y el
-  // conflicto de estado es «ya está inactivo»/«ya está activo». Comparten código porque los dos son
-  // un choque con el estado actual, no con la forma del pedido.
+  // conflicto de estado es «ya está inactivo»/«ya está activo» y compañía, cada uno con su código.
+  // Comparten status porque los dos son un choque con el estado actual, no con la forma del pedido.
   if (error instanceof DuplicateGameModeError || error instanceof GameModeStateConflictError) {
-    response.status(409).json({ status: "error", message: error.message });
+    sendError(response, 409, error.code, error.message);
     return;
   }
-  // 403 CON EL ENVELOPE DEL CATÁLOGO: un proveedor pidiendo algo de un modo que ve pero no es suyo. Lo
-  // que no ve sale como el 404 de arriba, nunca por acá (ver `service.ts`).
+  // 403: un proveedor pidiendo algo de un modo que ve pero no es suyo. Lo que no ve sale como el 404
+  // de arriba, nunca por acá (ver `service.ts`).
   if (error instanceof GameModeForbiddenError) {
-    response.status(403).json({ status: "error", message: error.message });
+    sendError(response, 403, error.code, error.message);
     return;
   }
   if (error instanceof FreeRoomWithEntryError) {
-    response.status(400).json({ status: "error", message: error.message });
+    sendError(response, 400, error.code, error.message);
     return;
   }
   // 503 Y NO 500: el lease lo tiene otro proceso. Nadie hizo nada mal y reintentar es la respuesta
   // correcta, que es justo lo que un 500 no dice.
   if (error instanceof GameModeWriteBusyError) {
-    response.status(503).json({ status: "error", message: error.message });
+    sendError(response, 503, error.code, error.message);
     return;
   }
   throw error;

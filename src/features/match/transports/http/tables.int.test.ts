@@ -150,7 +150,7 @@ describe("tablesRoutes", () => {
     });
     const res = await post(`${base}/internal/matches`, request);
     expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ error: "UNKNOWN_GAME_MODE" });
+    expect(await res.json()).toEqual({ code: "UNKNOWN_GAME_MODE" });
   });
 
   it("contesta 500 ante cualquier otra falla, sin disfrazarla de rechazo", async () => {
@@ -179,6 +179,6 @@ describe("tablesRoutes", () => {
     const gone = await serve({ tables: { openRequest: vi.fn(), seatBack: async () => undefined } });
     const res = await post(`${gone}/internal/players/p-a/seat`);
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "NO_LIVE_MATCH" });
+    expect(await res.json()).toEqual({ code: "NO_LIVE_MATCH" });
   });
 });

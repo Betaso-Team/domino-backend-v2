@@ -1,16 +1,17 @@
 import type { Logger } from "@/logger";
 import { type AdminTokenCheck, adminOf, requireAdminKey } from "@/shared/http/api-key";
+import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import { type Response, Router } from "express";
 import type { GameModeService } from "../../service";
 import {
   BASE,
   DELETED_MESSAGE,
-  NOT_FOUND_MESSAGE,
   REACTIVATED_MESSAGE,
+  sendCatalogError,
   sendData,
-  sendError,
   sendMessage,
+  sendModeNotFound,
 } from "./responses";
 import {
   CATALOG_SOURCE_BODY,
@@ -44,34 +45,33 @@ import {
 
 /**
  * SOBRE QUÉ PROVEEDOR ACTÚA el pedido, o `undefined` después de contestar por qué ninguno. Un admin de
- * proveedor, el suyo (un `?providerId=` igual al suyo se acepta, uno distinto es 403); Betaso Games
- * —token sin `prv`, o la llave— el que nombre con `?providerId=`, y sin él es 400. Es el mismo patrón
- * que los webhooks del orquestador (`reports/transports/http/webhooks.ts`).
+ * proveedor, el suyo (un `?providerId=` igual al suyo se acepta, uno distinto es 404
+ * `UNKNOWN_PROVIDER`: lo de otro proveedor no existe para éste, igual que sus modos propios); Betaso
+ * Games —token sin `prv`, o la llave— el que nombre con `?providerId=`, y sin él es 400
+ * `PROVIDER_REQUIRED`. Es el mismo patrón que los webhooks del orquestador
+ * (`reports/transports/http/webhooks.ts`).
  */
 function providerOf(response: Response, asked: string | undefined): string | undefined {
   const { provider } = adminOf(response);
   if (provider === null) {
     if (asked !== undefined) return asked;
-    response.status(400).json({
-      status: "error",
-      code: "PROVIDER_REQUIRED",
-      message: "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
-    });
+    sendError(
+      response,
+      400,
+      "PROVIDER_REQUIRED",
+      "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
+    );
     return undefined;
   }
   if (asked !== undefined && asked !== provider) {
-    response.status(403).json({
-      status: "error",
-      code: "FORBIDDEN",
-      message: "un proveedor sólo actúa sobre sí mismo",
-    });
+    sendError(response, 404, "UNKNOWN_PROVIDER");
     return undefined;
   }
   return provider;
 }
 
 // LO MISMO, PERO OPCIONAL PARA BETASO GAMES: el listado del panel sin `?providerId=` es el catálogo
-// entero. `null` = Betaso Games sin proveedor; `undefined` = ya se contestó el 403.
+// entero. `null` = Betaso Games sin proveedor; `undefined` = ya se contestó el 400 o el 404.
 function optionalProviderOf(
   response: Response,
   asked: string | undefined,
@@ -156,7 +156,7 @@ export function adminRoutes({
           source: catalog.source,
         });
       } catch (error) {
-        sendError(response, error);
+        sendCatalogError(response, error);
       }
     }),
   );
@@ -168,7 +168,7 @@ export function adminRoutes({
       const admin = adminOf(response);
       const mode = await service.getFor(admin, params.uuid);
       if (!mode) {
-        response.status(404).json({ status: "error", message: NOT_FOUND_MESSAGE });
+        sendModeNotFound(response);
         return;
       }
       sendData(response, 200, toAdminDTO(mode, admin));
@@ -192,7 +192,7 @@ export function adminRoutes({
         await service.reactivate(adminOf(response), params.uuid);
         sendMessage(response, REACTIVATED_MESSAGE);
       } catch (error) {
-        sendError(response, error);
+        sendCatalogError(response, error);
       }
     }),
   );
@@ -210,7 +210,7 @@ export function adminRoutes({
           toAdminDTO(await service.create(admin, createInputOf(body)), admin),
         );
       } catch (error) {
-        sendError(response, error);
+        sendCatalogError(response, error);
       }
     }),
   );
@@ -227,7 +227,7 @@ export function adminRoutes({
       try {
         sendData(response, 200, await service.createCopies(adminOf(response), providerId));
       } catch (error) {
-        sendError(response, error);
+        sendCatalogError(response, error);
       }
     }),
   );
@@ -253,7 +253,7 @@ export function adminRoutes({
           );
           sendData(response, 200, toCatalogDTO(catalog));
         } catch (error) {
-          sendError(response, error);
+          sendCatalogError(response, error);
         }
       },
     ),
@@ -268,7 +268,7 @@ export function adminRoutes({
         const updated = await service.update(admin, params.uuid, updateInputOf(body));
         sendData(response, 200, toAdminDTO(updated, admin));
       } catch (error) {
-        sendError(response, error);
+        sendCatalogError(response, error);
       }
     }),
   );
@@ -287,7 +287,7 @@ export function adminRoutes({
           const mode = await service.subscribe(admin, params.uuid, providerId);
           sendData(response, 200, toAdminDTO(mode, admin));
         } catch (error) {
-          sendError(response, error);
+          sendCatalogError(response, error);
         }
       },
     ),
@@ -306,7 +306,7 @@ export function adminRoutes({
           const mode = await service.unsubscribe(admin, params.uuid, providerId);
           sendData(response, 200, toAdminDTO(mode, admin));
         } catch (error) {
-          sendError(response, error);
+          sendCatalogError(response, error);
         }
       },
     ),
@@ -321,7 +321,7 @@ export function adminRoutes({
         await service.softDelete(adminOf(response), params.uuid);
         sendMessage(response, DELETED_MESSAGE);
       } catch (error) {
-        sendError(response, error);
+        sendCatalogError(response, error);
       }
     }),
   );

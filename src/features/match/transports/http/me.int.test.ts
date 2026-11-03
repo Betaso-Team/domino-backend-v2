@@ -112,7 +112,12 @@ describe("GET /me/matches: lo que jugó el dueño del token", () => {
   it("si la base no contesta a tiempo es 503 y no 500", async () => {
     const base = await serve({ pageOf: () => Promise.reject(new MatchListTimeoutError()) });
 
-    expect((await get(`${base}/me/matches`, "tok-u1")).status).toBe(503);
+    const response = await get(`${base}/me/matches`, "tok-u1");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      code: "MATCH_LIST_TIMEOUT",
+      detail: "El historial tardó demasiado; inténtalo de nuevo",
+    });
   });
 });
 
@@ -174,6 +179,19 @@ describe("GET /me/stats: las estadísticas del dueño del token", () => {
       gamesAbandoned: 1,
       winRate: 0.67,
       maxWinStreak: 2,
+    });
+  });
+  it("si la base no contesta a tiempo es 503 STATS_TIMEOUT y no 500", async () => {
+    const base = await serve(new MemoryHistory(), {
+      apply: vi.fn(),
+      of: () => Promise.reject(new MatchListTimeoutError()),
+    });
+
+    const response = await get(`${base}/me/stats`, "tok-u1");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      code: "STATS_TIMEOUT",
+      detail: "Las estadísticas tardaron demasiado; inténtalo de nuevo",
     });
   });
 });

@@ -356,7 +356,7 @@ describe("GET /game-modes/:uuid", () => {
   it.each([
     ["inexistente", undefined],
     ["dado de baja", false],
-  ])("contesta 404 con el mensaje de v1 si el modo es %s", async (_label, deactivate) => {
+  ])("contesta 404 MODE_NOT_FOUND si el modo es %s", async (_label, deactivate) => {
     const app = harness();
     let uuid = "no-existe";
     if (deactivate === false) {
@@ -367,7 +367,7 @@ describe("GET /game-modes/:uuid", () => {
 
     expect(await app.get(`/game-modes/${uuid}`)).toEqual({
       status: 404,
-      body: { status: "error", message: "Modo de juego no encontrado" },
+      body: { code: "MODE_NOT_FOUND" },
     });
   });
 });
@@ -443,7 +443,7 @@ describe("POST /game-modes", () => {
     const response = await app.post("/game-modes", body, KEY);
 
     expect(response.status).toBe(409);
-    expect(response.body).toMatchObject({ status: "error" });
+    expect(response.body).toMatchObject({ code: "MODE_DUPLICATE" });
   });
 
   // v1 NO contestaba 400 nunca: sus rutas no llaman al `.parse()` de su propio DTO, así que un
@@ -540,7 +540,7 @@ describe("PUT /game-modes/:uuid", () => {
 
     expect(await app.put("/game-modes/no-existe", { prize: 20 }, KEY)).toEqual({
       status: 404,
-      body: { status: "error", message: "Modo de juego no encontrado" },
+      body: { code: "MODE_NOT_FOUND" },
     });
   });
 
@@ -559,7 +559,7 @@ describe("PUT /game-modes/:uuid", () => {
 
     expect(await app.put(`/game-modes/${seeded.uuid}`, { isFreeRoom: true }, KEY)).toEqual({
       status: 400,
-      body: { status: "error", message: "una mesa gratis no puede tener entrada" },
+      body: { code: "FREE_ROOM_WITH_ENTRY", detail: "una mesa gratis no puede tener entrada" },
     });
   });
 });
@@ -588,7 +588,7 @@ describe("DELETE /game-modes/:uuid", () => {
     const response = await app.del(`/game-modes/${seeded.uuid}`, KEY);
 
     expect(response.status).toBe(409);
-    expect(response.body).toMatchObject({ status: "error" });
+    expect(response.body).toMatchObject({ code: "MODE_ALREADY_INACTIVE" });
   });
 
   it("contesta 404 sobre un uuid inexistente", async () => {
@@ -596,7 +596,7 @@ describe("DELETE /game-modes/:uuid", () => {
 
     expect(await app.del("/game-modes/no-existe", KEY)).toEqual({
       status: 404,
-      body: { status: "error", message: "Modo de juego no encontrado" },
+      body: { code: "MODE_NOT_FOUND" },
     });
   });
 });
@@ -642,7 +642,7 @@ describe("GET /game-modes/admin/:uuid", () => {
 
     expect(await app.get("/game-modes/admin/no-existe", KEY)).toEqual({
       status: 404,
-      body: { status: "error", message: "Modo de juego no encontrado" },
+      body: { code: "MODE_NOT_FOUND" },
     });
   });
 });
@@ -672,7 +672,7 @@ describe("GET /game-modes/reactive/:uuid", () => {
 
     expect(await app.get("/game-modes/reactive/no-existe", KEY)).toEqual({
       status: 404,
-      body: { status: "error", message: "Modo de juego no encontrado" },
+      body: { code: "MODE_NOT_FOUND" },
     });
   });
 });
@@ -703,7 +703,7 @@ describe("la llave interna", () => {
 
     expect(await callWith(app, method, path)).toEqual({
       status: 401,
-      body: { error: "UNAUTHORIZED" },
+      body: { code: "UNAUTHORIZED" },
     });
   });
 
@@ -766,7 +766,7 @@ describe("la infraestructura administrativa", () => {
               );
 
     expect(response.status).toBe(503);
-    expect(response.body).toMatchObject({ status: "error" });
+    expect(response.body).toMatchObject({ code: "CATALOG_BUSY" });
   });
 
   // UN FALLO DESCONOCIDO NO SE DISFRAZA DE 404. Traducirlo acá le diría al panel que el modo no
@@ -785,7 +785,7 @@ describe("la infraestructura administrativa", () => {
       } as unknown as GameModeRepository,
     });
 
-    expect(await app.get("/game-modes")).toEqual({ status: 500, body: { error: "INTERNAL" } });
+    expect(await app.get("/game-modes")).toEqual({ status: 500, body: { code: "INTERNAL" } });
   });
 });
 
@@ -837,13 +837,13 @@ describe("el panel de un proveedor", () => {
     expect(adminWireDtoOf(viejo).subscribers).toEqual(["betaso", "parley"]);
   });
 
-  it("un 403 del catálogo sale con su envelope", async () => {
+  it("un 403 del catálogo sale con su código y el mensaje como detalle", async () => {
     const app = harness();
     const compartido = await app.repository.create(clasica());
 
     expect(await app.put(`/game-modes/${compartido.uuid}`, { prize: 1 }, as("parley"))).toEqual({
       status: 403,
-      body: { status: "error", message: "un modo compartido lo administra Betaso Games" },
+      body: { code: "FORBIDDEN", detail: "un modo compartido lo administra Betaso Games" },
     });
   });
 
@@ -866,15 +866,13 @@ describe("el panel de un proveedor", () => {
 const PROVIDER_REQUIRED = {
   status: 400,
   body: {
-    status: "error",
     code: "PROVIDER_REQUIRED",
-    message: "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
+    detail: "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
   },
 };
-const FOREIGN_PROVIDER = {
-  status: 403,
-  body: { status: "error", code: "FORBIDDEN", message: "un proveedor sólo actúa sobre sí mismo" },
-};
+// LO DE OTRO PROVEEDOR NO EXISTE para éste: 404, como sus modos propios, y no un 403 que le confirme
+// que ese proveedor existe.
+const FOREIGN_PROVIDER = { status: 404, body: { code: "UNKNOWN_PROVIDER" } };
 
 describe("las suscripciones por HTTP", () => {
   it("un proveedor se suscribe y se da de baja él mismo, sin nombrarse", async () => {
@@ -896,7 +894,7 @@ describe("las suscripciones por HTTP", () => {
     expect((await app.del(`/game-modes/${modo.uuid}/subscription`, as("parley"))).status).toBe(200);
   });
 
-  it("un proveedor puede nombrarse a sí mismo; a otro es 403 y no toca nada", async () => {
+  it("un proveedor puede nombrarse a sí mismo; a otro es 404 y no toca nada", async () => {
     const app = harness();
     const modo = await app.repository.create(clasica());
 
@@ -1126,7 +1124,7 @@ describe("la fuente del catálogo por HTTP", () => {
       expect(body.source).toBe("shared");
       expect(body.data.map((m) => m.uuid).sort()).toEqual([viejo.uuid, propio.uuid].sort());
     }
-    // Nombrarse a sí mismo es lo mismo; nombrar a otro es 403.
+    // Nombrarse a sí mismo es lo mismo; nombrar a otro es 404.
     expect(
       (
         (await app.get("/game-modes/admin?providerId=parley", as("parley"))).body as {
@@ -1171,7 +1169,7 @@ describe("la fuente del catálogo por HTTP", () => {
 
     const rechazo = await app.put("/game-modes/source", { source: "own" }, as("parley"));
     expect(rechazo.status).toBe(409);
-    expect(rechazo.body).toMatchObject({ status: "error" });
+    expect(rechazo.body).toMatchObject({ code: "OWN_CATALOG_EMPTY" });
 
     await app.repository.create(clasica({ ownerProviderId: "parley" }));
     const ok = await app.put("/game-modes/source", { source: "own" }, as("parley"));
@@ -1194,7 +1192,7 @@ describe("la fuente del catálogo por HTTP", () => {
     ).toBe("shared");
   });
 
-  it("PUT: support no escribe, otro proveedor es 403, Betaso Games con ?providerId= (sin él 400), y la forma se valida", async () => {
+  it("PUT: support no escribe, otro proveedor es 404, Betaso Games con ?providerId= (sin él 400), y la forma se valida", async () => {
     const app = harness();
     await app.repository.create(clasica({ ownerProviderId: "parley" }));
 

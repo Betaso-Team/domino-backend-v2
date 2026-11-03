@@ -407,6 +407,9 @@ describe("GameModeService: baja y reactivación", () => {
     await expect(service.softDelete(GAMES, creada.uuid)).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.softDelete(GAMES, creada.uuid)).rejects.toMatchObject({
+      code: "MODE_ALREADY_INACTIVE",
+    });
 
     expect((await repository.byUuid(creada.uuid))?.version).toBe(1);
   });
@@ -419,6 +422,9 @@ describe("GameModeService: baja y reactivación", () => {
     await expect(service.reactivate(GAMES, creada.uuid)).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.reactivate(GAMES, creada.uuid)).rejects.toMatchObject({
+      code: "MODE_ALREADY_ACTIVE",
+    });
 
     expect((await repository.byUuid(creada.uuid))?.version).toBe(0);
   });
@@ -765,9 +771,15 @@ describe("GameModeService: las suscripciones", () => {
     await expect(service.subscribe(PARLEY, retirado.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.subscribe(PARLEY, retirado.uuid, "parley")).rejects.toMatchObject({
+      code: "MODE_INACTIVE",
+    });
     await expect(service.subscribe(PARLEY, propio.uuid, "parley")).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.subscribe(PARLEY, propio.uuid, "parley")).rejects.toMatchObject({
+      code: "MODE_NOT_SHARED",
+    });
     // El propio de OTRO proveedor no existe para éste.
     await expect(service.subscribe(RIVAL, propio.uuid, "rival")).rejects.toBeInstanceOf(
       GameModeNotFoundError,
@@ -960,6 +972,9 @@ describe("GameModeService: la fuente del catálogo de cada proveedor", () => {
     await expect(service.setCatalogSource(PIA, "parley", "own")).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.setCatalogSource(PIA, "parley", "own")).rejects.toMatchObject({
+      code: "OWN_CATALOG_EMPTY",
+    });
     expect((await service.catalogOf(GAMES, "parley")).source).toBe("shared");
   });
 
@@ -1006,6 +1021,9 @@ describe("GameModeService: la fuente del catálogo de cada proveedor", () => {
     await expect(service.softDelete(GAMES, unico.uuid)).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );
+    await expect(service.softDelete(GAMES, unico.uuid)).rejects.toMatchObject({
+      code: "OWN_CATALOG_EMPTY",
+    });
     await expect(service.update(PARLEY, unico.uuid, { isActive: false })).rejects.toBeInstanceOf(
       GameModeStateConflictError,
     );

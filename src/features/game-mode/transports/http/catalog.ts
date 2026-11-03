@@ -1,7 +1,7 @@
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import type { GameModeService } from "../../service";
-import { BASE, NOT_FOUND_MESSAGE, sendData } from "./responses";
+import { BASE, sendData, sendModeNotFound } from "./responses";
 import { UUID_PARAMS, toDTO } from "./schemas";
 
 // LAS DOS LECTURAS DEL CATÁLOGO, públicas: el jugador necesita la lista para entrar a una mesa.
@@ -27,7 +27,7 @@ export function catalogRoutes({ service }: { readonly service: GameModeService }
       // elegible para quien arma las mesas. Y sólo compartidos (ver arriba).
       const mode = await service.getPublic(params.uuid);
       if (!mode) {
-        response.status(404).json({ status: "error", message: NOT_FOUND_MESSAGE });
+        sendModeNotFound(response);
         return;
       }
       sendData(response, 200, toDTO(mode));
