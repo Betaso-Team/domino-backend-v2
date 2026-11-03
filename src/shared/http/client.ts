@@ -1,4 +1,4 @@
-import { withTimeout } from "@/shared/deadline";
+import { DeadlineExceededError } from "@/shared/deadline";
 import { currentTrace, traceparentOf } from "@/shared/trace";
 
 // The outgoing HTTP client: `fetch` plus a deadline. Nothing else. It knows neither truco nor money
@@ -54,18 +54,34 @@ export class HttpClient {
     });
   }
 
+  // THE DEADLINE COVERS THE WHOLE EXCHANGE, HEADERS AND BODY, AND IT ABORTS. A deadline wrapped
+  // around `fetch` alone (`withTimeout`) neither cancels the request nor bounds the body: a server
+  // that sends its headers and then hangs left `text()` waiting forever, and a table waiting on its
+  // entry charge stayed in `charging` for good. The signal tears the socket down, so a late answer
+  // cannot land after the caller already gave up.
   private async send<T>(path: string, init: RequestInit): Promise<T> {
-    const response = await withTimeout(
-      fetch(`${this.baseUrl}${path}`, { ...init, headers: { ...init.headers, ...traceHeaders() } }),
-      this.timeoutMs,
-    );
-    if (!response.ok) throw new HttpError(response.status, await safeText(response));
-    return parse<T>(response);
+    const signal = AbortSignal.timeout(this.timeoutMs);
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: { ...init.headers, ...traceHeaders() },
+        signal,
+      });
+      if (!response.ok) throw new HttpError(response.status, await safeText(response));
+      return await parse<T>(response);
+    } catch (error) {
+      // An `HttpError` is an answer even if its body was cut short: the `status` already decides.
+      // Anything else after the signal fired is the deadline, whatever `fetch` called it.
+      if (signal.aborted && !(error instanceof HttpError)) {
+        throw new DeadlineExceededError(this.timeoutMs);
+      }
+      throw error;
+    }
   }
 }
 
-// The body of an error cannot bring down the handling of that error. If it will not be read, the
-// `status` is already enough to decide.
+// The body of an error cannot bring down the handling of that error. If it will not be read —a
+// broken stream, or the deadline cutting it— the `status` is already enough to decide.
 async function safeText(response: Response): Promise<string> {
   try {
     return await response.text();

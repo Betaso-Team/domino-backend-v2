@@ -28,11 +28,22 @@ export function storedClosingOf(closing: MatchClosing): Record<string, unknown> 
   const { matchStartedAt, matchEndedAt, players, betMultiplier, ...rest } = closing;
   return {
     ...rest,
+    // Sólo el PRIMER cierre de una terminada: va adentro del cierre que gana, así que uno repetido no lo
+    // repone. Una abortada no cuenta para nadie.
+    ...(closing.status === "finished" ? { statsPending: true } : {}),
     ...(matchStartedAt === undefined ? {} : { matchStartedAt: dateOf(matchStartedAt) }),
     matchEndedAt: dateOf(matchEndedAt),
-    players: players.map(({ exit, ...player }) => ({
+    players: players.map(({ exit, connection, ...player }) => ({
       ...player,
       ...(exit ? { exit: { ...exit, at: dateOf(exit.at) } } : {}),
+      ...(connection
+        ? {
+            connection: {
+              ...connection,
+              events: connection.events.map((event) => ({ ...event, at: dateOf(event.at) })),
+            },
+          }
+        : {}),
     })),
     betMultiplier: {
       ...betMultiplier,
@@ -134,7 +145,9 @@ export const isFiltered = (query: MatchListQuery): boolean =>
   query.matchId !== undefined ||
   query.roomId !== undefined ||
   query.id !== undefined ||
-  query.userId !== undefined;
+  query.userId !== undefined ||
+  query.matchEndReason !== undefined ||
+  query.status !== undefined;
 
 const createdAtOf = (document: StoredMatchRecord): number | undefined =>
   document.createdAt instanceof Date ? document.createdAt.getTime() : undefined;

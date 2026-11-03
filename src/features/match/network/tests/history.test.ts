@@ -4,6 +4,7 @@ import type { Clock } from "../../core/engine/clock";
 import { createMatchState } from "../../core/engine/genesis";
 import { BoardState, BoneyardState, RoundState, Tile } from "../../core/state";
 import { replayConfigOf } from "../../transports/match-contract";
+import type { SeatConnection } from "../connection";
 import type {
   ClosedRound,
   HistoryEntry,
@@ -411,6 +412,31 @@ describe("MatchHistory: el registro de la partida", () => {
     expect(closing?.matchConfig.seed).toBe("s");
     expect(closing).not.toHaveProperty("matchStartedAt");
     expect(closing).not.toHaveProperty("matchDurationInMs");
+  });
+
+  // LA CONEXIÓN LA SABE LA SALA, y el grabador sólo la pregunta al cerrar. El asiento que nunca tuvo
+  // socket —una máquina, el que no entró— no tiene nada que contar y sale sin la clave.
+  it("el cierre lleva la conexión que le da la sala, y nada para el asiento sin socket", () => {
+    const { history, calls } = build();
+    const connection: SeatConnection = {
+      rtt: { samples: 2, avgMs: 85, maxMs: 90, jitterMs: 3, lostProbes: 0 },
+      events: [{ kind: "RECONNECTED", at: 7_000, roundNumber: 1, awayMs: 2_000 }],
+    };
+    history.trackConnections((playerId) => (playerId === "seat-1" ? connection : undefined));
+
+    history.close(ENDING);
+
+    const [closing] = closingOf(calls);
+    expect(closing?.players[0]?.connection).toEqual(connection);
+    expect(closing?.players[1]).not.toHaveProperty("connection");
+  });
+
+  it("sin trackConnections el cierre no cambia", () => {
+    const { history, calls } = build();
+    history.close(ENDING);
+
+    for (const player of closingOf(calls)[0]?.players ?? [])
+      expect(player).not.toHaveProperty("connection");
   });
 
   it("cierra una sola vez, y después de cerrar ya no abre", () => {

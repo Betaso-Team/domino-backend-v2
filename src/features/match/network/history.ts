@@ -20,6 +20,7 @@ import type { Clock } from "../core/engine/clock";
 import type { PlayerId, TeamId } from "../core/ids";
 import { handValue } from "../core/rules/tiles";
 import type { MatchState } from "../core/state";
+import type { SeatConnection } from "./connection";
 import type { AbortReason, NetworkMatchEvent } from "./events";
 
 // EL VOCABULARIO DEL HISTORIAL ES CERRADO, y eso es el punto entero de la corrección
@@ -145,6 +146,28 @@ export interface MatchOpening extends MatchSetup {
  */
 export type MatchEndReason = "SCORE" | "ABANDONMENT" | AbortReason | "CHARGE_REJECTED";
 
+// LOS MOTIVOS EN UN ARREGLO, para el que tiene que validarlos en tiempo de ejecución: el filtro del
+// listado (`transports/http/records.ts`). Es un `Record` y no una lista a mano porque así un motivo
+// nuevo del tipo que falte acá NO COMPILA, y sin eso la ruta contestaría 400 a un filtro legítimo.
+const END_REASONS: Record<MatchEndReason, true> = {
+  SCORE: true,
+  ABANDONMENT: true,
+  NEVER_STARTED: true,
+  TILES_NOT_SEEN: true,
+  NEVER_PLAYED: true,
+  INTERRUPTED: true,
+  CHARGE_REJECTED: true,
+};
+export const MATCH_END_REASONS = Object.keys(END_REASONS) as [MatchEndReason, ...MatchEndReason[]];
+
+/** En qué punto está el documento: abierto al primer reparto (`started`) o cerrado con su desenlace. */
+export type MatchStatus = "started" | "finished" | "aborted";
+
+// LOS ESTADOS EN UN ARREGLO, por lo mismo que los motivos: el filtro del listado los valida, y un
+// estado nuevo del tipo que falte acá no compila.
+const STATUSES: Record<MatchStatus, true> = { started: true, finished: true, aborted: true };
+export const MATCH_STATUSES = Object.keys(STATUSES) as [MatchStatus, ...MatchStatus[]];
+
 /**
  * Por qué un jugador ya no está en la mesa: lo dijo él (`LEFT`), o lo retiró el reloj — conectado
  * (`TIMEOUT`) o con la conexión caída (`DISCONNECTED`).
@@ -214,6 +237,8 @@ export interface MatchClose {
 export interface StoredPlayer extends SeatSetup, Partial<SeatMoney> {
   readonly finalScore: number;
   readonly exit?: SeatExit;
+  /** El ping y las caídas del asiento, medidos por la sala. Sin socket nunca, no está. */
+  readonly connection?: SeatConnection;
 }
 
 /**
@@ -269,7 +294,7 @@ export interface MatchSummary {
   readonly matchId: string;
   readonly game: "domino";
   readonly roomId?: string;
-  readonly status?: "started" | "finished" | "aborted";
+  readonly status?: MatchStatus;
   readonly table?: MatchSetup["table"];
   readonly createdAt?: Date;
   readonly updatedAt?: Date;
@@ -310,6 +335,16 @@ export interface MatchListQuery {
    * la forma vieja no tienen asientos y no coinciden nunca.
    */
   readonly userId?: string;
+  /**
+   * Por qué terminó, exacto. Lo escribe el cierre: una partida todavía abierta no tiene motivo y no
+   * coincide con ninguno, y la forma vieja tampoco.
+   */
+  readonly matchEndReason?: MatchEndReason;
+  /**
+   * En qué punto está, exacto: `started` (abierta), `finished` o `aborted`. La forma vieja no tiene
+   * estado y no coincide con ninguno. Sin este filtro salen todos: el default lo pone el panel.
+   */
+  readonly status?: MatchStatus;
 }
 
 /**
@@ -437,6 +472,7 @@ export class MatchHistory {
   private readonly exits = new Map<PlayerId, SeatExit>();
   private readonly proposals: BetMultiplierProposal[] = [];
   private agreements = 0;
+  private connectionOf: (playerId: PlayerId) => SeatConnection | undefined = () => undefined;
 
   constructor(
     private readonly matchId: string,
@@ -456,6 +492,13 @@ export class MatchHistory {
     const entry = this.wrap(source, "COMMAND", type, payload);
     this.follow(source, type, entry.payload);
     this.port.record([entry]);
+  }
+
+  // LA CONEXIÓN ES DE LA SALA —es la que ve los sockets— y el grabador sólo la pregunta al cerrar. Lo
+  // que pase después del cierre no entra: el cierre escribe una vez, y la caída que importa —la que
+  // terminó en retiro— ya se anotó en su instante.
+  trackConnections(source: (playerId: PlayerId) => SeatConnection | undefined): void {
+    this.connectionOf = source;
   }
 
   events(events: readonly NetworkMatchEvent[]): void {
@@ -500,10 +543,12 @@ export class MatchHistory {
     const board = this.match.scoreboard;
     const players: StoredPlayer[] = this.setup.seats.map((seat) => {
       const exit = this.exits.get(seat.id) ?? this.walkedOutUnseen(seat.id, endedAt);
+      const connection = this.connectionOf(seat.id);
       return {
         ...seat,
         finalScore: (seat.teamId === "A" ? board?.teamA : board?.teamB) ?? 0,
         ...(exit ? { exit } : {}),
+        ...(connection ? { connection } : {}),
         ...ending.money[seat.id],
       };
     });

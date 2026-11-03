@@ -91,6 +91,9 @@ describe("tablesRoutes", () => {
       expect.stringContaining("/internal/players/:userId/seat"),
     );
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("/internal/census"));
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("/internal/players/:userId/match"),
+    );
   });
 
   it("cuenta quién juega, en total y por modo, solo con la llave", async () => {
@@ -150,7 +153,7 @@ describe("tablesRoutes", () => {
     });
     const res = await post(`${base}/internal/matches`, request);
     expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ error: "UNKNOWN_GAME_MODE" });
+    expect(await res.json()).toEqual({ code: "UNKNOWN_GAME_MODE" });
   });
 
   it("contesta 500 ante cualquier otra falla, sin disfrazarla de rechazo", async () => {
@@ -179,6 +182,58 @@ describe("tablesRoutes", () => {
     const gone = await serve({ tables: { openRequest: vi.fn(), seatBack: async () => undefined } });
     const res = await post(`${gone}/internal/players/p-a/seat`);
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "NO_LIVE_MATCH" });
+    expect(await res.json()).toEqual({ code: "NO_LIVE_MATCH" });
+  });
+
+  // LA MESA DE UN JUGADOR SIN RESERVAR: dos GET al registro y NINGUNA llamada a Colyseus.
+  describe("GET /internal/players/:userId/match", () => {
+    const get = (url: string, key: string | null = KEY) =>
+      fetch(url, { headers: key ? { "x-internal-api-key": key } : {} });
+
+    it("devuelve el matchId y el roomId de quien sigue en una mesa, sin reservar asiento", async () => {
+      const seatBack = vi.fn();
+      const res = await get(
+        `${await serve({ tables: { openRequest: vi.fn(), seatBack } })}/internal/players/p-a/match`,
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        status: "success",
+        data: { matchId: "m-1", roomId: "room-1" },
+      });
+      expect(seatBack).not.toHaveBeenCalled();
+    });
+
+    it("contesta 404 NO_LIVE_MATCH a quien no está en ninguna mesa, o cuya config ya no está", async () => {
+      const none = await get(`${await serve()}/internal/players/p-z/match`);
+      expect(none.status).toBe(404);
+      expect(await none.json()).toEqual({ code: "NO_LIVE_MATCH" });
+
+      const gone = await serve({
+        registry: {
+          matchOf: async () => "room-1",
+          publicConfigOf: async () => undefined,
+          census: vi.fn(),
+        },
+      });
+      const res = await get(`${gone}/internal/players/p-a/match`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ code: "NO_LIVE_MATCH" });
+    });
+
+    it("pide la llave antes que nada, y no acepta la de otro", async () => {
+      const base = await serve();
+      const sinLlave = await get(`${base}/internal/players/p-a/match`, null);
+      expect(sinLlave.status).toBe(401);
+      expect(await sinLlave.json()).toEqual({ code: "UNAUTHORIZED" });
+      expect((await get(`${base}/internal/players/p-a/match`, "otra-llave-de-16ch")).status).toBe(
+        401,
+      );
+    });
+
+    it("rechaza un userId de forma imposible con 400 MALFORMED", async () => {
+      const res = await get(`${await serve()}/internal/players/${"x".repeat(129)}/match`);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "MALFORMED" });
+    });
   });
 });

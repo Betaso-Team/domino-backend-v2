@@ -64,11 +64,12 @@ describe("el composition root", () => {
   // invertido. Lo que se rompe al revés: cerrar Mongo antes de drenar pierde el último lote de cada
   // partida, y cerrar el broker antes que el despachador tira la publicación en vuelo sobre un canal
   // cerrado.
-  it("el apagado para el despachador, drena, cierra el broker y recién ahí Mongo", () => {
+  it("el apagado para el despachador, el barrido, drena, cierra el broker y recién ahí Mongo", () => {
     const apagado = source.slice(source.indexOf("export async function shutdown"));
     const pasos = [
       "matchResultDispatcher?.close",
-      "history.drain",
+      "statsRecorder.stop",
+      "historyPort.drain",
       "betasoGamesAmqp?.close",
       "mongo?.close",
     ];

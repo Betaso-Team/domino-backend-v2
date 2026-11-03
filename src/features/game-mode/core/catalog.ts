@@ -82,6 +82,7 @@ export function visibleTo(mode: GameMode, actor: CatalogActor): boolean {
 // `GameModeStateConflictError`.
 export class GameModeNotFoundError extends Error {
   override readonly name = "GameModeNotFoundError";
+  readonly code = "MODE_NOT_FOUND";
 }
 
 // La regla lógica de v1: no repetir `name + playersQuantity`. Es de aplicación y no de índice
@@ -89,6 +90,7 @@ export class GameModeNotFoundError extends Error {
 // solo el adaptador sabe leer.
 export class DuplicateGameModeError extends Error {
   override readonly name = "DuplicateGameModeError";
+  readonly code = "MODE_DUPLICATE";
 }
 
 // LA BAJA DE UN MODO YA INACTIVO, O LA REACTIVACIÓN DE UNO YA ACTIVO. Es el error que v1 lanzaba
@@ -106,8 +108,26 @@ export class DuplicateGameModeError extends Error {
 // se descartó: la baja de un modo con dinero configurado es una operación que el panel tiene que
 // poder confirmar que hizo ÉL, y un 200 silencioso sobre un modo que otro admin ya retiró es
 // exactamente el aviso que se pierde.
+//
+// UN CÓDIGO POR SITIO, y no uno solo para la clase: los cinco choques comparten el 409 pero no lo que
+// el panel tiene que hacer con cada uno (refrescar la lista, volver la fuente a `shared`, reactivar
+// antes de suscribir). El que lanza elige el código; la frontera HTTP sólo lo copia.
+export type GameModeStateConflictCode =
+  | "MODE_ALREADY_INACTIVE"
+  | "MODE_ALREADY_ACTIVE"
+  | "MODE_NOT_SHARED"
+  | "MODE_INACTIVE"
+  | "OWN_CATALOG_EMPTY";
+
 export class GameModeStateConflictError extends Error {
   override readonly name = "GameModeStateConflictError";
+
+  constructor(
+    readonly code: GameModeStateConflictCode,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 // UNA MESA GRATIS QUE COBRA ENTRADA (truco `a876258`). En el dominó `isFreeRoom` es un campo propio
@@ -117,6 +137,7 @@ export class GameModeStateConflictError extends Error {
 // pedido, no un choque con el estado.
 export class FreeRoomWithEntryError extends Error {
   override readonly name = "FreeRoomWithEntryError";
+  readonly code = "FREE_ROOM_WITH_ENTRY";
 }
 
 // La escritura no pudo TOMAR SU TURNO: otro proceso tiene el lease que serializa las
@@ -124,13 +145,24 @@ export class FreeRoomWithEntryError extends Error {
 // reintentar es la respuesta correcta, así que la frontera contesta 503 y no 409 ni 500.
 export class GameModeWriteBusyError extends Error {
   override readonly name = "GameModeWriteBusyError";
+  readonly code = "CATALOG_BUSY";
 }
 
-// UN PROVEEDOR PIDIENDO ALGO QUE NO ES SUYO: editar un compartido —que no es secreto, lo lista el
-// catálogo público—, crear un modo para otro proveedor, suscribir a otro. 403. Un modo PROPIO de otro
-// proveedor no llega acá: sale como «no existe» (404), porque decir 403 le confirmaría que existe.
+// UN PROVEEDOR PIDIENDO ALGO QUE VE PERO NO ES SUYO: editar un compartido —que no es secreto, lo
+// lista el catálogo público— o crear uno. 403. Un modo PROPIO de otro proveedor no llega acá: sale
+// como «no existe» (404), porque decir 403 le confirmaría que existe; y actuar SOBRE otro proveedor
+// tampoco: es `UnknownProviderError`.
 export class GameModeForbiddenError extends Error {
   override readonly name = "GameModeForbiddenError";
+  readonly code = "FORBIDDEN";
+}
+
+// UN PROVEEDOR NOMBRANDO A OTRO: crear un modo para él (`ownerProviderId` en el cuerpo), o leer,
+// copiar, suscribir o cambiar la fuente de otro. Lo de otro proveedor no existe para éste: 404, igual
+// que un `?providerId=` ajeno en la frontera HTTP y que sus modos propios. Sin `detail`.
+export class UnknownProviderError extends Error {
+  override readonly name = "UnknownProviderError";
+  readonly code = "UNKNOWN_PROVIDER";
 }
 
 // ── LA FUENTE DEL CATÁLOGO DE CADA PROVEEDOR ───────────────────────────────────────────────────────

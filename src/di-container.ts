@@ -41,9 +41,17 @@ import {
   OrchestratorBetCharger,
   type OrchestratorCharges,
 } from "@/features/match/network/orchestrator-charges";
+import type { PlayerLog } from "@/features/match/network/player-log";
+import type { PlayerStatsStore } from "@/features/match/network/player-stats";
+import {
+  PlayerStatsRecorder,
+  recordingStats,
+} from "@/features/match/network/player-stats-recorder";
 import { HttpOrchestratorCharges } from "@/features/match/network/transports/http-orchestrator";
 import { MemoryHistory } from "@/features/match/network/transports/memory-history";
+import { MemoryPlayerStats } from "@/features/match/network/transports/memory-player-stats";
 import { MongoHistory } from "@/features/match/network/transports/mongo-history";
+import { MongoPlayerStats } from "@/features/match/network/transports/mongo-player-stats";
 import {
   MemorySettings,
   MongoSettings,
@@ -164,12 +172,28 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 // `register` van TIPADOS: sin el parámetro de tipo, tsyringe acepta cualquier valor contra
 // el token y el error aparece recién en el `resolve`, es decir en runtime.
 const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
-rootContainer.register<HistoryPort>("HistoryPort", { useValue: history });
+// EL LEASE DE LOS TRABAJOS ADMINISTRATIVOS (catálogo y barrido de estadísticas): la misma base, así que
+// el mismo adaptador. Con Mongo excluye procesos; sin Mongo no hay a quién excluir.
+const catalogLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
+// LAS ESTADÍSTICAS DEL JUGADOR se aplican después de cada cierre. Sólo `HistoryPort` pasa por el
+// decorador: los otros tres tokens leen del historial crudo.
+const playerStats = mongo ? new MongoPlayerStats(mongo, logger) : new MemoryPlayerStats();
+const statsRecorder = new PlayerStatsRecorder({
+  store: playerStats,
+  backlog: history,
+  lease: catalogLease,
+  logger,
+  now: () => new Date(),
+});
+const historyPort = recordingStats(history, statsRecorder);
+rootContainer.register<HistoryPort>("HistoryPort", { useValue: historyPort });
+rootContainer.register<PlayerStatsStore>("PlayerStats", { useValue: playerStats });
 rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
 // Y UN TERCERO, el del DOCUMENTO entero: el listado y el detalle del panel, y `/game-data` del
 // backend principal. Los mismos argumentos que los dos de arriba.
 rootContainer.register<MatchArchive>("MatchArchive", { useValue: history });
-rootContainer.register("PlayerLog", { useValue: history });
+// Y EL CUARTO, el del JUGADOR: `GET /me/matches`, lo que jugó el dueño del token.
+rootContainer.register<PlayerLog>("PlayerLog", { useValue: history });
 
 // EL CATÁLOGO DE MODOS, que desde la Tarea 10 es la AUTORIDAD sobre la economía de una mesa: la
 // sala resuelve acá el modo que el request nombró y de él salen `pointsToWin`, `entryFee` y
@@ -189,7 +213,6 @@ const gameModeRepository = mongo
 const providerCatalogs = mongo
   ? new MongoProviderCatalogs(mongo, clock)
   : new MemoryProviderCatalogs(clock);
-const catalogLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
 
 // ── LAS MESAS DEL ORQUESTADOR: el resultado y los cobros ────────────────────────────────────────
 //
@@ -366,6 +389,7 @@ if (env.logLevel === "debug") {
 
 export function startServices(): void {
   settingsSignal.start();
+  statsRecorder.start();
 }
 
 export function stopAcceptingMatches(): void {
@@ -406,7 +430,9 @@ export async function shutdown(): Promise<void> {
   //    un resultado entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
   //    duplicado que el consumidor ya deduplica, pero el costo de esperar son milisegundos.
   await matchResultDispatcher?.close();
-  await history.drain();
+  // El barrido de estadísticas se para antes de drenar: un tick nuevo escribiría en una base que se cierra.
+  statsRecorder.stop();
+  await historyPort.drain();
   // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
   //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`
   //    tolera una conexión ya cerrada, así que no hay nada que proteger acá.

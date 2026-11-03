@@ -26,6 +26,15 @@ import {
   type StoredMatchRecord,
 } from "../history";
 import {
+  ENDED_STATUSES,
+  type MatchRow,
+  type Paginated,
+  type PlayerLog,
+  paginated,
+  rowOf,
+} from "../player-log";
+import type { StatsBacklog } from "../player-stats";
+import {
   type HistoryAdapterOptions,
   LARGE_LAST,
   SUMMARY_FIELDS,
@@ -93,11 +102,13 @@ export type MatchHistoryDocument = {
   updatedAt: Date;
   timeline?: StoredEntry[];
   rounds?: ClosedRound[];
+  /** Hay estadísticas por confirmar: lo deja el primer cierre de una terminada. */
+  statsPending?: true;
   /** La forma vieja, anterior a la v2.1: sólo se lee. */
   entries?: HistoryEntry[];
 };
 
-// LOS CUATRO ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS SIETE ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -114,12 +125,24 @@ export type MatchHistoryDocument = {
 //     asiento—, y aun así la página sale ordenada y sin SORT: el arreglo es sólo el prefijo, que el
 //     filtro fija por igualdad, y `createdAt`/`_id` no son arreglos (medido). Un usuario en dos
 //     asientos genera la misma clave dos veces, que Mongo guarda una sola: la partida sale una vez.
+//   · `matchEndReason` con el orden del listado detrás: el filtro por motivo del cierre. Son siete
+//     valores sobre millones de filas, así que sin el orden detrás la página de «abandonos» leería y
+//     ordenaría todos los abandonos de la historia para mostrar veinte.
+//   · `matchEndedAt` PARCIAL (`statsPending`): lo que el barrido de estadísticas todavía no confirmó.
+//   · `status` con el orden del listado detrás: el filtro por estado (abierta, terminada, abortada),
+//     por lo mismo que el del motivo: tres valores sobre millones de filas. Con el jugador o la sala
+//     no tiene compuesto propio, a propósito: Mongo usa uno y filtra el otro leyendo de más.
 //
 // El filtro por `_id` no necesita uno: el de la colección ya está.
 //
 // EN DOS PEDIDOS Y NO EN UNO, porque `createIndexes` es todo o nada (medido contra Mongo 7): con dos
 // documentos viejos de la misma partida el único falla, y en el mismo pedido se llevaba a los otros
 // dos con él — el listado quedaba recorriendo la colección entera hasta que alguien limpiara las filas.
+// El índice parcial de lo pendiente. `pending` NO lo fuerza con `hint`: los índices se crean en segundo
+// plano y un `hint` a uno que todavía no existe FALLA la consulta (medido); como el filtro lleva
+// `statsPending: true`, el planificador lo elige solo, y el `explain` de la suite lo mide.
+export const PENDING_INDEX = "matchEndedAt_1_statsPending";
+
 const HISTORY_INDEXES: readonly IndexDescription[][] = [
   [{ key: { matchId: 1 }, name: "matchId_1", unique: true }],
   [
@@ -128,6 +151,20 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
     {
       key: { "seats.userId": 1, createdAt: -1, _id: -1 },
       name: "seats.userId_1_createdAt_-1__id_-1",
+    },
+    {
+      key: { matchEndReason: 1, createdAt: -1, _id: -1 },
+      name: "matchEndReason_1_createdAt_-1__id_-1",
+    },
+    {
+      key: { status: 1, createdAt: -1, _id: -1 },
+      name: "status_1_createdAt_-1__id_-1",
+    },
+    // PARCIAL: sólo lo pendiente, que es una fracción mínima de la colección y casi siempre vacía.
+    {
+      key: { matchEndedAt: 1 },
+      name: PENDING_INDEX,
+      partialFilterExpression: { statsPending: true },
     },
   ],
 ];
@@ -156,6 +193,8 @@ function filterOf(query: MatchListQuery): ListFilter {
     ...(query.id === undefined ? {} : { _id: new ObjectId(query.id) }),
     // Cualquier asiento: sobre un arreglo, la igualdad de Mongo pregunta por algún elemento.
     ...(query.userId === undefined ? {} : { "seats.userId": query.userId }),
+    ...(query.matchEndReason === undefined ? {} : { matchEndReason: query.matchEndReason }),
+    ...(query.status === undefined ? {} : { status: query.status }),
   };
 }
 
@@ -216,6 +255,47 @@ export function countQueryOf(
   return { filter: filterOf(query), options: { limit, maxTimeMS: LIST_MAX_TIME_MS } };
 }
 
+// LO QUE LA FILA DEL JUGADOR LEE, y nada más: sin `timeline` ni `rounds`, que son la mayor parte del
+// documento.
+const PLAYER_ROW_PROJECTION = {
+  matchId: 1,
+  roomId: 1,
+  status: 1,
+  winnerIds: 1,
+  table: 1,
+  "matchConfig.playersQuantity": 1,
+  matchEndedAt: 1,
+  createdAt: 1,
+  updatedAt: 1,
+  seats: 1,
+  players: 1,
+} as const;
+
+/**
+ * LA CONSULTA EXACTA DE UNA PÁGINA DEL JUGADOR, exportada para que el `explain` mida la que corre. Usa
+ * el índice del filtro por jugador del panel (`seats.userId` con el orden detrás): la página sale
+ * ordenada del índice y el estado se descarta en el FETCH, que sólo pierde las pocas en curso.
+ *
+ * POR PÁGINA Y NO POR CURSOR, a diferencia del panel: es la forma de truco que el cliente ya lee, y el
+ * `skip` recorre sólo las partidas de UNA cuenta, no la colección.
+ */
+export function playerPageQueryOf(
+  userId: string,
+  page: number,
+  perPage: number,
+): { readonly filter: ListFilter; readonly options: FindOptions } {
+  return {
+    filter: { "seats.userId": userId, status: { $in: [...ENDED_STATUSES] } },
+    options: {
+      projection: PLAYER_ROW_PROJECTION,
+      sort: NEWEST_FIRST,
+      skip: (page - 1) * perPage,
+      limit: perPage,
+      maxTimeMS: LIST_MAX_TIME_MS,
+    },
+  };
+}
+
 // `MaxTimeMSExpired`: la base cortó la consulta por el plazo.
 const isTimeout = (error: unknown) =>
   error instanceof MongoServerError && (error.code === 50 || error.codeName === "MaxTimeMSExpired");
@@ -242,12 +322,18 @@ const stampsAt = (now: Date) => ({
   updatedAt: now,
 });
 
-export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
+export class MongoHistory
+  implements HistoryPort, HistoryReader, MatchArchive, PlayerLog, StatsBacklog
+{
   // UNA ESCRITURA A LA VEZ POR PARTIDA. Cada verbo es fire-and-forget, así que sin esto llegan a la
   // base a la vez — y dos upserts que no encuentran el documento INSERTAN uno cada uno, partiendo la
   // partida en dos filas. Fija también el ORDEN de las escrituras, que es cómo se leen los arreglos.
   // Por proceso alcanza: una partida vive en una sala, y una sala en un proceso.
   private readonly writing = new Map<string, Promise<void>>();
+  // EL LOTE PENDIENTE DE CADA PARTIDA: entradas ya encoladas en un trabajo que todavía no salió.
+  // `record` suma acá mientras no esté sellado (ver `seal`). Se vacía solo: cada pendiente tiene
+  // un trabajo en la cola que lo sella al correr.
+  private readonly unsealed = new Map<string, HistoryEntry[]>();
   // LOS LOTES QUE TODAVÍA ESTÁN VIAJANDO. Es lo único que hace falta para que el apagado
   // pueda esperarlos, y es un `Set` y no un contador porque lo que se espera son las
   // promesas mismas.
@@ -276,6 +362,7 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
   // que falta se completa.
   open(matchId: string, opening: MatchOpening): void {
     const now = this.now();
+    this.seal(matchId);
     this.write(matchId, "no se pudo grabar el inicio", {}, (collection) =>
       collection.updateOne(
         { matchId },
@@ -305,6 +392,13 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
   // Devolver la promesa "por si alguien quiere esperarla" rompería el contrato de a poco:
   // el primer llamador que le ponga `await` mete la latencia de Mongo dentro del manejo de
   // un mensaje del socket, que es el camino sincrónico que `architecture.test.ts` protege.
+  //
+  // UN `$push` POR TRABAJO DE LA COLA, no uno por lote. Un comando produce dos lotes en el mismo
+  // tick —el comando y sus eventos—, y con la cola ocupada se apilan más: cada uno era un
+  // `updateOne` propio. Ahora el lote se suma al PENDIENTE de la partida si hay uno sin sellar, y
+  // solo el primero encola el trabajo; el trabajo sella el pendiente al empezar y lo
+  // manda entero con un solo `$each`. Lo que llega después del sello abre un pendiente nuevo, con su
+  // propio trabajo detrás del anterior: nada se pierde ni se desordena.
   record(entries: readonly HistoryEntry[]): void {
     if (entries.length === 0) return;
     // Todas las entradas de un lote son de la misma partida: las arma `MatchHistory`, que es
@@ -312,29 +406,46 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
     // caso que la clase de arriba no puede producir.
     const matchId = entries[0]?.matchId;
     if (!matchId) return;
-    const now = this.now();
-    this.write(matchId, "no se pudo grabar el lote", { entries: entries.length }, (collection) =>
-      collection.updateOne(
-        { matchId },
-        {
-          // `$push` con `$each` y NUNCA `$set` sobre la timeline: cada lote se agrega al final,
-          // que es lo que hace que el `seq` siga siendo el orden. Con `$set` el documento
-          // quedaría con el último lote y el historial sería siempre la última jugada.
-          $push: { timeline: { $each: entries.map(storedEntryOf) } },
-          $set: { updatedAt: now },
-          // La cabecera de la FILA se escribe UNA SOLA VEZ, con la primera escritura. `$setOnInsert`
-          // y no `$set` porque describe el nacimiento del documento: con `$set`, `createdAt`
-          // avanzaría con cada jugada y dejaría de ser el instante en que la partida empezó a
-          // grabarse.
-          $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
-        },
-        { upsert: true },
-      ),
+    const open = this.unsealed.get(matchId);
+    if (open) {
+      open.push(...entries);
+      return;
+    }
+    const batch = [...entries];
+    this.unsealed.set(matchId, batch);
+    this.write(
+      matchId,
+      "no se pudo grabar el lote",
+      () => ({ entries: batch.length }),
+      (collection) => {
+        const now = this.now();
+        return collection.updateOne(
+          { matchId },
+          {
+            // `$push` con `$each` y NUNCA `$set` sobre la timeline: cada lote se agrega al final,
+            // que es lo que hace que el `seq` siga siendo el orden. Con `$set` el documento
+            // quedaría con el último lote y el historial sería siempre la última jugada.
+            $push: { timeline: { $each: batch.map(storedEntryOf) } },
+            $set: { updatedAt: now },
+            // La cabecera de la FILA se escribe UNA SOLA VEZ, con la primera escritura. `$setOnInsert`
+            // y no `$set` porque describe el nacimiento del documento: con `$set`, `createdAt`
+            // avanzaría con cada jugada y dejaría de ser el instante en que la partida empezó a
+            // grabarse.
+            $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
+          },
+          { upsert: true },
+        );
+      },
+      // EL SELLO, al empezar el trabajo y antes que nada que pueda fallar (pedir la colección
+      // incluido): desde acá lo que llegue abre un pendiente nuevo, y este arreglo ya no cambia
+      // mientras viaja. Un trabajo que falla antes de escribir igual deja el pendiente sellado.
+      () => this.seal(matchId, batch),
     );
   }
 
   round(matchId: string, round: ClosedRound): void {
     const now = this.now();
+    this.seal(matchId);
     this.write(matchId, "no se pudo grabar la mano", { roundNumber: round.roundNumber }, (c) =>
       c.updateOne(
         { matchId },
@@ -354,6 +465,7 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
    */
   close(matchId: string, closing: MatchClosing): void {
     const now = this.now();
+    this.seal(matchId);
     this.write(matchId, "no se pudo grabar el cierre", { status: closing.status }, (collection) =>
       collection.updateOne(
         { matchId },
@@ -448,6 +560,62 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
     }
   }
 
+  // LA PÁGINA Y SU TOTAL A LA VEZ, sobre el mismo filtro. El total se cuenta entero: son las partidas
+  // de una cuenta, no la colección.
+  async pageOf(userId: string, page: number, perPage: number): Promise<Paginated<MatchRow>> {
+    const collection = await this.collection();
+    const query = playerPageQueryOf(userId, page, perPage);
+    try {
+      const [found, totalItems] = await Promise.all([
+        collection.find(query.filter, query.options).toArray(),
+        collection.countDocuments(query.filter, { maxTimeMS: LIST_MAX_TIME_MS }),
+      ]);
+      return paginated(
+        found.map((document) => rowOf(userId, document)),
+        totalItems,
+        page,
+        perPage,
+      );
+    } catch (error) {
+      if (isTimeout(error)) throw new MatchListTimeoutError(error);
+      throw error;
+    }
+  }
+
+  // LO PENDIENTE, por el índice parcial (lo elige el planificador, ver `PENDING_INDEX`) y sin los
+  // arreglos grandes. El más viejo primero, para que el barrido aplique en orden de cierre.
+  async pending(endedBefore: Date, limit: number): Promise<StoredMatchRecord[]> {
+    const collection = await this.collection();
+    try {
+      const found = await collection
+        .find(
+          { statsPending: true, matchEndedAt: { $lt: endedBefore } },
+          {
+            projection: { timeline: 0, rounds: 0, entries: 0 },
+            sort: { matchEndedAt: 1 },
+            limit,
+            maxTimeMS: LIST_MAX_TIME_MS,
+          },
+        )
+        .toArray();
+      return found.map((document) => ({ ...document, _id: String(document._id) }));
+    } catch (error) {
+      if (isTimeout(error)) throw new MatchListTimeoutError(error);
+      throw error;
+    }
+  }
+
+  // POR LA COLA DE LA PARTIDA, así queda detrás de su `close` sin esperar a ninguna otra escritura del
+  // proceso, y ESPERADO: quien llama necesita saber que la marca se fue. A diferencia de `write`, el fallo
+  // sube a quien llama (el aplicador lo loguea y lo reintenta el barrido). Sin documento o sin marca,
+  // `updateOne` no hace nada.
+  settled(matchId: string): Promise<void> {
+    this.seal(matchId);
+    return this.queued(matchId, async () => {
+      await (await this.collection()).updateOne({ matchId }, { $unset: { statsPending: "" } });
+    });
+  }
+
   // Todo verbo pasa por acá: encolado por partida, anotado para el drenado y con el fallo logueado y
   // tragado. La promesa que se ANOTA es la que ya tiene el `catch` puesto, y ese orden importa:
   // anotar la cruda dejaría en el `Set` una promesa rechazada, y el `Promise.all` de `drain()` se
@@ -455,13 +623,19 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
   private write(
     matchId: string,
     failure: string,
-    detail: Record<string, unknown>,
+    detail: Record<string, unknown> | (() => Record<string, unknown>),
     update: (collection: Collection<MatchHistoryDocument>) => Promise<unknown>,
+    start?: () => void,
   ): void {
     const writing = this.queued(matchId, async () => {
+      start?.();
       await update(await this.collection());
     }).catch((error) =>
-      this.logger.error(`historial: ${failure}`, { matchId, ...detail, error: String(error) }),
+      this.logger.error(`historial: ${failure}`, {
+        matchId,
+        ...(typeof detail === "function" ? detail() : detail),
+        error: String(error),
+      }),
     );
     this.inFlight.add(writing);
     void writing.finally(() => this.inFlight.delete(writing));
@@ -484,6 +658,16 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
     return next;
   }
 
+  // SELLA EL PENDIENTE DE UNA PARTIDA: lo que `record` agregue desde acá abre otro, con su trabajo
+  // DETRÁS del que se está encolando. La cabecera, la mano, el cierre y la marca de estadísticas
+  // sellan antes de encolarse, así que un lote grabado antes que ellos viaja antes que ellos —el
+  // desenlace llega detrás de la entrada que lo cuenta— y uno grabado después, después. Con
+  // `batch`, sella solo si el pendiente sigue siendo ése: el trabajo de un lote no le puede cerrar
+  // el pendiente a otro.
+  private seal(matchId: string, batch?: HistoryEntry[]): void {
+    if (batch === undefined || this.unsealed.get(matchId) === batch) this.unsealed.delete(matchId);
+  }
+
   private collection(): Promise<Collection<MatchHistoryDocument>> {
     this.prepared ??= this.prepare().catch((error: unknown) => {
       // Se limpia al fallar, igual que el `finally` de `Mongo.ready()`: un Mongo que todavía no había
@@ -494,24 +678,29 @@ export class MongoHistory implements HistoryPort, HistoryReader, MatchArchive {
     return this.prepared;
   }
 
-  // UN ÍNDICE QUE NO SE PUEDE CREAR NO FRENA EL HISTORIAL. El caso real es el único: una colección
-  // vieja con dos documentos de la misma partida, que hace fallar el único. Rechazar acá dejaría a
-  // TODAS las partidas sin registro por un problema de dos filas; se loguea —es lo que el operador
-  // necesita para limpiarlas— y se graba igual, con la cola como única garantía hasta el próximo
-  // arranque.
+  // LOS ÍNDICES SE PIDEN Y NO SE ESPERAN. Sobre la colección de producción —millones de partidas— crear
+  // uno nuevo tarda minutos, y esperarlo dejaba todo ese rato las escrituras de este proceso en
+  // memoria. Mongo lo construye sin trabar la colección (desde la 4.2 sólo la bloquea un instante al
+  // empezar y otro al terminar), así que se graba mientras tanto, y un índice nuevo ya no hay que
+  // crearlo a mano antes del despliegue. Lo que cuesta esa ventana: el listado que lo necesita va lento
+  // —o vence su plazo, 503—, y el único de `matchId` todavía no protege; la cola de abajo sigue
+  // garantizándolo dentro del proceso.
+  //
+  // UN ÍNDICE QUE NO SE PUEDE CREAR TAMPOCO FRENA EL HISTORIAL. El caso real es el único: una colección
+  // vieja con dos documentos de la misma partida, que hace fallar el único. Se loguea —es lo que el
+  // operador necesita para limpiarlas— y se graba igual, con la cola como única garantía hasta el
+  // próximo arranque, que lo vuelve a pedir. Lo mismo si el proceso se apaga con uno a medio crear.
   private async prepare(): Promise<Collection<MatchHistoryDocument>> {
     const collection = await this.store.collection<MatchHistoryDocument>(HISTORY_COLLECTION);
-    await Promise.all(
-      HISTORY_INDEXES.map((indexes) =>
-        collection.createIndexes(indexes).catch((error: unknown) =>
-          this.logger.error("historial: no se pudieron crear los índices; se graba igual", {
-            collection: HISTORY_COLLECTION,
-            indexes: indexes.map(({ name }) => name),
-            error: String(error),
-          }),
-        ),
-      ),
-    );
+    for (const indexes of HISTORY_INDEXES) {
+      collection.createIndexes(indexes).catch((error: unknown) =>
+        this.logger.error("historial: no se pudieron crear los índices; se graba igual", {
+          collection: HISTORY_COLLECTION,
+          indexes: indexes.map(({ name }) => name),
+          error: String(error),
+        }),
+      );
+    }
     return collection;
   }
 }

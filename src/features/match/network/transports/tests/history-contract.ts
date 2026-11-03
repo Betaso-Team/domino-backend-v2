@@ -10,6 +10,7 @@ import type {
   MatchListQuery,
   MatchSetup,
 } from "../../history";
+import type { StatsBacklog } from "../../player-stats";
 import type { HistoryAdapterOptions } from "../stored-record";
 
 // EL CONTRATO DEL REGISTRO, ESCRITO UNA SOLA VEZ Y CORRIDO CONTRA LOS DOS ADAPTADORES, por el criterio
@@ -24,7 +25,7 @@ import type { HistoryAdapterOptions } from "../stored-record";
 // TODOS LOS VERBOS DEL PUERTO SON `void`, así que el contrato espera con `drain()`, que es la única
 // pregunta "¿terminaste?" que el puerto ofrece.
 
-export type HistoryHarness = HistoryPort & HistoryReader & MatchArchive;
+export type HistoryHarness = HistoryPort & HistoryReader & MatchArchive & StatsBacklog;
 
 export const SETUP: MatchSetup = {
   roomId: "room-1",
@@ -204,6 +205,93 @@ export function describeHistoryContract(
   harness: (options?: HistoryAdapterOptions) => Promise<HistoryHarness> | HistoryHarness,
 ): void {
   describe(`${name}: el contrato del registro`, () => {
+    // EL PENDIENTE DE ESTADÍSTICAS: lo deja el PRIMER cierre de una terminada, y sólo ése.
+    describe("el pendiente de estadísticas", () => {
+      const FAR = new Date(Date.parse("2100-01-01T00:00:00.000Z"));
+      const closeAt = async (history: HistoryHarness, matchId: string, endedAt: number) => {
+        history.open(matchId, { ...SETUP, matchStartedAt: 1_000 });
+        history.close(matchId, { ...CLOSING, matchEndedAt: endedAt });
+        await history.drain();
+      };
+      const ids = async (history: HistoryHarness, before: Date = FAR, limit = 10) =>
+        (await history.pending(before, limit)).map((record) => record.matchId);
+
+      it("una terminada queda pendiente, con lo que la regla lee y sin timeline ni rounds", async () => {
+        const history = await harness();
+        history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+        history.record([entry(1, { matchId: "m-1" })]);
+        history.round("m-1", ROUND);
+        history.close("m-1", CLOSING);
+        await history.drain();
+
+        const [found] = await history.pending(FAR, 10);
+        expect(found).toMatchObject({
+          matchId: "m-1",
+          status: "finished",
+          winnerIds: ["seat-1"],
+          statsPending: true,
+        });
+        expect(found?.matchEndedAt).toBeInstanceOf(Date);
+        expect(found?.players).toHaveLength(2);
+        expect(found?.seats).toHaveLength(2);
+        expect(found?.matchConfig).toBeDefined();
+        expect(found).not.toHaveProperty("timeline");
+        expect(found).not.toHaveProperty("rounds");
+      });
+
+      it("una abortada no queda pendiente", async () => {
+        const history = await harness();
+        history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+        history.close("m-1", { ...CLOSING, status: "aborted", winnerIds: [] });
+        await history.drain();
+
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("`settled` la saca, y de una partida que no existe no lanza", async () => {
+        const history = await harness();
+        await closeAt(history, "m-1", 61_000);
+        expect(await ids(history)).toEqual(["m-1"]);
+
+        await history.settled("m-1");
+        await history.settled("m-1");
+        await history.settled("no-existe");
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("`settled` pedido justo después de `close`, sin esperar el drain, queda detrás del cierre", async () => {
+        const history = await harness();
+        history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+        history.close("m-1", CLOSING);
+        await history.settled("m-1");
+        await history.drain();
+
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("un segundo cierre de una ya asentada no la vuelve a dejar pendiente", async () => {
+        const history = await harness();
+        await closeAt(history, "m-1", 61_000);
+        await history.settled("m-1");
+
+        history.close("m-1", { ...CLOSING, matchEndedAt: 99_000 });
+        await history.drain();
+
+        expect(await ids(history)).toEqual([]);
+      });
+
+      it("sólo lo cerrado antes del límite, del más viejo al más nuevo y hasta `limit`", async () => {
+        const history = await harness();
+        await closeAt(history, "m-c", 300_000);
+        await closeAt(history, "m-a", 100_000);
+        await closeAt(history, "m-b", 200_000);
+
+        expect(await ids(history)).toEqual(["m-a", "m-b", "m-c"]);
+        expect(await ids(history, new Date(250_000))).toEqual(["m-a", "m-b"]);
+        expect(await ids(history, new Date(100_000))).toEqual([]);
+        expect(await ids(history, FAR, 2)).toEqual(["m-a", "m-b"]);
+      });
+    });
     it("al abrir: la versión, el armado, el estado `started` y el arranque como fecha", async () => {
       const history = await harness();
       history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
@@ -272,6 +360,71 @@ export function describeHistoryContract(
       history.record([entry(2)]);
       await history.drain();
       expect(await history.of("m-1")).toHaveLength(2);
+    });
+
+    it("al cerrar: la conexión de cada asiento, con los instantes de sus hechos como fechas", async () => {
+      const history = await harness();
+      const verdict = {
+        blame: "NETWORK",
+        cause: "CONNECTION_LOST",
+        verdictVersion: 1,
+      } as const;
+      const server = {
+        eventLoopP99Ms: 12,
+        othersWithHighRtt: 0,
+        othersConnected: 1,
+        shuttingDown: false,
+      };
+      const rtt = { samples: 3, avgMs: 85, maxMs: 90, jitterMs: 4, lostProbes: 0 };
+      const [first, second] = CLOSING.players;
+      history.close("m-1", {
+        ...CLOSING,
+        players: [
+          {
+            ...(first as MatchClosing["players"][number]),
+            connection: {
+              rtt,
+              events: [
+                {
+                  kind: "DROPPED",
+                  at: 20_000,
+                  roundNumber: 1,
+                  closeCode: 1006,
+                  sinceLastPongMs: 4_000,
+                  recentRttMs: [80, null, 90],
+                  server,
+                  verdict,
+                },
+                { kind: "RECONNECTED", at: 25_000, roundNumber: 1, awayMs: 5_000 },
+              ],
+            },
+          },
+          second as MatchClosing["players"][number],
+        ],
+      });
+      await history.drain();
+
+      const record = await history.recordOf("m-1");
+      expect(record).toMatchObject({
+        players: [
+          {
+            connection: {
+              rtt,
+              events: [
+                {
+                  kind: "DROPPED",
+                  at: new Date(20_000),
+                  recentRttMs: [80, null, 90],
+                  server,
+                  verdict,
+                },
+                { kind: "RECONNECTED", at: new Date(25_000), awayMs: 5_000 },
+              ],
+            },
+          },
+          {},
+        ],
+      });
     });
 
     // UNA MESA QUE NUNCA SE LLENÓ: el cierre es lo primero que llega, y trae el armado él mismo.
@@ -639,6 +792,111 @@ export function describeHistoryContract(
       });
       const exact = await history.list({ pageSize: 10, userId: "bot", from: new Date(at(3)) });
       expect({ total: exact.total, totalExact: exact.totalExact }).toEqual({
+        total: 2,
+        totalExact: true,
+      });
+    });
+
+    // EL MOTIVO DEL CIERRE (`matchEndReason`), exacto. Lo escribe el cierre, así que una partida todavía
+    // abierta no tiene motivo y no coincide con ninguno, y la forma vieja tampoco: nunca lo grabó.
+    it("por motivo del cierre: exacto, con los demás filtros, y la abierta nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      const rows: readonly Row[] = [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"] },
+        { matchId: "m-2", at: at(20), users: ["ana", "carla"] },
+        { matchId: "m-3", at: at(30), users: ["beto", "carla"] },
+        { matchId: "m-abierta", at: at(40), users: ["ana", "dani"] },
+        { matchId: "m-vieja", at: at(50), roomId: null },
+        { matchId: "m-6", at: at(60), users: ["ana", "eva"] },
+      ];
+      await seed(history, clock, rows);
+      clock.set(at(70));
+      const closings: [string, MatchClosing["matchEndReason"], MatchClosing["status"]][] = [
+        ["m-1", "SCORE", "finished"],
+        ["m-2", "ABANDONMENT", "finished"],
+        ["m-3", "ABANDONMENT", "finished"],
+        ["m-6", "CHARGE_REJECTED", "aborted"],
+      ];
+      for (const [matchId, matchEndReason, status] of closings) {
+        const users = rows.find((row) => row.matchId === matchId)?.users ?? [];
+        history.close(matchId, {
+          ...CLOSING,
+          roomId: `room-${matchId}`,
+          seats: seatsOf(users),
+          status,
+          matchEndReason,
+        });
+      }
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ matchEndReason: "SCORE" })).toEqual(["m-1"]);
+      expect(await ids({ matchEndReason: "ABANDONMENT" })).toEqual(["m-3", "m-2"]);
+      expect(await ids({ matchEndReason: "CHARGE_REJECTED" })).toEqual(["m-6"]);
+      expect(await ids({ matchEndReason: "NEVER_STARTED" })).toEqual([]);
+      // CON LOS DEMÁS, por AND: el jugador, las fechas y la sala.
+      expect(await ids({ matchEndReason: "ABANDONMENT", userId: "ana" })).toEqual(["m-2"]);
+      expect(await ids({ matchEndReason: "ABANDONMENT", from: new Date(at(25)) })).toEqual(["m-3"]);
+      expect(await ids({ matchEndReason: "SCORE", roomId: "room-m-2" })).toEqual([]);
+
+      const page = await history.list({ pageSize: 10, matchEndReason: "ABANDONMENT" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
+        total: 2,
+        totalExact: true,
+      });
+    });
+
+    // EL ESTADO (`status`), exacto: `started` es la abierta, `finished` y `aborted` las cerradas. La
+    // forma vieja nunca grabó estado y no coincide con ninguno. Sin el filtro salen todos.
+    it("por estado: exacto, con los demás filtros, y la vieja nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      const rows: readonly Row[] = [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"] },
+        { matchId: "m-2", at: at(20), users: ["ana", "carla"] },
+        { matchId: "m-abierta", at: at(30), users: ["ana", "dani"] },
+        { matchId: "m-vieja", at: at(40), roomId: null },
+        { matchId: "m-5", at: at(50), users: ["beto", "eva"] },
+        { matchId: "m-6", at: at(60), users: ["ana", "eva"] },
+      ];
+      await seed(history, clock, rows);
+      clock.set(at(70));
+      const closings: [string, MatchClosing["matchEndReason"], MatchClosing["status"]][] = [
+        ["m-1", "SCORE", "finished"],
+        ["m-2", "CHARGE_REJECTED", "aborted"],
+        ["m-5", "ABANDONMENT", "finished"],
+        ["m-6", "INTERRUPTED", "aborted"],
+      ];
+      for (const [matchId, matchEndReason, status] of closings) {
+        const users = rows.find((row) => row.matchId === matchId)?.users ?? [];
+        history.close(matchId, {
+          ...CLOSING,
+          roomId: `room-${matchId}`,
+          seats: seatsOf(users),
+          status,
+          matchEndReason,
+        });
+      }
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ status: "started" })).toEqual(["m-abierta"]);
+      expect(await ids({ status: "finished" })).toEqual(["m-5", "m-1"]);
+      expect(await ids({ status: "aborted" })).toEqual(["m-6", "m-2"]);
+      // SIN EL FILTRO, TODOS: la vieja incluida.
+      expect(await ids({})).toEqual(["m-6", "m-5", "m-vieja", "m-abierta", "m-2", "m-1"]);
+      // CON LOS DEMÁS, por AND: el jugador, las fechas, la sala y el motivo.
+      expect(await ids({ status: "aborted", userId: "eva" })).toEqual(["m-6"]);
+      expect(await ids({ status: "finished", from: new Date(at(15)) })).toEqual(["m-5"]);
+      expect(await ids({ status: "aborted", roomId: "room-m-2" })).toEqual(["m-2"]);
+      expect(await ids({ status: "finished", roomId: "room-m-2" })).toEqual([]);
+      expect(await ids({ status: "aborted", matchEndReason: "SCORE" })).toEqual([]);
+
+      const page = await history.list({ pageSize: 10, status: "aborted" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
         total: 2,
         totalExact: true,
       });

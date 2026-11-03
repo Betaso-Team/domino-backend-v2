@@ -9,6 +9,8 @@ export { validated } from "./validated";
 // rewriting it. `shared` still knows no feature: what travels out are the shapes, not a direction.
 export type { RouteSchemas, Validated } from "./validated";
 export { httpErrorHandler } from "./error-handler";
+export { sendError } from "./errors";
+export type { ErrorBody } from "./errors";
 export { exposeServerTime } from "./server-time";
 export { requestLog } from "./request-log";
 export { traceScope } from "./trace-scope";

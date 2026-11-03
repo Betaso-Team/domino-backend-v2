@@ -1,4 +1,5 @@
 import { type TokenVerifier, requireBearer } from "@/features/auth";
+import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import { z } from "zod";
@@ -39,7 +40,7 @@ export function matchRoutes(deps: {
       validated({ params: CONFIG_PARAMS }, async ({ params }, response) => {
         const match = await deps.registry.publicConfigOf(params.roomId);
         if (!match) {
-          response.status(404).json({ error: "ROOM_NOT_FOUND" });
+          sendError(response, 404, "ROOM_NOT_FOUND");
           return;
         }
         response.set("Cache-Control", "no-store").json(match);
@@ -66,7 +67,7 @@ export function matchRoutes(deps: {
     validated({ params: CONFIG_PARAMS }, async ({ params }, response) => {
       const config = await deps.registry.publicConfigOf(params.roomId);
       if (!config) {
-        response.status(404).json({ error: "NOT_FOUND" });
+        sendError(response, 404, "ROOM_NOT_FOUND");
         return;
       }
 

@@ -80,8 +80,10 @@ describe("recordRoutes: el registro de las rutas", () => {
       "GET /internal/matches",
       "GET /internal/matches/:matchId",
       "GET /game-data/:roomId",
+      "GET /internal/players/:userId/matches",
       "POST /internal/matches",
       "POST /internal/players/:userId/seat",
+      "GET /internal/players/:userId/match",
       "GET /internal/census",
     ]);
   });
@@ -217,7 +219,7 @@ describe("recordRoutes: lo que contestan", () => {
 
     const after = cursorOf({ t: Date.parse("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) });
     await get(
-      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana`,
+      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted`,
     );
     expect(list).toHaveBeenLastCalledWith({
       pageSize: 5,
@@ -226,6 +228,8 @@ describe("recordRoutes: lo que contestan", () => {
       to: new Date("2026-10-02T00:00:00.000Z"),
       id: "b".repeat(24),
       userId: "u-ana",
+      matchEndReason: "CHARGE_REJECTED",
+      status: "aborted",
     });
   });
 
@@ -259,6 +263,16 @@ describe("recordRoutes: lo que contestan", () => {
     `userId=${"u".repeat(129)}`,
     "userId=%00",
     "userId=ana&userId=beto",
+    // EL MOTIVO, uno de los del dominó y escrito como él: ni inventado, ni en minúscula, ni dos.
+    "matchEndReason=",
+    "matchEndReason=GANÓ",
+    "matchEndReason=score",
+    "matchEndReason=SCORE&matchEndReason=ABANDONMENT",
+    // EL ESTADO, uno de los tres y escrito como él: ni inventado, ni en mayúscula, ni dos.
+    "status=",
+    "status=open",
+    "status=FINISHED",
+    "status=started&status=finished",
   ])("un pedido imposible es 400 MALFORMED (%s)", async (query) => {
     const base = await serve(untouched);
 
@@ -290,8 +304,8 @@ describe("recordRoutes: lo que contestan", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      status: "error",
-      message: "La búsqueda tardó demasiado; acota el rango de fechas",
+      code: "MATCH_LIST_TIMEOUT",
+      detail: "La búsqueda tardó demasiado; acota el rango de fechas",
     });
   });
 
@@ -325,7 +339,7 @@ describe("recordRoutes: lo que contestan", () => {
     const response = await get(`${base}/internal/matches/no-existe`);
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ status: "error", message: "Partida no encontrada" });
+    expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
   });
 
   // EL CONTRATO DEL BACKEND PRINCIPAL (truco `4472332`): el documento pelado, sin envelope ni `_id`.
@@ -348,7 +362,7 @@ describe("recordRoutes: lo que contestan", () => {
     const response = await get(`${base}/game-data/no-existe`);
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "MATCH_NOT_FOUND" });
+    expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
   });
 
   // LA LLAVE PRIMERO: sin ella las tres contestan 401, y antes de validar la forma.

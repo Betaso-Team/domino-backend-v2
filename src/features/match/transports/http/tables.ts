@@ -1,5 +1,6 @@
 import type { Logger } from "@/logger";
 import { requireApiKey } from "@/shared/http/api-key";
+import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import { z } from "zod";
@@ -11,6 +12,7 @@ import type { MatchRegistry } from "../match-registry";
 export const OPEN_TABLE_ROUTE = "/internal/matches";
 export const SEAT_BACK_ROUTE = "/internal/players/:userId/seat";
 export const CENSUS_ROUTE = "/internal/census";
+export const PLAYER_MATCH_ROUTE = "/internal/players/:userId/match";
 
 // Misma forma que el `matchId` del historial: largo acotado y sin controles, porque este id entra
 // del llamador y termina en una clave del registro compartido.
@@ -43,7 +45,7 @@ export function tablesRoutes(deps: TablesDeps): Router {
   const router = Router();
   if (!deps.orchestratorApiKey) {
     deps.logger.warn(
-      `API del orquestador deshabilitada: falta ORCHESTRATOR_API_KEY, no se registran ${OPEN_TABLE_ROUTE}, ${SEAT_BACK_ROUTE} ni ${CENSUS_ROUTE}`,
+      `API del orquestador deshabilitada: falta ORCHESTRATOR_API_KEY, no se registran ${OPEN_TABLE_ROUTE}, ${SEAT_BACK_ROUTE}, ${PLAYER_MATCH_ROUTE} ni ${CENSUS_ROUTE}`,
     );
     return router;
   }
@@ -60,7 +62,7 @@ export function tablesRoutes(deps: TablesDeps): Router {
         const code = error instanceof Error ? REFUSAL.exec(error.message)?.[1] : undefined;
         // Todo lo que no es un rechazo de la sala es NUESTRO: 500, no un 422 que lo disfrace.
         if (!code) throw error;
-        response.status(422).json({ error: code });
+        sendError(response, 422, code);
       }
     }),
   );
@@ -73,10 +75,27 @@ export function tablesRoutes(deps: TablesDeps): Router {
       const config = roomId ? await deps.registry.publicConfigOf(roomId) : undefined;
       const reservation = roomId && config ? await deps.tables.seatBack(roomId) : undefined;
       if (!config || reservation === undefined) {
-        response.status(404).json({ error: "NO_LIVE_MATCH" });
+        sendError(response, 404, "NO_LIVE_MATCH");
         return;
       }
       response.json({ status: "success", data: { matchId: config.matchId, reservation } });
+    }),
+  );
+  // EN QUÉ MESA ESTÁ SENTADO, SIN RESERVAR NADA. Es la pregunta del orquestador cuando solo necesita
+  // saber si el jugador tiene partida viva (para no abrirle otra): dos GET al registro compartido y
+  // ninguna llamada a Colyseus. `POST .../seat` contesta lo mismo pero además reserva un asiento,
+  // que es lo caro y lo que solo hace falta para volver a entrar.
+  router.get(
+    PLAYER_MATCH_ROUTE,
+    guard,
+    validated({ params: SEAT_PARAMS }, async ({ params }, response) => {
+      const roomId = await deps.registry.matchOf(params.userId);
+      const config = roomId ? await deps.registry.publicConfigOf(roomId) : undefined;
+      if (!roomId || !config) {
+        sendError(response, 404, "NO_LIVE_MATCH");
+        return;
+      }
+      response.json({ status: "success", data: { matchId: config.matchId, roomId } });
     }),
   );
   // Del CLÚSTER, no de este proceso: el censo es el hash que escriben todas las salas.

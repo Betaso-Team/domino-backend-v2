@@ -142,7 +142,7 @@ describe("el registro de una partida jugada", () => {
     expect((await get("/internal/matches/no-existe")).status).toBe(404);
     const response = await get("/game-data/no-existe");
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: "MATCH_NOT_FOUND" });
+    expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
   });
 });
 

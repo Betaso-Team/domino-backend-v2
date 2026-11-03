@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MemoryHistory } from "./memory-history";
 import { SETUP, describeHistoryContract, entry } from "./tests/history-contract";
+import { describePlayerLogContract } from "./tests/player-log-contract";
 
 // EL MISMO CONTRATO QUE EL ADAPTADOR DE MONGO (`./mongo-history.int.test.ts`), corrido contra el que
 // usa la instancia sin base y la suite entera.
 describeHistoryContract("MemoryHistory", (options) => new MemoryHistory(options));
+describePlayerLogContract("MemoryHistory", (options) => new MemoryHistory(options));
 
 describe("MemoryHistory: lo propio de no tener base", () => {
   // EL TOPE ES LO QUE SE PIERDE ELIGIÉNDOLA, y se mide: sin él un proceso que vive semanas guardaría

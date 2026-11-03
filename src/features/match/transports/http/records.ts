@@ -1,9 +1,16 @@
 import type { Logger } from "@/logger";
 import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
+import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import { type Response, Router } from "express";
 import { z } from "zod";
-import { type MatchArchive, type MatchCursor, MatchListTimeoutError } from "../../network/history";
+import {
+  MATCH_END_REASONS,
+  MATCH_STATUSES,
+  type MatchArchive,
+  type MatchCursor,
+  MatchListTimeoutError,
+} from "../../network/history";
 
 // En consts para que el aviso de arranque y el registro no puedan divergir.
 export const MATCHES_ROUTE = "/internal/matches";
@@ -12,8 +19,9 @@ export const GAME_DATA_ROUTE = "/game-data/:roomId";
 
 // LA FORMA DEL HISTORIAL DE SOPORTE (`./history.ts`): largo acotado y sin caracteres de control. El
 // `matchId` lo elige el orquestador y el `roomId` Colyseus, y `/game-data` acepta cualquiera de los
-// dos, así que no hay un alfabeto que fijar sin rechazar partidas legítimas.
-const id = z
+// dos, así que no hay un alfabeto que fijar sin rechazar partidas legítimas. La misma regla vale para el
+// `userId` del filtro y de `./players.ts`.
+export const id = z
   .string()
   .min(1)
   .max(128)
@@ -82,18 +90,19 @@ const LIST_QUERY = z
     roomId: id.optional(),
     id: objectId.optional(),
     userId: id.optional(),
+    matchEndReason: z.enum(MATCH_END_REASONS).optional(),
+    status: z.enum(MATCH_STATUSES).optional(),
   })
   .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
     message: "`from` no puede ser posterior a `to`",
     path: ["from"],
   });
 
-const NOT_FOUND_MESSAGE = "Partida no encontrada";
 const TIMEOUT_MESSAGE = "La búsqueda tardó demasiado; acota el rango de fechas";
 
 // EL ENVELOPE DE LAS RUTAS DEL PANEL, el mismo de las lecturas administrativas del catálogo
-// (`features/game-mode/transports/http/admin.ts`): `{ status, data }` al encontrar y
-// `{ status, message }` al no encontrar. Se escribe acá y no se importa de allá porque es de otra
+// (`features/game-mode/transports/http/admin.ts`): `{ status, data }` al encontrar. Los errores
+// salen `{ code, detail? }` (`@/shared/http/errors`), como en todo el dominó. Se escribe acá y no se importa de allá porque es de otra
 // feature, y una ruta del dominó no puede depender de los mensajes del catálogo.
 const sendData = (response: Response, data: unknown) => response.json({ status: "success", data });
 
@@ -138,7 +147,8 @@ export function recordRoutes({
     MATCHES_ROUTE,
     admin,
     validated({ query: LIST_QUERY }, async ({ query }, response) => {
-      const { pageSize, after, from, to, matchId, roomId, id, userId } = query;
+      const { pageSize, after, from, to, matchId, roomId, id, userId, matchEndReason, status } =
+        query;
       try {
         const page = await archive.list({
           pageSize,
@@ -149,6 +159,8 @@ export function recordRoutes({
           ...(roomId === undefined ? {} : { roomId }),
           ...(id === undefined ? {} : { id }),
           ...(userId === undefined ? {} : { userId }),
+          ...(matchEndReason === undefined ? {} : { matchEndReason }),
+          ...(status === undefined ? {} : { status }),
         });
         sendData(response, {
           items: page.items,
@@ -162,7 +174,7 @@ export function recordRoutes({
         // momento—, así que no es un 500: es 503 con qué hacer. Cualquier otro fallo sí sube.
         if (!(error instanceof MatchListTimeoutError)) throw error;
         logger.warn("listado de partidas: la base excedió el plazo", { query: { ...query } });
-        response.status(503).json({ status: "error", message: TIMEOUT_MESSAGE });
+        sendError(response, 503, "MATCH_LIST_TIMEOUT", TIMEOUT_MESSAGE);
       }
     }),
   );
@@ -176,7 +188,7 @@ export function recordRoutes({
     validated({ params: MATCH_PARAMS }, async ({ params }, response) => {
       const record = await archive.recordOf(params.matchId);
       if (!record) {
-        response.status(404).json({ status: "error", message: NOT_FOUND_MESSAGE });
+        sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }
       sendData(response, record);
@@ -192,7 +204,7 @@ export function recordRoutes({
     validated({ params: ROOM_PARAMS }, async ({ params }, response) => {
       const snapshot = await archive.snapshotOf(params.roomId);
       if (!snapshot) {
-        response.status(404).json({ error: "MATCH_NOT_FOUND" });
+        sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }
       response.json(snapshot);

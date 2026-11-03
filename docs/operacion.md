@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y el
+`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/players/:userId/match` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y el
 broker de juegos (`BETASO_GAMES_RABBITMQ_URL`) son capacidades opcionales elegidas por la presencia de sus URLs; `RABBITMQ_URL` (el viejo broker de Betaso) ya no se lee.
 
 El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
@@ -147,8 +147,8 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 
 ## Registro de partidas
 
-`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y cuatro
-índices que el proceso crea al primer uso:
+`match_history` tiene un documento por partida (la forma v2.1, ver `docs/api-y-mensajes.md`) y seis
+índices que el proceso pide al primer uso, en segundo plano:
 
 | Índice | Sirve a |
 |---|---|
@@ -156,20 +156,29 @@ Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos dura
 | `roomId_1_createdAt_-1__id_-1` | `/game-data/:roomId` (por el prefijo); el filtro `roomId` del listado, con o sin fechas, ya ordenado |
 | `createdAt_-1__id_-1` | el orden del listado: sin filtros, por fechas y con cursor |
 | `seats.userId_1_createdAt_-1__id_-1` | el filtro `userId` del listado, con o sin fechas y cursor, ya ordenado. Es multikey (una clave por asiento) |
+| `matchEndReason_1_createdAt_-1__id_-1` | el filtro `matchEndReason` del listado (el motivo del cierre), con o sin fechas y cursor, ya ordenado |
+| `status_1_createdAt_-1__id_-1` | el filtro `status` del listado (abierta, terminada o abortada), con o sin fechas y cursor, ya ordenado |
 
 El filtro `id` usa el `_id_` de la colección. Cada combinación de filtros del listado sale de uno de
 estos sin recorrer la colección ni ordenar en memoria, y lee como mucho `pageSize + 1` documentos en
-cualquier página; lo mide `mongo-history.int.test.ts` con `explain` contra un Mongo de verdad.
+cualquier página; lo mide `mongo-history.int.test.ts` con `explain` contra un Mongo de verdad. La
+excepción es motivo + jugador, estado + jugador y estado + sala, que no tienen índice propio: usan uno
+de los dos y leen de más, hasta las partidas de ese jugador o de esa sala.
 
-**Al desplegar sobre una colección grande.** `createIndexes` corre con la primera escritura del proceso
-y, sobre millones de documentos, tarda: las escrituras de ese proceso esperan en memoria hasta que
-termina. Conviene crear los índices a mano antes, con los mismos nombres (si coinciden, el proceso no
-hace nada):
+**Al desplegar un índice nuevo no hay que hacer nada a mano.** El proceso pide los índices con su
+primera escritura y no los espera: sobre millones de documentos uno nuevo tarda minutos, y Mongo lo
+construye sin trabar la colección (desde la 4.2 sólo la bloquea un instante al empezar y otro al
+terminar), así que las partidas se graban mientras tanto. En ese rato el filtro que lo usa va lento y
+puede contestar 503, y el único de `matchId` todavía no protege (la cola del proceso sí). Si se
+prefiere tenerlo listo antes de desplegar, se crea a mano con el mismo nombre (si coincide, el proceso
+no hace nada):
 
 ```js
 db.match_history.createIndex({ roomId: 1, createdAt: -1, _id: -1 }, { name: "roomId_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ createdAt: -1, _id: -1 }, { name: "createdAt_-1__id_-1" })
 db.match_history.createIndex({ "seats.userId": 1, createdAt: -1, _id: -1 }, { name: "seats.userId_1_createdAt_-1__id_-1" })
+db.match_history.createIndex({ matchEndReason: 1, createdAt: -1, _id: -1 }, { name: "matchEndReason_1_createdAt_-1__id_-1" })
+db.match_history.createIndex({ status: 1, createdAt: -1, _id: -1 }, { name: "status_1_createdAt_-1__id_-1" })
 db.match_history.createIndex({ matchId: 1 }, { name: "matchId_1", unique: true })
 ```
 
@@ -177,10 +186,9 @@ El `roomId_1` que creaba la versión anterior quedó cubierto por el compuesto (
 pero ocupa memoria y frena cada escritura. Una vez creado el compuesto, se puede borrar:
 `db.match_history.dropIndex("roomId_1")`.
 
-**El de `seats.userId` es el más grande de los cuatro**: lleva una clave por asiento (dos o cuatro por
-partida; un usuario en dos asientos de la misma partida es una sola), así que sobre la colección de
-producción se crea **a mano y antes del despliegue** que lo trae, con la línea de arriba. Mientras no
-exista, el filtro por jugador funciona pero recorre el índice de fechas descartando partidas (o, para un
+**El de `seats.userId` es el más grande de los seis**: lleva una clave por asiento (dos o cuatro por
+partida; un usuario en dos asientos de la misma partida es una sola), así que es el que más tarda en
+construirse. Mientras no exista, el filtro por jugador funciona pero recorre el índice de fechas descartando partidas (o, para un
 jugador con pocas, las ordena en memoria), y una búsqueda ancha puede terminar en el 503 del plazo. Tiene
 que ser el compuesto: con `{ "seats.userId": 1 }` solo, el plan medido ordena en memoria (`SORT`).
 
@@ -226,12 +234,39 @@ documento (seed, parejas, plazos, marcador inicial). Los documentos de antes de 
 siguen pidiendo los argumentos: `npm run replay -- <matchId> <seed> <pointsToWin> <SHUFFLED|SEAT_ORDER>
 <asiento...>`.
 
+### Por qué se desconectó alguien
+
+Cada jugador del registro cerrado lleva `connection`: el ping que midió el servidor (`rtt`: promedio,
+peor, fluctuación y sondeos perdidos) y la lista de hechos (`events`): `DROPPED` (se cayó), `RECONNECTED`
+(volvió, con `awayMs`) y `GONE` (no volvió). Cada caída trae `verdict.blame`:
+
+| `blame` | qué fue | `cause` |
+|---|---|---|
+| `OURS` | el servidor | `SERVER_SHUTDOWN` (apagado o deploy), `SERVER_OVERLOAD` (el proceso trabado, o el ping alto a la vez para la mayoría de los conectados al proceso, con al menos 3), `SERVER_ERROR` |
+| `NETWORK` | la conexión del jugador | `POOR_CONNECTION` (el ping venía alto o inestable), `CONNECTION_LOST` (se cortó de golpe), `WENT_OFFLINE` (el navegador avisó que perdió la red) |
+| `INTENTIONAL` | el jugador | `LEFT_THE_TABLE` (salió con el botón), `CLOSED_APP` (cerró o recargó; si hay un `RECONNECTED` justo después, recargó) |
+| `UNKNOWN` | un código de cierre que la regla no conoce | `UNKNOWN_CLOSE` |
+
+La evidencia viaja al lado (`closeCode`, `recentRttMs`, `sinceLastPongMs`, `server`), así que se puede
+discutir el veredicto con los mismos números. Un `GONE` con `afterDrop` vale lo que dijo su `DROPPED`.
+Minimizar la app en el celular hoy sale como `NETWORK`. Cada hecho sale además en el log como
+`conexión`, con `playerId`, `blame` y `cause`.
+
 ## Resultados de partida
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
 `betaso_games` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
-(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite, con espera
-creciente hasta 5 minutos.
+(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite y en orden
+(el más viejo primero; nada se adelanta).
+
+- **La espera es del broker, no de cada entrada.** Tras un fallo, el despachador deja de intentar
+  durante una ventana que duplica desde 1 s con cada fallo seguido, con techo de **30 s**; la primera
+  publicación confirmada la cierra. Cada partida que termina despierta al despachador y ese sondeo
+  ignora la ventana, así que cuando el broker vuelve, todo lo pendiente sale con la próxima partida o
+  a los 30 s como mucho. Con la cola vacía, el tick de cada segundo es una sola consulta cubierta por
+  el índice (`status_1__id_1`) y no toma el lease.
+- **`attempts` y `lastError`** de cada entrada se siguen anotando, para diagnóstico. Los documentos
+  anteriores traen un `nextAttemptAt` que ya nadie lee ni escribe.
 
 - **Un resultado trabado** deja un `warn` por cada fallo, y pasados **10 minutos** sin salir cada fallo
   es un `error` con `«el resultado de partida lleva demasiado sin salir»`. Es la línea que conviene
@@ -243,7 +278,7 @@ creciente hasta 5 minutos.
   ```js
   db.match_result_outbox.updateMany(
     { status: "SENT", sentAt: { $gte: ISODate("<instante anterior al incidente>") } },
-    { $set: { status: "PENDING", attempts: 0, nextAttemptAt: new Date() }, $unset: { sentAt: "" } },
+    { $set: { status: "PENDING", attempts: 0 }, $unset: { sentAt: "" } },
   )
   ```
 
