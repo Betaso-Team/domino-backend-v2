@@ -63,6 +63,11 @@ pieza del dominó.
   compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
   `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
 
+- **El registro de partidas vivas (Redis) renueva por reloj y suelta por hecho.** El latido de 30 s
+  re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
+  (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
+  escribe de más».
+
 ## El plan es la autoridad
 
 `docs/superpowers/plans/2026-09-09-domino-v2-esqueleto-y-juego-2p.md` — 24 tareas (la 0 a la
@@ -2702,6 +2707,24 @@ producción, y no quedan alias.
 - **Servicio:** `copyShared` → `createCopies` (`CopySharedResult` → `CopiesResult`); `listFor(actor,
   providerId?)` filtra por lo que ve ese proveedor. Las firmas reciben el proveedor ya resuelto, y el
   servicio conserva la regla 3 (`refuseForeign`) como segunda llave.
+
+## Incremento completo — el latido por hecho no escribe de más (rama `perf/latido-sin-escrituras-de-mas`)
+
+Del plan «rendimiento del backend, roles y pendientes» (sección C, PR3). Desde `develop`.
+
+- **Dos latidos con trabajos distintos.** El del reloj de la sala (`HEARTBEAT_MS`, `beat(true)`)
+  llama `MatchRegistry.keepAlive`, que re-estampa config, asientos y censo con el plazo entero. El de
+  cada hecho del juego (el último sink del notificador, `beat()`) llama `settle(roomId, active)`, que
+  SOLO suelta: si la lista de los que siguen jugando no se achicó respecto de `seatsByRoomId`, no toca
+  el almacén (cero I/O, el caso de casi toda jugada). Si alguien salió, suelta su clave (con el mismo
+  chequeo de `release`: solo si sigue apuntando a esta sala) y reescribe el censo en el acto.
+- **Se compara contra lo anotado y no contra el latido anterior** porque soltar es irreversible: lo
+  soltado sale de `seatsByRoomId`, así que «no cambió» es exactamente «tiene el mismo largo».
+- **`keepAlive` escribe en paralelo** (`Promise.all` de los `setex` y los `release`) y el `hset` del
+  censo después. Antes eran 2 + N viajes en serie por latido, y uno de esos latidos por ficha jugada.
+- Ambos siguen en la fila `this.beats` y detrás de la guarda `disposed`: el apagado los espera antes de
+  borrar. Lo miden `match-registry.test.ts` (con un `KeyValueStore` que cuenta llamadas y
+  concurrencia) y los e2e de liberación de asiento (`orchestrator-tables`, `lifecycle`, `bot-4p`).
 
 ## Cómo se ejecuta una tarea
 

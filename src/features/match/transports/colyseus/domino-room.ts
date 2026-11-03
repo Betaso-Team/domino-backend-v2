@@ -287,7 +287,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         // EL LATIDO POR HECHO, portado de truco, y va ÚLTIMO: los demás sinks ya vieron el hecho y
         // el árbol ya está mutado. Quién sigue jugando cambia con la partida —un retiro, un
         // veredicto— y el que quedó afuera tiene que poder sentarse en otra mesa YA, no al
-        // próximo latido del reloj.
+        // próximo latido del reloj. Solo SUELTA (`settle`): si nadie salió no escribe nada, y los
+        // plazos los renueva el reloj de abajo.
         () => this.beat(),
       ],
     );
@@ -357,7 +358,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     //
     // Y ADEMÁS HAY UN LATIDO POR HECHO (el último sink del notificador), como en truco: este
     // reloj renueva, aquél suelta en el acto al que dejó de jugar.
-    this.heartbeat = this.clock.setInterval(() => this.beat(), HEARTBEAT_MS);
+    this.heartbeat = this.clock.setInterval(() => this.beat(true), HEARTBEAT_MS);
     this.probing = this.clock.setInterval(() => this.connections.probe(), PROBE_INTERVAL_MS);
 
     this.seating = this.clock.setTimeout(() => {
@@ -555,13 +556,22 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // UN LATIDO. No se espera —la partida no depende de él— pero sí se ENCOLA, y un fallo se
   // registra y no tumba nada: si el almacén se cae, lo que se pierde es que esta mesa figure en
   // el clúster durante dos minutos, no la partida que se está jugando adentro.
-  private beat(): void {
+  //
+  // DOS LATIDOS EN LA MISMA FILA: el del reloj (`full`) re-estampa todo con el plazo entero; el de
+  // cada hecho solo suelta a quien dejó de jugar, y si nadie lo hizo no va a la red. Antes el de cada
+  // hecho también re-estampaba todo, y una partida mandaba a Redis una ráfaga de escrituras por ficha
+  // jugada que no cambiaban nada.
+  private beat(full = false): void {
     // Un hecho emitido durante el cierre —el `MATCH_ABORTED` de `onDispose`— no puede volver a
     // anunciar la sala que se está por borrar; y uno emitido antes de anotarla no tiene registro.
     if (this.disposed || !this.matches) return;
     const active = this.activeSeats();
     this.beats = this.beats
-      .then(() => this.matches.keepAlive(this.roomId, active))
+      .then(() =>
+        full
+          ? this.matches.keepAlive(this.roomId, active)
+          : this.matches.settle(this.roomId, active),
+      )
       .catch((error: unknown) =>
         this.log.error("no se pudo mantener el registro de la partida", {
           message: error instanceof Error ? error.message : String(error),
