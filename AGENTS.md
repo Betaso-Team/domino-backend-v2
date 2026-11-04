@@ -88,6 +88,9 @@ pieza del dominó.
   `PublicMatchConfig` trae `isFreeRoom`, `enableBots` y `betLevels[].extra`. El orquestador pregunta
   la mesa de un jugador sin reservar con `GET /internal/players/:userId/match`. Ver «Incremento
   completo — la mesa completa y el asiento sin reserva».
+- **Reacciones en la mesa**: `SEND_REACTION` `{ reactionId }` → `REACTION_SENT` a toda la mesa, con una
+  lista fija de 24 emojis en el código que sirve `GET /reactions`. Ver «Incremento completo — las
+  reacciones».
 
 ## El plan es la autoridad
 
@@ -598,10 +601,11 @@ tasas de v1: es un incremento propio, no una línea.
 
 ### Lo que se decidió NO portar
 
-- **Las reacciones** (truco `f8713f3`). Allá el argumento era que existen en v1 y el día del corte
+- ~~**Las reacciones** (truco `f8713f3`). Allá el argumento era que existen en v1 y el día del corte
   dejarían de funcionar. **El dominó v1 no las tiene** —verificado: no hay una sola mención en
   `Betaso-Domino-Backend/src`—, así que acá no sería una regresión que se tapa sino una feature
-  nueva que nadie pidió.
+  nueva que nadie pidió.~~ **HECHAS** después, a pedido y con lista propia: ver «Incremento completo —
+  las reacciones».
 - **El catálogo fuera de matchmaking** (`a1605d2`), **el registrar y su API administrativa**
   (`c51b4cd`), **la llave interna** (`3308781`) y **el `PUT` como parche** (`d1f23fc`): ya estaban
   hechos, y el último **mejor que en truco**. Allá el `PUT` exigía los seis campos y lo destapó
@@ -1552,7 +1556,8 @@ mutación: sacando el productor del cableado, ese `it` es el único que se pone 
 
 Comparado archivo por archivo y símbolo por símbolo:
 
-- **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
+- ~~**`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.~~ **HECHO**, ver
+  «Incremento completo — las reacciones».
 - **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
 - ~~`charge-multiplier`~~ — **HECHO**, ver el bloque del final.
 - ~~`logSink`~~ y ~~los cinco archivos de test~~ — **HECHOS**, ver el bloque del final.
@@ -1636,7 +1641,8 @@ antes. **Nada de esto está certificado contra un backend de verdad**: el smoke 
 
 ### Lo que sigue faltando de truco, después de esto
 
-- **`reactions`** — deliberado: v1 del dominó no las tiene.
+- ~~**`reactions`** — deliberado: v1 del dominó no las tiene.~~ **HECHO**, ver «Incremento completo —
+  las reacciones».
 - **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
 - ~~`logSink`~~ y ~~los cinco archivos de test~~ — **HECHOS**, ver el bloque de abajo.
 
@@ -1700,7 +1706,8 @@ decisión de qué es un token vacío — ahí habría que mantenerla dos veces.
 
 ### Lo que sigue faltando de truco, después de esto
 
-- **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
+- ~~**`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.~~ **HECHO**, ver
+  «Incremento completo — las reacciones».
 - ~~`bot.ts` / `BotPort`~~ — **HECHO**, y no como truco: ver el bloque de abajo.
 
 ## Incremento completo — la mesa de cuatro y la máquina que la sostiene
@@ -2862,6 +2869,39 @@ respuesta para todos.
   `404` sale `no-store`.
 - ⚠ Un test que da de baja un modo **directo en el repositorio** (como otro proceso) y después lee lo
   público tiene que adelantar el reloj `PUBLIC_MEMO_MS`; por el servicio no hace falta.
+
+## Incremento completo — las reacciones (rama `feature/reacciones`)
+
+Port de truco `f8713f3`, a pedido: el dominó v1 no las tenía (ver «Lo que se decidió NO portar»), pero
+el front de dominó v2 las quiere con el mismo contrato que truco.
+
+- **Feature propia, `src/features/reactions`**, no parte de `match`: no tiene reglas, no muta el estado,
+  no produce eventos, no entra en el historial ni en el registro. `match` la conoce por su índice y no
+  al revés; el cable está en `match/transports/colyseus/reactions.ts` y entra por el `MessageRouter`
+  como una ruta más (`buildRouter` recibe el relay; `buildReactionRelay` lo arma por mesa).
+- **El cliente manda un id; el contenido lo pone el servidor.** Lista cerrada = no es un chat.
+- **La lista es FIJA en el código** (`static-catalog.ts`, `StaticReactionCatalog` detrás del mismo
+  puerto `ReactionCatalog` que truco), y ésta es la diferencia con truco: allá se la pide al backend de
+  Betaso; acá el dominó sirve a varios proveedores y ninguno es dependencia suya. Sin TTL, sin
+  `auxFiles`: en el cable va `{ id, type, content }`. Un paquete, `global`, 24 emojis con id ASCII.
+- **`GET /reactions`**, pública y sin credencial, con `Cache-Control: public, max-age=300`; se monta en
+  `app.config.ts` como un router más.
+- **Límite por jugador y por mesa**: 3 cada 2 s, ventana deslizante (`ReactionLimiter`, consume el
+  permiso en una sola operación). Va antes del catálogo, así que un id inventado también gasta.
+- **Los dos rechazos son silenciosos** (demasiado seguido, id desconocido): ni se difunden ni contestan,
+  y quedan en `debug`. El payload malformado sí contesta `illegal` `MALFORMED`, como un verbo. Sin
+  `.strict()`, al revés que los verbos: el `targetPlayerId` del front viejo se ignora.
+- **`fromPlayerId` es el `seat-N`** que el router inyecta desde la identidad verificada: el mismo
+  `PlayerState.playerId` que el front ya usa para ubicar cada asiento. Se difunde a toda la mesa, el
+  que lo mandó incluido. Sin precio ni destinatario.
+- **Quién y cuándo**: cualquier socket de la sala, que por la puerta de `onJoin` es siempre el dueño de
+  un asiento; en cualquier fase mientras la sala esté abierta (reparto, mano, resultado). No se mira la
+  fase ni si el jugador abandonó.
+- **Fuera:** los mensajes de seguimiento de truco (`ENABLE_REACTIONS_TRACKING`,
+  `REACTIONS_MUTE_CHANGED`).
+- **Docs:** «Reacciones» y las tablas de mensajes, HTTP público y errores en `docs/api-y-mensajes.md`.
+- **Tests:** `reactions/tests/` (relay, límite y la lista), `reactions/transports/http.int.test.ts` y
+  `match/tests/reactions.e2e.test.ts` (puerto 2593): +13 unit, +2 int, +7 e2e.
 
 ## Cómo se ejecuta una tarea
 

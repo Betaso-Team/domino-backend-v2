@@ -26,9 +26,30 @@ sentó, normalizado con `trim()`.
 | `ABANDON` | `{}` | Abandono voluntario |
 | `PROPOSE_BET_MULTIPLIER` | `{ level }` | Congela el turno y abre la negociación |
 | `RESPOND_BET_MULTIPLIER` | `{ accept }` | Acepta o rechaza la propuesta vigente |
+| `SEND_REACTION` | `{ reactionId }` | Manda un gesto a la mesa (ver «Reacciones») |
 
 El cliente no envía `playerId`: el handler lo toma del asiento autenticado. Cada payload pasa por un
 decoder estricto antes de alcanzar el comando.
+
+### Reacciones
+
+`SEND_REACTION` `{ reactionId: string }` (de 1 a 64 caracteres; un campo de más, como el
+`targetPlayerId` del front viejo, se ignora) pone un gesto del catálogo en la mesa: la sala lo
+difunde a **todos**, el que lo mandó incluido, como `REACTION_SENT`. El cliente manda el id y el
+contenido lo pone el servidor, así que no es un chat.
+
+- `fromPlayerId` es el asiento que lo mandó (`seat-1`, `seat-2`…), el mismo `playerId` de
+  `state.players[]`: el cliente lo ubica con `players.find((p) => p.playerId === fromPlayerId)`.
+- Puede mandar cualquier jugador sentado en la sala, en cualquier fase mientras la sala esté
+  abierta: el reparto, la mano, entre manos y la pantalla del resultado.
+- **Límite:** 3 gestos cada 2 s por jugador, ventana deslizante, por mesa.
+- **Los rechazos son silenciosos:** un id que no está en el catálogo o un gesto por encima del límite
+  no se difunden ni devuelven nada (quedan en el log de debug). Sólo el payload malformado (sin
+  `reactionId`, o de otro tipo) contesta `illegal` con `MALFORMED`.
+- No toca la partida: no cambia el estado, no produce `events` y no entra en el historial ni en el
+  registro de la partida.
+
+La lista de gestos la sirve `GET /reactions` (ver «HTTP público»).
 
 ## Mensajes del servidor
 
@@ -40,6 +61,7 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
 | `events` | Toda la mesa | Lista de eventos del motor y de plataforma (`ROUND_STARTED`, `MATCH_RESOLVED`, `PLAYER_RECONNECTED`…) | Cada vez que la partida produce hechos |
 | `illegal` | El que mandó el mensaje | `{ code, detail? }`: `code` es el de la regla violada, `MALFORMED` (con `detail`) o `UNKNOWN_COMMAND` | Su mensaje no prosperó; el estado no cambió |
 | `matchCancelled` | Toda la mesa | `{ reason: "CHARGE_REJECTED" }` | El orquestador no cobró la entrada; la sala se cierra sin arrancar |
+| `REACTION_SENT` | Toda la mesa, el que lo mandó incluido | `{ fromPlayerId, reaction: { id, type, content } }` | Un jugador mandó un gesto válido dentro del límite (`SEND_REACTION`) |
 
 **`config`** trae lo mismo que `GET /config/:roomId`, sin pedirlo por HTTP:
 
@@ -89,12 +111,26 @@ handler. Un cliente que no lo escucha solo ve un aviso del SDK.
 | `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`). Página de 1 a 50, 10 por defecto |
 | `GET /game-modes` | Modos **compartidos** activos del catálogo, con el DTO de siempre (sin dueño ni suscriptores) |
 | `GET /game-modes/:uuid` | Un modo compartido activo; uno dado de baja o propio de un proveedor responde 404 |
+| `GET /reactions` | La lista de gestos de `SEND_REACTION`, sin credencial (ver abajo) |
 
 Los dos `GET /game-modes` responden los `200` con `Cache-Control: public, max-age=10` (el `404`, con
 `no-store`), y el servidor guarda la lista de activos 5 s por proceso: una edición hecha en otra
 instancia puede tardar hasta 5 s en verse en ésta, más lo que la guarde un caché intermedio. La
 instancia que atiende la edición la ve en el acto. Abrir una mesa nunca usa esa lista: lee el modo
 fresco.
+
+**`GET /reactions`** responde con `Cache-Control: public, max-age=300` la lista fija del dominó (vive
+en el código, `src/features/reactions/static-catalog.ts`, y es la misma para todos los proveedores):
+un solo paquete, `global`, con 24 emojis en el orden en que se dibujan.
+
+```json
+[{ "pack": "global", "items": [{ "id": "grin", "type": "emoji", "content": "😀" }, …] }]
+```
+
+Los ids, en orden: `grin` 😀, `joy` 😂, `cool` 😎, `heart-eyes` 😍, `angry` 😡, `sob` 😭,
+`thumbs-up` 👍, `thumbs-down` 👎, `pray` 🙏, `muscle` 💪, `victory` ✌️, `fire` 🔥, `zzz` 💤,
+`thinking` 🤔, `sleeping` 😴, `mind-blown` 🤯, `scream` 😱, `huffing` 😤, `devil` 😈, `skull` 💀,
+`trophy` 🏆, `dollar` 💵, `money-bag` 💰, `money-mouth` 🤑.
 
 Todas las respuestas HTTP exponen el header `Date`, que permite recalcular el desfase del reloj del
 cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
@@ -482,6 +518,7 @@ antes de mirar la forma.
 | `GET /me/stats` | `401 UNAUTHORIZED`, `503 STATS_TIMEOUT` (+ `detail`) |
 | `GET /game-modes` | — |
 | `GET /game-modes/:uuid` | `404 MODE_NOT_FOUND` |
+| `GET /reactions` | — |
 | `GET /internal/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
 | `GET /internal/matches/:matchId` | `404 MATCH_NOT_FOUND` |
 | `GET /internal/matches/:matchId/history` | `404 MATCH_NOT_FOUND` |

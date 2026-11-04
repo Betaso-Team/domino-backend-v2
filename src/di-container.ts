@@ -53,6 +53,12 @@ import { MemoryPlayerStats } from "@/features/match/network/transports/memory-pl
 import { MongoHistory } from "@/features/match/network/transports/mongo-history";
 import { MongoPlayerStats } from "@/features/match/network/transports/mongo-player-stats";
 import {
+  DEFAULT_REACTIONS_CONFIG,
+  type ReactionCatalog,
+  type ReactionsConfig,
+  StaticReactionCatalog,
+} from "@/features/reactions";
+import {
   MemorySettings,
   MongoSettings,
   PolledSettingsSignal,
@@ -296,6 +302,16 @@ rootContainer.register<GameModeReader>("GameModeReader", { useValue: gameModeRep
 rootContainer.register(GameModeService, {
   useValue: new GameModeService(gameModeRepository, providerCatalogs, catalogLease),
 });
+
+// ── LAS REACCIONES ─────────────────────────────────────────────────────────────────────────────
+//
+// LA LISTA DE GESTOS ES NUESTRA y vive en el código (`features/reactions/static-catalog.ts`): el
+// dominó sirve a varios proveedores, así que no puede pedírsela a ninguno. Truco la pide al backend
+// de Betaso. La sirve `GET /reactions` y cada sala la consulta para validar el id que llega.
+rootContainer.register<ReactionCatalog>("ReactionCatalog", {
+  useValue: new StaticReactionCatalog(),
+});
+rootContainer.register<ReactionsConfig>("ReactionsConfig", { useValue: DEFAULT_REACTIONS_CONFIG });
 
 // ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────
 //
