@@ -8,6 +8,7 @@ import {
   type SeatedMatch,
   act,
   bootServer,
+  mintToken,
   playUntilDecided,
   revealHands,
   seatPair,
@@ -185,5 +186,59 @@ describe("el registro de las partidas que no terminan jugando", () => {
     expect(stayed).toMatchObject({ userId: "rec6", prizePaidInUC: 250 });
     expect(stayed).not.toHaveProperty("exit");
     expect((record?.rounds as Doc[]).at(-1)).toMatchObject({ endReason: "MATCH_ABANDONED" });
+  });
+});
+
+// EL PRECIO EN LA MONEDA DE CADA UNO, de la mesa al historial del jugador: la sala lo congela en el
+// asiento, el cierre elige lo cobrado y lo pagado, y `GET /me/matches` lo devuelve tal cual quedó.
+describe("el registro y el historial en la moneda del jugador", () => {
+  const price = {
+    currency: "VES",
+    rate: "200",
+    entry: "25000.00",
+    prize: "50000.00",
+    levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
+  };
+
+  it("el asiento con precio lo guarda, y su fila lo devuelve; el que no lo trajo queda en UC", async () => {
+    const match = await seatPair(server, [
+      { userId: "rec7", displayName: "Siete", currency: "VES", price },
+      { userId: "rec8", displayName: "Ocho", currency: "VES" },
+    ]);
+    await revealHands(match);
+    await act(match, "rec8", "ABANDON");
+    await waitUntil(async () => closed(await recordOf(match.config.matchId)), 3_000);
+
+    const record = await recordOf(match.config.matchId);
+    const [priced, plain] = record?.players as Doc[];
+    expect(priced).toMatchObject({
+      userId: "rec7",
+      price,
+      chargedInUC: 125,
+      prizePaidInUC: 250,
+      chargedInPlayerCurrency: "25000.00",
+      prizePaidInPlayerCurrency: "50000.00",
+    });
+    expect(plain).not.toHaveProperty("price");
+    expect(plain).not.toHaveProperty("chargedInPlayerCurrency");
+
+    const rowOf = async (userId: string) => {
+      const response = await fetch(`${base}/me/matches`, {
+        headers: { authorization: `Bearer ${mintToken(userId)}` },
+      });
+      const page = (await response.json()) as { items: Doc[] };
+      return page.items.find((item) => item.id === match.config.matchId);
+    };
+    expect(await rowOf("rec7")).toMatchObject({
+      result: "win",
+      bet: 125,
+      prize: 250,
+      currency: "VES",
+      betInPlayerCurrency: "25000.00",
+      prizeInPlayerCurrency: "50000.00",
+    });
+    const other = await rowOf("rec8");
+    expect(other).toMatchObject({ result: "abandoned", bet: 125, prize: 0 });
+    expect(other).not.toHaveProperty("currency");
   });
 });

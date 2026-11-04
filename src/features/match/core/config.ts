@@ -26,6 +26,10 @@ export type TeamAssignmentMode = "SHUFFLED" | "SEAT_ORDER";
  *
  * `username` y `profilePicture` son OPCIONALES y el resto no: un invitado puede no tener
  * usuario ni foto, pero nadie juega sin nombre visible ni sin moneda cobrada.
+ *
+ * `price` es lo que la mesa le cuesta y le paga a ESTE asiento en SU moneda, como lo cotizó billing
+ * y lo mandó el orquestador. Opcional y sin default: ausente es la mesa en UC de siempre (las gratis,
+ * los orquestadores viejos, las partidas grabadas antes).
  */
 export interface MatchSeat {
   readonly playerId: PlayerId;
@@ -34,6 +38,32 @@ export interface MatchSeat {
   readonly username?: string;
   readonly profilePicture?: string;
   readonly currency: string;
+  readonly price?: SeatPrice;
+}
+
+/**
+ * EL PRECIO DE UN ASIENTO EN LA MONEDA DEL JUGADOR, congelado al sentarse. Son VALORES PARA MOSTRAR:
+ * los cotizó billing con su tasa y su redondeo, y el que cobra sigue siendo billing con los montos en UC
+ * (`entryFee`, `prize`). Por eso son TEXTO decimal y no números: el dominó no los convierte ni los
+ * redondea, sólo elige cuál corresponde (el del nivel de aumento aceptado, si hubo uno), y un `number`
+ * le daría la oportunidad de perder un centavo en el camino.
+ *
+ *   · `entry`            lo que cuesta sentarse.
+ *   · `prize`            lo que cobra cada ganador sin aumento.
+ *   · `levels[].entry`   lo que COBRA subir a ese nivel (no acumulado: la entrada ya está pagada).
+ *   · `levels[].prize`   el premio de cada ganador a ese nivel.
+ */
+export interface SeatPrice {
+  readonly currency: string;
+  /** La tasa que billing congeló para esta mesa, como texto. */
+  readonly rate: string;
+  readonly entry: string;
+  readonly prize: string;
+  readonly levels: readonly {
+    readonly level: number;
+    readonly entry: string;
+    readonly prize: string;
+  }[];
 }
 
 export interface DominoMatchConfig {

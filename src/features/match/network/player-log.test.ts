@@ -86,6 +86,94 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
   });
 });
 
+// LA FILA EN SU MONEDA: lo que el cierre congeló, con las mismas dos reglas que la de UC. Los tres campos
+// van juntos, y sólo si el asiento se sentó con precio.
+describe("rowOf: en la moneda del jugador", () => {
+  const price = {
+    currency: "VES",
+    rate: "200",
+    entry: "2000.00",
+    prize: "3600.00",
+    levels: [{ level: 2, entry: "2000.00", prize: "7200.00" }],
+  };
+  // GANÓ CON UN AUMENTO A x2 (u1) y el otro se fue (u2): es lo que `matchCloseOf` deja en cada asiento.
+  const [winner, loser] = finished.players;
+  const priced = {
+    ...finished,
+    seats: finished.seats.map((seat) => ({ ...seat, price })),
+    players: [
+      {
+        ...winner,
+        price,
+        chargedInUC: 20,
+        prizePaidInUC: 36,
+        chargedInPlayerCurrency: "4000.00",
+        prizePaidInPlayerCurrency: "7200.00",
+      },
+      {
+        ...loser,
+        price,
+        chargedInUC: 20,
+        prizePaidInUC: 0,
+        chargedInPlayerCurrency: "4000.00",
+        prizePaidInPlayerCurrency: "0.00",
+      },
+    ],
+  };
+
+  it("el que ganó con un aumento ve la entrada más el aumento y el premio del nivel", () => {
+    expect(rowOf("u1", priced)).toMatchObject({
+      result: "win",
+      bet: 20,
+      prize: 36,
+      currency: "VES",
+      betInPlayerCurrency: "4000.00",
+      prizeInPlayerCurrency: "7200.00",
+    });
+  });
+
+  it("el que no ganó ve lo que pagó y ningún premio", () => {
+    expect(rowOf("u2", priced)).toMatchObject({
+      result: "abandoned",
+      bet: 20,
+      prize: 0,
+      currency: "VES",
+      betInPlayerCurrency: "4000.00",
+      prizeInPlayerCurrency: "0.00",
+    });
+    const lost = {
+      ...priced,
+      players: [priced.players[0], { ...priced.players[1], exit: undefined }],
+    };
+    expect(rowOf("u2", lost)).toMatchObject({ result: "lose", betInPlayerCurrency: "4000.00" });
+  });
+
+  // LA CANCELADA NO MOVIÓ PLATA, tampoco en su moneda, diga lo que diga el asiento.
+  it("la cancelada va en cero en su moneda", () => {
+    const canceled = { ...priced, status: "aborted", winnerIds: [] };
+    expect(rowOf("u1", canceled)).toMatchObject({
+      result: "canceled",
+      bet: 0,
+      prize: 0,
+      currency: "VES",
+      betInPlayerCurrency: "0.00",
+      prizeInPlayerCurrency: "0.00",
+    });
+    // Y LA QUE SE ABORTÓ ANTES DE ABRIR, que sólo tiene los asientos del armado.
+    const { players, ...bare } = canceled;
+    expect(rowOf("u1", bare)).toMatchObject({ result: "canceled", betInPlayerCurrency: "0.00" });
+  });
+
+  // SIN PRECIO, LA FILA ES LA DE SIEMPRE: ni un campo nuevo, ni vacío.
+  it("un asiento sin precio no trae ningún campo nuevo", () => {
+    for (const row of [rowOf("u1", finished), rowOf("u2", finished), rowOf("u1", aborted)]) {
+      expect(row).not.toHaveProperty("currency");
+      expect(row).not.toHaveProperty("betInPlayerCurrency");
+      expect(row).not.toHaveProperty("prizeInPlayerCurrency");
+    }
+  });
+});
+
 describe("paginated: la página con la forma de truco", () => {
   it("dice cuántas hay y si hay otra a cada lado", () => {
     expect(paginated(["a", "b"], 5, 2, 2)).toEqual({

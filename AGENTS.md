@@ -91,6 +91,10 @@ pieza del dominó.
 - **Reacciones en la mesa**: `SEND_REACTION` `{ reactionId }` → `REACTION_SENT` a toda la mesa, con una
   lista fija de 24 emojis en el código que sirve `GET /reactions`. Ver «Incremento completo — las
   reacciones».
+- **El precio en la moneda del jugador**: el orquestador puede mandar `participants[].price` (texto
+  decimal de billing); el asiento lo congela, la config pública lo publica en `seatPrices` y el cierre
+  elige lo cobrado y lo pagado en su moneda para `GET /me/matches`. Los montos en UC no cambian. Ver
+  «Incremento completo — el precio en la moneda del jugador».
 
 ## El plan es la autoridad
 
@@ -2902,6 +2906,41 @@ el front de dominó v2 las quiere con el mismo contrato que truco.
 - **Docs:** «Reacciones» y las tablas de mensajes, HTTP público y errores en `docs/api-y-mensajes.md`.
 - **Tests:** `reactions/tests/` (relay, límite y la lista), `reactions/transports/http.int.test.ts` y
   `match/tests/reactions.e2e.test.ts` (puerto 2593): +13 unit, +2 int, +7 e2e.
+
+## Incremento completo — el precio en la moneda del jugador (rama `feature/reacciones`)
+
+El front mostraba la mesa en UC. El orquestador ya tiene la cotización de billing de cada jugador, y la
+manda; el dominó la muestra y la guarda, y no hace cuentas.
+
+- **`participants[].price`** (`match-contract.ts`, `seatPrice`), opcional y **sin default** en el pedido y
+  en el snapshot: `{ currency, rate, entry, prize, levels: [{ level, entry, prize }] }`. Montos y tasa son
+  TEXTO decimal (`/^\d+(\.\d+)?$/`, ≤ 32), nunca `number`: un `number` sería la conversión que pierde el
+  centavo. `level` ≥ 2, sin repetir, hasta 16; `levels` ausente es `[]`. `price.currency` distinta de la
+  del participante es 400. Ausente = la mesa en UC de siempre (gratis, orquestador viejo, goldens).
+- ⚠ **zod no extiende un objeto refinado**: el chequeo de moneda es `priceInSeatCurrency(schema)` y se
+  aplica a `participantShape` y a `participantShape.extend({ playerId })` por separado.
+- **En la mesa:** `PublicMatchConfig.seatPrices` (`match-registry.ts`), un mapa `seat-N → price` con sólo
+  los asientos que lo trajeron, ausente si ninguno; lo sirven `GET /config/:roomId`, `GET /matches/:roomId`
+  y el mensaje `config`. `seats` sigue siendo `string[]`: cambiarlo a objetos rompía al front. El precio
+  del rival se ve (no es secreto); identidad y `rateId` siguen afuera.
+- **En el registro:** `seats[]`/`players[]` guardan `price`, y `SeatMoney` suma
+  `chargedInPlayerCurrency`/`prizePaidInPlayerCurrency` (`localMoneyOf`, `network/player-currency.ts`),
+  elegidos con la regla de UC de `matchCloseOf`: cobrado = `entry` + el `entry` del nivel aceptado si se
+  confirmó la entrada (si no, cero); pagado = `prize` o el del nivel, sólo si `payoutOf` le asigna premio.
+  La única cuenta es esa suma, exacta con `bigint`. Un nivel aceptado que el precio no cotizó deja el
+  asiento en UC. Los ceros van con la escala del precio (`"0.00"`).
+- **En `/me/matches`:** `currency`, `betInPlayerCurrency`, `prizeInPlayerCurrency` (`rowOf`), los tres o
+  ninguno, sólo si el asiento tiene `price` y el cierre los dejó; cancelada en ceros y premio sólo del
+  que ganó, como `bet`/`prize`. Se leen del registro y no se recalculan: una tasa nueva no cambia una
+  partida vieja.
+- **Orden de despliegue:** dominó primero (campo opcional), después el orquestador, después el front. Al
+  revés, el `strictObject` de `participant` rechaza el `price` y el orquestador no abre mesas.
+- **Docs:** el pedido, `seatPrices` en «Mensajes del servidor», `/config` y `/me/matches` en
+  `docs/api-y-mensajes.md`, y el registro.
+- **Tests:** +42 unit (contrato, `player-currency`, `matchCloseOf`, `rowOf`, registro) y +3 e2e
+  (`orchestrator-tables`: `seatPrices` por `/config` y por el mensaje, y el 400; `match-record`: del
+  asiento a `/me/matches`). Totales: 1100 unit (+27 de `scripts/deploy/tests/` rojos en Windows, ya
+  rojos en `develop`), 441 int (+130 saltados), 146 e2e.
 
 ## Cómo se ejecuta una tarea
 

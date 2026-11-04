@@ -15,7 +15,7 @@
 // pasaron, porque por el criterio de MatchEvent la mayoría de los verbos no emite
 // nada: un historial de solo eventos tendría los desenlaces y ninguna jugada.
 import type { CommandPayloads } from "../core/command";
-import type { BetLevel, TeamAssignmentMode } from "../core/config";
+import type { BetLevel, SeatPrice, TeamAssignmentMode } from "../core/config";
 import type { Clock } from "../core/engine/clock";
 import type { PlayerId, TeamId } from "../core/ids";
 import { handValue } from "../core/rules/tiles";
@@ -85,6 +85,11 @@ export interface SeatSetup {
   readonly username?: string;
   /** La moneda YA COBRADA, congelada en el snapshot (`MatchSeat.currency`). */
   readonly currency: string;
+  /**
+   * EL PRECIO EN SU MONEDA con que se sentó (`MatchSeat.price`), si el orquestador lo mandó. Se guarda
+   * entero y no se recalcula: la tasa de mañana no puede cambiar lo que costó la mesa de hoy.
+   */
+  readonly price?: SeatPrice;
 }
 
 /**
@@ -203,10 +208,15 @@ export interface BetMultiplierProposal {
  *   · `chargedInUC`   la entrada que el orquestador CONFIRMÓ, más el aumento que quedó cobrado.
  *   · `prizePaidInUC` el premio que el resultado publicado le asigna (`payoutOf`). Lo paga el
  *                     orquestador; esto es lo que se le pidió pagar.
+ *
+ * Y LOS MISMOS DOS EN LA MONEDA DEL JUGADOR, sólo si el asiento trajo `price`: no se convierten, se ELIGEN
+ * del precio congelado con la misma regla que los de UC (`localMoneyOf`). Texto decimal, como el precio.
  */
 export interface SeatMoney {
   readonly chargedInUC: number;
   readonly prizePaidInUC: number;
+  readonly chargedInPlayerCurrency?: string;
+  readonly prizePaidInPlayerCurrency?: string;
 }
 
 /** Lo que sabe el que cierra sobre cómo terminó. El historial pone el resto. */
