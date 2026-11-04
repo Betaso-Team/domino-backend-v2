@@ -77,11 +77,28 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
   isFreeRoom: boolean;
   enableBots: boolean;
   timeouts: { turnMs: number; extraTimeMs: number; dealingMs: number; betResponseMs: number };
+  // Opcional: lo que la mesa cuesta y paga EN LA MONEDA de cada asiento, por su id opaco. Sólo los
+  // asientos que trajeron `price` en el pedido; ausente si ninguno (mesa gratis, orquestador viejo).
+  seatPrices?: {
+    [playerId: string]: {
+      currency: string;         // la del asiento
+      rate: string;             // la tasa que billing congeló, como texto
+      entry: string;            // lo que costó sentarse, texto decimal ("25000.00")
+      prize: string;            // lo que cobra cada ganador sin aumento
+      levels: { level: number; entry: string; prize: string }[]; // subir a ese nivel cobra `entry`
+    };
+  };
   serverNow: number;            // epoch ms del servidor al mandarlo, para el desfase de reloj
 }
 ```
 
-Nunca lleva el `seed`, ni identidad, moneda o tasa. Lo que la sala manda en `onJoin` Colyseus lo
+El front toma `seatPrices[<su playerId>]` (el `playerId` de su asiento en el estado) y pinta entrada,
+premio y cada aumento en la moneda del jugador; sin entrada para su asiento, sigue en UC. Los montos son
+texto decimal tal como los cotizó billing: no se convierten ni se redondean. `entryFee`, `prize` y
+`betLevels` siguen en UC y son lo que billing cobra.
+
+Nunca lleva el `seed`, ni identidad, ni el `rateId` de la mesa; moneda y tasa salen sólo dentro de
+`seatPrices` (el precio del rival es visible: no es secreto). Lo que la sala manda en `onJoin` Colyseus lo
 encola hasta que el cliente confirma la entrada, así que llega apenas resuelve el `join` y antes de
 cualquier `events` posterior. El handler se registra **justo después del `join`, sin un `await` en
 el medio** (por ejemplo, no después de `waitForInitialState()`): si no, el mensaje llega antes que el
@@ -106,9 +123,9 @@ handler. Un cliente que no lo escucha solo ve un aviso del SDK.
 |---|---|
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
-| `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
+| `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts` y, opcional, `seatPrices` por `seat-N`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
-| `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`). Página de 1 a 50, 10 por defecto |
+| `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`; y, sólo si su asiento se sentó con `price`, `currency`, `betInPlayerCurrency` y `prizeInPlayerCurrency` como texto decimal, congelados al cerrar). Página de 1 a 50, 10 por defecto |
 | `GET /game-modes` | Modos **compartidos** activos del catálogo, con el DTO de siempre (sin dueño ni suscriptores) |
 | `GET /game-modes/:uuid` | Un modo compartido activo; uno dado de baja o propio de un proveedor responde 404 |
 | `GET /reactions` | La lista de gestos de `SEND_REACTION`, sin credencial (ver abajo) |
@@ -283,7 +300,9 @@ abre al primer reparto (`status: "started"`, con `roomId`, `table`, `matchConfig
 incluidos—, `seats` y `matchStartedAt`), se alimenta durante la partida (`timeline`, la secuencia de
 actos y hechos; `rounds`, lo que las reglas concluyeron de cada mano) y se cierra al terminar
 (`status: "finished" | "aborted"`, `matchEndedAt`, `matchDurationInMs`, `matchEndReason`, ganadores,
-`players` con su salida y su plata, `rateId`, `betMultiplier` y `rankingMultiplier`). Una mesa que nunca
+`players` con su salida y su plata, `rateId`, `betMultiplier` y `rankingMultiplier`). Un asiento que se
+sentó con `price` lo guarda en `seats[]` y `players[]`, y su plata suma `chargedInPlayerCurrency` y
+`prizePaidInPlayerCurrency` (texto decimal, elegidos del precio con la regla de UC). Una mesa que nunca
 arrancó nace en el cierre. Los instantes son fechas (ISO en el JSON); las duraciones, números. Los
 documentos de antes de la v2.1 (`{ matchId, entries, createdAt, updatedAt }`) se siguen leyendo en las
 cuatro rutas.
@@ -381,7 +400,7 @@ cuerpo.
 
 **`POST /internal/matches`** abre una mesa. Cuerpo (`CreateMatchRequest`, estricto: una clave de más
 es 400): `mode` (`"CASUAL"`), `matchId`, `gameModeId` (uuid del catálogo), `participants` (2 a 4;
-cada uno `userId`, `displayName`, `currency` y, opcionales, `username` y `profilePicture`), `seed`,
+cada uno `userId`, `displayName`, `currency` y, opcionales, `username`, `profilePicture` y `price`), `seed`,
 `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`) y `rateId` (opaco: el `_id` de Mongo de la tasa de
 Betaso).
 
@@ -452,6 +471,27 @@ orquestador.
 
 `CreateMatchRequest` acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
+
+**`participants[].price`** (opcional) es lo que la mesa le cuesta y le paga a ese jugador **en su
+moneda**, con la cotización de billing:
+
+```jsonc
+"price": {
+  "currency": "VES",          // la misma que participants[].currency (si no, 400)
+  "rate": "200",              // la tasa congelada, texto
+  "entry": "200.00",          // lo que cuesta sentarse
+  "prize": "300.00",          // lo que cobra cada ganador sin aumento
+  "levels": [ { "level": 2, "entry": "200.00", "prize": "600.00" } ] // opcional, hasta 16
+}
+```
+
+Los montos y la tasa son texto decimal sin signo ni exponente (`/^\d+(\.\d+)?$/`, hasta 32 caracteres);
+`level` es un entero ≥ 2 y no se repite; `levels[].entry` es lo que cobra **subir** a ese nivel (no
+acumulado) y `levels[].prize` el premio a ese nivel. Ausente, la mesa queda en UC como siempre (las
+gratis nunca lo traen). El dominó no hace cuentas con esto: lo congela en el asiento, lo publica en
+`seatPrices` de la config y elige lo cobrado y lo pagado al cerrar (`chargedInPlayerCurrency` =
+`entry` + el `entry` del nivel aceptado; `prizePaidInPlayerCurrency` = `prize` o el del nivel, sólo
+para quien cobra premio), que es lo que devuelve `GET /me/matches`. Cobra billing, en UC.
 
 **Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:

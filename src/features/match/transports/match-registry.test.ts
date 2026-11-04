@@ -131,6 +131,33 @@ describe("MatchRegistry", () => {
     });
   });
 
+  // EL PRECIO DE CADA ASIENTO EN SU MONEDA, por su id opaco: el front toma el suyo. Sólo los que lo
+  // trajeron, sin nada más del asiento (ni `userId` ni nombre), y ausente si nadie lo trajo.
+  it("publica el precio de cada asiento que lo trajo, por su id opaco y sin identidad", async () => {
+    const price = {
+      currency: "VES",
+      rate: "200",
+      entry: "25000.00",
+      prize: "50000.00",
+      levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
+    };
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register(
+      "room-1",
+      replayConfigOf({ ...roomOptions, seats: [{ ...seat("u1", 0), price }, seat("u2", 1)] }),
+      timeouts,
+    );
+
+    const published = await registry.publicConfigOf("room-1");
+    expect(published?.seatPrices).toEqual({ "seat-1": price });
+    expect(JSON.stringify(published?.seatPrices)).not.toContain("u1");
+    expect(await registry.publicConfigOf("room-404")).toBeUndefined();
+  });
+
+  it("sin precio en ningún asiento no publica `seatPrices`", () => {
+    expect(publicConfigOf(config, timeouts)).not.toHaveProperty("seatPrices");
+  });
+
   // EL MISMO DTO PARA EL REGISTRO Y PARA EL MENSAJE `config` DE LA SALA: los dos salen de la función
   // pura, así que lo que estampa el almacén y lo que recibe el jugador al entrar no pueden divergir.
   it("publicConfigOf es lo que el registro estampa, y nunca lleva la semilla", async () => {

@@ -174,6 +174,58 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect((await get("/internal/players/nadie/match")).status).toBe(404);
   });
 
+  // EL PRECIO EN LA MONEDA DE CADA UNO, de punta a punta: entra por el pedido del orquestador y sale por
+  // las dos puertas de la config pública —`GET /config/:roomId` y el mensaje `config` al sentarse—, por
+  // el id opaco de cada asiento.
+  it("publica en la config el precio de cada asiento que lo trajo", async () => {
+    const price = {
+      currency: "VES",
+      rate: "200",
+      entry: "25000.00",
+      prize: "50000.00",
+      levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
+    };
+    const table = casualTable([
+      { userId: "o-p1", displayName: "P1", currency: "VES", price },
+      { userId: "o-p2", displayName: "P2", currency: "USD" },
+    ]);
+    const res = await post("/internal/matches", table);
+    expect(res.status).toBe(201);
+    const opened = (await res.json()) as Opened;
+
+    const config = (await (await fetch(`${base}/config/${opened.data.roomId}`)).json()) as {
+      seats: string[];
+      seatPrices?: unknown;
+    };
+    expect(config.seats).toEqual(["seat-1", "seat-2"]);
+    expect(config.seatPrices).toEqual({ "seat-1": price });
+
+    const received: { seatPrices?: unknown }[] = [];
+    for (const seat of opened.data.seats) {
+      server.sdk.auth.token = mintToken(seat.userId);
+      const room = await server.sdk.consumeSeatReservation(seat.reservation as never);
+      room.onMessage("config", (message: { seatPrices?: unknown }) => {
+        received.push(message);
+      });
+    }
+    await waitUntil(() => received.length === 2);
+    for (const message of received) expect(message.seatPrices).toEqual({ "seat-1": price });
+  });
+
+  it("rechaza con 400 un precio malformado, sin abrir nada", async () => {
+    const table = casualTable([
+      { userId: "o-q1", displayName: "Q1", currency: "VES" },
+      { userId: "o-q2", displayName: "Q2", currency: "VES" },
+    ]);
+    const participants = table.participants.map((participant) => ({
+      ...participant,
+      price: { currency: "VES", rate: "200", entry: 200, prize: "300.00" },
+    }));
+    const res = await post("/internal/matches", { ...table, participants });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "MALFORMED" });
+  });
+
   it("contesta 404 a quien no está en ninguna mesa", async () => {
     expect((await post("/internal/players/nadie/seat")).status).toBe(404);
   });
