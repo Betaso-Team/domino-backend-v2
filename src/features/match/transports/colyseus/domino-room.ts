@@ -57,6 +57,7 @@ import {
   type RematchCloser,
   buildCatalog,
   buildPieces,
+  buildReactionRelay,
   buildRouter,
   registerIndividualCommands,
 } from "./commands/di-wiring";
@@ -306,7 +307,20 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
     // que queda es la tabla.
-    this.router = buildRouter(catalog, this.history, (events) => this.notifier.notify(events));
+    //
+    // LAS REACCIONES entran por la misma tabla y salen por `broadcast` directo, sin el notificador:
+    // un gesto no es un hecho de la partida, así que no lo ven el historial, el registro ni el
+    // resultado.
+    this.router = buildRouter(
+      catalog,
+      this.history,
+      (events) => this.notifier.notify(events),
+      buildReactionRelay(
+        child,
+        (type, payload) => this.broadcast(type, payload),
+        rootLogger.child({ matchId: config.matchId, roomId: this.roomId }),
+      ),
+    );
     // ⚠ EL BOT NO ENTRA POR EL ROUTER, y no es un atajo: el router es la frontera del CABLE, y su
     // handler graba la fuente `"PLAYER"` por construcción —que es la mitad del valor de tenerlo—.
     // Una jugada de la máquina es un acto del SISTEMA, y el historial que alguien va a auditar es

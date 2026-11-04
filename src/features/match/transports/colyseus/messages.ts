@@ -30,8 +30,9 @@ export interface MessageDecoder<P> {
 //
 // Puede ser asíncrono, y ahí está la otra mitad de lo que esta separación permite: los
 // comandos del motor son SÍNCRONOS por contrato (§`Command`), pero no todo lo que un
-// cliente manda es un comando del motor —una reacción tiene que resolver un catálogo
-// remoto—. Lo asíncrono es la envoltura de transporte, nunca el motor.
+// cliente manda es un comando del motor —una reacción pregunta a un catálogo detrás de un
+// puerto asíncrono (`./reactions.ts`)—. Lo asíncrono es la envoltura de transporte, nunca el
+// motor.
 export interface MessageHandler<P> {
   handle(payload: P, playerId: PlayerId): void | Promise<void>;
 }
