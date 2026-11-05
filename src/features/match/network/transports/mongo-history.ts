@@ -297,6 +297,17 @@ export function playerPageQueryOf(
 }
 
 // `MaxTimeMSExpired`: la base cortó la consulta por el plazo.
+// EL PLAZO DE CADA ESCRITURA DEL HISTORIAL, por operación y no en el `MongoClient`: la conexión es
+// la misma del catálogo, el outbox y el lease, y ellos tienen sus propios tiempos. Sin plazo, un
+// Mongo lento pero vivo deja cada escritura esperando para siempre —la conexión del pool, la
+// respuesta— y lo que se acumula detrás vive en la memoria del proceso. Vencido, es un fallo como
+// cualquier otro: se loguea, el lote se pierde y la cola de la partida pasa al siguiente. 30 s
+// aguantan un tropiezo largo (un índice que se construye, un disco saturado); lo que se junta
+// mientras tanto lo acotan los topes del pendiente, no este número.
+export const HISTORY_WRITE_TIMEOUT_MS = 30_000;
+const WRITE = { timeoutMS: HISTORY_WRITE_TIMEOUT_MS };
+const UPSERT = { upsert: true, ...WRITE };
+
 const isTimeout = (error: unknown) =>
   error instanceof MongoServerError && (error.code === 50 || error.codeName === "MaxTimeMSExpired");
 
@@ -380,7 +391,7 @@ export class MongoHistory
             },
           },
         ],
-        { upsert: true },
+        UPSERT,
       ),
     );
   }
@@ -433,7 +444,7 @@ export class MongoHistory
             // grabarse.
             $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
           },
-          { upsert: true },
+          UPSERT,
         );
       },
       // EL SELLO, al empezar el trabajo y antes que nada que pueda fallar (pedir la colección
@@ -454,7 +465,7 @@ export class MongoHistory
           $set: { updatedAt: now },
           $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
         },
-        { upsert: true },
+        UPSERT,
       ),
     );
   }
@@ -490,7 +501,7 @@ export class MongoHistory
             },
           },
         ],
-        { upsert: true },
+        UPSERT,
       ),
     );
   }
@@ -612,7 +623,11 @@ export class MongoHistory
   settled(matchId: string): Promise<void> {
     this.seal(matchId);
     return this.queued(matchId, async () => {
-      await (await this.collection()).updateOne({ matchId }, { $unset: { statsPending: "" } });
+      await (await this.collection()).updateOne(
+        { matchId },
+        { $unset: { statsPending: "" } },
+        WRITE,
+      );
     });
   }
 
