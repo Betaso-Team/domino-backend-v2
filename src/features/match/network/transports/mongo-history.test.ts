@@ -478,22 +478,65 @@ describe("MongoHistory: plazos y topes", () => {
     expect(options).toEqual({ upsert: true, timeoutMS: HISTORY_WRITE_TIMEOUT_MS });
   });
 
-  it("una marca que falla no encola otra: lo perdido espera a la próxima pérdida", async () => {
+  it("una marca que falla no se reintenta sola: la reintenta la próxima escritura que sale bien", async () => {
     const { store, updateOne } = storeWith();
     updateOne.mockRejectedValue(new Error("mongo caído"));
     const history = new MongoHistory(store, fakeLogger());
 
     history.record([entry(1), entry(2)]);
     await history.drain();
-    // El lote y su marca: nada más, aunque la marca también falló.
+    // El lote y su marca: nada más, aunque la marca también falló. Sin bucle con Mongo caído.
     expect(updateOne).toHaveBeenCalledTimes(2);
 
+    // Mongo vuelve: la próxima escritura de la partida que sale bien vuelve a intentar la marca.
     updateOne.mockResolvedValue({ acknowledged: true });
     history.record([entry(3)]);
-    history.record([]);
     await history.drain();
-    // La siguiente pérdida no hubo: lo que quedó sin marcar sigue esperando, sin bucle.
-    expect(marcasDe(updateOne, "m-1")).toEqual([2]);
+    expect(marcasDe(updateOne, "m-1")).toEqual([2, 2]);
+    history.record([entry(4)]);
+    await history.drain();
+    expect(marcasDe(updateOne, "m-1")).toEqual([2, 2]);
+  });
+
+  it("un cierre que falla se loguea aunque la partida ya haya perdido un lote", async () => {
+    const { store, updateOne } = storeWith();
+    updateOne.mockRejectedValue(new Error("mongo caído"));
+    const logger = fakeLogger();
+    const history = new MongoHistory(store, logger);
+
+    history.record([entry(1)]);
+    history.close("m-1", CLOSING);
+    await history.drain();
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "historial: no se pudo grabar el cierre",
+      expect.objectContaining({ matchId: "m-1" }),
+    );
+  });
+
+  it("el tope del proceso se libera cuando los lotes terminan, bien o mal", async () => {
+    const { store, updateOne } = storeWith();
+    const lento = colgado();
+    updateOne.mockImplementationOnce(() =>
+      lento.promesa.then(() => {
+        throw new Error("vencido");
+      }),
+    );
+    const history = new MongoHistory(store, fakeLogger(), { maxPendingTotal: 4 });
+
+    history.record([1, 2, 3, 4].map((seq) => entry(seq)));
+    await settle();
+    history.record([entry(1, { matchId: "m-2" })]);
+    lento.liberar();
+    await history.drain();
+    history.record([entry(2, { matchId: "m-2" })]);
+    await history.drain();
+
+    const pushesDeM2 = pushesOf(updateOne).filter(
+      (call) => (call[0] as { matchId: string }).matchId === "m-2",
+    );
+    expect(pushesDeM2).toHaveLength(1);
+    expect(marcasDe(updateOne, "m-2")).toEqual([1]);
   });
 
   it("las pérdidas se resumen una vez por minuto, no una línea por lote", async () => {
@@ -656,7 +699,7 @@ describe("MongoHistory: el drenado del apagado", () => {
       expect(drenado).toBe(true);
       expect(logger.error).toHaveBeenCalledWith(
         "historial: el apagado no esperó lo que seguía en vuelo",
-        { batches: 1, entries: 2 },
+        { writes: 1, entries: 2 },
       );
     } finally {
       vi.useRealTimers();

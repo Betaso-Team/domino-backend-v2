@@ -108,7 +108,10 @@ export type MatchHistoryDocument = {
   entries?: HistoryEntry[];
   /** A la timeline le faltan entradas: la base no las aceptó a tiempo o no entraron en espera. */
   timelineIncomplete?: true;
-  /** Cuántas entradas le faltan, sumadas a medida que se pierden. */
+  /**
+   * Cuántas entradas le faltan, sumadas a medida que se pierden. PUEDE CONTAR DE MÁS: una escritura
+   * que vence del lado del cliente a veces igual se aplicó en el servidor.
+   */
   lostEntries?: number;
 };
 
@@ -310,8 +313,9 @@ export function playerPageQueryOf(
 // mientras tanto lo acotan los topes del pendiente, no este número.
 export const HISTORY_WRITE_TIMEOUT_MS = 30_000;
 const WRITE = { timeoutMS: HISTORY_WRITE_TIMEOUT_MS };
-// LO QUE PUEDE ESPERAR A LA BASE, en entradas de la timeline: por partida (su pendiente sin sellar)
-// y por proceso (pendientes más lotes en vuelo). Una partida entera suele tener 100–300 entradas,
+// LO QUE PUEDE ESPERAR A LA BASE, en entradas de la timeline: por pendiente de una partida (el lote
+// sin sellar; el que ya viaja no cuenta, así que una partida trabada retiene un poco más) y por
+// proceso (pendientes más lotes en vuelo), que es el que de verdad acota la memoria. Una partida entera suele tener 100–300 entradas,
 // así que 2000 en espera es una partida trabada, no una larga; 100 000 son decenas de MB en el peor
 // caso. Lo que no entra se descarta, se cuenta y se marca en el documento: la partida sigue.
 export const MAX_PENDING_PER_MATCH = 2_000;
@@ -577,8 +581,10 @@ export class MongoHistory
         // salieron del `then` de `write` y del `finally` de `mark`.
         const done = Promise.all([...this.inFlight]).then(() => "done" as const);
         if ((await Promise.race([done, late])) === "late") {
+          // `writes` son todas las escrituras de la cola —lotes, inicios, manos, cierres y marcas—;
+          // `entries`, las de la timeline que esperaban.
           this.logger.error("historial: el apagado no esperó lo que seguía en vuelo", {
-            batches: this.inFlight.size,
+            writes: this.inFlight.size,
             entries: this.waiting,
           });
           return;
@@ -717,19 +723,26 @@ export class MongoHistory
       start?.();
       await update(await this.collection());
     }).then(
-      () => done?.(false),
+      () => {
+        done?.(false);
+        // MONGO VOLVIÓ para esta partida: si una marca suya había fallado, se reintenta ahora. Solo
+        // después de un éxito, así que con la base caída no hay bucle.
+        if ((this.lost.get(matchId) ?? 0) > 0) this.mark(matchId);
+      },
       (error) => {
-        // UNA LÍNEA POR PARTIDA Y POR VENTANA, la primera: las demás van al resumen.
-        if (!this.window.matches.has(matchId)) {
+        // SOLO LOS LOTES DE LA TIMELINE se resumen (los que traen `done`): la primera falla de cada
+        // partida en la ventana sale con su línea y las demás van al resumen. El inicio, la mano y
+        // el cierre se loguean siempre: son pocos por partida y el cierre lleva el desenlace.
+        const quiet = done !== undefined && this.window.matches.has(matchId);
+        // `done` antes que el log: un logger que tire no puede dejar sin bajar el contador.
+        done?.(true);
+        if (!quiet) {
           this.logger.error(`historial: ${failure}`, {
             matchId,
             ...(typeof detail === "function" ? detail() : detail),
             error: String(error),
           });
         }
-        this.window.matches.add(matchId);
-        this.reportLater();
-        done?.(true);
       },
     );
     this.track(writing);
@@ -755,7 +768,8 @@ export class MongoHistory
   // el `$replaceWith` del cierre, así que una partida cerrada sigue cerrada. Va por la cola de la
   // partida, detrás de lo que se perdió, y lee lo perdido AL SALIR: lo que se pierde mientras espera
   // viaja con ella. Si falla, lo suyo vuelve a esperar y NO se encola otra: con Mongo caído, una
-  // marca que reintenta sola es un bucle. La próxima pérdida de la partida la vuelve a intentar.
+  // marca que reintenta sola es un bucle. La reintenta la próxima escritura de la partida que salga
+  // bien (ver `write`) o su próxima pérdida.
   private mark(matchId: string): void {
     if (this.marking.has(matchId)) return;
     this.marking.add(matchId);
