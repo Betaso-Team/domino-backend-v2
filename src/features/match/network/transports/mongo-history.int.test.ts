@@ -65,6 +65,25 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
   describeHistoryContract("MongoHistory", (options) => fresh(undefined, options));
   describePlayerLogContract("MongoHistory", (options) => fresh(undefined, options));
 
+  // LA MARCA DE PÉRDIDA NO REABRE NADA: `$set`/`$inc` sobre un documento ya cerrado deja su estado
+  // y su desenlace como estaban, y suma lo perdido. Una entrada que llega después del cierre, con el
+  // pendiente de la partida en cero, es la pérdida más simple de provocar.
+  it("la marca deja cerrada una partida cerrada y suma lo perdido", async () => {
+    const history = await fresh(undefined, { maxPendingPerMatch: 0 });
+    history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+    history.close("m-1", CLOSING);
+    history.record([entry(1)]);
+    history.record([entry(2)]);
+    await history.drain();
+
+    const document = await (await collection()).findOne({ matchId: "m-1" });
+    expect(document?.status).toBe(CLOSING.status);
+    expect(document?.matchEndedAt).toEqual(new Date(CLOSING.matchEndedAt));
+    expect(document?.timelineIncomplete).toBe(true);
+    expect(document?.lostEntries).toBe(2);
+    expect(document?.timeline).toBeUndefined();
+  });
+
   it("crea sus siete índices, con el de `matchId` único", async () => {
     const history = await fresh();
     history.record([entry(1)]);

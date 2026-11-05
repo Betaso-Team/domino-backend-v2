@@ -415,6 +415,9 @@ export interface HistoryPort {
    *
    * NUNCA RECHAZA. Un lote que falló ya se logueó, que es lo único que se le debe al operador;
    * propagarlo acá cortaría el resto del apagado, que es peor que perder el lote.
+   *
+   * CON PLAZO en el adaptador de Mongo (`DRAIN_DEADLINE_MS`): con la base colgada, espera hasta ahí,
+   * dice lo que dejó en vuelo y resuelve. Esperar más es que pm2 mate el proceso igual.
    */
   drain(): Promise<void>;
 }
