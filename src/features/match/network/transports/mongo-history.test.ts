@@ -3,6 +3,7 @@ import { type Collection, MongoOperationTimeoutError, MongoServerError } from "m
 import { describe, expect, it, vi } from "vitest";
 import { type HistoryEntry, MatchListTimeoutError } from "../history";
 import {
+  DRAIN_DEADLINE_MS,
   HISTORY_COLLECTION,
   HISTORY_WRITE_TIMEOUT_MS,
   type HistoryStore,
@@ -628,6 +629,57 @@ describe("MongoHistory: el drenado del apagado", () => {
     history.record([entry(1)]);
 
     await expect(history.drain()).resolves.toBeUndefined();
+  });
+
+  // UN MONGO COLGADO NO FRENA EL DEPLOY: el drenado espera a lo sumo `DRAIN_DEADLINE_MS` y dice lo
+  // que dejó en vuelo. Sin plazo, el apagado esperaba hasta que pm2 lo mataba (`kill_timeout`).
+  it("el drenado se rinde a los 5 s y dice lo que dejó en vuelo", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, updateOne } = storeWith();
+      updateOne.mockImplementation(() => new Promise(() => {}));
+      const logger = fakeLogger();
+      const history = new MongoHistory(store, logger);
+      history.record([entry(1), entry(2)]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      let drenado = false;
+      const drain = history.drain().then(() => {
+        drenado = true;
+      });
+      await vi.advanceTimersByTimeAsync(DRAIN_DEADLINE_MS - 1);
+      expect(drenado).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await drain;
+
+      expect(DRAIN_DEADLINE_MS).toBe(5_000);
+      expect(drenado).toBe(true);
+      expect(logger.error).toHaveBeenCalledWith(
+        "historial: el apagado no esperó lo que seguía en vuelo",
+        { batches: 1, entries: 2 },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("con la base sana, el drenado no espera el plazo", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store } = storeWith();
+      const history = new MongoHistory(store, fakeLogger());
+      history.record([entry(1)]);
+      let drenado = false;
+      const drain = history.drain().then(() => {
+        drenado = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await drain;
+      expect(drenado).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // Sin nada en vuelo resuelve de una: el apagado de una instancia que no grabó nada no paga

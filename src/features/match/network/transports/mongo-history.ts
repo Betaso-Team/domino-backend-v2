@@ -319,6 +319,10 @@ export const MAX_PENDING_TOTAL = 100_000;
 // LAS PÉRDIDAS SE RESUMEN, no se loguean lote por lote: con Mongo caído y cientos de partidas, una
 // línea por lote tapa todo lo demás. La primera de cada partida en la ventana sí sale entera.
 export const LOSS_REPORT_EVERY_MS = 60_000;
+// EL PLAZO DEL DRENADO DEL APAGADO. pm2 mata a los 20 s (`kill_timeout`) y antes el apagado ya espera
+// hasta 15 s al cobro del aumento (`matchResultRecorder.drain()`): el historial no puede comerse ese
+// margen. Pasado el plazo, lo que sigue en vuelo se da por perdido y se dice cuánto era.
+export const DRAIN_DEADLINE_MS = 5_000;
 const UPSERT = { upsert: true, ...WRITE };
 
 const isTimeout = (error: unknown) =>
@@ -559,11 +563,29 @@ export class MongoHistory
   // de que la promesa resuelve—, y un drenado que espera una sola tanda dejaría justo al
   // último afuera. Termina porque durante el apagado ya no hay salas que graben: la sala se
   // dispone ANTES de que esto corra (§`src/main.ts`).
-  async drain(): Promise<void> {
-    while (this.inFlight.size > 0) {
-      // `all` y no `allSettled` porque ninguna de estas promesas puede rechazar: son las que
-      // salieron del `catch` de `write`.
-      await Promise.all([...this.inFlight]);
+  //
+  // CON PLAZO: un Mongo colgado no puede dejar al deploy esperando hasta que pm2 mate el proceso. Al
+  // vencer se loguea lo que quedó en vuelo y se resuelve igual; nunca rechaza.
+  async drain(deadlineMs = DRAIN_DEADLINE_MS): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), deadlineMs);
+    });
+    try {
+      while (this.inFlight.size > 0) {
+        // `all` y no `allSettled` porque ninguna de estas promesas puede rechazar: son las que
+        // salieron del `then` de `write` y del `finally` de `mark`.
+        const done = Promise.all([...this.inFlight]).then(() => "done" as const);
+        if ((await Promise.race([done, late])) === "late") {
+          this.logger.error("historial: el apagado no esperó lo que seguía en vuelo", {
+            batches: this.inFlight.size,
+            entries: this.waiting,
+          });
+          return;
+        }
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
 
