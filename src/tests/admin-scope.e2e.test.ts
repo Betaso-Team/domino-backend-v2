@@ -204,6 +204,25 @@ describe("el ámbito de los admins (integración)", () => {
     });
     expect((await call("games", "GET", "/game-modes/admin")).body).not.toHaveProperty("source");
 
+    // Paginada si se pide: una página y el total, la misma lista en el mismo orden; sin pedirla, entera.
+    const toda = (await call("games", "GET", "/game-modes/admin")).body as {
+      data: Array<{ uuid: string }>;
+    };
+    expect(toda).not.toHaveProperty("total");
+    expect((await call("games", "GET", "/game-modes/admin?page=2&pageSize=1")).body).toEqual({
+      status: "success",
+      data: toda.data.slice(1, 2),
+      total: toda.data.length,
+      page: 2,
+      pageSize: 1,
+    });
+    expect((await call("rival", "GET", "/game-modes/admin?pageSize=1")).body).toMatchObject({
+      source: "own",
+      page: 1,
+      pageSize: 1,
+    });
+    expect((await call("games", "GET", "/game-modes/admin?pageSize=101")).status).toBe(400);
+
     const baja = await call("rival", "DELETE", `/game-modes/${uuid}`);
     expect(baja.status).toBe(409);
     expect(baja.body).toMatchObject({ code: "OWN_CATALOG_EMPTY" });

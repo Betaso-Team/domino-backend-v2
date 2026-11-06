@@ -170,6 +170,29 @@ export const UUID_PARAMS = z.object({
 // `?providerId=`. Lo resuelve `providerOf` (`admin.ts`); acá sólo se valida la forma.
 export const PROVIDER_QUERY = z.object({ providerId: providerIdOf("providerId").optional() });
 
+// LA LISTA DEL ADMIN, PAGINADA SI SE PIDE: con `page` o `pageSize` (1 a 100) una página y el total;
+// sin ninguno, toda (lo que la necesita entera: el lobby del panel, los selectores).
+export const ADMIN_LIST_QUERY = PROVIDER_QUERY.extend({
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+/** `{ data }` entera, o `{ data, total, page, pageSize }` si la consulta pide una página. */
+export function pagedData<T>(
+  items: readonly T[],
+  query: { readonly page?: number; readonly pageSize?: number },
+): { data: readonly T[]; total?: number; page?: number; pageSize?: number } {
+  if (query.page === undefined && query.pageSize === undefined) return { data: items };
+  const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? 20;
+  return {
+    data: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+    page,
+    pageSize,
+  };
+}
+
 // LA FUENTE DEL CATÁLOGO: el proveedor sale del token (o de `?providerId=`), la fuente va en el cuerpo.
 export const CATALOG_SOURCE_BODY = z.strictObject({ source: z.enum(["shared", "own"]) });
 
