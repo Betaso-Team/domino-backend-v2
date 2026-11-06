@@ -452,6 +452,25 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
 El contrato completo vive en el monorepo del orquestador:
 `docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`.
 
+### Anuncios del catálogo (`domino.config.*`)
+
+Cada cambio del catálogo se anuncia en el exchange `betaso_games` (el de `BETASO_GAMES_RABBITMQ_URL`), para el
+servicio de notificaciones de Betaso Games. Salen de su propio outbox (`catalog_event_outbox`, con su propio
+despachador): un anuncio que no sale nunca frena un resultado de partida. Se encolan **después** de escribir
+el cambio (Mongo no tiene transacciones en este despliegue): un proceso que muere entre las dos cosas pierde
+ese aviso. `messageId = <uuid>:<topic>`.
+
+| Topic | Payload (además de `gameSlug`, `occurredAt`, `actor`) | Cuándo |
+| --- | --- | --- |
+| `domino.config.shared_game_mode.{created,updated,deactivated,reactivated}` | `modeId`, `name` | un modo compartido se crea, se edita, se da de baja o se reactiva |
+| `domino.config.provider_game_mode.{created,updated,deactivated,reactivated}` | `providerId`, `modeId`, `name` | lo mismo con un modo propio de un proveedor |
+| `domino.config.provider_game_mode.subscribed` · `.unsubscribed` | `providerId`, `modeId`, `name` | un proveedor se suscribe a un compartido o se da de baja (solo si cambió) |
+| `domino.config.provider_game_mode.copied` | `providerId` | se copiaron compartidos como propios (solo si se creó alguno) |
+| `domino.config.catalog_source.changed` | `providerId`, `source` | cambió la fuente del catálogo de un proveedor (solo si cambió) |
+
+`gameSlug` es `domino`. `actor` es `{ kind: "admin", name }`: el `sub` del token de admin, o `ADMIN_API_KEY`
+para la llave de administración.
+
 ## Errores
 
 **Todo error HTTP del dominó es `{ code, detail? }`.** `code` es una constante en mayúsculas que el

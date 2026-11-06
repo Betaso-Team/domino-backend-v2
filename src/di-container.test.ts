@@ -52,9 +52,10 @@ describe("el composition root", () => {
       expect(source).toMatch(new RegExp(`mongo\\s*\\?[\\s\\S]{0,120}?:\\s*new ${memoria}`));
   });
 
-  // EL CATÁLOGO NO PUBLICA A NINGÚN BROKER: el exchange `betaso` y su outbox se fueron cuando Betaso
-  // pasó a leer los modos del orquestador. El único broker del proceso es el de juegos.
-  it("no hay outbox del catálogo ni broker de Betaso", () => {
+  // EL CATÁLOGO NO PUBLICA SUS MODOS A NINGÚN BROKER: el exchange `betaso` y su outbox se fueron cuando
+  // Betaso pasó a leer los modos del orquestador. El único broker del proceso es el de juegos, donde
+  // sólo salen los anuncios de cada cambio (`domino.config.*`, `catalogEventDispatcher`).
+  it("no hay outbox de modos ni broker de Betaso", () => {
     expect(source).not.toMatch(/GameModeOutbox|\bOutboxDispatcher|outboxDispatcher/);
     expect(source).not.toMatch(/rabbitmqUrl\b/);
   });
@@ -68,6 +69,7 @@ describe("el composition root", () => {
     const apagado = source.slice(source.indexOf("export async function shutdown"));
     const pasos = [
       "matchResultDispatcher?.close",
+      "catalogEventDispatcher?.close",
       "statsRecorder.stop",
       "historyPort.drain",
       "betasoGamesAmqp?.close",
