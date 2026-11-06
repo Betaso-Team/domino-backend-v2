@@ -2165,7 +2165,7 @@ si hay `BILLING_AUTH_PUBLIC_KEY`; el `alg` del header elige la clave y cada rama
 Hechos medidos en la Tarea 13, Parte B:
 
 - **`createRoom` propaga el mensaje del error `onCreate` con su prefijo de código** (`UNKNOWN_GAME_MODE: …`), que es cómo la ruta responde 422 (medido sobre `@colyseus/core` 0.18.15). ~~`MaintenanceModeError` no tiene prefijo y sale como 500 (pendiente).~~ Ya no existe: el mantenimiento es del orquestador.
-- **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. La ruta responde 404 solo si `matchMaker.query({ roomId })` no encuentra nada; una sala bloqueada es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa).
+- **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. Ante **cualquier** error de la reserva (no solo `MATCHMAKE_INVALID_ROOM_ID`: la sala de un proceso muerto da `SeatReservationError`), la ruta confirma con `matchMaker.query({ roomId })` en 2 s; si no la encuentra, borra `player_match` y responde 404, y si la encuentra o no puede confirmarlo es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa). Es el T-04 de truco (`53d1030`).
 - **Toda reserva sin consumir mantiene viva su sala ~15 s** (`seatReservationTimeout`) y retrasa `server.shutdown()` — los tests que obtienen una reserva tienen que consumirla.
 - **Pendiente de decidir:** ~~qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing);~~ (cerradas: no hay lobby propio y el resultado sale por `betaso_games`) `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
 - **`BILLING_AUTH_PUBLIC_KEY` se valida al boot** (EC P-256 solo público; una clave privada se rechaza).
@@ -2803,7 +2803,7 @@ Del plan «rendimiento del backend, roles y pendientes» (sección C, PR5). Apil
   espera `waitForInitialState` y para entonces el comodín de `src/tests/e2e.ts` ya se tragó el
   mensaje).
 - **`GET /internal/players/:userId/match`** (`tables.ts`, misma llave y `SEAT_PARAMS` que `.../seat`):
-  `matchOf` + `publicConfigOf` del registro, sin Colyseus ni reserva. 200 `{status, data: {matchId,
+  `matchOf` + `publicConfigOf` del registro, sin reserva; confirma la sala con `matchMaker.query` (2 s) y borra la entrada si no está. 200 `{status, data: {matchId,
   roomId}}`; 404 `{code: "NO_LIVE_MATCH"}` (con `sendError`, como `.../seat` desde los errores con código);
   la llave y la forma dan los `401 UNAUTHORIZED` y `400 MALFORMED` comunes. `player_match:<userId>` no
   cambia.
@@ -3226,3 +3226,8 @@ cobro de la entrada y de cada aumento pasan por este cliente.
 - Tests: `src/shared/http/client.int.test.ts` con `node:http` real (cuerpo colgado, sin cabeceras, 500
   con cuerpo colgado: rechaza en plazo y el servidor ve el socket cerrado) y el caso colgado en
   `orchestrator-charges.test.ts`. Los cuatro salen rojos con el cliente anterior.
+
+## Corrección — el plazo de ocupación avisa y la mesa de un proceso muerto no retiene (rama `fix/seating-timeout-notice`)
+
+- **`SEATING_TIMEOUT`**: al vencer el plazo de ocupación la sala manda `matchCancelled { reason: "SEATING_TIMEOUT" }` a los presentes y recién después cierra (abortada `NEVER_STARTED`, sin cobro, 4000). Sin el mensaje, el front leía el 4000 como «abriste la partida en otra pestaña». Lo hace `cancelTable(reason)`, el mismo camino que `CHARGE_REJECTED`. Un cliente que todavía no confirmó `JOIN_ROOM` pierde el mensaje con su cola (ya pasaba con `CHARGE_REJECTED`).
+- **T-04** (truco `53d1030`): `POST …/seat` y `GET …/match` confirman la sala con `matchMaker.query` (2 s) y borran `player_match` (`forget`, solo si sigue apuntando a esa sala) cuando no existe. «No sé» cuenta como viva. `GET …/match` mira solo el registro de salas, no el proceso dueño: una sala de un proceso muerto que nadie revisó sigue contestando 200 hasta que un `POST …/seat` fallido la revisa.

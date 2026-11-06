@@ -30,13 +30,22 @@ const request: CreateMatchRequest = {
 
 type PublicConfig = Awaited<ReturnType<TablesDeps["registry"]["publicConfigOf"]>>;
 
-const deps = (over: Partial<TablesDeps> = {}): TablesDeps => ({
+// LAS DOS DEPENDENCIAS CON MÉTODOS SE PISAN DE A UNO: un caso nombra solo lo que cambia, y lo demás
+// sigue siendo la mesa feliz de abajo.
+type Over = Omit<Partial<TablesDeps>, "tables" | "registry"> & {
+  readonly tables?: Partial<TablesDeps["tables"]>;
+  readonly registry?: Partial<TablesDeps["registry"]>;
+};
+
+const deps = ({ tables, registry, ...over }: Over = {}): TablesDeps => ({
   tables: {
     openRequest: async (r) => ({
       roomId: "room-1",
       seats: r.participants.map(({ userId }) => ({ userId, reservation: { sessionId: userId } })),
     }),
     seatBack: async () => ({ sessionId: "again" }),
+    isGone: async () => false,
+    ...tables,
   },
   registry: {
     matchOf: async (userId) => (userId === "p-a" ? "room-1" : undefined),
@@ -48,6 +57,8 @@ const deps = (over: Partial<TablesDeps> = {}): TablesDeps => ({
         ["mode-4p", 2],
       ]),
     }),
+    forget: async () => undefined,
+    ...registry,
   },
   logger: fakeLogger(),
   orchestratorApiKey: KEY,
@@ -57,7 +68,7 @@ const deps = (over: Partial<TablesDeps> = {}): TablesDeps => ({
 // Un Express DE VERDAD sobre un puerto efímero, con el mismo parser y el mismo manejador de
 // errores que `app.config.ts`: lo que se mide son status y cuerpos, y eso lo decide Express.
 const servers: Server[] = [];
-async function serve(over: Partial<TablesDeps> = {}): Promise<string> {
+async function serve(over: Over = {}): Promise<string> {
   const app = express();
   app.use(express.json());
   app.use(tablesRoutes(deps(over)));
@@ -185,7 +196,42 @@ describe("tablesRoutes", () => {
     expect(await res.json()).toEqual({ code: "NO_LIVE_MATCH" });
   });
 
-  // LA MESA DE UN JUGADOR SIN RESERVAR: dos GET al registro y NINGUNA llamada a Colyseus.
+  // T-04 (truco `53d1030`): la sala de un proceso muerto deja su entrada en el registro hasta que vence.
+  // Sin borrarla, cada pregunta del orquestador la volvía a encontrar y el jugador quedaba trabado.
+  it("cuando la sala ya no existe, borra la entrada del jugador antes de contestar 404", async () => {
+    const forget = vi.fn(async () => undefined);
+    const base = await serve({ tables: { seatBack: async () => undefined }, registry: { forget } });
+    const res = await post(`${base}/internal/players/p-a/seat`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ code: "NO_LIVE_MATCH" });
+    expect(forget).toHaveBeenCalledWith("p-a", "room-1");
+  });
+
+  // «No sé» no es «no existe»: el gateway relanza cuando la sala sigue o no pudo confirmarlo, y ahí la
+  // entrada se queda —borrarla le abriría al jugador una segunda mesa—.
+  it("si la reserva falla con la sala en pie, contesta 500 y no borra nada", async () => {
+    const forget = vi.fn(async () => undefined);
+    const base = await serve({
+      tables: {
+        seatBack: async () => {
+          throw new Error("process p-9 is not available.");
+        },
+      },
+      registry: { forget },
+    });
+    expect((await post(`${base}/internal/players/p-a/seat`)).status).toBe(500);
+    expect(forget).not.toHaveBeenCalled();
+  });
+
+  it("a quien no está en ninguna mesa no le borra nada", async () => {
+    const forget = vi.fn(async () => undefined);
+    const base = await serve({ registry: { forget } });
+    expect((await post(`${base}/internal/players/p-z/seat`)).status).toBe(404);
+    expect(forget).not.toHaveBeenCalled();
+  });
+
+  // LA MESA DE UN JUGADOR SIN RESERVAR: dos GET al registro y una lectura del registro de salas, sin
+  // reservar nada.
   describe("GET /internal/players/:userId/match", () => {
     const get = (url: string, key: string | null = KEY) =>
       fetch(url, { headers: key ? { "x-internal-api-key": key } : {} });
@@ -218,6 +264,25 @@ describe("tablesRoutes", () => {
       const res = await get(`${gone}/internal/players/p-a/match`);
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ code: "NO_LIVE_MATCH" });
+    });
+
+    // T-04: la entrada de una sala que ya no figura en el matchmaker es de un proceso muerto.
+    it("si la sala ya no existe, borra la entrada y contesta 404 NO_LIVE_MATCH", async () => {
+      const forget = vi.fn(async () => undefined);
+      const isGone = vi.fn(async () => true);
+      const base = await serve({ tables: { isGone }, registry: { forget } });
+      const res = await get(`${base}/internal/players/p-a/match`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ code: "NO_LIVE_MATCH" });
+      expect(isGone).toHaveBeenCalledWith("room-1");
+      expect(forget).toHaveBeenCalledWith("p-a", "room-1");
+    });
+
+    it("con la sala en pie (o sin poder confirmarlo) contesta como siempre y no borra nada", async () => {
+      const forget = vi.fn(async () => undefined);
+      const res = await get(`${await serve({ registry: { forget } })}/internal/players/p-a/match`);
+      expect(res.status).toBe(200);
+      expect(forget).not.toHaveBeenCalled();
     });
 
     it("pide la llave antes que nada, y no acepta la de otro", async () => {

@@ -336,6 +336,27 @@ describe("MatchRegistry", () => {
     expect(await nueva.matchOf("u1")).toBe("room-2");
     expect(await vieja.matchOf("u2")).toBeUndefined();
   });
+
+  // LO QUE DEJÓ UN PROCESO MUERTO, borrado por quien confirmó que su sala ya no existe (truco
+  // `53d1030`). Solo la entrada que SIGUE apuntando a esa sala: el jugador puede haberse sentado en
+  // otra mesa en el medio, y borrarla a ciegas lo dejaría sin partida.
+  it("olvida la entrada de una sala muerta, y solo si sigue apuntando a ella", async () => {
+    const compartido = new MemoryKeyValueStore();
+    const muerto = new MatchRegistry(compartido);
+    const vivo = new MatchRegistry(compartido);
+    await muerto.register("room-1", config, timeouts);
+    await vivo.register(
+      "room-2",
+      replayConfigOf({ ...roomOptions, matchId: "m2", seats: [seat("u2", 0), seat("u3", 1)] }),
+      timeouts,
+    );
+
+    await vivo.forget("u1", "room-1");
+    await vivo.forget("u2", "room-1");
+
+    expect(await vivo.matchOf("u1")).toBeUndefined();
+    expect(await vivo.matchOf("u2")).toBe("room-2");
+  });
 });
 
 // LOS ASIENTOS QUE SE LIBERAN EN VIDA DE LA SALA. Una mesa que terminó sigue viva un rato —la

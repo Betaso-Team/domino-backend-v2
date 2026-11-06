@@ -342,6 +342,15 @@ export class MatchRegistry {
     }
   }
 
+  // LA ENTRADA QUE DEJÓ UN PROCESO MUERTO (truco `53d1030`). Un `kill -9` o un OOM no corre `onDispose`,
+  // así que `player_match` sigue apuntando a una sala que ya no existe hasta que vence su plazo
+  // (`TTL_SECONDS`), y mientras tanto el orquestador no puede volver a sentar al jugador. La borra
+  // quien CONFIRMÓ que la sala no existe —la API del orquestador, contra el matchmaker—, y es lo mismo
+  // que `release`: solo si sigue apuntando a esa sala.
+  async forget(userId: string, roomId: string): Promise<void> {
+    await this.release(userId, roomId);
+  }
+
   // Soltar a un jugador es borrar SU clave, y SOLO SI sigue apuntando acá: entre que dejó esta
   // sala y que esta sala se entera, el jugador puede haberse sentado en otra mesa —en este
   // proceso o en otro—, y borrar a ciegas lo dejaría sin partida justo cuando acaba de empezar

@@ -1,7 +1,11 @@
+import { rootContainer } from "@/di-container";
 import { env } from "@/env";
 import { bootTestServer, casualTable, mintToken, waitUntil } from "@/tests/e2e";
+import { matchMaker } from "@colyseus/core";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { replayConfigOf } from "../transports/match-contract";
+import { MatchRegistry } from "../transports/match-registry";
 
 const PORT = 2605;
 const base = `http://127.0.0.1:${PORT}`;
@@ -224,6 +228,65 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     const res = await post("/internal/matches", { ...table, participants });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ code: "MALFORMED" });
+  });
+
+  // T-04 (truco `53d1030`): LA SALA DE UN PROCESO QUE MURIÓ DE GOLPE. Sigue anunciada en el registro de
+  // salas y sus jugadores siguen en `player_match`, porque `onDispose` no corrió. `joinById` no dice «no
+  // existe»: le pide el asiento al dueño, no contesta, Colyseus le hace el chequeo de salud, lo excluye,
+  // borra sus salas y tira `SeatReservationError`. Antes era un 500 —`TABLE_UNAVAILABLE` en el
+  // orquestador— y el jugador quedaba trabado hasta que su entrada vencía. Tarda los dos plazos de IPC
+  // de Colyseus (2 s cada uno): el del asiento y el del chequeo de salud.
+  it("la sala de un proceso muerto no retiene a nadie: 404 y su entrada borrada", async () => {
+    const roomId = "sala-de-un-muerto";
+    const registry = rootContainer.resolve(MatchRegistry);
+    const seat = (userId: string, index: number) => ({
+      userId,
+      displayName: userId,
+      currency: "VES",
+      playerId: `seat-${index + 1}`,
+    });
+    await registry.register(
+      roomId,
+      replayConfigOf({
+        matchId: "m-muerta",
+        gameModeId: "modo",
+        seats: [seat("o-k1", 0), seat("o-k2", 1)],
+        seed: "seed",
+        pointsToWin: 100,
+        teamAssignment: "SEAT_ORDER",
+        isDealWindowEnabled: true,
+        rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
+        entryFee: 10,
+        prize: 20,
+      }),
+      { turnMs: 1, extraTimeMs: 1, dealingMs: 1, betResponseMs: 1 },
+    );
+    await matchMaker.driver.persist(
+      {
+        name: "domino",
+        roomId,
+        processId: "proceso-muerto",
+        clients: 0,
+        maxClients: Number.POSITIVE_INFINITY,
+        locked: false,
+        private: false,
+      },
+      true,
+    );
+
+    const seatBack = await post("/internal/players/o-k1/seat");
+    expect(seatBack.status).toBe(404);
+    expect(await seatBack.json()).toEqual({ code: "NO_LIVE_MATCH" });
+    expect(await registry.matchOf("o-k1")).toBeUndefined();
+
+    // EL OTRO JUGADOR, por la pregunta sin reserva: la sala ya no figura —la sacó el chequeo de salud
+    // de arriba— así que su entrada también se borra.
+    expect(await registry.matchOf("o-k2")).toBe(roomId);
+    const match = await get("/internal/players/o-k2/match");
+    expect(match.status).toBe(404);
+    expect(await match.json()).toEqual({ code: "NO_LIVE_MATCH" });
+    expect(await registry.matchOf("o-k2")).toBeUndefined();
+    await registry.remove(roomId);
   });
 
   it("contesta 404 a quien no está en ninguna mesa", async () => {

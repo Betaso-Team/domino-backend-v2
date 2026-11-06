@@ -155,13 +155,28 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
   });
 
   it("si el orquestador no cobra la entrada, la mesa se cierra sin arrancar y sale abortada", async () => {
-    fakeOrchestrator.failEntryWith(async () =>
-      Promise.reject(new ChargeRejectedError("INSUFFICIENT_FUNDS")),
+    // EL RECHAZO SE SUELTA CON LOS DOS ESCUCHANDO: un rechazo inmediato llega antes de que el arnés
+    // devuelva los clientes, y el comodín de `src/tests/e2e.ts` se traga el aviso.
+    let refuse = () => {};
+    fakeOrchestrator.failEntryWith(
+      () =>
+        new Promise<void>((_, reject) => {
+          refuse = () => reject(new ChargeRejectedError("INSUFFICIENT_FUNDS"));
+        }),
     );
     try {
       const match = await seatPair(server, ["x1", "x2"]);
+      const reasons: string[] = [];
+      for (const client of Object.values(match.clients))
+        client.onMessage("matchCancelled", (message: { reason: string }) => {
+          reasons.push(message.reason);
+        });
+      await waitUntil(() => fakeOrchestrator.entries.includes(match.config.matchId));
+      refuse();
       const key = `${match.config.matchId}:aborted`;
       await waitUntil(async () => (await matchResults.present([key])).has(key), 3_000);
+      await waitUntil(() => reasons.length === 2);
+      expect(reasons).toEqual(["CHARGE_REJECTED", "CHARGE_REJECTED"]);
       expect(match.serverState.phase).toBe("NOT_STARTED");
       expect(server.getRoomById(match.roomId)).toBeUndefined();
     } finally {
@@ -186,6 +201,44 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     await joinAs(server, room.roomId, "s1");
     await new Promise((resume) => setTimeout(resume, 20));
     expect(fakeOrchestrator.entries.length).toBe(before);
+  });
+
+  // EL PLAZO DE OCUPACIÓN VENCIDO SE AVISA ANTES DE CERRAR. La sala cierra con 4000 (CONSENTED), que es
+  // el mismo código del socket desplazado por otra pestaña: sin el aviso, el front le decía al que sí
+  // entró «abriste la partida en otro lado», y era falso. El aviso tiene que llegar ANTES del cierre:
+  // un mensaje encolado detrás del `close` no lo lee nadie.
+  it("si alguien no ocupa su asiento a tiempo, avisa SEATING_TIMEOUT al que entró, cierra sin cobrar y sale abortada", async () => {
+    const enqueue = vi.spyOn(matchResults, "enqueue");
+    const room = await server.createRoom("domino", {
+      mode: "CASUAL",
+      matchId: "m-plazo",
+      gameModeId: CASUAL_2P.uuid,
+      participants: [
+        { userId: "t1", displayName: "t1", currency: "VES" },
+        { userId: "t2", displayName: "t2", currency: "VES" },
+      ],
+      seed: "seed",
+      teamAssignment: "SEAT_ORDER",
+      rateId: "rate-1",
+    });
+    const present = await joinAs(server, room.roomId, "t1");
+    const seen: string[] = [];
+    present.onMessage("matchCancelled", (message: { reason: string }) => {
+      seen.push(`matchCancelled:${message.reason}`);
+    });
+    present.onLeave((code: number) => {
+      seen.push(`leave:${code}`);
+    });
+
+    const key = "m-plazo:aborted";
+    await waitUntil(async () => (await matchResults.present([key])).has(key), 8_000);
+    await waitUntil(() => seen.some((fact) => fact.startsWith("leave:")));
+    expect(seen).toEqual(["matchCancelled:SEATING_TIMEOUT", "leave:4000"]);
+    expect(enqueue.mock.calls.find((call) => call[0] === key)?.[2]).toMatchObject({
+      reason: "NEVER_STARTED",
+    });
+    expect(fakeOrchestrator.entries).not.toContain("m-plazo");
+    expect(server.getRoomById(room.roomId)).toBeUndefined();
   });
 
   it("al resolverse, publica el resultado", async () => {

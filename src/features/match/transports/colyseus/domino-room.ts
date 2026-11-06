@@ -387,10 +387,12 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.heartbeat = this.clock.setInterval(() => this.beat(true), HEARTBEAT_MS);
     this.probing = this.clock.setInterval(() => this.connections.probe(), PROBE_INTERVAL_MS);
 
+    // EL PLAZO DE OCUPACIÓN: alguien del emparejamiento nunca consumió su reserva. La mesa se cierra
+    // sin arrancar —sale abortada `NEVER_STARTED` y no se cobró nada, porque el cobro de la entrada
+    // espera a la mesa completa— y al que sí entró se le dice por qué.
     this.seating = this.clock.setTimeout(() => {
       this.log.warn("plazo de ocupación vencido", { clients: this.clients.length });
-      this.closingByRoom = true;
-      this.disconnect();
+      this.cancelTable("SEATING_TIMEOUT");
     }, global.seatingTimeoutMs);
     this.onMessage("*", (client, type, payload) =>
       this.handleMessage(client, String(type), payload),
@@ -756,12 +758,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         error: String(error),
       });
       this.orchestratorAbortReason = "CHARGE_REJECTED";
-      if (!this.disposed) {
-        this.closingByRoom = true;
-        for (const client of this.clients)
-          client.send("matchCancelled", { reason: "CHARGE_REJECTED" });
-        void this.disconnect().catch(() => undefined);
-      }
+      if (!this.disposed) this.cancelTable("CHARGE_REJECTED");
       return;
     }
     this.entryCharge = "charged";
@@ -770,6 +767,21 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // corriendo sin dueño.
     if (this.disposed) return;
     this.notifier.notify(this.startMatch());
+  }
+
+  // LA MESA QUE SE CIERRA SIN ARRANCAR, con el motivo a la vista de los que están sentados. Sin el
+  // aviso, el cliente solo ve el cierre 4000 (CONSENTED), que es el mismo código del socket desplazado
+  // por otra pestaña, y el front le decía «abriste la partida en otro lado».
+  //
+  // ⚠ EL AVISO VA ANTES DEL `disconnect()` y así llega: un cliente que ya confirmó su entrada recibe
+  // el `send` en el acto (`enqueueClientRaw`, `@colyseus/core/build/Transport.mjs`) y el cierre sale
+  // después por el mismo socket, porque `disconnect` cierra cada cliente recién cuando termina su
+  // `onLeave`. Uno que todavía no confirmó el `JOIN_ROOM` lo tiene en la cola de entrada, y esa cola
+  // se pierde con el cierre: no lo había visto y no ve el aviso tampoco.
+  private cancelTable(reason: "CHARGE_REJECTED" | "SEATING_TIMEOUT"): void {
+    this.closingByRoom = true;
+    for (const client of this.clients) client.send("matchCancelled", { reason });
+    void this.disconnect().catch(() => undefined);
   }
 
   private probeSocket(playerId: PlayerId, client: Client): void {
