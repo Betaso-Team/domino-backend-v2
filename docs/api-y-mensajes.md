@@ -60,7 +60,7 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
 | `config` | Al que entra o vuelve | La config pública de la mesa más `serverNow` (forma abajo) | Al final de cada entrada (`onJoin`) y de cada reconexión (`onReconnect`) |
 | `events` | Toda la mesa | Lista de eventos del motor y de plataforma (`ROUND_STARTED`, `MATCH_RESOLVED`, `PLAYER_RECONNECTED`…) | Cada vez que la partida produce hechos |
 | `illegal` | El que mandó el mensaje | `{ code, detail? }`: `code` es el de la regla violada, `MALFORMED` (con `detail`) o `UNKNOWN_COMMAND` | Su mensaje no prosperó; el estado no cambió |
-| `matchCancelled` | Toda la mesa | `{ reason: "CHARGE_REJECTED" }` | El orquestador no cobró la entrada; la sala se cierra sin arrancar |
+| `matchCancelled` | Toda la mesa | `{ reason: "CHARGE_REJECTED" \| "SEATING_TIMEOUT" }` | `CHARGE_REJECTED`: el orquestador no cobró la entrada. `SEATING_TIMEOUT`: venció el plazo de ocupación sin que todos entraran (sale abortada `NEVER_STARTED`, sin cobro). En los dos la sala se cierra sin arrancar, con 4000, justo después |
 | `REACTION_SENT` | Toda la mesa, el que lo mandó incluido | `{ fromPlayerId, reaction: { id, type, content } }` | Un jugador mandó un gesto válido dentro del límite (`SEND_REACTION`) |
 
 **`config`** trae lo mismo que `GET /config/:roomId`, sin pedirlo por HTTP:
@@ -426,11 +426,11 @@ Betaso).
 | `200` | `{ status, data: { matchId, reservation } }` | Sigue en una mesa; el `matchId` es el del orquestador |
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
-| `500` | `{ code: "INTERNAL" }` | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva, o su sala ya no existe (proceso muerto): la entrada del jugador se borra |
+| `500` | `{ code: "INTERNAL" }` | La reserva falló y la sala sigue en el registro de salas (o no se pudo confirmar en 2 s): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
 
 **`GET /internal/players/:userId/match`** dice en qué mesa está sentado un jugador, **sin reservar
-asiento**: dos lecturas del registro compartido y ninguna llamada a Colyseus. Es lo que el orquestador
+asiento**: dos lecturas del registro compartido y una lectura del registro de salas de Colyseus (`matchMaker.query`, plazo 2 s). Es lo que el orquestador
 pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `POST .../seat`.
 
 | Estado | Cuerpo | Cuándo |
@@ -438,7 +438,7 @@ pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `PO
 | `200` | `{ status: "success", data: { matchId, roomId } }` | Sigue en una mesa viva; el `matchId` es el del orquestador |
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló) |
+| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló), o su sala ya no figura en el matchmaker: la entrada se borra |
 
 **`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
 orquestador lo muestra en los números de su lobby.
