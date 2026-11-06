@@ -170,6 +170,53 @@ export const UUID_PARAMS = z.object({
 // `?providerId=`. Lo resuelve `providerOf` (`admin.ts`); acá sólo se valida la forma.
 export const PROVIDER_QUERY = z.object({ providerId: providerIdOf("providerId").optional() });
 
+// LA LISTA DEL ADMIN, PAGINADA SI SE PIDE: con `page` o `pageSize` (1 a 100) una página y el total;
+// sin ninguno, toda (lo que la necesita entera: el lobby del panel, los selectores). Los filtros van
+// antes de la página, para que el total y las páginas sean de lo filtrado: `active=true` (solo los
+// activos), `players=2|4`, `free=true|false` (gratis o pagas) y `owner=shared|own`.
+export const ADMIN_LIST_QUERY = PROVIDER_QUERY.extend({
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional(),
+  active: z.enum(["true"]).optional(),
+  players: z.enum(["2", "4"]).optional(),
+  free: z.enum(["true", "false"]).optional(),
+  owner: z.enum(["shared", "own"]).optional(),
+});
+
+/** Lo que la consulta deja de la lista del admin (sin filtros, todo). */
+export function matchesAdminFilters(
+  mode: {
+    readonly isActive: boolean;
+    readonly playersQuantity: number;
+    readonly isFreeRoom: boolean;
+    readonly ownerProviderId: string | null;
+  },
+  query: z.infer<typeof ADMIN_LIST_QUERY>,
+): boolean {
+  if (query.active === "true" && !mode.isActive) return false;
+  if (query.players !== undefined && String(mode.playersQuantity) !== query.players) return false;
+  if (query.free !== undefined && mode.isFreeRoom !== (query.free === "true")) return false;
+  if (query.owner === "shared" && mode.ownerProviderId !== null) return false;
+  if (query.owner === "own" && mode.ownerProviderId === null) return false;
+  return true;
+}
+
+/** `{ data }` entera, o `{ data, total, page, pageSize }` si la consulta pide una página. */
+export function pagedData<T>(
+  items: readonly T[],
+  query: { readonly page?: number; readonly pageSize?: number },
+): { data: readonly T[]; total?: number; page?: number; pageSize?: number } {
+  if (query.page === undefined && query.pageSize === undefined) return { data: items };
+  const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? 20;
+  return {
+    data: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+    page,
+    pageSize,
+  };
+}
+
 // LA FUENTE DEL CATÁLOGO: el proveedor sale del token (o de `?providerId=`), la fuente va en el cuerpo.
 export const CATALOG_SOURCE_BODY = z.strictObject({ source: z.enum(["shared", "own"]) });
 

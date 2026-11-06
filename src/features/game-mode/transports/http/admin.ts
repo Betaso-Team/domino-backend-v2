@@ -14,12 +14,15 @@ import {
   sendModeNotFound,
 } from "./responses";
 import {
+  ADMIN_LIST_QUERY,
   CATALOG_SOURCE_BODY,
   CREATE_BODY,
   PROVIDER_QUERY,
   UPDATE_BODY,
   UUID_PARAMS,
   createInputOf,
+  matchesAdminFilters,
+  pagedData,
   toAdminDTO,
   toCatalogDTO,
   updateInputOf,
@@ -132,17 +135,21 @@ export function adminRoutes({
   router.get(
     `${BASE}/admin`,
     scopedReader,
-    validated({ query: PROVIDER_QUERY }, async ({ query }, response) => {
+    validated({ query: ADMIN_LIST_QUERY }, async ({ query }, response) => {
       const admin = adminOf(response);
       const providerId = optionalProviderOf(response, query.providerId);
       if (providerId === undefined) return;
       if (providerId === null) {
         const modes = await service.listFor(admin);
-        sendData(
-          response,
-          200,
-          modes.map((mode) => toAdminDTO(mode, admin)),
-        );
+        response.status(200).json({
+          status: "success",
+          ...pagedData(
+            modes
+              .map((mode) => toAdminDTO(mode, admin))
+              .filter((mode) => matchesAdminFilters(mode, query)),
+            query,
+          ),
+        });
         return;
       }
       try {
@@ -152,7 +159,12 @@ export function adminRoutes({
         ]);
         response.status(200).json({
           status: "success",
-          data: modes.map((mode) => toAdminDTO(mode, admin)),
+          ...pagedData(
+            modes
+              .map((mode) => toAdminDTO(mode, admin))
+              .filter((mode) => matchesAdminFilters(mode, query)),
+            query,
+          ),
           source: catalog.source,
         });
       } catch (error) {
