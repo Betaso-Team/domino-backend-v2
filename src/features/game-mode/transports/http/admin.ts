@@ -21,6 +21,7 @@ import {
   UPDATE_BODY,
   UUID_PARAMS,
   createInputOf,
+  matchesAdminFilters,
   pagedData,
   toAdminDTO,
   toCatalogDTO,
@@ -143,7 +144,9 @@ export function adminRoutes({
         response.status(200).json({
           status: "success",
           ...pagedData(
-            modes.map((mode) => toAdminDTO(mode, admin)),
+            modes
+              .map((mode) => toAdminDTO(mode, admin))
+              .filter((mode) => matchesAdminFilters(mode, query)),
             query,
           ),
         });
@@ -157,7 +160,9 @@ export function adminRoutes({
         response.status(200).json({
           status: "success",
           ...pagedData(
-            modes.map((mode) => toAdminDTO(mode, admin)),
+            modes
+              .map((mode) => toAdminDTO(mode, admin))
+              .filter((mode) => matchesAdminFilters(mode, query)),
             query,
           ),
           source: catalog.source,

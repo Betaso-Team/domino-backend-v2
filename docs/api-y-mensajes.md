@@ -247,7 +247,9 @@ los compartidos a los que está suscrito, según la fuente. Betaso Games ve todo
 **`GET /game-modes/admin` se pagina si se pide**: con `?page=` o `?pageSize=` (de 1 a 100; si falta uno,
 página 1 y 20 por página) responde una página de la misma lista, en el mismo orden, y el total:
 `{ status, data, total, page, pageSize }` (más `source` si hay un proveedor resuelto). Sin ninguno,
-la lista entera como siempre. Fuera de rango: `400`.
+la lista entera como siempre. Fuera de rango: `400`. Los filtros se aplican antes de la página (el total
+es el de lo filtrado) y se combinan: `active=true` (solo los activos), `players=2|4`, `free=true|false`
+(gratis o pagas) y `owner=shared|own`.
 
 **`POST /game-modes/copies`** (sin cuerpo) copia los compartidos **activos** a los que el proveedor está
 suscrito a modos propios suyos, con los mismos números y niveles. El uuid de cada copia

@@ -171,11 +171,35 @@ export const UUID_PARAMS = z.object({
 export const PROVIDER_QUERY = z.object({ providerId: providerIdOf("providerId").optional() });
 
 // LA LISTA DEL ADMIN, PAGINADA SI SE PIDE: con `page` o `pageSize` (1 a 100) una página y el total;
-// sin ninguno, toda (lo que la necesita entera: el lobby del panel, los selectores).
+// sin ninguno, toda (lo que la necesita entera: el lobby del panel, los selectores). Los filtros van
+// antes de la página, para que el total y las páginas sean de lo filtrado: `active=true` (solo los
+// activos), `players=2|4`, `free=true|false` (gratis o pagas) y `owner=shared|own`.
 export const ADMIN_LIST_QUERY = PROVIDER_QUERY.extend({
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
+  active: z.enum(["true"]).optional(),
+  players: z.enum(["2", "4"]).optional(),
+  free: z.enum(["true", "false"]).optional(),
+  owner: z.enum(["shared", "own"]).optional(),
 });
+
+/** Lo que la consulta deja de la lista del admin (sin filtros, todo). */
+export function matchesAdminFilters(
+  mode: {
+    readonly isActive: boolean;
+    readonly playersQuantity: number;
+    readonly isFreeRoom: boolean;
+    readonly ownerProviderId: string | null;
+  },
+  query: z.infer<typeof ADMIN_LIST_QUERY>,
+): boolean {
+  if (query.active === "true" && !mode.isActive) return false;
+  if (query.players !== undefined && String(mode.playersQuantity) !== query.players) return false;
+  if (query.free !== undefined && mode.isFreeRoom !== (query.free === "true")) return false;
+  if (query.owner === "shared" && mode.ownerProviderId !== null) return false;
+  if (query.owner === "own" && mode.ownerProviderId === null) return false;
+  return true;
+}
 
 /** `{ data }` entera, o `{ data, total, page, pageSize }` si la consulta pide una página. */
 export function pagedData<T>(

@@ -222,6 +222,14 @@ describe("el ámbito de los admins (integración)", () => {
       pageSize: 1,
     });
     expect((await call("games", "GET", "/game-modes/admin?pageSize=101")).status).toBe(400);
+    // Los filtros van antes de la página: el total es el de lo filtrado.
+    const propios = toda.data.filter(
+      (m) => (m as { ownerProviderId?: string | null }).ownerProviderId != null,
+    );
+    expect(
+      (await call("games", "GET", "/game-modes/admin?owner=own&pageSize=100")).body,
+    ).toMatchObject({ data: propios, total: propios.length });
+    expect((await call("games", "GET", "/game-modes/admin?players=3")).status).toBe(400);
 
     const baja = await call("rival", "DELETE", `/game-modes/${uuid}`);
     expect(baja.status).toBe(409);
