@@ -240,6 +240,7 @@ describe("ciclo de vida de una partida", () => {
     expect(response.status).toBe(200);
     expect(body).not.toContain("seed-secretisimo");
     expect(JSON.parse(body)).toEqual({
+      mode: "CASUAL",
       matchId: "m-c1-c2",
       // EL UUID DEL MODO RESUELTO, y ya no el nombre que el request traía: desde la Tarea 10 el
       // snapshot guarda lo que el catálogo devolvió. Sale del modo sembrado y no de un literal
