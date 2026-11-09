@@ -72,21 +72,13 @@ queda huérfana en las bases que la tenían.
   administran. Lo que queda abierto de este punto es solo el nombre heredado de las colecciones, que
   importa el día que el dominó tenga su propia base y no la del dominó v1.
 
-### Torneos: escritos contra Betaso, todavía sin cablear
+### ~~Torneos: escritos contra Betaso, todavía sin cablear~~
 
-Nada fuera de `src/features/tournament/` lo importa, pero si se cablea tal como está, depende de
-Betaso en cuatro puntos:
-
-- `transports/http-client.ts:21`: llama a `championship/championships` del backend de Betaso con
-  `betasoBackendAuthHeaders`. En `/is-enrolled` reenvía el Bearer del jugador.
-- `watcher.ts:15`: publica `tournament.games-check` al exchange `betaso`. Lo consume
-  `betaso-backend/src/modules/tournaments/rabbitmq/tournament-queue-consumer.ts`.
-- `transports/amqp-participation.ts:7-8`: publica a la cola `tournaments_queue` con el patrón
-  `tournament.save-participation`, del `main.ts` de Betaso-Backend.
-- `src/features/auth/api-key.ts:20`: `betasoBackendAuthHeaders`, los headers que el backend de Betaso
-  exige en sus rutas internas. Se re-exporta desde `features/auth/index.ts`.
-- `transports/http-client.ts` traduce campos de los campeonatos de Betaso: `status`,
-  `gameConfig.modality` (`"1vs1"`/`"2vs2"`) y `scoringConfig.pointsPerLoss`.
+Resuelto (2026-11-09): `src/features/tournament/` se borró. Los torneos son de Tablea Gaming
+(`apps/tournaments` del orquestador), y el dominó solo juega la mesa: `mode: "TOURNAMENT"` en
+`POST /internal/matches`, sin dinero ni catálogo (ver `docs/api-y-mensajes.md`). Ya no hay
+llamadas a `championship/championships` ni mensajes a `tournaments_queue` o al exchange `betaso`.
+`betasoBackendAuthHeaders` sigue en `features/auth/api-key.ts`.
 
 ## 2. Contratos con la forma de Betaso
 
@@ -143,8 +135,6 @@ desde un cliente HTTP.
   (`src/features/match/config-schema.ts:18`): turno de 15 a 300 s y reserva de 10 a 120 s.
 - **Mesa gratis.** No ofrece aumentar, por `isFreeRoom`, igual que en v1.
 - **Mesa de 4.** La mitad del reparto se queda en la casa (`match-contract.ts:213`).
-- **Torneos** (sin cablear). `pointsToWinBySeats` y la escala antifraude están en
-  `features/tournament/config.ts`.
 
 ## 4. Nombres, datos fijos y documentación
 
@@ -162,8 +152,8 @@ figuran aquí.
   - `docs/.vitepress/config.ts`: título «Dominó Betaso».
 - **Monedas en fixtures.** `"VES"` y `"USD"` en los fixtures y smoke tests. El motor trata la moneda
   como texto opaco.
-- **Exchange `betaso` en pruebas.** ~~Aparece en los smoke tests y en los tests de amqp, outbox y
-  torneo.~~ Sólo queda en los tests de torneo (sin cablear).
+- ~~**Exchange `betaso` en pruebas.** Aparece en los smoke tests y en los tests de amqp, outbox y
+  torneo.~~ Ya no queda: los tests de torneo se fueron con `features/tournament/`.
 - **Comentarios.** Unos veinte citan `Betaso-Domino-Backend/src/...` como fuente de verdad.
   `features/match/transports/match-registry.ts:34` supone que el id de usuario es compartido entre
   los productos de Betaso.

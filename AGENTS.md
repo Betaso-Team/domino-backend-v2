@@ -76,9 +76,10 @@ pieza del dominó.
   `docs/api-y-mensajes.md` («Errores») y la pinea `src/tests/error-shape.e2e.test.ts`. ⚠ Rompe al panel
   si se despliega antes de que el panel acepte `{ code, detail? }`. Ver «Incremento completo — errores
   con código».
-- **Pendiente — los torneos esperan al orquestador.** `src/features/tournament` sigue en el repo y
-  compila con sus tests, pero **no está cableado** (ni container, ni rutas, ni `TournamentWatcher`;
-  `GET /me/tournaments/:id/penalty` no existe). Vuelve cuando el orquestador abra mesas de torneo.
+- **Mesas de torneo (`mode: "TOURNAMENT"`).** El torneo es de `apps/tournaments` del orquestador; el
+  dominó solo juega la mesa: sin catálogo, gratis, sin aumentos, bots ni revancha, y arranca sin pedir
+  cobro. `src/features/tournament` (el de Betaso, nunca cableado) se borró. Ver «Incremento completo —
+  la mesa de torneo».
 
 - **El registro de partidas vivas (Redis) renueva por reloj y suelta por hecho.** El latido de 30 s
   re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
@@ -3150,3 +3151,36 @@ cobro de la entrada y de cada aumento pasan por este cliente.
 - Tests: `src/shared/http/client.int.test.ts` con `node:http` real (cuerpo colgado, sin cabeceras, 500
   con cuerpo colgado: rechaza en plazo y el servidor ve el socket cerrado) y el caso colgado en
   `orchestrator-charges.test.ts`. Los cuatro salen rojos con el cliente anterior.
+
+## Incremento completo — la mesa de torneo (rama `feat/torneos-mesa`)
+
+Fase 3 del plan de torneos de Tablea Gaming (spec `docs/superpowers/specs/2026-11-09-torneos-design.md`
+del monorepo del orquestador). Toca el camino del dinero solo para APAGARLO en las mesas de torneo.
+
+- **`CreateMatchRequest` es una unión discriminada por `mode`** (`match-contract.ts`): `CASUAL` igual
+  que antes, y `TOURNAMENT { matchId, tournamentId, participants, seed, teamAssignment, rules:
+  { pointsToWin } }`, estricto, sin `gameModeId`/`rateId`/`betLevels`. `configOf(request, mode?, levels)`
+  despacha: la de torneo sale de `tournamentConfigOf` sin catálogo (`isFreeRoom`, entrada y premio 0,
+  `multiplier` 1, sin bots, sin niveles, `isRematchEnabled: false`); una casual sin modo resuelto es
+  `UNKNOWN_GAME_MODE`. Los plazos salen de la config global, igual que en una casual.
+- **`DominoMatchConfig.mode` es `"TOURNAMENT"` o ausente** (ausente = casual; `modeOf` lo lee). Así el
+  snapshot casual, el registro y los goldens no cambian. `gameModeId` de una de torneo es
+  `tournament:<id>` y `rateId` es `"none"`: los dos son obligatorios en el snapshot, el registro y el
+  resultado. El snapshot (`replayConfigOf`) exige `mode` y `tournamentId` juntos; el registro guarda
+  los dos en `table` y `recordedReplayOf` los devuelve.
+- **La sala no cobra una mesa de torneo**: `startIfSeated` arranca directo; `entryCharge` queda `idle`,
+  así que el registro dice `chargedInUC: 0`. Los aumentos no se ofrecen (`isFreeRoom` →
+  `BETTING_DISABLED`), la revancha no abre ventana y `payoutOf` da montos 0.
+- **`PlayerState.leftBy`** (`noSync()`: no viaja ni entra en `toJSON()`, no corre índices del wire):
+  `voluntary` (el verbo `ABANDON`) o `timeout` (el reloj, en el reparto o en el turno). Lo escribe
+  `MatchPlayer` junto con `hasAbandoned`/`isBot`. El historial ya distinguía `LEFT`/`TIMEOUT` por la
+  fuente del `ABANDON`, pero no lo ve el resultado y no cubre la máquina sentada por el reloj.
+- **`domino.match.finished` suma (aditivo)** `mode`, `tournamentId?`, `startedAt`, `endReason`
+  (`SCORE_DOMINO|SCORE_BLOCKED|ABANDONMENT_VOLUNTARY|ABANDONMENT_TIMEOUT`), `roundsPlayed`,
+  `finalScore {A,B}` y `participants[].abandon`; `domino.match.aborted` suma `mode`/`tournamentId?`.
+- **Registro y rutas del orquestador**: `PublicMatchConfig` (y el mensaje `config`) trae `mode` y
+  `tournamentId?`; `GET /internal/players/:userId/match` y `POST .../seat` también; el censo cuenta las
+  de torneo en `byTournament` y ya no en `byGameMode`.
+- `computeQuality` y las constantes de calidad que vivían en `features/tournament/` siguen en `main`
+  antes de este merge (`git show dc1f513:src/features/tournament/quality.ts`): el orquestador las porta.
+
