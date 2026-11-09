@@ -302,6 +302,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         // próximo latido del reloj. Solo SUELTA (`settle`): si nadie salió no escribe nada, y los
         // plazos los renueva el reloj de abajo.
         () => this.beat(),
+        () => this.disposeWhenEmptyIfDecided(),
       ],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
@@ -386,6 +387,16 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // reloj renueva, aquél suelta en el acto al que dejó de jugar.
     this.heartbeat = this.clock.setInterval(() => this.beat(true), HEARTBEAT_MS);
     this.probing = this.clock.setInterval(() => this.connections.probe(), PROBE_INTERVAL_MS);
+
+    // LA MESA VACÍA NO ES UNA PARTIDA TERMINADA, portado de truco (`102a06b`). Colyseus dispone la
+    // sala un segundo después de que se va el último socket y vencen sus reconexiones; si la ventana
+    // es más corta que lo que tarda el reloj en decidir —la ventana se edita en caliente, y su mínimo
+    // (10 s) es menor que un turno con su reserva (60 + 30 s)—, la sala moría `INTERRUPTED`, con
+    // reembolso, en vez de que el reloj retirara al que tenía el turno, que es un veredicto. Mientras
+    // se juega la sala se sostiene sola, y la decisión vuelve a Colyseus con el veredicto o la
+    // anulación del reparto (`disposeWhenEmptyIfDecided`). Antes de eso la cierran el plazo de
+    // ocupación y el cobro rechazado, como siempre, y el apagado la cierra igual (`disconnect`).
+    this.autoDispose = false;
 
     // EL PLAZO DE OCUPACIÓN: alguien del emparejamiento nunca consumió su reserva. La mesa se cierra
     // sin arrancar —sale abortada `NEVER_STARTED` y no se cobró nada, porque el cobro de la entrada
@@ -617,6 +628,18 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
           message: error instanceof Error ? error.message : String(error),
         }),
       );
+  }
+
+  // DECIDIDA LA PARTIDA —veredicto, o anulada en el reparto—, una sala vacía es una sala terminada:
+  // quien siga en la pantalla final la sostiene y se cierra cuando se va el último. La decisión se le
+  // devuelve a Colyseus una vez, en el primer hecho que la trae; y si ya no queda nadie se cierra acá
+  // mismo, porque nadie más va a dispararla yéndose: los que se cayeron ya lo hicieron.
+  private disposeWhenEmptyIfDecided(): void {
+    if (this.autoDispose || !(this.hasOutcome() || wasAbortedAtDeal(this.state))) return;
+    // Encenderlo arma la espera de un segundo con la que Colyseus mira si la sala quedó vacía: si el
+    // último se va en ese segundo, la sala se cierra un segundo tarde. No cambia nada de la partida.
+    this.autoDispose = true;
+    if (this.clients.length === 0) void this.disconnect().catch(() => undefined);
   }
 
   // LOS userId QUE ESTA MESA TODAVÍA RETIENE, para que el registro suelte al resto. Portado de
