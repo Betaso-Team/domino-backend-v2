@@ -150,7 +150,7 @@ const schema = z.object({
     .min(1, "BILLING_AUTH_PUBLIC_KEY: obligatoria, es la clave pública de billing-auth")
     .transform((pem) => pem.replace(/\\n/g, "\n")),
   /** Quién firma los tokens que se aceptan: billing-auth. */
-  JWT_ISSUER: z.string().min(1).default("betaso-games-auth"),
+  JWT_ISSUER: z.string().min(1).default("tablea-gaming-auth"),
   JWT_AUDIENCE: z.string().min(1).default("domino"),
   /**
    * DE ENTRADA: lo que presenta NUESTRA administración (panel o soporte; no la de un cliente) para
@@ -188,15 +188,15 @@ const schema = z.object({
     .min(16, "ORCHESTRATOR_CALLBACK_API_KEY debe tener al menos 16 caracteres")
     .optional(),
   /**
-   * EL BROKER Y VHOST DE LA PLATAFORMA DE JUEGOS (`amqp://usuario:clave@host:puerto/betaso_games`),
-   * por donde sale el resultado de cada mesa del orquestador hacia el exchange `betaso_games`. Es el
+   * EL BROKER Y VHOST DE LA PLATAFORMA DE JUEGOS (`amqp://usuario:clave@host:puerto/tablea_gaming`),
+   * por donde sale el resultado de cada mesa del orquestador hacia el exchange `tablea_gaming`. Es el
    * ÚNICO broker del dominó: el catálogo ya no publica al exchange `betaso` de Betaso (la vieja
    * `RABBITMQ_URL` no se lee más).
    *
    * Su presencia elige, como `MONGO_URI`: sin ella el outbox de resultados acumula y nadie lo
    * publica. Obligatoria en producción si esta instancia atiende al orquestador.
    */
-  BETASO_GAMES_RABBITMQ_URL: z.string().min(1).optional(),
+  TABLEA_GAMING_RABBITMQ_URL: z.string().min(1).optional(),
   /**
    * La URI de Mongo, donde queda escrito el historial de cada partida
    * (`mongodb://host:puerto/nombre` — la base viaja en la URI, como en truco y como en v1,
@@ -381,7 +381,7 @@ export interface Env {
    */
   readonly orchestratorCallback: { readonly url: string; readonly apiKey: string } | undefined;
   /** `undefined` ⇒ el resultado de las mesas del orquestador se acumula sin publicar. */
-  readonly betasoGamesRabbitmqUrl: string | undefined;
+  readonly tableaGamingRabbitmqUrl: string | undefined;
   /** `undefined` ⇒ el historial es el de memoria y muere con el proceso. Ver MONGO_URI. */
   readonly mongoUri: string | undefined;
   /** `undefined` ⇒ este proceso es un clúster de uno: driver, presence y registro locales. */
@@ -454,7 +454,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         ["ORCHESTRATOR_CALLBACK_API_KEY", parsed.ORCHESTRATOR_CALLBACK_API_KEY],
         // En producción, además, el broker de los resultados: sin él nadie le paga a nadie.
         ...(parsed.NODE_ENV === "production"
-          ? ([["BETASO_GAMES_RABBITMQ_URL", parsed.BETASO_GAMES_RABBITMQ_URL]] as const)
+          ? ([["TABLEA_GAMING_RABBITMQ_URL", parsed.TABLEA_GAMING_RABBITMQ_URL]] as const)
           : []),
       ] as const
     )
@@ -503,7 +503,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
             apiKey: parsed.ORCHESTRATOR_CALLBACK_API_KEY,
           }
         : undefined,
-    betasoGamesRabbitmqUrl: parsed.BETASO_GAMES_RABBITMQ_URL,
+    tableaGamingRabbitmqUrl: parsed.TABLEA_GAMING_RABBITMQ_URL,
     mongoUri: parsed.MONGO_URI,
     redisUrl: parsed.REDIS_URL,
     // TRES CASOS (ver SERVER_ADDRESS). El puerto va COMO PATH y no como `host:puerto` —es el

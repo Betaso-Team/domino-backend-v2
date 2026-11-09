@@ -4,8 +4,8 @@ Dominó v2 es un port de la arquitectura de truco, no una copia del juego. Conse
 del motor y la forma de operar un clúster Colyseus, pero las reglas, los comandos y la economía son
 los del dominó v1.
 
-Es un **game backend**: juega las mesas que le abre el orquestador de Betaso Juegos
-(`betaso-games-orchestrator`, `apps/domino-orchestrator`). El orquestador es la única puerta de
+Es un **game backend**: juega las mesas que le abre el orquestador de Tablea Gaming
+(`tablea-gaming-orchestrator`, `apps/domino-orchestrator`). El orquestador es la única puerta de
 entrada —admite, empareja, tiene el único interruptor de mantenimiento y decide qué se cobra— y el
 dominó no mueve dinero: le pide al orquestador que cobre la entrada y cada aumento, y le publica el
 resultado de cada partida.
@@ -32,7 +32,7 @@ flowchart LR
 
   Redis[("Redis\ndriver, presence, registro")]
   Mongo[("MongoDB\nhistorial, catálogo, fuentes, outbox de resultados")]
-  Games[("RabbitMQ betaso_games\nresultados de partida")]
+  Games[("RabbitMQ tablea_gaming\nresultados de partida")]
 
   Client --> Proxy
   Panel --> Proxy
@@ -113,7 +113,7 @@ sequenceDiagram
 
   Engine-->>Room: MATCH_RESOLVED o MATCH_ABORTED
   Room->>History: grabar desenlace
-  Room->>Orch: resultado por outbox (betaso_games)
+  Room->>Orch: resultado por outbox (tablea_gaming)
   Room->>Registry: retirar sala y asientos
 ```
 
@@ -201,10 +201,10 @@ son fases distintas: cada una espera una clase diferente de input o timeout.
 | `MatchRegistry` | Redis, TTL y censo compartido | `MemoryKeyValueStore`; válido para una sola instancia |
 | Historial (un registro v2.1 por partida) | MongoDB, persiste reinicios | `MemoryHistory`, el mismo documento, limitado a 200 partidas y al proceso |
 | Catálogo y fuentes por proveedor | MongoDB (`game_modes_domino`, `provider_catalogs`) | Repositorios de memoria |
-| Resultado de partida | RabbitMQ `betaso_games` con confirmaciones | El outbox de resultados acumula; sin Mongo, muere con el proceso |
+| Resultado de partida | RabbitMQ `tablea_gaming` con confirmaciones | El outbox de resultados acumula; sin Mongo, muere con el proceso |
 | Cobros de entrada y aumento | Orquestador por HTTP | La mesa no arranca, o el aumento se anula |
 
-La presencia de `MONGO_URI`, `REDIS_URL` y `BETASO_GAMES_RABBITMQ_URL` elige cada
+La presencia de `MONGO_URI`, `REDIS_URL` y `TABLEA_GAMING_RABBITMQ_URL` elige cada
 capacidad. No hay variables que nombren drivers.
 
 ## Dinero: qué hace y qué no hace
@@ -216,7 +216,7 @@ Un juego nunca mueve dinero: el dominó no tiene billetera, ni ledger, ni creden
 - El aumento de apuesta se negocia en el motor y se le pide cobrar al orquestador; si no cobra, el
   aumento se anula (`MULTIPLIER_REVOKED`).
 - `payoutOf` proyecta el premio, y el resultado viaja al orquestador por el outbox de
-  `betaso_games`. Quien paga es el orquestador, a través de billing-auth.
+  `tablea_gaming`. Quien paga es el orquestador, a través de billing-auth.
 - La ventana de revancha se abre con la compuerta cerrada (`eligible: false`): una revancha
   necesitaría que el orquestador vuelva a cobrar, y eso no existe todavía.
 - Los torneos no se juegan: `src/features/tournament` está en el repo pero sin cablear, hasta que

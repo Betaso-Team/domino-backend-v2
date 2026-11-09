@@ -61,7 +61,7 @@ describe("el ámbito de los admins (integración)", () => {
     await server.shutdown();
   });
 
-  // LAS RUTAS DE BETASO GAMES: un proveedor no entra a ninguna, ni a leer. `support` lee y no escribe.
+  // LAS RUTAS DE TABLEA GAMING: un proveedor no entra a ninguna, ni a leer. `support` lee y no escribe.
   // Los 404 de una lectura son de la ruta (no hay tal partida), o sea que la puerta ya dejó pasar.
   const reads: Array<[string, string]> = [
     ["GET", "/internal/matches"],
@@ -72,7 +72,7 @@ describe("el ámbito de los admins (integración)", () => {
     ["GET", "/internal/settings/match"],
   ];
 
-  it.each(reads)("%s %s: Betaso Games y support entran, un proveedor no", async (method, path) => {
+  it.each(reads)("%s %s: Tablea Gaming y support entran, un proveedor no", async (method, path) => {
     for (const who of ["games", "support", "key"] as const) {
       expect([200, 404]).toContain((await call(who, method, path)).status);
     }
@@ -86,7 +86,7 @@ describe("el ámbito de los admins (integración)", () => {
     }
   });
 
-  it("escribir la configuración es sólo de un admin de Betaso Games", async () => {
+  it("escribir la configuración es sólo de un admin de Tablea Gaming", async () => {
     for (const who of ["support", "parley", "parleySupport"] as const) {
       expect((await call(who, "DELETE", "/internal/settings/match")).status).toBe(403);
       expect((await call(who, "PATCH", "/internal/settings/match", {})).status).toBe(403);
@@ -105,7 +105,7 @@ describe("el ámbito de los admins (integración)", () => {
 
   // EL CATÁLOGO, CON EL PROVEEDOR DENTRO DE SU ÁMBITO: crea su modo propio, que no sale al público y
   // que el orquestador ve con su dueño; el otro proveedor ni lo ve.
-  it("un proveedor crea un modo propio que sólo ven él, Betaso Games y el orquestador", async () => {
+  it("un proveedor crea un modo propio que sólo ven él, Tablea Gaming y el orquestador", async () => {
     const created = await call("parley", "POST", "/game-modes", {
       name: "Clásica de Parley",
       prize: 18,
@@ -162,7 +162,7 @@ describe("el ámbito de los admins (integración)", () => {
     expect(
       await call("parley", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`),
     ).toEqual({ status: 404, body: { code: "UNKNOWN_PROVIDER" } });
-    // Betaso Games nombra al proveedor; sin `?providerId=` es 400.
+    // Tablea Gaming nombra al proveedor; sin `?providerId=` es 400.
     expect(await call("games", "PUT", `/game-modes/${uuid}/subscription`)).toMatchObject({
       status: 400,
       body: { code: "PROVIDER_REQUIRED" },
@@ -212,7 +212,7 @@ describe("el ámbito de los admins (integración)", () => {
       409,
     );
 
-    // Betaso Games la vuelve a `shared` por el proveedor; sin `?providerId=` es 400.
+    // Tablea Gaming la vuelve a `shared` por el proveedor; sin `?providerId=` es 400.
     expect((await call("games", "PUT", "/game-modes/source", { source: "shared" })).status).toBe(
       400,
     );
@@ -226,7 +226,7 @@ describe("el ámbito de los admins (integración)", () => {
     expect((await call("rival", "DELETE", `/game-modes/${uuid}`)).status).toBe(200);
   });
 
-  it("la copia de los compartidos: el proveedor del token, o el que nombre Betaso Games", async () => {
+  it("la copia de los compartidos: el proveedor del token, o el que nombre Tablea Gaming", async () => {
     expect((await call("parley", "POST", "/game-modes/copies")).status).toBe(200);
     expect(await call("parley", "POST", "/game-modes/copies?providerId=rival")).toEqual({
       status: 404,

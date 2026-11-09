@@ -16,7 +16,7 @@ import { type ConfirmChannel, type RecoveringChannelModel, connect } from "amqpl
 //                     Es el camino del RANKING (`rankings_queue`).
 //   publishTopic    → a un EXCHANGE topic, con el payload CRUDO, porque ese consumidor no es un
 //                     `@EventPattern` y el envoltorio lo dejaría sin entender el mensaje. Es el
-//                     camino del RESULTADO de cada mesa (exchange `betaso_games`).
+//                     camino del RESULTADO de cada mesa (exchange `tablea_gaming`).
 //
 // Mezclarlas produce un mensaje que nadie consume, EN SILENCIO. Los dos contratos son de v1
 // (`Betaso-Domino-Backend/src/storage/rabbitmq/publisher.ts`) y se conservan enteros.

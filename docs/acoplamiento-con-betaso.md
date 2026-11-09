@@ -8,7 +8,7 @@ solución de cada punto todavía no está decidida.
 Inventario del 2026-10-13. Las rutas son relativas a la raíz del repo; los números de línea son
 orientativos.
 
-**Cómo se lee un nombre.** «Betaso Games» (`betaso_games`, `BETASO_GAMES_*`) es la marca del sistema
+**Cómo se lee un nombre.** «Tablea Gaming» (`tablea_gaming`, `TABLEA_GAMING_*`) es la marca del sistema
 de tercerización, y llevarla no es acoplamiento. «Betaso» a secas es el cliente Betaso. Un nombre del
 sistema que dice solo «Betaso» se lee como el cliente, y por eso figura en esta lista.
 
@@ -59,7 +59,7 @@ queda huérfana en las bases que la tenían.
   `ADMIN_API_KEY`.~~ Resuelto: `RABBITMQ_URL` ya no se lee; en producción se exigen `MONGO_URI` y
   `ADMIN_API_KEY`. Una `RABBITMQ_URL` que quede en un `.env` se ignora (quitarla al desplegar).
 - ~~`/ready` incluye el chequeo `rabbit`.~~ Resuelto: `/ready` sólo consulta el broker de juegos
-  (`betaso_games`).
+  (`tablea_gaming`).
 
 ### Las colecciones de Mongo son las de v1
 
@@ -123,7 +123,7 @@ Betaso:
 ### El panel de admin
 
 El admin inicia sesión en billing-auth, que le emite un token ES256 con audiencia
-`betaso-games-admin`. Las rutas de admin del dominó lo aceptan como `Bearer`, verificado con la misma
+`tablea-gaming-admin`. Las rutas de admin del dominó lo aceptan como `Bearer`, verificado con la misma
 clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a Betaso quién es un
 administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
 
@@ -131,7 +131,7 @@ Desde el 2026-10-27 el token dice además de qué proveedor es el admin (`prv`) 
 el dominó acota cada ruta (`docs/api-y-mensajes.md`, «HTTP interno»). Betaso es un proveedor más: un
 admin de Betaso entra al catálogo con su ámbito y a nada más.
 
-**Decidido el 2026-10-14:** no se porta. El panel será uno propio de Betaso Games, con login del
+**Decidido el 2026-10-14:** no se porta. El panel será uno propio de Tablea Gaming, con login del
 sistema, y no es del MVP. Mientras tanto el catálogo y los ajustes se administran con `ADMIN_API_KEY`
 desde un cliente HTTP.
 
@@ -150,7 +150,7 @@ desde un cliente HTTP.
 
 Ninguno de estos puntos cambia el comportamiento, pero todos usan el nombre del cliente donde va la
 marca del sistema, o atan el servicio a Betaso de otra forma. Los nombres del broker de resultados
-(`BETASO_GAMES_RABBITMQ_URL`, `betasoGamesAmqp` y el exchange `betaso_games`) llevan la marca y no
+(`TABLEA_GAMING_RABBITMQ_URL`, `tableaGamingAmqp` y el exchange `tablea_gaming`) llevan la marca y no
 figuran aquí.
 
 - **Paquete.** `package.json`: `"@betaso/domino-backend"`, «Backend del Dominó Betaso».

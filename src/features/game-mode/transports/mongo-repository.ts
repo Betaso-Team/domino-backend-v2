@@ -336,7 +336,7 @@ function definedOf(input: UpdateGameMode): Partial<GameModeDocument> {
 //
 // SÓLO LOS DOCUMENTOS SIN EL CAMPO, y en eso descansa que sea IDEMPOTENTE: la primera corrida escribe
 // la lista, y la segunda no encuentra nada que tocar —aunque entre medio un proveedor se haya dado de
-// baja de un modo, o Betaso Games haya creado uno nuevo, que nace con `[]` escrito—. Sin `__v` ni
+// baja de un modo, o Tablea Gaming haya creado uno nuevo, que nace con `[]` escrito—. Sin `__v` ni
 // `updatedAt`, como toda escritura de suscriptores. Devuelve cuántos modos tocó.
 export async function subscribeExistingModes(
   source: CollectionSource,

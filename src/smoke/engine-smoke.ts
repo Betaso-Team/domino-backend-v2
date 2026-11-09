@@ -50,8 +50,8 @@ interface GameModeDTO {
   readonly isFreeRoom: boolean;
   readonly enableBots: boolean;
   readonly betLevels: GameMode["betLevels"];
-  // Las dos que el POST administrativo agrega al DTO de v1: el smoke crea con la llave, que es Betaso
-  // Games, así que vienen las dos.
+  // Las dos que el POST administrativo agrega al DTO de v1: el smoke crea con la llave, que es Tablea
+  // Gaming, así que vienen las dos.
   readonly ownerProviderId: string | null;
   readonly subscribers?: readonly string[] | null;
   readonly createdAt: string;

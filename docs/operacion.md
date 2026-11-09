@@ -8,8 +8,8 @@ npm install
 npm run dev
 ```
 
-`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Betaso Juegos, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/players/:userId/match` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `betaso-games-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y el
-broker de juegos (`BETASO_GAMES_RABBITMQ_URL`) son capacidades opcionales elegidas por la presencia de sus URLs; `RABBITMQ_URL` (el viejo broker de Betaso) ya no se lee.
+`BILLING_AUTH_PUBLIC_KEY` es obligatoria. `ADMIN_API_KEY` (la de nuestra administración, panel o soporte) habilita las rutas internas del catálogo, del historial y de la configuración en caliente. `ORCHESTRATOR_API_KEY` (la que presenta el orquestador de Tablea Gaming, mínimo 16 caracteres) habilita `POST /internal/matches`, `POST /internal/players/:userId/seat`, `GET /internal/players/:userId/match` y `GET /internal/census`, que son la única puerta de entrada a una partida, y `GET /internal/game-modes`, el catálogo con dueños y suscriptores; sin ella esas rutas responden 404 y nadie juega, y si está el arranque exige `ORCHESTRATOR_URL`, `ORCHESTRATOR_CALLBACK_API_KEY` y que no repita `ADMIN_API_KEY`. `BILLING_AUTH_PUBLIC_KEY` es la clave PÚBLICA EC P-256 (PEM en una línea con `\n` literales) con la que se verifican los ES256 de billing-auth, el único emisor de tokens; se valida al arrancar y una clave privada se rechaza. Esos tokens deben traer el emisor de `JWT_ISSUER` (default `tablea-gaming-auth`), la audiencia `JWT_AUDIENCE` (default `domino`) y el claim `game` igual a `\"domino\"`; un HS256 se rechaza. Mongo, Redis y el
+broker de juegos (`TABLEA_GAMING_RABBITMQ_URL`) son capacidades opcionales elegidas por la presencia de sus URLs; `RABBITMQ_URL` (el viejo broker de Betaso) ya no se lee.
 
 El mantenimiento no se opera acá: el único interruptor es el del orquestador, que deja de abrir mesas.
 Las partidas ya abiertas terminan.
@@ -56,7 +56,7 @@ npm run modes:subscribe-existing -- betaso
 Se lee en `GET /game-modes/admin` (`source`) y se cambia con `PUT /game-modes/source`.
 
 **El proveedor sale del token.** Las rutas del catálogo que actúan sobre un proveedor (suscripción,
-copias, fuente) no lo llevan en el path: un admin de proveedor actúa sobre el suyo, y Betaso Games —el
+copias, fuente) no lo llevan en el path: un admin de proveedor actúa sobre el suyo, y Tablea Gaming —el
 panel con un admin sin proveedor, o un script con `ADMIN_API_KEY`— lo nombra con `?providerId=`. Sin
 él, `400 PROVIDER_REQUIRED`. Por ejemplo, suscribir a Betaso a un compartido desde un script:
 
@@ -255,7 +255,7 @@ Minimizar la app en el celular hoy sale como `NETWORK`. Cada hecho sale además 
 ## Resultados de partida
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
-`betaso_games` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
+`tablea_gaming` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
 (índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite y en orden
 (el más viejo primero; nada se adelanta).
 
@@ -390,7 +390,7 @@ niegan a arrancar mientras el otro medio esté sirviendo, porque usan el mismo p
    - `REDIS_URL`, con un índice propio;
    - para las mesas del orquestador, `ORCHESTRATOR_URL` (la base del orquestador),
      `ORCHESTRATOR_CALLBACK_API_KEY` (= `DOMINO_CALLBACK_API_KEY` del orquestador) y
-     `BETASO_GAMES_RABBITMQ_URL` (el vhost `betaso_games`, donde salen los resultados).
+     `TABLEA_GAMING_RABBITMQ_URL` (el vhost `tablea_gaming`, donde salen los resultados).
 2. Crear el vhost del dominio hacia `127.0.0.1:PORT`, con el `RewriteRule … ws://` del upgrade de
    WebSocket.
 3. Cargar en GitHub las variables y los secretos de arriba, y sumar el entorno a `DEPLOY_ENVIRONMENTS`.

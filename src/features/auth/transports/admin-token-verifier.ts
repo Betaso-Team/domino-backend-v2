@@ -5,13 +5,13 @@ import { type BillingAuthTrust, parseBillingKey } from "./jwt-verifier";
 
 // La audiencia de los tokens de admin de billing-auth: nunca la de un jugador, así que un token de
 // jugador (la misma clave y el mismo emisor) no abre una ruta de administración.
-const ADMIN_AUDIENCE = "betaso-games-admin";
+const ADMIN_AUDIENCE = "tablea-gaming-admin";
 
 const ROLES: readonly AdminRole[] = ["admin", "support"];
 
 // LAS DOS CLAIMS DEL ÁMBITO, EXIGIDAS. billing-auth firma en todo token de admin `prv` (el proveedor
-// del admin, `null` = Betaso Games) y `role` (`admin` | `support`). Un token sin alguna de las dos es
-// de antes de los proveedores o de otro contrato, y no se tolera: leer la ausencia como «Betaso Games,
+// del admin, `null` = Tablea Gaming) y `role` (`admin` | `support`). Un token sin alguna de las dos es
+// de antes de los proveedores o de otro contrato, y no se tolera: leer la ausencia como «Tablea Gaming,
 // admin» sería darle el máximo justo al que no dice quién es. `prv` tiene que estar PRESENTE —texto
 // no vacío o `null` explícito—; ausente es `undefined` y el token se rechaza.
 function providerOf(payload: jwt.JwtPayload): string | null | undefined {

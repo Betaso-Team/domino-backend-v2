@@ -15,7 +15,7 @@
 # volver es apuntar a la etiqueta anterior. Se conservan las de la que corre y la anterior.
 #
 # Mongo, Redis y RabbitMQ NO los levanta este compose en el servidor: son del VPS (`MONGO_URI`,
-# `REDIS_URL` y `BETASO_GAMES_RABBITMQ_URL` del `shared/.env`, con `host.docker.internal` en vez de
+# `REDIS_URL` y `TABLEA_GAMING_RABBITMQ_URL` del `shared/.env`, con `host.docker.internal` en vez de
 # `127.0.0.1`).
 #
 # UNA SOLA INSTANCIA. Varias exigen que el proxy rutee cada partida a SU proceso (el prefijo de path

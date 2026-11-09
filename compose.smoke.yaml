@@ -47,7 +47,7 @@ services:
         -----END PUBLIC KEY-----
       # El resultado sale al vhost por defecto del broker del smoke, donde nadie lo consume: con
       # `mandatory`, el outbox lo reintenta sin perderlo y sin molestar a la partida.
-      BETASO_GAMES_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      TABLEA_GAMING_RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       TURN_TIMEOUT_MS: 5000
       EXTRA_TIME_RESERVE_MS: 1000
       DEALING_TIMEOUT_MS: 5000

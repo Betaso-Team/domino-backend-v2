@@ -52,8 +52,8 @@ export function settingsRoutes(deps: SettingsRoutesDeps): Router {
     });
     return router;
   }
-  // Leerla: la llave o un admin de Betaso Games, `support` incluido. Cambiarla: sólo un `admin` de
-  // Betaso Games. Ningún admin de PROVEEDOR: los plazos son de todas las mesas de todos los proveedores.
+  // Leerla: la llave o un admin de Tablea Gaming, `support` incluido. Cambiarla: sólo un `admin` de
+  // Tablea Gaming. Ningún admin de PROVEEDOR: los plazos son de todas las mesas de todos los proveedores.
   const admin = requireAdminKey(adminApiKey, adminTokens);
   const reader = requireAdminKey(adminApiKey, adminTokens, { read: true });
 

@@ -135,7 +135,7 @@ export function recordRoutes({
   // Primero QUIÉN SOS y después QUÉ MANDASTE: al revés, un anónimo distinguiría una forma inválida de
   // una válida en rutas que no tiene derecho a tocar.
   //
-  // LAS TRES SON LECTURAS DE BETASO GAMES (`support` incluido) y ningún admin de PROVEEDOR las abre: el
+  // LAS TRES SON LECTURAS DE TABLEA GAMING (`support` incluido) y ningún admin de PROVEEDOR las abre: el
   // registro no guarda de qué proveedor es cada asiento, así que no hay ámbito con el que acotarlo, y
   // abrirlas le mostraría a un proveedor las partidas —y los `userId`— de todos los demás.
   const admin = requireAdminKey(adminApiKey, adminTokens, { read: true });
