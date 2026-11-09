@@ -146,6 +146,10 @@ export class MemoryHistory
     return Promise.resolve(entriesOf(this.byMatch.get(matchId)));
   }
 
+  hasRecord(matchId: string): Promise<boolean> {
+    return Promise.resolve(this.byMatch.has(matchId));
+  }
+
   recordOf(matchId: string): Promise<StoredMatchRecord | undefined> {
     const document = this.byMatch.get(matchId);
     return Promise.resolve(document ? largeLast(document) : undefined);

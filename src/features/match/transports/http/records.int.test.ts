@@ -31,6 +31,7 @@ const untouched: MatchArchive = {
   recordOf: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
   snapshotOf: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
   list: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
+  hasRecord: () => Promise.reject(new Error("el registro de la ruta no debe leer el archivo")),
 };
 
 interface ListBody {
@@ -84,6 +85,8 @@ describe("recordRoutes: el registro de las rutas", () => {
       "POST /internal/matches",
       "POST /internal/players/:userId/seat",
       "GET /internal/players/:userId/match",
+      // Dos segmentos tras `matches`: ni el detalle (uno) ni el historial (otro literal) la tapan.
+      "GET /internal/matches/:matchId/existence",
       "GET /internal/census",
     ]);
   });
