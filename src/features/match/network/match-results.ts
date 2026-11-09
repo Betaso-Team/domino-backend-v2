@@ -1,5 +1,5 @@
 import type { Logger } from "@/shared/logger";
-import type { DominoMatchConfig } from "../core/config";
+import { type DominoMatchConfig, type MatchMode, modeOf } from "../core/config";
 import type { MatchState } from "../core/state";
 import type { AbortReason, NetworkMatchEvent } from "./events";
 import type { MatchEventSink } from "./listeners";
@@ -24,14 +24,42 @@ export type MatchResultKey = typeof MATCH_FINISHED_KEY | typeof MATCH_ABORTED_KE
 // tiene: el orquestador no pudo cobrar la entrada y la mesa no arrancó.
 export type MatchAbortReason = AbortReason | "CHARGE_REJECTED";
 
+/**
+ * CÓMO TERMINÓ, más fino que `reason`: por puntos con la última mano dominada o trancada, o por
+ * abandono del equipo perdedor, rendido (`ABANDON` dicho por él) o retirado por el reloj. Si en el
+ * equipo perdedor alguien se rindió, es `ABANDONMENT_VOLUNTARY` aunque otro se haya ido por tiempo.
+ */
+export type MatchFinishDetail =
+  | "SCORE_DOMINO"
+  | "SCORE_BLOCKED"
+  | "ABANDONMENT_VOLUNTARY"
+  | "ABANDONMENT_TIMEOUT";
+
+/** Cómo dejó la mesa un participante; `null` si la terminó sentado. */
+export type ParticipantAbandon = "voluntary" | "timeout" | null;
+
+// LOS CAMPOS DE ABAJO MARCADOS «aditivo» llegaron con los torneos (2026-11). Los consumidores parsean
+// sin `strict`, así que un consumidor viejo los ignora; los de antes no cambian.
 export interface MatchFinishedPayload {
   readonly gameSlug: "domino";
+  /** aditivo: `CASUAL` (del catálogo, con dinero) o `TOURNAMENT` (gratis, de un torneo). */
+  readonly mode: MatchMode;
+  /** aditivo: solo en una mesa de torneo. */
+  readonly tournamentId?: string;
   readonly matchId: string;
   readonly roomId: string;
   readonly gameModeId: string;
   readonly rateId: string;
+  /** aditivo: cuándo arrancó el juego (el primer reparto); `null` si nunca arrancó. */
+  readonly startedAt: string | null;
   readonly endedAt: string;
   readonly reason: "SCORE" | "ABANDONMENT";
+  /** aditivo */
+  readonly endReason: MatchFinishDetail;
+  /** aditivo: manos cerradas (`pastRounds`); la que se cortó por un abandono no cuenta. */
+  readonly roundsPlayed: number;
+  /** aditivo: el marcador final por equipo. */
+  readonly finalScore: { readonly A: number; readonly B: number };
   readonly stakes: {
     readonly entryFee: number;
     readonly prize: number;
@@ -43,12 +71,18 @@ export interface MatchFinishedPayload {
     readonly userId: string;
     readonly teamId: string;
     readonly result: "won" | "lost" | "abandoned";
+    /** aditivo */
+    readonly abandon: ParticipantAbandon;
   }[];
   readonly payouts: readonly { readonly userId: string; readonly amountUc: number }[];
 }
 
 export interface MatchAbortedPayload {
   readonly gameSlug: "domino";
+  /** aditivo */
+  readonly mode: MatchMode;
+  /** aditivo: solo en una mesa de torneo. */
+  readonly tournamentId?: string;
   readonly matchId: string;
   readonly roomId: string;
   readonly gameModeId: string;
@@ -79,8 +113,13 @@ export function matchResultOf(
   at: Date,
   abortReason?: MatchAbortReason,
 ): MatchResult | undefined {
+  const mode = modeOf(config);
   const base = {
     gameSlug: "domino",
+    mode,
+    ...(mode === "TOURNAMENT" && config.tournamentId !== undefined
+      ? { tournamentId: config.tournamentId }
+      : {}),
     matchId: config.matchId,
     roomId,
     gameModeId: config.gameModeId,
@@ -108,8 +147,12 @@ export function matchResultOf(
     payload: {
       ...base,
       rateId: config.rateId,
+      startedAt: match.startedAt > 0 ? new Date(match.startedAt).toISOString() : null,
       endedAt: at.toISOString(),
       reason: event.reason,
+      endReason: endReasonOf(event, match),
+      roundsPlayed: match.pastRounds.length,
+      finalScore: { A: match.scoreboard?.teamA ?? 0, B: match.scoreboard?.teamB ?? 0 },
       stakes: {
         entryFee: config.entryFee,
         prize: config.prize,
@@ -131,6 +174,7 @@ export function matchResultOf(
             : player.teamId === event.winnerTeamId
               ? "won"
               : "lost",
+        abandon: abandonOf(player),
       })),
       payouts: (reward?.entries ?? []).map(({ userId, amount }) => ({
         userId,
@@ -138,6 +182,27 @@ export function matchResultOf(
       })),
     },
   };
+}
+
+/** Cómo se fue un asiento, si se fue: rendido, retirado por el reloj, o (`null`) terminó sentado. */
+function abandonOf(player: { hasAbandoned: boolean; isBot: boolean; leftBy: string }) {
+  if (!player.hasAbandoned && !player.isBot) return null;
+  // Un asiento retirado siempre tiene `leftBy` (lo escribe `MatchPlayer`); si faltara, el reloj es lo
+  // único que retira sin que nadie lo pida.
+  return player.leftBy === "voluntary" ? "voluntary" : "timeout";
+}
+
+function endReasonOf(
+  event: Extract<NetworkMatchEvent, { type: "MATCH_RESOLVED" }>,
+  match: MatchState,
+): MatchFinishDetail {
+  if (event.reason === "SCORE") {
+    return match.pastRounds.at(-1)?.reason === "BLOCKED" ? "SCORE_BLOCKED" : "SCORE_DOMINO";
+  }
+  const losers = match.players.filter((player) => player.teamId !== event.winnerTeamId);
+  return losers.some((player) => abandonOf(player) === "voluntary")
+    ? "ABANDONMENT_VOLUNTARY"
+    : "ABANDONMENT_TIMEOUT";
 }
 
 // LO QUE LA PIEZA NECESITA DEL OUTBOX: encolar y despertar al despachador. Encolar es idempotente por
