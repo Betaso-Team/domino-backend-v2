@@ -18,7 +18,7 @@ import {
 // contrato de Betaso y el secreto es de cada dirección.
 //
 // La llave no dice QUIÉN habla, dice que el que habla es un servidor autorizado: vale como un admin de
-// Betaso Games (`API_KEY_ADMIN`) y las rutas que protege no pueden auditar a una persona.
+// Tablea Gaming (`API_KEY_ADMIN`) y las rutas que protege no pueden auditar a una persona.
 
 function fakeRes() {
   const sent: { status?: number; body?: unknown } = {};
@@ -130,7 +130,7 @@ const knockWithBearer = async (handler: RequestHandler, token: string) => {
 };
 
 describe("la puerta con un token de admin", () => {
-  it("deja pasar a un admin de Betaso Games, y deja su principal en locals", async () => {
+  it("deja pasar a un admin de Tablea Gaming, y deja su principal en locals", async () => {
     const { next, locals } = await knockWithBearer(
       requireAdminKey("la-llave", adminTokens),
       "token-de-ana",
@@ -139,7 +139,7 @@ describe("la puerta con un token de admin", () => {
     expect(locals.admin).toEqual(ANA);
   });
 
-  it("la llave deja el principal de Betaso Games con rol admin", () => {
+  it("la llave deja el principal de Tablea Gaming con rol admin", () => {
     const { res } = fakeRes();
     const next = vi.fn();
     requireAdminKey("la-llave")(reqWith("la-llave"), res, next);
@@ -159,7 +159,7 @@ describe("la puerta con un token de admin", () => {
 
 // ⚠ EL DEFAULT ES EL CERRADO, y es lo que impide que un admin de PROVEEDOR entre como admin total el
 // día que billing-auth empiece a emitir sus tokens: una ruta que no declara nada es de escritura y
-// de Betaso Games. La matriz entera, una fila por credencial y una columna por lo que la ruta abre.
+// de Tablea Gaming. La matriz entera, una fila por credencial y una columna por lo que la ruta abre.
 describe("lo que abre cada puerta", () => {
   const cases: Array<[string, AdminAccess, string, boolean]> = [
     ["el default", {}, "token-de-ana", true],

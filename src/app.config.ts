@@ -30,7 +30,6 @@ import {
 } from "colyseus";
 import express, { type Application } from "express";
 import {
-  betasoGamesAmqp,
   driver,
   mongo,
   presence,
@@ -38,6 +37,7 @@ import {
   settingsSections,
   settingsSignal,
   settingsWriter,
+  tableaGamingAmqp,
 } from "./di-container";
 import { env, isDevEnvironment } from "./env";
 import type { Logger } from "./logger";
@@ -135,11 +135,11 @@ const mongoConnection = mongo;
 const sharedStore = presence;
 // EL BROKER DE LA PLATAFORMA DE JUEGOS, con su nombre propio en el mapa: de él depende que el
 // resultado —el premio— llegue al orquestador.
-const gamesBroker = betasoGamesAmqp;
+const gamesBroker = tableaGamingAmqp;
 const hardDependencies: DependencyChecks = {
   ...(mongoConnection ? { mongo: () => mongoConnection.ping() } : {}),
   ...(sharedStore ? { redis: () => sharedStore.get("readiness") } : {}),
-  ...(gamesBroker ? { betaso_games: () => gamesBroker.ping() } : {}),
+  ...(gamesBroker ? { tablea_gaming: () => gamesBroker.ping() } : {}),
 };
 
 // LAS DOS HERRAMIENTAS DE COLYSEUS PARA PROBAR A MANO, sólo donde se prueba a mano: el playground y

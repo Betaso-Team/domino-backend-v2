@@ -45,7 +45,7 @@ export interface GameMode {
   // LOS AUMENTOS QUE OFRECE, ordenados por nivel. **Vacío = no ofrece aumentar**, y es el reposo:
   // un modo que nadie configuró (o un Novato) no cobra de más.
   readonly betLevels: readonly GameModeBetLevel[];
-  // EL DUEÑO DEL MODO. `null` es un modo COMPARTIDO, de Betaso Games, que se ofrece a los proveedores
+  // EL DUEÑO DEL MODO. `null` es un modo COMPARTIDO, de Tablea Gaming, que se ofrece a los proveedores
   // suscritos; un id es un modo PROPIO de ese proveedor, que sólo juegan sus jugadores. Los documentos
   // de antes de los proveedores no tienen el campo y se leen como `null`: eran todos compartidos.
   // NO SE EDITA: cambiarle el dueño a un modo es otro modo, con otro uuid.

@@ -9,7 +9,7 @@ import { UUID_PARAMS, toDTO } from "./schemas";
 // SÓLO LOS COMPARTIDOS ACTIVOS, con la forma de siempre (sin dueño ni suscriptores). Un modo propio es
 // la configuración de UN proveedor: no se lista, y `/:uuid` lo contesta 404 como a uno que no existe.
 // Lo que cada proveedor ofrece de verdad —sus propios y los compartidos que juega— lo arma el
-// orquestador con `GET /internal/game-modes`; esta lista es la de Betaso Games, como antes.
+// orquestador con `GET /internal/game-modes`; esta lista es la de Tablea Gaming, como antes.
 //
 // CACHEABLES DIEZ SEGUNDOS, y sólo los 200: es la misma lista para todos los jugadores, y el servicio ya
 // la guarda cinco (`PUBLIC_MEMO_MS`). Un 404 sale `no-store`: un modo que se publica en este momento no

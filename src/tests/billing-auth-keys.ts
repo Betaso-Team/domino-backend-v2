@@ -17,11 +17,11 @@ btLrkUlRvHcf05aATv2b2fV7btQxZWGs02T58sChoGipEbpG1t1m6G0T
 -----END PRIVATE KEY-----
 `;
 
-/** Un token de jugador como lo firma billing-auth: ES256, `betaso-games-auth`, las dos audiencias y `game`. */
+/** Un token de jugador como lo firma billing-auth: ES256, `tablea-gaming-auth`, las dos audiencias y `game`. */
 export function mintBillingToken(userId: string, expiresIn: jwt.SignOptions["expiresIn"] = "1h") {
   return jwt.sign({ sub: userId, game: "domino" }, TEST_BILLING_AUTH_PRIVATE_KEY, {
     algorithm: "ES256",
-    issuer: "betaso-games-auth",
+    issuer: "tablea-gaming-auth",
     audience: ["orchestrator", "domino"],
     expiresIn,
   });
@@ -29,7 +29,7 @@ export function mintBillingToken(userId: string, expiresIn: jwt.SignOptions["exp
 
 /**
  * Un token de ADMIN como lo firma billing-auth: la audiencia de administración, `typ: admin` y el
- * ámbito (`prv`, `role`). Sin ámbito explícito es un admin de Betaso Games (`prv: null`, `admin`).
+ * ámbito (`prv`, `role`). Sin ámbito explícito es un admin de Tablea Gaming (`prv: null`, `admin`).
  */
 export function mintAdminToken(
   name: string,
@@ -50,8 +50,8 @@ function signAdmin(name: string, scope: Record<string, unknown>) {
   return jwt.sign({ typ: "admin", sid: `s-${name}`, ...scope }, TEST_BILLING_AUTH_PRIVATE_KEY, {
     algorithm: "ES256",
     subject: name,
-    issuer: "betaso-games-auth",
-    audience: "betaso-games-admin",
+    issuer: "tablea-gaming-auth",
+    audience: "tablea-gaming-admin",
     expiresIn: "5m",
   });
 }

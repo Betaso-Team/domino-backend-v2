@@ -2,7 +2,7 @@ import type { CatalogActor } from "./catalog";
 import type { GameMode } from "./game-mode";
 
 // LO QUE EL CATÁLOGO ANUNCIA DE CADA CAMBIO, para quien escuche (el servicio de notificaciones de
-// Betaso Games): `domino.config.<entidad>.<acción>` en el exchange `betaso_games`, con cuándo y quién.
+// Tablea Gaming): `domino.config.<entidad>.<acción>` en el exchange `tablea_gaming`, con cuándo y quién.
 // El contrato está en `docs/api-y-mensajes.md`; cambiar un payload es cambiar un contrato publicado.
 //
 // NO VA EN LA MISMA TRANSACCIÓN QUE EL CAMBIO: Mongo no tiene transacciones en este despliegue. Se

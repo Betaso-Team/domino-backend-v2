@@ -3,7 +3,7 @@ import type { RequestHandler, Response } from "express";
 import { sendError } from "./errors";
 
 // SON TRES LLAVES DE SERVIDOR, y cruzan esta frontera en las dos direcciones. Las dos de ENTRADA: la
-// de ADMINISTRACIÓN (`ADMIN_API_KEY`) y la del ORQUESTADOR de Betaso Juegos
+// de ADMINISTRACIÓN (`ADMIN_API_KEY`) y la del ORQUESTADOR de Tablea Gaming
 // (`ORCHESTRATOR_API_KEY`), que abre mesas y pide el asiento de vuelta. La de SALIDA es la que el
 // dominó PRESENTA al orquestador para pedir cobros (`ORCHESTRATOR_CALLBACK_API_KEY`). Son secretos distintos a
 // propósito —compartirlos dejaría que el que tiene una, para preguntar un saldo, también abra mesas y
@@ -29,8 +29,8 @@ export type AdminRole = "admin" | "support";
 
 /**
  * QUIÉN ESTÁ DEL OTRO LADO de una ruta de administración. `provider` es el proveedor al que pertenece
- * el admin (`null` = Betaso Games, el dueño del sistema) y `role` qué puede hacer. Lo arma el
- * verificador del token de billing-auth, o la llave, que vale como un admin de Betaso Games.
+ * el admin (`null` = Tablea Gaming, el dueño del sistema) y `role` qué puede hacer. Lo arma el
+ * verificador del token de billing-auth, o la llave, que vale como un admin de Tablea Gaming.
  */
 export interface Admin {
   readonly name: string;
@@ -38,7 +38,7 @@ export interface Admin {
   readonly role: AdminRole;
 }
 
-// LA LLAVE ES UN ADMIN DE BETASO GAMES: autoriza todo lo que autorizaba antes de que existieran los
+// LA LLAVE ES UN ADMIN DE TABLEA GAMING: autoriza todo lo que autorizaba antes de que existieran los
 // proveedores. No identifica a una persona, así que el nombre dice de dónde vino y nada más.
 export const API_KEY_ADMIN: Admin = { name: "ADMIN_API_KEY", provider: null, role: "admin" };
 
@@ -50,8 +50,8 @@ export const API_KEY_ADMIN: Admin = { name: "ADMIN_API_KEY", provider: null, rol
 export type AdminTokenCheck = (token: string) => Promise<Admin | undefined>;
 
 /**
- * LO QUE UNA RUTA ABRE, además de a un admin de Betaso Games. Los dos son opt-in y el default es el
- * cerrado: una ruta que no dice nada es de escritura y sólo de Betaso Games.
+ * LO QUE UNA RUTA ABRE, además de a un admin de Tablea Gaming. Los dos son opt-in y el default es el
+ * cerrado: una ruta que no dice nada es de escritura y sólo de Tablea Gaming.
  *
  * - `read`: la ruta sólo lee, así que también entra `support`.
  * - `providers`: entran los admins de un proveedor. La ruta se compromete a acotar ella misma lo que
@@ -71,7 +71,7 @@ const deny = (response: Response, status: 401 | 403): void => {
 
 // LA PUERTA DE ENTRADA DEL PANEL, con dos credenciales:
 // - la llave (`x-internal-api-key`), que autoriza pero no identifica: dice que habla el panel o un
-//   script, no qué persona apretó el botón. Vale como admin de Betaso Games;
+//   script, no qué persona apretó el botón. Vale como admin de Tablea Gaming;
 // - el token de admin (`Authorization: Bearer`), que emite billing-auth cuando un admin inicia sesión.
 //   Ese sí identifica, y dice además de qué proveedor es y con qué rol.
 //
@@ -79,7 +79,7 @@ const deny = (response: Response, status: 401 | 403): void => {
 // billing-auth empieza a emitir tokens de ADMINS DE PROVEEDOR: con el default abierto, un admin de
 // Parley entraría como admin total del dominó —el historial de todas las mesas, la configuración en
 // caliente, el catálogo entero— el mismo día en que billing-auth despliega, sin una línea cambiada
-// acá. Por eso toda ruta que no declare `providers` es de Betaso Games, y toda la que no declare
+// acá. Por eso toda ruta que no declare `providers` es de Tablea Gaming, y toda la que no declare
 // `read` exige el rol `admin`. Un 403 de más se ve y se arregla; uno de menos es una fuga.
 //
 // Lo que deja pasar queda en `response.locals.admin` (un `Admin`), para que la ruta acote lo que ve
@@ -127,7 +127,7 @@ export function adminOf(response: Response): Admin {
 
 // LA LLAVE DE UN SERVIDOR (el orquestador), y nada más: entre el panel y el orquestador cambia la
 // llave, no el chequeo. No deja principal en `locals`: el orquestador no es un admin, y darle el de
-// Betaso Games sería una puerta lateral el día que una de sus rutas mire quién es.
+// Tablea Gaming sería una puerta lateral el día que una de sus rutas mire quién es.
 export const requireApiKey =
   (expected: string): RequestHandler =>
   (request, response, next) => {

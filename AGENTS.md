@@ -13,8 +13,8 @@ Parley): `providerId` en el código, `prv` en el token. **Operador** es una pers
 sistema (soporte, quien despliega, un usuario del panel), nunca una plataforma. Una **ficha** es una
 pieza del dominó.
 
-- **El dominó es un game backend del orquestador de Betaso Juegos**
-  (`betaso-games-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
+- **El dominó es un game backend del orquestador de Tablea Gaming**
+  (`tablea-gaming-orchestrator/apps/domino-orchestrator`), y el orquestador es la **única puerta de
   entrada**: admite, empareja, tiene el único interruptor de mantenimiento y abre cada mesa por la API
   interna (`POST /internal/matches`, `POST /internal/players/:userId/seat`,
   `GET /internal/players/:userId/match`, `GET /internal/census`,
@@ -25,7 +25,7 @@ pieza del dominó.
   (herramientas de prueba a mano).
 - **Un juego nunca mueve dinero.** El dominó no tiene billetera, ledger ni credenciales de ninguna:
   le pide al orquestador que cobre la entrada (`chargeEntry`) y cada aumento
-  (`OrchestratorBetCharger`), y le publica el resultado por el outbox de `betaso_games`
+  (`OrchestratorBetCharger`), y le publica el resultado por el outbox de `tablea_gaming`
   (`MatchResultRecorder`). Tampoco reporta ranking ni liga, ni sirve `/me/metrics`. Sí sirve
   `GET /me/matches`, el historial del jugador (ver «Incremento completo — el historial del jugador»).
   Los premios viajan en el campo `payouts` de `domino.match.finished` y los calcula `payoutOf`
@@ -36,17 +36,17 @@ pieza del dominó.
   Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
   llave nuestra, no la de un cliente.
 - **Cada admin tiene proveedor y rol.** El token de admin de billing-auth trae `prv` (el proveedor;
-  `null` = Betaso Games) y `role` (`admin` | `support`), **obligatorios**: sin alguno, 401. `requireAdminKey` **cierra por default**: una ruta es de Betaso Games y de escritura salvo
+  `null` = Tablea Gaming) y `role` (`admin` | `support`), **obligatorios**: sin alguno, 401. `requireAdminKey` **cierra por default**: una ruta es de Tablea Gaming y de escritura salvo
   que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Hoy sólo
   el catálogo declara `providers`; el historial, los registros, `/game-data` y `/internal/settings`
-  son de Betaso Games. Ver «Incremento completo — modos con dueño y suscripciones».
+  son de Tablea Gaming. Ver «Incremento completo — modos con dueño y suscripciones».
 - **Los modos tienen dueño** (`ownerProviderId`: `null` compartido, un id propio de ese proveedor) y los
   compartidos, suscriptores **explícitos** (`subscribers`; ausente = `[]` = nadie). Cada proveedor
   elige la **fuente** de su catálogo entero (`provider_catalogs`: `shared` | `own`, ausente =
   `shared`). El público `GET /game-modes` sirve sólo compartidos; el orquestador lee modos y fuentes
   por `GET /internal/game-modes`. **El catálogo no publica sus modos a ningún broker**: el exchange
   `betaso`, su outbox, `/sync` y `RABBITMQ_URL` se fueron; Betaso lee dominó del orquestador. Lo que sí
-  sale es el **anuncio** de cada cambio (`domino.config.*`, a `betaso_games`, por su propio outbox
+  sale es el **anuncio** de cada cambio (`domino.config.*`, a `tablea_gaming`, por su propio outbox
   `catalog_event_outbox`, después de escribir) para el servicio de notificaciones; ver «Anuncios del
   catálogo» en `docs/api-y-mensajes.md`. Ver «Incremento
   completo — modos con dueño: fuente del catálogo y sin exchange `betaso`».
@@ -2133,8 +2133,8 @@ perdonado, si vuelven, son del orquestador.
 ## Incremento en curso — API para el orquestador
 
 Y después la **API para el orquestador** (rama `feat/api-orquestador`, sobre
-`refactor/port-truco-integracion-front`): el orquestador de Betaso Juegos
-(`betaso-games-orchestrator/apps/domino-orchestrator`) empareja y le pide la mesa a dominó.
+`refactor/port-truco-integracion-front`): el orquestador de Tablea Gaming
+(`tablea-gaming-orchestrator/apps/domino-orchestrator`) empareja y le pide la mesa a dominó.
 `POST /internal/matches` abre una sala con un `CreateMatchRequest` —**sin `roomOptions`, así que la
 sala no cobra, no reembolsa ni paga: el dinero lo mueve el orquestador**. Desde `3de2d3c` eso es
 verdad de punta a punta: esas salas no consultan niveles de apuesta, no enganchan el `BetCharger`
@@ -2146,7 +2146,7 @@ dominó:** dominó le pedirá el cobro de un aumento acordado por la API interna
 orquestador reporte ranking y liga **a cada cliente con su `externalUserId`** — el `userId` de estas
 mesas es el `playerId` de billing-auth, que el cliente no conoce; el lobby propio de dominó sigue
 usando el `uuid` de Betaso como siempre. Ver el spec del orquestador
-(`betaso-games-orchestrator/docs/superpowers/specs/2026-09-27-orquestador-design.md`, «Aumentos de
+(`tablea-gaming-orchestrator/docs/superpowers/specs/2026-09-27-orquestador-design.md`, «Aumentos de
 apuesta» y «Ranking y liga del cliente»)— y
 `POST /internal/players/:userId/seat` devuelve el asiento de quien sigue jugando, leído de
 `MatchRegistry.matchOf`. Las dos con `x-internal-api-key` y **su propia llave,
@@ -2159,7 +2159,7 @@ Hechos medidos en la Tarea 13, Parte B:
 - **`createRoom` propaga el mensaje del error `onCreate` con su prefijo de código** (`UNKNOWN_GAME_MODE: …`), que es cómo la ruta responde 422 (medido sobre `@colyseus/core` 0.18.15). ~~`MaintenanceModeError` no tiene prefijo y sale como 500 (pendiente).~~ Ya no existe: el mantenimiento es del orquestador.
 - **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. La ruta responde 404 solo si `matchMaker.query({ roomId })` no encuentra nada; una sala bloqueada es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa).
 - **Toda reserva sin consumir mantiene viva su sala ~15 s** (`seatReservationTimeout`) y retrasa `server.shutdown()` — los tests que obtienen una reserva tienen que consumirla.
-- **Pendiente de decidir:** ~~qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing);~~ (cerradas: no hay lobby propio y el resultado sale por `betaso_games`) `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
+- **Pendiente de decidir:** ~~qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing);~~ (cerradas: no hay lobby propio y el resultado sale por `tablea_gaming`) `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
 - **`BILLING_AUTH_PUBLIC_KEY` se valida al boot** (EC P-256 solo público; una clave privada se rechaza).
 - **El ES256 exige el juego**: billing-auth firma `aud: ['orchestrator','domino']` para todos los juegos, así que el `JwtVerifier` rechaza un ES256 cuyo claim `game` no sea `"domino"` (un token de truco pasaría emisor y audiencia). Y `parseEnv` falla al arrancar si hay `ORCHESTRATOR_API_KEY` sin `BILLING_AUTH_PUBLIC_KEY`, o si esa llave repite `BETASO_ADMIN_PANEL_API_KEY` o `BETASO_BACKEND_API_KEY`.
 - ~~**Bug previo, pendiente y con su propio ticket (no se arregla en esta rama):** `BetCharger.charge` trata `DuplicateMovementError` como "pagado", pero la clave del ledger es `(matchId, playerId, reason)` sin secuencia; tras un aumento revocado, un segundo aumento en la misma partida cuenta a los dos como pagados (`bet-charge.ts:84-89`, `legality.ts:170`).~~ Ya no aplica: `BetCharger` no existe; el aumento lo cobra el orquestador.
@@ -2204,7 +2204,7 @@ del orquestador está mockeado** (registro contable y wallet falsos); de este la
   la entrega aunque llegue el ack. Es lo que impide que un resultado publicado antes de que el
   orquestador declare su cola se marque `SENT` y se pierda.
 - **El resultado** (`network/match-results.ts`) sale de toda mesa (todas son por request), al exchange
-  `betaso_games` en su propio broker (`BETASO_GAMES_RABBITMQ_URL`), con outbox
+  `tablea_gaming` en su propio broker (`TABLEA_GAMING_RABBITMQ_URL`), con outbox
   `match_result_outbox` y lease `match-result-publisher`. El premio viaja calculado por `settlementOf`;
   los reembolsos no viajan.
 - ⚠ **`settlementOf` liquidaba sin el aumento aceptado** (`8e6522c`): la config se congela al nacer y
@@ -2215,7 +2215,7 @@ del orquestador está mockeado** (registro contable y wallet falsos); de este la
 - **El aumento** (`network/orchestrator-charges.ts`): los niveles llegan en el request (`betLevels`) y el
   cobro se le pide al orquestador; un rechazo, un silencio o un orquestador caído lo anulan.
 - `ORCHESTRATOR_API_KEY` exige ahora `ORCHESTRATOR_URL` y `ORCHESTRATOR_CALLBACK_API_KEY` (y en
-  producción `BETASO_GAMES_RABBITMQ_URL`). `vitest.setup.ts` borra `BETASO_GAMES_RABBITMQ_URL`.
+  producción `TABLEA_GAMING_RABBITMQ_URL`). `vitest.setup.ts` borra `TABLEA_GAMING_RABBITMQ_URL`.
 - Smoke real con Docker verde (`RUN_ENGINE_SMOKE=1 npm run test:deploy`): la partida pidió el cobro al
   stub, arrancó y cerró con 120 entradas de historial.
 - **`match_result_outbox` vence lo ENVIADO a los 7 días** (TTL sobre `sentAt`, opción
@@ -2282,7 +2282,7 @@ abiertas por el dominó mismo (las creadas CON `roomOptions`):
   publicada a propósito (`mintBillingToken`); `vitest.setup.ts` y `compose.smoke.yaml` usan su pública.
   Ningún entorno de verdad confía en ella.
 - **Sigue igual:** el catálogo se publica al exchange `betaso` (el backend de Betaso lo consume).
-  ~~`JWT_ISSUER` vale `betaso-auth`.~~ Desde 2026-10-14 es uno solo, `betaso-games-auth`.
+  ~~`JWT_ISSUER` vale `betaso-auth`.~~ Desde 2026-10-14 es uno solo, `tablea-gaming-auth`.
 - **Los niveles de aumento son parte del modo** (`43d89a0`): `betLevels: [{ level, extra,
   additionalPoints }]`, la misma forma del `CreateMatchRequest`. Vacío = no ofrece aumentar. Se
   validan niveles únicos (≥ 2) y el `extra` creciente; el `PUT` reemplaza la lista. El `GET` público
@@ -2332,7 +2332,7 @@ cliente que no lo conoce tiene que ignorarlo), y `betLevels` es un campo nuevo d
 
 | truco | acá |
 |---|---|
-| `dcf88a0` un `ranking.match-finished` por partida, con el desenlace de cada asiento (`won`/`lost`/`left`/`timeout`/`disconnected`) y `playedSeconds` | **NO PORTADO**: el dominó no reporta ranking, lo hace el orquestador con el resultado de `betaso_games`. Ese resultado ya lleva `participants[].result` (`won`/`lost`/`abandoned`). Separar `abandoned` en tres y sumar `playedSeconds` cambia el contrato del orquestador, así que lo tiene que pedir él primero: si su consumidor valida estricto, un campo de más es un resultado rechazado, o sea un premio que no se paga |
+| `dcf88a0` un `ranking.match-finished` por partida, con el desenlace de cada asiento (`won`/`lost`/`left`/`timeout`/`disconnected`) y `playedSeconds` | **NO PORTADO**: el dominó no reporta ranking, lo hace el orquestador con el resultado de `tablea_gaming`. Ese resultado ya lleva `participants[].result` (`won`/`lost`/`abandoned`). Separar `abandoned` en tres y sumar `playedSeconds` cambia el contrato del orquestador, así que lo tiene que pedir él primero: si su consumidor valida estricto, un campo de más es un resultado rechazado, o sea un premio que no se paga |
 | `9168552` el cartel del lobby como estado de sala | **NO APLICA**: no hay lobby |
 | `cfca91f` las marcas de flor después de quemarla | reglas de truco |
 | `fc3d131`, `7b3b583` | docs de truco |
@@ -2367,7 +2367,7 @@ Baseline **1240 → 1248 tests** en `src`, con `typecheck`, lint y `depcruise` e
 
 ### ~~Deuda abierta: el panel no puede entrar con su sesión~~
 
-Resuelta en `feat/emisor-betaso-games` (2026-10-13), sin el backend de Betaso: billing-auth emite el
+Resuelta en `feat/emisor-tablea-gaming` (2026-10-13), sin el backend de Betaso: billing-auth emite el
 token del admin cuando inicia sesión (`POST /v1/auth/login`), y las rutas de admin aceptan
 `Authorization: Bearer` con ese token además de `ADMIN_API_KEY` (`requireAdminKey`,
 `features/auth/transports/admin-token-verifier.ts`). ~~Las mutaciones piden el rol `catalog`~~: desde el
@@ -2387,7 +2387,7 @@ administra el catálogo del dominó (la deuda 3 de «sin credenciales»): si es 
 hace falta.
 
 **Decidido el 14/10:** el catálogo y los ajustes son del dominó, y el panel que los administre será
-uno propio de Betaso Games, con un login del sistema (billing-auth u otro) y no el de Betaso. **No es
+uno propio de Tablea Gaming, con un login del sistema (billing-auth u otro) y no el de Betaso. **No es
 del MVP.** Hasta entonces se administran con `ADMIN_API_KEY` en `x-internal-api-key`, desde un
 cliente HTTP (Insomnia o similar). No se porta el `auth/me` de truco.
 
@@ -2622,7 +2622,7 @@ El PR 3 del plan «rivales, valores propios, suscripciones y roles del panel» (
 Desde `main`. Se programó contra el contrato de token que billing-auth está sacando en paralelo.
 
 - **El principal es `{ name, provider, role }`** (`shared/http/api-key.ts`) y la llave
-  (`API_KEY_ADMIN`) es un admin de Betaso Games. El verificador (`admin-token-verifier.ts`) es
+  (`API_KEY_ADMIN`) es un admin de Tablea Gaming. El verificador (`admin-token-verifier.ts`) es
   TOLERANTE con lo ausente —un token de antes no trae ni `prv` ni `role`, y rechazarlo deslogueaba al
   panel un TTL entero— y ESTRICTO con lo presente: un rol desconocido o un `prv` que no es texto es
   `undefined`, no el default.
@@ -2639,7 +2639,7 @@ Desde `main`. Se programó contra el contrato de token que billing-auth está sa
   suscribe él, copia para él.
 - **Sin migración ni apagón**: `ownerProviderId` y `subscribers` ausentes se leen `null`. `null` en
   `subscribers` es LEGADO y se ofrece a todos, igual que antes; un compartido nuevo nace con `[]`. Sumar
-  o sacar un proveedor de un legado es 409 hasta que Betaso Games fije la lista
+  o sacar un proveedor de un legado es 409 hasta que Tablea Gaming fije la lista
   (`PUT /game-modes/:uuid/subscribers`): sumarlo lo dejaría ofrecido sólo a ése. El adaptador Mongo lo
   impide también en la base (`subscribers: { $type: "array" }` en el filtro: `$addToSet` sobre un campo
   ausente lo crearía con un solo elemento).
@@ -2672,7 +2672,7 @@ Desde `main`. Se programó contra el contrato de token que billing-auth está sa
 ### Al mergear a `develop`
 
 `develop` tiene `GET /internal/players/:userId/matches` (`players.ts`) detrás de
-`requireAdminKey(adminApiKey, adminTokens)`. Con el default cerrado queda de Betaso Games con rol
+`requireAdminKey(adminApiKey, adminTokens)`. Con el default cerrado queda de Tablea Gaming con rol
 `admin`: si `support` tiene que leerlo, va `{ read: true }`. Ningún proveedor debe entrar (no hay ámbito
 de partidas). El filtro por motivo del listado no cambia nada de esto.
 
@@ -2699,7 +2699,7 @@ Emmanuel». Varias entradas del bloque anterior quedan desactualizadas; las vige
 - **La fuente del catálogo** (`provider_catalogs`, `{ providerId, source, updatedAt, updatedBy }`,
   ausente = `shared`): ~~`GET /game-modes/catalogs/:providerId` (cualquier rol del ámbito) y
   `PUT … {source}`~~ → `source` en `GET /game-modes/admin` y `PUT /game-modes/source {source}`, ver
-  «el proveedor sale del token» (rol `admin` del ámbito; Betaso Games cualquiera), bajo el lease y la cola. `own`
+  «el proveedor sale del token» (rol `admin` del ámbito; Tablea Gaming cualquiera), bajo el lease y la cola. `own`
   sin un modo propio ACTIVO es 409, y con la fuente en `own` dar de baja el último propio activo
   también es 409 (`refuseEmptyingOwnCatalog`, en el mismo turno del lease).
 - **`GET /internal/game-modes`** = `{ status, data: [modos], catalogs: { [providerId]: "own" } }`, sólo
@@ -2717,7 +2717,7 @@ producción, y no quedan alias.
   `providerOf` (`transports/http/admin.ts`, el mismo patrón que los webhooks del orquestador): un
   admin de proveedor actúa sobre el suyo (`?providerId=` igual se acepta, distinto es
   ~~`403 {status:"error", code:"FORBIDDEN"}`~~ `404 {code:"UNKNOWN_PROVIDER"}` desde
-  `refactor/errores-con-codigo`); Betaso Games (token con `prv: null`, o la llave) lo nombra
+  `refactor/errores-con-codigo`); Tablea Gaming (token con `prv: null`, o la llave) lo nombra
   con `?providerId=`, y sin él es ~~`400 {status:"error", code:"PROVIDER_REQUIRED"}`~~
   `400 {code:"PROVIDER_REQUIRED", detail}`. La credencial y
   el rol se miran antes (la puerta), la forma después (`validated`, `PROVIDER_QUERY`) y el proveedor
@@ -2728,8 +2728,8 @@ producción, y no quedan alias.
   /game-modes/catalogs/:providerId` → `PUT /game-modes/source {source}`. Las viejas dan 404.
   `POST /game-modes` (con `ownerProviderId`) y `GET /internal/game-modes` no cambian.
 - **La fuente se lee en `GET /game-modes/admin`**: con un proveedor resuelto (token de proveedor, o
-  Betaso Games con `?providerId=`) responde `{ status, data, source }`, y `data` es lo que ve ESE
-  proveedor (Betaso Games sigue viendo `subscribers`); Betaso Games sin `?providerId=` recibe todos los
+  Tablea Gaming con `?providerId=`) responde `{ status, data, source }`, y `data` es lo que ve ESE
+  proveedor (Tablea Gaming sigue viendo `subscribers`); Tablea Gaming sin `?providerId=` recibe todos los
   modos y ningún `source`. El GET de la fuente sola se fue.
 - ⚠ **`PUT /game-modes/source` va ANTES de `PUT /game-modes/:uuid`**: es un solo segmento, y al revés
   todo cambio de fuente sería la edición del modo de uuid `source`. Lo pinea el test del orden de

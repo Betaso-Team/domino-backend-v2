@@ -14,7 +14,7 @@
 //
 // LOS MODOS NO SE PUBLICAN: Betaso (y cualquier proveedor) los lee del orquestador, que los lee de acá
 // por `GET /internal/game-modes`. Lo que sí sale son los ANUNCIOS de cada cambio (`domino.config.*`, a
-// `betaso_games`, por su propio outbox) para el servicio de notificaciones.
+// `tablea_gaming`, por su propio outbox) para el servicio de notificaciones.
 export type { GameModeReader } from "./core/catalog";
 export type { GameMode } from "./core/game-mode";
 export type { CatalogEvent, CatalogTopic } from "./core/catalog-events";

@@ -183,7 +183,7 @@ function wireDtoOf(mode: GameMode): Record<string, unknown> {
   };
 }
 
-// LO QUE VE BETASO GAMES EN EL PANEL: el DTO de v1 más el dueño y la lista de suscriptores.
+// LO QUE VE TABLEA GAMING EN EL PANEL: el DTO de v1 más el dueño y la lista de suscriptores.
 function adminWireDtoOf(mode: GameMode): Record<string, unknown> {
   return {
     ...wireDtoOf(mode),
@@ -848,7 +848,7 @@ describe("el panel de un proveedor", () => {
     expect(data.find((m) => m.uuid === libre.uuid)?.subscribed).toBe(false);
   });
 
-  it("Betaso Games ve la lista de suscriptores", async () => {
+  it("Tablea Gaming ve la lista de suscriptores", async () => {
     const app = harness();
     const viejo = await playedOf(app.repository);
 
@@ -865,12 +865,12 @@ describe("el panel de un proveedor", () => {
 
     expect(await app.put(`/game-modes/${compartido.uuid}`, { prize: 1 }, as("parley"))).toEqual({
       status: 403,
-      body: { code: "FORBIDDEN", detail: "un modo compartido lo administra Betaso Games" },
+      body: { code: "FORBIDDEN", detail: "un modo compartido lo administra Tablea Gaming" },
     });
   });
 
   // LO DE OTRO PROVEEDOR NO EXISTE para éste: 404, igual que un `?providerId=` ajeno. Pedir un
-  // compartido sí es un 403: los compartidos se ven, pero los crea Betaso Games.
+  // compartido sí es un 403: los compartidos se ven, pero los crea Tablea Gaming.
   it("crear para otro proveedor es 404 UNKNOWN_PROVIDER, un compartido es 403, y no deja nada", async () => {
     const app = harness();
     const body = { name: "X", prize: 1, entryFee: 1, playersQuantity: 2 };
@@ -881,7 +881,7 @@ describe("el panel de un proveedor", () => {
     expect(await app.post("/game-modes", { ...body, ownerProviderId: null }, as("parley"))).toEqual(
       {
         status: 403,
-        body: { code: "FORBIDDEN", detail: "un modo compartido lo crea Betaso Games" },
+        body: { code: "FORBIDDEN", detail: "un modo compartido lo crea Tablea Gaming" },
       },
     );
     expect(await app.repository.all()).toEqual([]);
@@ -889,12 +889,12 @@ describe("el panel de un proveedor", () => {
 });
 
 // EL PROVEEDOR SOBRE EL QUE ACTÚA UNA RUTA SALE DEL TOKEN: el admin de un proveedor no lo nombra (o
-// nombra el suyo); Betaso Games lo nombra con `?providerId=`, y sin él es 400.
+// nombra el suyo); Tablea Gaming lo nombra con `?providerId=`, y sin él es 400.
 const PROVIDER_REQUIRED = {
   status: 400,
   body: {
     code: "PROVIDER_REQUIRED",
-    detail: "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
+    detail: "falta ?providerId=: Tablea Gaming indica sobre qué proveedor actúa",
   },
 };
 // LO DE OTRO PROVEEDOR NO EXISTE para éste: 404, como sus modos propios, y no un 403 que le confirme
@@ -947,7 +947,7 @@ describe("las suscripciones por HTTP", () => {
     expect((await app.repository.byUuid(modo.uuid))?.subscribers).toEqual(["parley"]);
   });
 
-  it("Betaso Games suscribe al que nombre con ?providerId=, y sin él es 400", async () => {
+  it("Tablea Gaming suscribe al que nombre con ?providerId=, y sin él es 400", async () => {
     const app = harness();
     const modo = await app.repository.create(clasica());
 
@@ -965,7 +965,7 @@ describe("las suscripciones por HTTP", () => {
       as("games"),
     );
     expect(alta.status).toBe(200);
-    // Betaso Games ve la lista de suscriptores en la respuesta.
+    // Tablea Gaming ve la lista de suscriptores en la respuesta.
     expect((alta.body as { data: { subscribers: string[] } }).data.subscribers).toEqual(["parley"]);
     expect(
       (await app.del(`/game-modes/${modo.uuid}/subscription?providerId=parley`, KEY)).status,
@@ -1033,7 +1033,7 @@ describe("POST /game-modes/copies", () => {
     );
   });
 
-  it("un proveedor no copia para otro, support no copia y Betaso Games sin ?providerId= es 400", async () => {
+  it("un proveedor no copia para otro, support no copia y Tablea Gaming sin ?providerId= es 400", async () => {
     const app = harness();
     await playedOf(app.repository);
 
@@ -1164,7 +1164,7 @@ describe("la fuente del catálogo por HTTP", () => {
     );
   });
 
-  it("Betaso Games con ?providerId= ve el catálogo de ese proveedor y su fuente; sin él, todo y sin fuente", async () => {
+  it("Tablea Gaming con ?providerId= ve el catálogo de ese proveedor y su fuente; sin él, todo y sin fuente", async () => {
     const app = harness();
     const viejo = await playedOf(app.repository);
     const propio = await app.repository.create(
@@ -1180,7 +1180,7 @@ describe("la fuente del catálogo por HTTP", () => {
       const body = scoped.body as { data: Array<Record<string, unknown>>; source: string };
       expect(body.source).toBe("shared");
       expect(body.data.map((m) => m.uuid).sort()).toEqual([viejo.uuid, propio.uuid].sort());
-      // Betaso Games sigue viendo los suscriptores.
+      // Tablea Gaming sigue viendo los suscriptores.
       expect(body.data.find((m) => m.uuid === viejo.uuid)).toEqual(adminWireDtoOf(viejo));
 
       const all = await app.get("/game-modes/admin", who);
@@ -1219,7 +1219,7 @@ describe("la fuente del catálogo por HTTP", () => {
     ).toBe("shared");
   });
 
-  it("PUT: support no escribe, otro proveedor es 404, Betaso Games con ?providerId= (sin él 400), y la forma se valida", async () => {
+  it("PUT: support no escribe, otro proveedor es 404, Tablea Gaming con ?providerId= (sin él 400), y la forma se valida", async () => {
     const app = harness();
     await app.repository.create(clasica({ ownerProviderId: "parley" }));
 

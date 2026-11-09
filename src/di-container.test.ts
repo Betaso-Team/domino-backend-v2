@@ -72,7 +72,7 @@ describe("el composition root", () => {
       "catalogEventDispatcher?.close",
       "statsRecorder.stop",
       "historyPort.drain",
-      "betasoGamesAmqp?.close",
+      "tableaGamingAmqp?.close",
       "mongo?.close",
     ];
     const posiciones = pasos.map((paso) => apagado.indexOf(paso));
@@ -99,7 +99,7 @@ describe("la superficie Express", () => {
   // EL BROKER DE JUEGOS ENTRA A READINESS Y NO A `/health`. `/health` no consulta NADA a propósito
   // —"reiniciame" es la única respuesta que destruye partidas en curso—.
   it("suma el broker de juegos a las dependencias duras, con ping y no con una publicación", () => {
-    expect(source).toMatch(/betaso_games:\s*\(\)\s*=>\s*gamesBroker\.ping\(\)/);
+    expect(source).toMatch(/tablea_gaming:\s*\(\)\s*=>\s*gamesBroker\.ping\(\)/);
   });
 
   // EL BROKER DE BETASO NO EXISTE: el dominó no le publica nada. Que no vuelva al mapa.

@@ -15,7 +15,7 @@ import { act, bootServer, clientOf, revealHands, seatPair, waitUntil } from "./e
 const PORT = 2607;
 
 // UNA MESA NO MUEVE PLATA EN DOMINÓ: dice qué pasó y pide que se cobre. El resultado va al outbox de
-// `betaso_games` y la entrada y el aumento se le piden cobrar al orquestador.
+// `tablea_gaming` y la entrada y el aumento se le piden cobrar al orquestador.
 const LEVELS = [{ level: 2, extra: 1, additionalPoints: 1 }] as const;
 
 function silentLogger(): Logger {
