@@ -333,3 +333,94 @@ describe("replayConfigOf", () => {
     expect(config.prize).toBe(2.75);
   });
 });
+
+// LA MESA DE TORNEO: gratis, sin catálogo y sin ningún campo de dinero en el pedido.
+describe("mesa de torneo", () => {
+  const { gameModeId: _mode, rateId: _rate, ...shared } = request;
+  const tournament = {
+    ...shared,
+    mode: "TOURNAMENT",
+    tournamentId: "t-1",
+    rules: { pointsToWin: 50 },
+  } as const;
+
+  it("arma el snapshot sin catálogo: gratis, sin bots, sin aumentos ni revancha", () => {
+    // El modo que se le pase no la toca: no hay catálogo detrás.
+    expect(configOf(requestOf(tournament), modeOf({ pointsToWin: 200, entryFee: 9 }))).toEqual({
+      mode: "TOURNAMENT",
+      tournamentId: "t-1",
+      matchId: "match-1",
+      gameModeId: "tournament:t-1",
+      seats: [
+        { ...participants[0], playerId: "seat-1" },
+        { ...participants[1], playerId: "seat-2" },
+      ],
+      seed: "seed-1",
+      pointsToWin: 50,
+      teamAssignment: "SHUFFLED",
+      isDealWindowEnabled: true,
+      rateId: "none",
+      entryFee: 0,
+      prize: 0,
+      multiplier: 1,
+      isFreeRoom: true,
+      enableBots: false,
+      isRematchEnabled: false,
+      betLevels: [],
+    });
+    expect(configOf(requestOf(tournament), undefined).pointsToWin).toBe(50);
+  });
+
+  it("una casual sin modo resuelto es UNKNOWN_GAME_MODE", () => {
+    expect(() => configOf(requestOf(request), undefined)).toThrow(/UNKNOWN_GAME_MODE/);
+  });
+
+  it.each([
+    ["con rateId", { rateId: "r" }],
+    ["con gameModeId", { gameModeId: "mode-2p" }],
+    ["con niveles de aumento", { betLevels: [] }],
+    ["con entryFee", { entryFee: 1 }],
+    ["sin torneo", { tournamentId: undefined }],
+    ["torneo vacío", { tournamentId: " " }],
+    ["sin reglas", { rules: undefined }],
+    ["puntos en cero", { rules: { pointsToWin: 0 } }],
+    ["puntos fraccionarios", { rules: { pointsToWin: 1.5 } }],
+    ["más puntos que el catálogo", { rules: { pointsToWin: 101 } }],
+    ["reglas de más", { rules: { pointsToWin: 50, entryFee: 1 } }],
+    ["un solo jugador", { participants: [participants[0]] }],
+    ["tres jugadores", { participants: [...participants, { ...participants[0], userId: "x" }] }],
+    ["el mismo jugador dos veces", { participants: [participants[0], participants[0]] }],
+  ])("rechaza una de torneo %s", (_name, override) => {
+    expect(() => requestOf({ ...tournament, ...override })).toThrow();
+  });
+
+  it("una casual con campos de torneo, o un modo desconocido, no pasa", () => {
+    expect(() => requestOf({ ...request, tournamentId: "t-1" })).toThrow();
+    expect(() => requestOf({ ...tournament, mode: "RANKED" })).toThrow();
+  });
+
+  it("sienta cuatro, por parejas", () => {
+    const four = [
+      ...participants,
+      { userId: "max", displayName: "Max", currency: "VES" },
+      { userId: "zoe", displayName: "Zoe", currency: "VES" },
+    ];
+    expect(
+      configOf(requestOf({ ...tournament, participants: four }), undefined).seats,
+    ).toHaveLength(4);
+  });
+
+  it("el snapshot de torneo se rebobina con su torneo; el torneo sin modo, o al revés, no", () => {
+    const config = configOf(requestOf(tournament), undefined);
+    expect(replayConfigOf(config)).toEqual(config);
+    const { tournamentId: _t, ...withoutTournament } = config;
+    expect(() => replayConfigOf(withoutTournament)).toThrow();
+    const { mode: _m, ...withoutMode } = config;
+    expect(() => replayConfigOf(withoutMode)).toThrow();
+  });
+
+  it("una casual sigue sin escribir `mode`: su snapshot es el de siempre", () => {
+    expect(configFrom()).not.toHaveProperty("mode");
+    expect(configFrom()).not.toHaveProperty("tournamentId");
+  });
+});

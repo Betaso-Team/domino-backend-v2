@@ -94,6 +94,9 @@ export interface SeatSetup {
 export interface MatchSetup {
   readonly roomId: string;
   readonly table: {
+    /** Solo en una mesa de torneo (ausente = casual), con su torneo. */
+    readonly mode?: "TOURNAMENT";
+    readonly tournamentId?: string;
     readonly gameModeId: string;
     /** El nombre del modo COMO SE JUGÓ: el panel puede renombrarlo después. */
     readonly name: string;
