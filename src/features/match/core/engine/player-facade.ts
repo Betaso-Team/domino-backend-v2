@@ -1,4 +1,5 @@
 import type { PlayerId } from "../ids";
+import type { SeatExitKind } from "../state/player";
 import type { BoardSide, TileLike } from "../state/tile";
 import type { PlayerRepository } from "./player-repository";
 
@@ -7,12 +8,12 @@ import type { PlayerRepository } from "./player-repository";
 export class Player {
   constructor(private readonly repository: PlayerRepository) {}
 
-  abandon(playerId: PlayerId): void {
-    this.repository.get(playerId).abandon();
+  abandon(playerId: PlayerId, how: SeatExitKind): void {
+    this.repository.get(playerId).abandon(how);
   }
 
-  seatBot(playerId: PlayerId): void {
-    this.repository.get(playerId).seatBot();
+  seatBot(playerId: PlayerId, how: SeatExitKind): void {
+    this.repository.get(playerId).seatBot(how);
   }
 
   playTile(playerId: PlayerId, tile: TileLike, side: BoardSide): void {

@@ -6,7 +6,7 @@ import { Router } from "express";
 import { z } from "zod";
 import type { ColyseusMatchGateway } from "../colyseus/gateway";
 import { createMatchRequestSchema } from "../match-contract";
-import type { MatchRegistry } from "../match-registry";
+import type { MatchRegistry, PublicMatchConfig } from "../match-registry";
 
 // En consts para que el aviso de arranque y el registro no puedan divergir.
 export const OPEN_TABLE_ROUTE = "/internal/matches";
@@ -27,6 +27,15 @@ const SEAT_PARAMS = z.object({
 // LOS RECHAZOS DE LA SALA LLEGAN COMO MENSAJE: Colyseus propaga el `message` del error de
 // `onCreate` al que pidió crearla, y el código va adelante (ver `match-contract.ts`).
 const REFUSAL = /^(UNKNOWN_GAME_MODE|UNSUPPORTED_GAME_MODE|SEAT_COUNT_MISMATCH):/;
+
+// LA CLASE DE LA MESA en las respuestas que la ubican: el orquestador separa las de torneo. Las mesas
+// anotadas antes de los torneos no traen `mode` en el registro, y son casuales.
+function modeFieldsOf(config: PublicMatchConfig) {
+  return {
+    mode: config.mode ?? "CASUAL",
+    ...(config.tournamentId === undefined ? {} : { tournamentId: config.tournamentId }),
+  };
+}
 
 export interface TablesDeps {
   readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack" | "isGone">;
@@ -85,7 +94,10 @@ export function tablesRoutes(deps: TablesDeps): Router {
         sendError(response, 404, "NO_LIVE_MATCH");
         return;
       }
-      response.json({ status: "success", data: { matchId: config.matchId, reservation } });
+      response.json({
+        status: "success",
+        data: { matchId: config.matchId, ...modeFieldsOf(config), reservation },
+      });
     }),
   );
   // EN QUÉ MESA ESTÁ SENTADO, SIN RESERVAR NADA. Es la pregunta del orquestador cuando solo necesita
@@ -112,18 +124,25 @@ export function tablesRoutes(deps: TablesDeps): Router {
         sendError(response, 404, "NO_LIVE_MATCH");
         return;
       }
-      response.json({ status: "success", data: { matchId: config.matchId, roomId } });
+      response.json({
+        status: "success",
+        data: { matchId: config.matchId, roomId, ...modeFieldsOf(config) },
+      });
     }),
   );
   // Del CLÚSTER, no de este proceso: el censo es el hash que escriben todas las salas.
   router.get(CENSUS_ROUTE, guard, async (_request, response) => {
-    const { playersInMatch, byGameMode } = await deps.registry.census();
+    const { playersInMatch, byGameMode, byTournament } = await deps.registry.census();
     response.json({
       status: "success",
       data: {
         playersInMatch,
         byGameMode: [...byGameMode].map(([gameModeId, players]) => ({
           gameModeId,
+          playersInMatch: players,
+        })),
+        byTournament: [...byTournament].map(([tournamentId, players]) => ({
+          tournamentId,
           playersInMatch: players,
         })),
       },

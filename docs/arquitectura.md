@@ -219,8 +219,10 @@ Un juego nunca mueve dinero: el dominó no tiene billetera, ni ledger, ni creden
   `tablea_gaming`. Quien paga es el orquestador, a través de billing-auth.
 - La ventana de revancha se abre con la compuerta cerrada (`eligible: false`): una revancha
   necesitaría que el orquestador vuelva a cobrar, y eso no existe todavía.
-- Los torneos no se juegan: `src/features/tournament` está en el repo pero sin cablear, hasta que
-  el orquestador abra mesas de torneo.
+- Una mesa de torneo (`mode: "TOURNAMENT"`) no toca dinero: no tiene modo del catálogo, es gratis,
+  sin aumentos, sin bots y sin revancha, y arranca sin pedirle cobro al orquestador. El torneo
+  (inscripción, tabla, premios) es de `apps/tournaments` del orquestador; el dominó solo juega la
+  mesa y publica su resultado con `mode`, `tournamentId` y los hechos que el torneo puntúa.
 
 La API que este backend le expone al orquestador está en `docs/api-y-mensajes.md` y en `AGENTS.md`,
 «API para el orquestador».

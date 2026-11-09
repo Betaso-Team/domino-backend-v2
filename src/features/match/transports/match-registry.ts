@@ -1,5 +1,11 @@
 import type { KeyValueStore } from "@/shared/kv";
-import type { DominoMatchConfig, GlobalDominoConfig, SeatPrice } from "../core/config";
+import {
+  type DominoMatchConfig,
+  type GlobalDominoConfig,
+  type MatchMode,
+  type SeatPrice,
+  modeOf,
+} from "../core/config";
 
 /**
  * LOS PLAZOS CON LOS QUE NACIÓ LA MESA, para que el front dibuje el anillo con el largo de verdad.
@@ -28,6 +34,10 @@ export function publicTimeoutsOf(global: GlobalDominoConfig): PublicMatchTimeout
 }
 
 export interface PublicMatchConfig {
+  /** `CASUAL` o `TOURNAMENT`: el front y el orquestador separan las mesas de torneo con esto. */
+  readonly mode: MatchMode;
+  /** El torneo de la mesa; solo en una de torneo. */
+  readonly tournamentId?: string;
   readonly matchId: string;
   readonly gameModeId: string;
   readonly seats: readonly string[];
@@ -70,7 +80,12 @@ export function publicConfigOf(
   config: DominoMatchConfig,
   timeouts: PublicMatchTimeouts,
 ): PublicMatchConfig {
+  const mode = modeOf(config);
   return {
+    mode,
+    ...(mode === "TOURNAMENT" && config.tournamentId !== undefined
+      ? { tournamentId: config.tournamentId }
+      : {}),
     matchId: config.matchId,
     gameModeId: config.gameModeId,
     seats: config.seats.map(({ playerId }) => playerId),
@@ -169,12 +184,18 @@ const DEAD_MS = 4 * HEARTBEAT_MS;
 interface CensusEntry {
   readonly seats: number;
   readonly gameModeId: string;
+  /** Solo en una mesa de torneo. Las entradas escritas antes de los torneos no lo tienen. */
+  readonly tournamentId?: string;
   readonly at: number;
 }
 
 export interface MatchCensusCount {
+  /** Todos los asientos que siguen jugando, casuales y de torneo. */
   readonly playersInMatch: number;
+  /** Solo las mesas casuales: una de torneo no tiene modo del catálogo. */
   readonly byGameMode: ReadonlyMap<string, number>;
+  /** Las mesas de torneo, por torneo. */
+  readonly byTournament: ReadonlyMap<string, number>;
 }
 
 // EL REGISTRO DE PARTIDAS VIVAS DEL CLÚSTER. La `DominoRoom` se anota al nacer, late mientras
@@ -295,7 +316,12 @@ export class MatchRegistry {
     await this.store.hset(
       CENSUS_KEY,
       roomId,
-      JSON.stringify({ seats: active.length, gameModeId: config.gameModeId, at: this.now() }),
+      JSON.stringify({
+        seats: active.length,
+        gameModeId: config.gameModeId,
+        ...(config.tournamentId === undefined ? {} : { tournamentId: config.tournamentId }),
+        at: this.now(),
+      }),
     );
   }
 
@@ -314,6 +340,7 @@ export class MatchRegistry {
     const now = this.now();
     let playersInMatch = 0;
     const byGameMode = new Map<string, number>();
+    const byTournament = new Map<string, number>();
 
     for (const [roomId, raw] of Object.entries(await this.store.hgetall(CENSUS_KEY))) {
       const entry = parseCensus(raw);
@@ -323,10 +350,17 @@ export class MatchRegistry {
       }
       if (now - entry.at >= STALE_MS) continue;
       playersInMatch += entry.seats;
+      if (entry.tournamentId !== undefined) {
+        byTournament.set(
+          entry.tournamentId,
+          (byTournament.get(entry.tournamentId) ?? 0) + entry.seats,
+        );
+        continue;
+      }
       byGameMode.set(entry.gameModeId, (byGameMode.get(entry.gameModeId) ?? 0) + entry.seats);
     }
 
-    return { playersInMatch, byGameMode };
+    return { playersInMatch, byGameMode, byTournament };
   }
 
   async remove(roomId: string): Promise<void> {
@@ -368,6 +402,7 @@ function parseCensus(raw: string): CensusEntry | undefined {
     const entry = JSON.parse(raw) as Partial<CensusEntry>;
     return typeof entry.seats === "number" &&
       typeof entry.gameModeId === "string" &&
+      (entry.tournamentId === undefined || typeof entry.tournamentId === "string") &&
       typeof entry.at === "number"
       ? (entry as CensusEntry)
       : undefined;

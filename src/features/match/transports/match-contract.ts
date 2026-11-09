@@ -160,10 +160,10 @@ const betLevel = z.strictObject({
   additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
 
-// EL REQUEST VIVO. No trae `pointsToWin`, ni `entryFee`, ni `prize`: los tres salen del catálogo,
-// y el `strictObject` los RECHAZA en vez de ignorarlos. La diferencia importa — ignorarlos dejaría
-// a un llamador creyendo que fijó la economía de la mesa mientras el modo la pisa en silencio.
-const createRequest = z
+// EL REQUEST VIVO DE UNA MESA CASUAL. No trae `pointsToWin`, ni `entryFee`, ni `prize`: los tres salen
+// del catálogo, y el `strictObject` los RECHAZA en vez de ignorarlos. La diferencia importa — ignorarlos
+// dejaría a un llamador creyendo que fijó la economía de la mesa mientras el modo la pisa en silencio.
+const casualRequest = z
   .strictObject({
     mode: z.literal("CASUAL"),
     matchId: nonBlank,
@@ -187,12 +187,45 @@ const createRequest = z
     checkTableShape(participants, context, "participants"),
   );
 
+// EL TECHO DE PUNTOS ES EL DEL CATÁLOGO (`game-mode/transports/http/schemas.ts`): una mesa de torneo
+// no puede pedir una partida que ningún modo casual podría tener.
+const MAX_POINTS_TO_WIN = 100;
+
+// LA MESA DE TORNEO, y NO TRAE DINERO NI CATÁLOGO: ni `gameModeId`, ni `rateId`, ni `betLevels`. Las
+// partidas de un torneo son gratis —la inscripción la cobró billing al inscribirse— y las reglas las
+// manda el orquestador, que las copió del torneo. `strictObject` rechaza cualquier campo de dinero:
+// un llamador que crea estar cobrando una mesa de torneo se entera acá y no al ver que no se cobró.
+const tournamentRequest = z
+  .strictObject({
+    mode: z.literal("TOURNAMENT"),
+    matchId: nonBlank,
+    tournamentId: identityPart,
+    // Mismas reglas de forma que la casual: 2 o 4, par, sin el mismo jugador dos veces.
+    participants: z.array(participant).min(2).max(4),
+    seed: nonBlank,
+    teamAssignment,
+    rules: z.strictObject({
+      pointsToWin: z.number().int().positive().max(MAX_POINTS_TO_WIN),
+    }),
+  })
+  .superRefine(({ participants }, context) =>
+    checkTableShape(participants, context, "participants"),
+  );
+
+// `mode` DISCRIMINA: una mesa casual con campos de torneo, o al revés, es un 400 y no una mesa a medias.
+const createRequest = z.discriminatedUnion("mode", [casualRequest, tournamentRequest]);
+
 // EL SNAPSHOT GRABADO. Es la mesa ENTERA —asientos ya numerados, puntos y dinero adentro— y es lo
 // que el replay recibe: reconstruir una partida no puede depender del catálogo, porque el catálogo
 // cambia y la partida ya pasó. Valida todo lo que `configOf` produjo, con las mismas guardas de
 // identidad y de dinero.
 const matchSnapshot = z
   .strictObject({
+    // DE QUÉ CLASE ES LA MESA. Opcional y sin default: todo lo grabado antes de los torneos es casual, y
+    // una mesa casual sigue sin escribirlo (ver `DominoMatchConfig.mode`), así que el snapshot de
+    // siempre se rebobina idéntico.
+    mode: z.literal("TOURNAMENT").optional(),
+    tournamentId: identityPart.optional(),
     matchId: nonBlank,
     gameModeId: nonBlank,
     seats: z
@@ -232,7 +265,18 @@ const matchSnapshot = z
     // la reconstrucción dejaría de ser fiel.
     isRematchEnabled: z.boolean().default(false),
   })
-  .superRefine(({ seats }, context) => checkTableShape(seats, context, "seats"));
+  .superRefine((snapshot, context) => {
+    checkTableShape(snapshot.seats, context, "seats");
+    // Una mesa de torneo sin su torneo, o un torneo colgado de una casual, no se rebobina: no se sabría
+    // a qué torneo contó.
+    if ((snapshot.mode === "TOURNAMENT") !== (snapshot.tournamentId !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["tournamentId"],
+        message: "tournamentId va con mode TOURNAMENT, y solo con él",
+      });
+    }
+  });
 
 // El MISMO schema, para que la API interna valide el cuerpo con el contrato de la sala y no con
 // una copia: si divergen, una mesa que la ruta acepta la sala la rechaza después de crearla.
@@ -240,6 +284,8 @@ export const createMatchRequestSchema = createRequest;
 
 export type MatchParticipant = z.infer<typeof participant>;
 export type CreateMatchRequest = z.infer<typeof createRequest>;
+export type CasualMatchRequest = z.infer<typeof casualRequest>;
+export type TournamentMatchRequest = z.infer<typeof tournamentRequest>;
 
 export interface SeatCredentials extends Identity {
   readonly token: string;
@@ -312,9 +358,13 @@ export function requestOf(input: unknown): CreateMatchRequest {
  */
 export function configOf(
   request: CreateMatchRequest,
-  mode: GameMode,
+  mode: GameMode | undefined,
   betLevels: readonly BetLevel[] = [],
 ): DominoMatchConfig {
+  // LA MESA DE TORNEO NO TIENE MODO NI NIVELES: se arma con lo que trae el request, y lo que el
+  // llamador pase en `mode`/`betLevels` no la toca.
+  if (request.mode === "TOURNAMENT") return tournamentConfigOf(request);
+  if (!mode) throw new UnknownGameModeError(request.gameModeId);
   // EL ORDEN DE LAS DOS GUARDAS IMPORTA: primero "no sabemos jugar este modo" y después "pediste
   // mal la cantidad". Al revés, un pedido de tres contra un modo de tres saldría con el error de
   // cantidad —que coincide— y nadie se enteraría de que el problema es el modo.
@@ -370,6 +420,52 @@ export function configOf(
     // LA MESA GRATIS NO OFRECE AUMENTAR, traiga lo que traiga el request: no hay entrada que
     // multiplicar ni premio que escalar. Es la regla de v1 (`on-propose-bet-multiplier.ts:46`).
     betLevels: mode.isFreeRoom ? [] : betLevels,
+  };
+}
+
+/**
+ * EL `gameModeId` DE UNA MESA DE TORNEO. No hay modo del catálogo detrás; el campo sigue siendo
+ * obligatorio en el snapshot, el registro, el censo y el resultado, y con el torneo adentro agrupa
+ * las mesas de un mismo torneo en el censo. Un consumidor que filtre por modo no lo confunde con un
+ * uuid del catálogo.
+ */
+export const tournamentGameModeId = (tournamentId: string): string => `tournament:${tournamentId}`;
+
+/**
+ * LA TASA DE UNA MESA SIN DINERO. El snapshot y el resultado la exigen no vacía, y una mesa de torneo
+ * no cobra ni paga nada que convertir: es un marcador, no una tasa del proveedor.
+ */
+export const NO_RATE = "none";
+
+/**
+ * EL SNAPSHOT DE UNA MESA DE TORNEO, sin catálogo: las reglas vienen en el request y el resto es fijo.
+ * Gratis (`isFreeRoom`, sin entrada ni premio ni aumentos), sin bots —un torneo se juega entre los
+ * inscritos; el que se va, pierde— y sin revancha —se vuelve a jugar cuando el torneo lo diga, no
+ * cuando los dos se pongan de acuerdo—. Los plazos son los mismos de cualquier mesa: salen de la
+ * config global (con sus ediciones en caliente), que la sala fotografía igual que en una casual.
+ */
+export function tournamentConfigOf(request: TournamentMatchRequest): DominoMatchConfig {
+  return {
+    mode: "TOURNAMENT",
+    tournamentId: request.tournamentId,
+    matchId: request.matchId,
+    gameModeId: tournamentGameModeId(request.tournamentId),
+    seats: request.participants.map((value, index) => ({
+      ...value,
+      playerId: `seat-${index + 1}`,
+    })),
+    seed: request.seed,
+    pointsToWin: request.rules.pointsToWin,
+    teamAssignment: request.teamAssignment,
+    isDealWindowEnabled: true,
+    rateId: NO_RATE,
+    entryFee: 0,
+    prize: 0,
+    multiplier: 1,
+    isFreeRoom: true,
+    enableBots: false,
+    isRematchEnabled: false,
+    betLevels: [],
   };
 }
 

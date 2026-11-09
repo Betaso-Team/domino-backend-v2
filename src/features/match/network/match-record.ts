@@ -30,6 +30,8 @@ export function matchSetupOf(
   return {
     roomId: table.roomId,
     table: {
+      ...(config.mode === undefined ? {} : { mode: config.mode }),
+      ...(config.tournamentId === undefined ? {} : { tournamentId: config.tournamentId }),
       gameModeId: config.gameModeId,
       name: table.gameModeName,
       entryFeeInUC: config.entryFee,

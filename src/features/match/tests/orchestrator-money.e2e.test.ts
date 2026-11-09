@@ -249,4 +249,56 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     const key = `${match.config.matchId}:finished`;
     await waitUntil(async () => (await matchResults.present([key])).has(key), 3_000);
   });
+
+  // LA MESA DE TORNEO NO TOCA DINERO: no pide cobro de entrada, arranca con la mesa completa y su
+  // resultado sale con el modo, el torneo y sin montos.
+  it("una mesa de torneo arranca sin pedir cobro y publica su resultado con el torneo", async () => {
+    const before = fakeOrchestrator.entries.length;
+    const enqueue = vi.spyOn(matchResults, "enqueue");
+    const room = await server.createRoom("domino", {
+      mode: "TOURNAMENT",
+      matchId: "m-torneo",
+      tournamentId: "t-1",
+      participants: [
+        { userId: "t1", displayName: "t1", currency: "VES" },
+        { userId: "t2", displayName: "t2", currency: "VES" },
+      ],
+      seed: "seed",
+      teamAssignment: "SEAT_ORDER",
+      rules: { pointsToWin: 50 },
+    });
+    const first = await joinAs(server, room.roomId, "t1");
+    const second = await joinAs(server, room.roomId, "t2");
+    const state = room.state as unknown as {
+      phase: string;
+      currentRound?: { phase: string };
+    };
+    await waitUntil(() => state.phase === "PLAYING");
+    expect(fakeOrchestrator.entries.length).toBe(before);
+    expect(configOfRoom(room.roomId)).toMatchObject({
+      mode: "TOURNAMENT",
+      tournamentId: "t-1",
+      isFreeRoom: true,
+      isRematchEnabled: false,
+      pointsToWin: 50,
+    });
+
+    first.send("REVEAL_TILES", {});
+    second.send("REVEAL_TILES", {});
+    await waitUntil(() => state.currentRound?.phase === "PLAYING");
+    second.send("ABANDON", {});
+    const key = "m-torneo:finished";
+    await waitUntil(async () => (await matchResults.present([key])).has(key), 3_000);
+    expect(enqueue.mock.calls.find((call) => call[0] === key)?.[2]).toMatchObject({
+      mode: "TOURNAMENT",
+      tournamentId: "t-1",
+      reason: "ABANDONMENT",
+      endReason: "ABANDONMENT_VOLUNTARY",
+      stakes: { entryFee: 0, prize: 0, isFreeRoom: true, bet: null },
+      participants: [
+        { userId: "t1", result: "won", abandon: null },
+        { userId: "t2", result: "abandoned", abandon: "voluntary" },
+      ],
+    });
+  });
 });

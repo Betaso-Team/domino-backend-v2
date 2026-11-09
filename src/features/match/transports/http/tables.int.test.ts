@@ -56,6 +56,7 @@ const deps = ({ tables, registry, ...over }: Over = {}): TablesDeps => ({
         ["mode-2p", 4],
         ["mode-4p", 2],
       ]),
+      byTournament: new Map([["t-1", 2]]),
     }),
     forget: async () => undefined,
     ...registry,
@@ -119,6 +120,7 @@ describe("tablesRoutes", () => {
           { gameModeId: "mode-2p", playersInMatch: 4 },
           { gameModeId: "mode-4p", playersInMatch: 2 },
         ],
+        byTournament: [{ tournamentId: "t-1", playersInMatch: 2 }],
       },
     });
     expect((await fetch(`${base}/internal/census`)).status).toBe(401);
@@ -153,6 +155,24 @@ describe("tablesRoutes", () => {
     expect((await post(`${base}/internal/matches`, { ...request, rateId: " " })).status).toBe(400);
   });
 
+  it("abre una mesa de torneo, y le rechaza cualquier campo de dinero", async () => {
+    const base = await serve();
+    const { gameModeId: _m, rateId: _r, ...rest } = request;
+    const tournament = {
+      ...rest,
+      mode: "TOURNAMENT",
+      tournamentId: "t-1",
+      rules: { pointsToWin: 100 },
+    };
+    expect((await post(`${base}/internal/matches`, tournament)).status).toBe(201);
+    expect((await post(`${base}/internal/matches`, { ...tournament, rateId: "r" })).status).toBe(
+      400,
+    );
+    expect((await post(`${base}/internal/matches`, { ...tournament, mode: "CASUAL" })).status).toBe(
+      400,
+    );
+  });
+
   it("contesta 422 con el código cuando la sala rechaza la mesa", async () => {
     const base = await serve({
       tables: {
@@ -184,7 +204,7 @@ describe("tablesRoutes", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       status: "success",
-      data: { matchId: "m-1", reservation: { sessionId: "again" } },
+      data: { matchId: "m-1", mode: "CASUAL", reservation: { sessionId: "again" } },
     });
   });
 
@@ -244,9 +264,24 @@ describe("tablesRoutes", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         status: "success",
-        data: { matchId: "m-1", roomId: "room-1" },
+        data: { matchId: "m-1", roomId: "room-1", mode: "CASUAL" },
       });
       expect(seatBack).not.toHaveBeenCalled();
+    });
+
+    it("dice si la mesa es de torneo, y de cuál", async () => {
+      const base = await serve({
+        registry: {
+          matchOf: async () => "room-1",
+          publicConfigOf: async () =>
+            ({ matchId: "m-1", mode: "TOURNAMENT", tournamentId: "t-1" }) as PublicConfig,
+          census: vi.fn(),
+        },
+      });
+      expect(await (await get(`${base}/internal/players/p-a/match`)).json()).toEqual({
+        status: "success",
+        data: { matchId: "m-1", roomId: "room-1", mode: "TOURNAMENT", tournamentId: "t-1" },
+      });
     });
 
     it("contesta 404 NO_LIVE_MATCH a quien no está en ninguna mesa, o cuya config ya no está", async () => {

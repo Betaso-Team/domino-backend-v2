@@ -20,7 +20,12 @@ import { playableSides } from "../core/rules/playable";
 import type { MatchState } from "../core/state";
 import type { BoardSide } from "../core/state/tile";
 import type { HistoryEntry, HistoryReader } from "../network/history";
-import { type CreateMatchRequest, configOf, requestOf } from "../transports/match-contract";
+import {
+  type CasualMatchRequest,
+  type CreateMatchRequest,
+  configOf,
+  requestOf,
+} from "../transports/match-contract";
 
 export {
   bootTestServer as bootServer,
@@ -99,7 +104,7 @@ export async function seatPair(
   seats: readonly [ParticipantInput, ParticipantInput],
   seed?: string,
   // LO QUE EL ORQUESTADOR PUEDE AGREGARLE AL PEDIDO, hoy los niveles de aumento.
-  extra: Pick<CreateMatchRequest, "betLevels"> = {},
+  extra: Pick<CasualMatchRequest, "betLevels"> = {},
 ): Promise<SeatedMatch> {
   const options = { ...casualTable(seats, seed), ...extra };
   // EL MISMO PAR QUE LA SALA: el request validado y el modo sembrado. Si acá se armara el config a

@@ -26,6 +26,8 @@ export function recordedReplayOf(
   // sabe armar un `DominoMatchConfig` válido. La tasa y la moneda no las consume el motor; la tasa
   // falta en una partida que no cerró, y va la nula que el CLI ya usaba.
   const meta = replayConfigOf({
+    ...(setup.table.mode === undefined ? {} : { mode: setup.table.mode }),
+    ...(setup.table.tournamentId === undefined ? {} : { tournamentId: setup.table.tournamentId }),
     matchId: setup.matchId,
     gameModeId: setup.table.gameModeId,
     seats: setup.seats.map((seat) => ({

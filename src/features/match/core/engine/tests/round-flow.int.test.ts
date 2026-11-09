@@ -167,6 +167,7 @@ describe("flujo de la ronda", () => {
     const events = e.fireTimeout();
     expect(events).toContainEqual({ type: "DEADLINE_EXPIRED", kind: "DEALING" });
     expect(events).toContainEqual({ type: "ABANDON", playerId: "u2" });
+    expect(e.match.players.find((p) => p.playerId === "u2")?.leftBy).toBe("timeout");
     expect(events.some((event) => event.type === "MATCH_RESOLVED")).toBe(false);
     expect(e.match.phase).toBe("PRESENTING_ABORT");
     // La ronda se queda en el reparto y las manos TAPADAS: destaparlas marcaría como vistas
@@ -272,6 +273,7 @@ describe("flujo de la ronda", () => {
     expect(events[0]).toEqual({ type: "DEADLINE_EXPIRED", kind: "TURN" });
     expect(events[1]).toEqual({ type: "ABANDON", playerId: "u1" });
     expect(e.match.players.find((p) => p.playerId === "u1")?.hasAbandoned).toBe(true);
+    expect(e.match.players.find((p) => p.playerId === "u1")?.leftBy).toBe("timeout");
   });
 
   it("el ABANDON voluntario no emite evento; el del timeout sí", () => {

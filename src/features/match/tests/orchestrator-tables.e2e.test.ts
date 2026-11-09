@@ -165,7 +165,7 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       status: "success",
-      data: { matchId: table.matchId, roomId: opened.data.roomId },
+      data: { matchId: table.matchId, roomId: opened.data.roomId, mode: "CASUAL" },
     });
     // NINGUNA RESERVA NUEVA: la sala sigue con sus dos clientes y nada más.
     expect(room.clients.length).toBe(2);
