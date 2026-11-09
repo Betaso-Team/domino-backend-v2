@@ -45,7 +45,7 @@ export interface GameModeRepository extends GameModeReader {
   removeSubscriber(uuid: string, providerId: string): Promise<GameMode | undefined>;
 }
 
-// QUIÉN PIDE, para el ámbito: `provider` nulo es Betaso Games, que ve y toca todo; un id es un admin
+// QUIÉN PIDE, para el ámbito: `provider` nulo es Tablea Gaming, que ve y toca todo; un id es un admin
 // de ese proveedor. Es la mitad del `Admin` de `shared/http/api-key.ts` que el catálogo necesita, y se
 // redeclara acá para que el core no dependa de la frontera HTTP (el tipado estructural las une).
 export interface CatalogActor {
@@ -55,7 +55,7 @@ export interface CatalogActor {
   readonly name?: string;
 }
 
-export const BETASO_GAMES: CatalogActor = { provider: null };
+export const TABLEA_GAMING: CatalogActor = { provider: null };
 
 // QUÉ MODOS SE LE OFRECEN A UN PROVEEDOR: los suyos, y los compartidos que lo tienen en la lista de
 // suscriptores (explícita: sin lista, nadie). Es la regla de lo que JUEGA: la usa la copia de los
@@ -68,7 +68,7 @@ export function offeredTo(mode: GameMode, provider: string): boolean {
 // QUÉ MODOS VE UN PROVEEDOR EN EL PANEL, que es más que lo que juega: además de lo que se le ofrece,
 // todos los compartidos ACTIVOS, para que elija a cuáles suscribirse (`subscribed` en el DTO dice en
 // cuáles está). Un compartido dado de baja sólo lo ve si estaba suscrito; uno propio de otro proveedor,
-// nunca. Betaso Games ve todo.
+// nunca. Tablea Gaming ve todo.
 export function visibleTo(mode: GameMode, actor: CatalogActor): boolean {
   if (actor.provider === null) return true;
   if (mode.ownerProviderId === null && mode.isActive) return true;

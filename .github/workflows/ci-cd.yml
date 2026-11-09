@@ -113,7 +113,7 @@ jobs:
           fi
 
   # SIN `services:`: la suite no mira Mongo ni Redis (`vitest.setup.ts` borra `MONGO_URI`, `REDIS_URL` y
-  # `BETASO_GAMES_RABBITMQ_URL`), así que levantarlos acá sería un job que miente. Lo que sí los usa es el
+  # `TABLEA_GAMING_RABBITMQ_URL`), así que levantarlos acá sería un job que miente. Lo que sí los usa es el
   # smoke, abajo.
   verify:
     needs: target

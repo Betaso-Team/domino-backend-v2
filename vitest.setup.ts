@@ -72,13 +72,13 @@ delete process.env.MONGO_URI;
 // Es además lo que garantiza que `npm test` no dependa de NINGÚN servicio externo: sin esta
 // línea la propiedad no sería del repo sino del entorno de quien lo corre.
 delete process.env.REDIS_URL;
-// SE BORRA POR LA TERCERA VEZ Y POR LA MISMA RAZÓN. La presencia de `BETASO_GAMES_RABBITMQ_URL` es
+// SE BORRA POR LA TERCERA VEZ Y POR LA MISMA RAZÓN. La presencia de `TABLEA_GAMING_RABBITMQ_URL` es
 // lo que hace que el composition root construya un `AmqpPublisher` y arranque el despachador de
 // resultados: un desarrollador que la tenga exportada en su shell haría que `npm test` PUBLIQUE
 // resultados de partidas inventadas a la cola del orquestador, que los liquidaría. `amqplib` con
 // `recovery: true` además no rechaza cuando el broker no está —cuelga, ver `src/shared/amqp.ts`—,
 // así que el modo de falla del olvido no sería un rojo sino una suite que se queda esperando.
-delete process.env.BETASO_GAMES_RABBITMQ_URL;
+delete process.env.TABLEA_GAMING_RABBITMQ_URL;
 process.env.PORT ??= "2567";
 // LOS PLAZOS SE DIVIDEN EN LOS QUE VENCEN Y LOS QUE SE CANCELAN (truco `9d543c6`), no en cortos
 // y largos. Los que VENCEN —las pausas de presentación— los espera el flujo entero en cada mano,

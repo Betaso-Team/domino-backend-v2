@@ -157,21 +157,21 @@ cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
 Estas rutas requieren una de dos credenciales:
 
 - el header `x-internal-api-key` con la llave de administración (scripts y soporte). Vale como un
-  admin de **Betaso Games** con rol `admin`;
+  admin de **Tablea Gaming** con rol `admin`;
 - `Authorization: Bearer <token>` con el token de admin que billing-auth emite cuando un admin inicia
-  sesión (`POST /v1/auth/login` de billing-auth): ES256, audiencia `betaso-games-admin` y
-  `typ: admin`. Sus claims `prv` (el proveedor del admin; `null` es Betaso Games) y `role` (`admin` o
+  sesión (`POST /v1/auth/login` de billing-auth): ES256, audiencia `tablea-gaming-admin` y
+  `typ: admin`. Sus claims `prv` (el proveedor del admin; `null` es Tablea Gaming) y `role` (`admin` o
   `support`) dicen qué abre, y son **obligatorias**: un token sin `prv` (texto o `null` explícito) o
   sin `role` es `401`, igual que un rol desconocido o un `prv` vacío o que no es texto.
 
 Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas. Los errores de todas
 salen `{ code, detail? }` (ver [«Errores»](#errores)).
 
-**Quién entra.** El default es el cerrado: una ruta es de Betaso Games y de escritura salvo que diga
+**Quién entra.** El default es el cerrado: una ruta es de Tablea Gaming y de escritura salvo que diga
 lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las rutas del catálogo que
 acotan su ámbito; en todas las demás recibe `403 { code: "FORBIDDEN" }`.
 
-| Rutas | Betaso Games `admin` (y la llave) | Betaso Games `support` | Proveedor `admin` | Proveedor `support` |
+| Rutas | Tablea Gaming `admin` (y la llave) | Tablea Gaming `support` | Proveedor `admin` | Proveedor `support` |
 |---|---|---|---|---|
 | `/internal/matches…`, `/game-data/:roomId` | sí | sí | 403 | 403 |
 | `GET /internal/settings…` | sí | sí | 403 | 403 |
@@ -185,8 +185,8 @@ acotan su ámbito; en todas las demás recibe `403 { code: "FORBIDDEN" }`.
 
 **El proveedor sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo. Un admin de
 proveedor no lo nombra: es el suyo (un `?providerId=` igual al suyo se acepta; uno distinto responde
-`404 { code: "UNKNOWN_PROVIDER" }`: otro proveedor no existe para él, como sus modos propios). Betaso
-Games (token sin `prv`, o la llave) lo nombra con `?providerId=`, obligatorio en las rutas que actúan
+`404 { code: "UNKNOWN_PROVIDER" }`: otro proveedor no existe para él, como sus modos propios). Tablea
+Gaming (token sin `prv`, o la llave) lo nombra con `?providerId=`, obligatorio en las rutas que actúan
 sobre un proveedor (suscripción, copias, fuente): sin él, `400 { code: "PROVIDER_REQUIRED", detail }`.
 En `GET /game-modes/admin` es opcional.
 
@@ -218,7 +218,7 @@ catálogo público): tocarlo sin poder responde `403 { code: "FORBIDDEN", detail
 
 ### Modos con dueño y suscripciones
 
-Cada modo tiene un dueño, `ownerProviderId`: `null` es un modo **compartido** de Betaso Games; un id es
+Cada modo tiene un dueño, `ownerProviderId`: `null` es un modo **compartido** de Tablea Gaming; un id es
 un modo **propio** de ese proveedor, que sólo juegan sus jugadores. Un admin de proveedor crea sólo
 modos propios suyos: sin el campo se lo pone el servicio; con `null` es `403 FORBIDDEN` y con el id de
 otro proveedor, `404 UNKNOWN_PROVIDER` (lo de otro proveedor no existe para él). Los compartidos llevan
@@ -228,7 +228,7 @@ además `subscribers`, los proveedores que los juegan:
   sin el campo se lee `[]`, igual que un compartido nuevo: no se ofrece a nadie hasta que se
   suscriban. Un modo propio también lleva `[]`: no tiene suscriptores. Los compartidos de antes de las
   suscripciones se suscriben una vez con `npm run modes:subscribe-existing` (`operacion.md`).
-- Cada proveedor se suscribe o se da de baja él mismo (Betaso Games puede hacerlo por cualquiera, con
+- Cada proveedor se suscribe o se da de baja él mismo (Tablea Gaming puede hacerlo por cualquiera, con
   `?providerId=`). Las dos son idempotentes. La suscripción vale sólo sobre compartidos **activos**;
   sobre uno inactivo o propio, `409`. No hay ruta para fijar la lista entera.
 - Las escrituras de suscriptores **no avanzan `__v` ni `updatedAt`**: suscribirse no es una edición
@@ -237,11 +237,11 @@ además `subscribers`, los proveedores que los juegan:
   vale **por dueño**: dos proveedores pueden tener cada uno su «Clásica».
 
 Lo que ve cada uno en `GET /game-modes/admin` y `/admin/:uuid`: el DTO de v1 más `ownerProviderId`.
-Betaso Games ve también `subscribers`; un proveedor no (es información de los otros), sino
+Tablea Gaming ve también `subscribers`; un proveedor no (es información de los otros), sino
 `subscribed: true | false` en cada compartido: si él está suscrito. Un proveedor ve sus modos propios
 (también los dados de baja) y **todos los compartidos activos**, para elegir a cuáles suscribirse; un
 compartido dado de baja sólo lo sigue viendo si estaba suscrito. Lo que JUEGA no cambia: sus propios o
-los compartidos a los que está suscrito, según la fuente. Betaso Games ve todos los modos, o con
+los compartidos a los que está suscrito, según la fuente. Tablea Gaming ve todos los modos, o con
 `?providerId=` lo que ve ese proveedor.
 
 **`GET /game-modes/admin` se pagina si se pide**: con `?page=` o `?pageSize=` (de 1 a 100; si falta uno,
@@ -277,7 +277,7 @@ El camino habitual para pasar a `own`: `POST /game-modes/copies`, editar las cop
 fuente.
 
 **La fuente se lee en `GET /game-modes/admin`** cuando hay un proveedor resuelto (un token de proveedor,
-o Betaso Games con `?providerId=`): la respuesta suma `source` junto a `data`. Betaso Games sin
+o Tablea Gaming con `?providerId=`): la respuesta suma `source` junto a `data`. Tablea Gaming sin
 `?providerId=` recibe todos los modos y ningún `source`.
 
 ```json
@@ -399,7 +399,7 @@ con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Cinco rutas que sólo usa el orquestador de Betaso Juegos; las de las mesas son la única puerta
+Cinco rutas que sólo usa el orquestador de Tablea Gaming; las de las mesas son la única puerta
 de entrada a una partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 { code: "UNAUTHORIZED" }` es una llave ausente o equivocada, y se decide ANTES de mirar el
@@ -511,8 +511,8 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
   un plazo vencido, y la mesa no queda esperando el cobro.
 - **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
   anula (`MULTIPLIER_REVOKED`).
-- **El resultado** sale por un outbox durable al exchange `betaso_games` (broker y vhost de
-  `BETASO_GAMES_RABBITMQ_URL`), con `mandatory` y publisher confirm: `domino.match.finished` al
+- **El resultado** sale por un outbox durable al exchange `tablea_gaming` (broker y vhost de
+  `TABLEA_GAMING_RABBITMQ_URL`), con `mandatory` y publisher confirm: `domino.match.finished` al
   dictaminarse (participantes, apuesta de la mesa y los premios en `payouts`, ya con el aumento) y
   `domino.match.aborted` al cerrarse sin veredicto (sin montos: el orquestador devuelve lo que cobró).
   `messageId = <matchId>:finished|aborted`.
@@ -537,8 +537,8 @@ El contrato completo vive en el monorepo del orquestador:
 
 ### Anuncios del catálogo (`domino.config.*`)
 
-Cada cambio del catálogo se anuncia en el exchange `betaso_games` (el de `BETASO_GAMES_RABBITMQ_URL`), para el
-servicio de notificaciones de Betaso Games. Salen de su propio outbox (`catalog_event_outbox`, con su propio
+Cada cambio del catálogo se anuncia en el exchange `tablea_gaming` (el de `TABLEA_GAMING_RABBITMQ_URL`), para el
+servicio de notificaciones de Tablea Gaming. Salen de su propio outbox (`catalog_event_outbox`, con su propio
 despachador): un anuncio que no sale nunca frena un resultado de partida. Se encolan **después** de escribir
 el cambio (Mongo no tiene transacciones en este despliegue): un proceso que muere entre las dos cosas pierde
 ese aviso. `messageId = <uuid>:<topic>`.
@@ -627,7 +627,7 @@ flowchart LR
   Platform --> History
   Domain --> Clients["Clientes de la sala"]
   Domain --> Payouts["payoutOf\nproyección de dinero"]
-  Payouts --> Result["Resultado al orquestador\n(outbox → betaso_games)"]
+  Payouts --> Result["Resultado al orquestador\n(outbox → tablea_gaming)"]
 ```
 
 Los eventos de dominio describen consecuencias (`ROUND_STARTED` en cada reparto, `ROUND_RESOLVED`,

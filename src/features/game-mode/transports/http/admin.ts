@@ -30,11 +30,11 @@ import {
 
 // LAS MUTACIONES DEL PANEL Y SUS DOS LECTURAS, detrás de su llave.
 //
-// QUIÉN ENTRA A CADA UNA lo dice su puerta (`requireAdminKey`), y el default es el cerrado: Betaso
-// Games con rol `admin`. Las que abren a los admins de PROVEEDOR (`providers`) delegan el ámbito en el
+// QUIÉN ENTRA A CADA UNA lo dice su puerta (`requireAdminKey`), y el default es el cerrado: Tablea
+// Gaming con rol `admin`. Las que abren a los admins de PROVEEDOR (`providers`) delegan el ámbito en el
 // servicio, que sabe de quién es cada modo; las de sólo lectura (`read`) abren también a `support`.
 //
-// | ruta                                     | Betaso Games | proveedor                      | support |
+// | ruta                                     | Tablea Gaming | proveedor                      | support |
 // |------------------------------------------|--------------|--------------------------------|---------|
 // | GET  /game-modes/admin, /admin/:uuid      | todo         | los suyos + compartidos que juega | lee  |
 // | POST /game-modes                          | sí           | sólo propios suyos             | no      |
@@ -49,8 +49,8 @@ import {
 /**
  * SOBRE QUÉ PROVEEDOR ACTÚA el pedido, o `undefined` después de contestar por qué ninguno. Un admin de
  * proveedor, el suyo (un `?providerId=` igual al suyo se acepta, uno distinto es 404
- * `UNKNOWN_PROVIDER`: lo de otro proveedor no existe para éste, igual que sus modos propios); Betaso
- * Games —token sin `prv`, o la llave— el que nombre con `?providerId=`, y sin él es 400
+ * `UNKNOWN_PROVIDER`: lo de otro proveedor no existe para éste, igual que sus modos propios); Tablea
+ * Gaming —token sin `prv`, o la llave— el que nombre con `?providerId=`, y sin él es 400
  * `PROVIDER_REQUIRED`. Es el mismo patrón que los webhooks del orquestador
  * (`reports/transports/http/webhooks.ts`).
  */
@@ -62,7 +62,7 @@ function providerOf(response: Response, asked: string | undefined): string | und
       response,
       400,
       "PROVIDER_REQUIRED",
-      "falta ?providerId=: Betaso Games indica sobre qué proveedor actúa",
+      "falta ?providerId=: Tablea Gaming indica sobre qué proveedor actúa",
     );
     return undefined;
   }
@@ -73,8 +73,8 @@ function providerOf(response: Response, asked: string | undefined): string | und
   return provider;
 }
 
-// LO MISMO, PERO OPCIONAL PARA BETASO GAMES: el listado del panel sin `?providerId=` es el catálogo
-// entero. `null` = Betaso Games sin proveedor; `undefined` = ya se contestó el 400 o el 404.
+// LO MISMO, PERO OPCIONAL PARA TABLEA GAMING: el listado del panel sin `?providerId=` es el catálogo
+// entero. `null` = Tablea Gaming sin proveedor; `undefined` = ya se contestó el 400 o el 404.
 function optionalProviderOf(
   response: Response,
   asked: string | undefined,
@@ -129,8 +129,8 @@ export function adminRoutes({
   // aquél: el admin se monta primero (`register.ts`), así que `/game-modes/admin` le gana al
   // `/:uuid` público, que lo tomaría por el uuid de un modo llamado "admin".
   //
-  // CON UN PROVEEDOR RESUELTO (el del token, o el `?providerId=` de Betaso Games) la respuesta suma
-  // `source`, la fuente de su catálogo: `{ status, data, source }`. Betaso Games sin `?providerId=`
+  // CON UN PROVEEDOR RESUELTO (el del token, o el `?providerId=` de Tablea Gaming) la respuesta suma
+  // `source`, la fuente de su catálogo: `{ status, data, source }`. Tablea Gaming sin `?providerId=`
   // ve todos los modos y ninguna fuente, porque no hay un catálogo del que hablar.
   router.get(
     `${BASE}/admin`,

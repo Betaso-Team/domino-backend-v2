@@ -117,7 +117,7 @@ export const CREATE_BODY = z.strictObject({
   // dos adaptadores; ponerle un default fijo acá lo apagaría en toda mesa de cuatro.
   enableBots: fields.enableBots.optional(),
   betLevels: fields.betLevels.default([]),
-  // DE QUIÉN ES EL MODO: ausente o `null` es un compartido de Betaso Games; un id es un modo propio de
+  // DE QUIÉN ES EL MODO: ausente o `null` es un compartido de Tablea Gaming; un id es un modo propio de
   // ese proveedor. Un admin de proveedor puede omitirlo (se lo pone el servicio) o mandar el suyo; el
   // `null` es 403 y el de otro, 404 UNKNOWN_PROVIDER. No se edita: no está en `UPDATE_BODY`.
   ownerProviderId: providerIdOf("ownerProviderId").nullable().optional(),
@@ -166,7 +166,7 @@ export const UUID_PARAMS = z.object({
 });
 
 // EL PROVEEDOR SOBRE EL QUE SE ACTÚA NO VIAJA EN EL PATH NI EN EL CUERPO: sale del token. Un admin de
-// proveedor ya dice quién es; sólo Betaso Games (token sin `prv`, o la llave) lo nombra, con
+// proveedor ya dice quién es; sólo Tablea Gaming (token sin `prv`, o la llave) lo nombra, con
 // `?providerId=`. Lo resuelve `providerOf` (`admin.ts`); acá sólo se valida la forma.
 export const PROVIDER_QUERY = z.object({ providerId: providerIdOf("providerId").optional() });
 
@@ -304,7 +304,7 @@ export function toDTO(mode: GameMode): GameModeDTO {
   };
 }
 
-// LO QUE VE EL PANEL: el DTO de v1 más el dueño. Betaso Games ve la lista de suscriptores; un proveedor
+// LO QUE VE EL PANEL: el DTO de v1 más el dueño. Tablea Gaming ve la lista de suscriptores; un proveedor
 // no ve quién más juega un compartido (es información comercial de los otros), sólo `subscribed`: si
 // él está suscrito. En un modo propio `subscribed` no viene: nadie se suscribe a lo suyo.
 export interface AdminGameModeDTO extends GameModeDTO {

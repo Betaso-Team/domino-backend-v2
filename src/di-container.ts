@@ -225,15 +225,15 @@ const providerCatalogs = mongo
 
 // ── LAS MESAS DEL ORQUESTADOR: el resultado y los cobros ────────────────────────────────────────
 //
-// EL RESULTADO VA POR EL BROKER DE LA PLATAFORMA DE JUEGOS (`BETASO_GAMES_RABBITMQ_URL`, vhost
-// `betaso_games`), el único al que el dominó publica. El outbox elige por `MONGO_URI`, y el
+// EL RESULTADO VA POR EL BROKER DE LA PLATAFORMA DE JUEGOS (`TABLEA_GAMING_RABBITMQ_URL`, vhost
+// `tablea_gaming`), el único al que el dominó publica. El outbox elige por `MONGO_URI`, y el
 // despachador existe con el broker aunque no haya Mongo —sin Mongo, lo encolado se pierde con el
 // proceso, pero lo que alcance a salir sale—. Sin broker, el outbox acumula.
 //
 // `mandatory` es lo que hace que un resultado publicado antes de que el orquestador declare su cola
 // cuente como fallo y se reintente (ver `shared/amqp.ts`).
-export const betasoGamesAmqp = env.betasoGamesRabbitmqUrl
-  ? new AmqpPublisher(env.betasoGamesRabbitmqUrl, logger)
+export const tableaGamingAmqp = env.tableaGamingRabbitmqUrl
+  ? new AmqpPublisher(env.tableaGamingRabbitmqUrl, logger)
   : undefined;
 const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
   ? new MongoOutboxStore(mongo, "match_result_outbox", clock, {
@@ -241,13 +241,13 @@ const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
       sentRetentionSeconds: 7 * 24 * 3600,
     })
   : new MemoryOutboxStore(clock);
-export const matchResultDispatcher = betasoGamesAmqp
+export const matchResultDispatcher = tableaGamingAmqp
   ? new TopicOutboxDispatcher({
       exchange: MATCH_RESULT_EXCHANGE,
       // OTRO LEASE que el escritor del catálogo: comparten colección, no nombre, así que no se bloquean.
       leaseName: "match-result-publisher",
       queue: matchResultOutbox,
-      delivery: betasoGamesAmqp,
+      delivery: tableaGamingAmqp,
       lease: catalogLease,
       clock,
       log: logger,
@@ -309,12 +309,12 @@ const catalogEventOutbox: OutboxStore<CatalogTopic, CatalogEvent["payload"]> = m
       sentRetentionSeconds: 7 * 24 * 3600,
     })
   : new MemoryOutboxStore(clock);
-export const catalogEventDispatcher = betasoGamesAmqp
+export const catalogEventDispatcher = tableaGamingAmqp
   ? new TopicOutboxDispatcher({
       exchange: MATCH_RESULT_EXCHANGE,
       leaseName: "catalog-event-publisher",
       queue: catalogEventOutbox,
-      delivery: betasoGamesAmqp,
+      delivery: tableaGamingAmqp,
       lease: catalogLease,
       clock,
       log: logger,
@@ -485,7 +485,7 @@ export async function shutdown(): Promise<void> {
   // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
   //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`
   //    tolera una conexión ya cerrada, así que no hay nada que proteger acá.
-  await betasoGamesAmqp?.close();
+  await tableaGamingAmqp?.close();
   // 3. CERRAR MONGO ÚLTIMO. Los tres pasos de arriba escriben ahí: el despachador marca `SENT`, el
   //    historial drena su último lote. Al revés se pierde exactamente lo que se acaba de esperar.
   await mongo?.close();

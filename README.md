@@ -1,7 +1,7 @@
 # domino-backend-v2
 
 Backend de dominó multijugador sobre Colyseus 0.18. Juega las mesas que abre el **orquestador**
-de Betaso Juegos (`games-orchestrator/apps/domino-orchestrator`), que es la única puerta de
+de Tablea Gaming (`games-orchestrator/apps/domino-orchestrator`), que es la única puerta de
 entrada: admite a los jugadores, los empareja, tiene el interruptor de mantenimiento y abre cada
 mesa por la API interna de este servidor. El dominó no mueve dinero: le pide al orquestador que
 cobre y le publica el resultado de cada partida.

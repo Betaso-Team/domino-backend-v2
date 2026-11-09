@@ -65,7 +65,7 @@ function fixture(perTick?: number, stuckAfterMs?: number) {
   const lease = new MemoryLease();
   const within = vi.spyOn(lease, "within");
   const dispatcher = new TopicOutboxDispatcher({
-    exchange: "betaso_games",
+    exchange: "tablea_gaming",
     leaseName: "match-result-publisher",
     queue: store,
     delivery: delivery.port,

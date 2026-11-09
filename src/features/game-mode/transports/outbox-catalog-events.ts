@@ -4,7 +4,7 @@ import type { OutboxStore } from "@/shared/outbox";
 import type { CatalogEvent, CatalogEvents, CatalogTopic } from "../core/catalog-events";
 
 // LOS ANUNCIOS DEL CATÁLOGO AL OUTBOX DURABLE (`catalog_event_outbox`), que su propio despachador
-// publica en `betaso_games`: otro outbox que el de los resultados, así que un anuncio que no sale
+// publica en `tablea_gaming`: otro outbox que el de los resultados, así que un anuncio que no sale
 // nunca frena un resultado de partida. La clave de cada entrada es nueva (`<uuid>:<topic>`) y es el
 // `messageId`: quien consume deduplica por ella.
 //

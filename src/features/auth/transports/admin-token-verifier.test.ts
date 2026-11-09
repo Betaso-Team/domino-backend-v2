@@ -8,7 +8,7 @@ const PUBLIC = billing.publicKey.export({ type: "spki", format: "pem" }).toStrin
 const PRIVATE = billing.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const check = adminTokenCheck({
   publicKeyPem: PUBLIC,
-  issuer: "betaso-games-auth",
+  issuer: "tablea-gaming-auth",
   audience: "domino",
 });
 
@@ -17,15 +17,15 @@ const adminToken = (over: jwt.SignOptions = {}, claims: Record<string, unknown> 
   jwt.sign({ typ: "admin", sid: "s-1", ...claims }, PRIVATE, {
     algorithm: "ES256",
     subject: "ana",
-    issuer: "betaso-games-auth",
-    audience: "betaso-games-admin",
+    issuer: "tablea-gaming-auth",
+    audience: "tablea-gaming-admin",
     expiresIn: "5m",
     ...over,
   });
 
 describe("adminTokenCheck", () => {
   // SIN TOLERANCIA A LOS TOKENS DE ANTES: `prv` y `role` son obligatorios. Un token que no los trae
-  // no es «Betaso Games, admin»: es uno que no dice quién es.
+  // no es «Tablea Gaming, admin»: es uno que no dice quién es.
   it.each([
     ["sin prv ni role", {}],
     ["sin prv", { role: "admin" }],
@@ -53,7 +53,7 @@ describe("adminTokenCheck", () => {
   });
 
   // UN VALOR PRESENTE QUE NO SE ENTIENDE NO ES EL DEFAULT: es un token de otro contrato, y leerlo como
-  // Betaso Games con rol admin sería darle de más justo al que no se sabe quién es.
+  // Tablea Gaming con rol admin sería darle de más justo al que no se sabe quién es.
   it.each([
     ["un rol desconocido", { prv: null, role: "superadmin" }],
     ["un rol que no es texto", { prv: null, role: 1 }],

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DuplicateGameModeError,
   FreeRoomWithEntryError,
-  BETASO_GAMES as GAMES,
+  TABLEA_GAMING as GAMES,
   GameModeForbiddenError,
   GameModeNotFoundError,
   GameModeStateConflictError,
@@ -170,7 +170,7 @@ describe("GameModeService: lectura", () => {
 
   // LO QUE VE EL PANEL: reactivar exige poder listar al retirado primero. Mismo armado que
   // `listPublic`, pero acá el orden es el del repositorio (recientes primero).
-  it("listFor de Betaso Games devuelve activos e inactivos y no toma el lease", async () => {
+  it("listFor de Tablea Gaming devuelve activos e inactivos y no toma el lease", async () => {
     const { service, repository, clock, taken } = harness();
     const activa = await repository.create(clasica());
     clock.set(clock.now() + 1000);
@@ -182,7 +182,7 @@ describe("GameModeService: lectura", () => {
     expect(taken).toEqual([]);
   });
 
-  it("getFor de Betaso Games ve al modo dado de baja y tampoco toma el lease", async () => {
+  it("getFor de Tablea Gaming ve al modo dado de baja y tampoco toma el lease", async () => {
     const { service, repository, clock, taken } = harness();
     const modo = await repository.create(clasica());
     await repository.update(modo.uuid, { isActive: false });
@@ -214,7 +214,7 @@ describe("GameModeService: create", () => {
       isFreeRoom: false,
       enableBots: false,
       betLevels: [],
-      // Betaso Games sin dueño en el cuerpo: un COMPARTIDO, que nace sin nadie suscrito.
+      // Tablea Gaming sin dueño en el cuerpo: un COMPARTIDO, que nace sin nadie suscrito.
       ownerProviderId: null,
       subscribers: [],
       createdAt: new Date(BASE_INSTANT),
@@ -596,7 +596,7 @@ describe("GameModeService: sus dependencias", () => {
 
 // ═══ LOS PROVEEDORES ══════════════════════════════════════════════════════════════════════════════
 // Modos con dueño, suscripciones y la copia de los compartidos. Los actores son los que dejaría
-// pasar la puerta HTTP: Betaso Games (`GAMES`) y dos proveedores que no se ven entre sí.
+// pasar la puerta HTTP: Tablea Gaming (`GAMES`) y dos proveedores que no se ven entre sí.
 const PARLEY = { provider: "parley" } as const;
 const RIVAL = { provider: "rival" } as const;
 
@@ -645,7 +645,7 @@ describe("GameModeService: el dueño de un modo nuevo", () => {
     expect(await repository.all()).toEqual([]);
   });
 
-  it("Betaso Games crea compartidos por default y propios del proveedor que nombre", async () => {
+  it("Tablea Gaming crea compartidos por default y propios del proveedor que nombre", async () => {
     const { service } = harness();
 
     expect((await service.create(GAMES, clasica())).ownerProviderId).toBeNull();
@@ -716,7 +716,7 @@ describe("GameModeService: lo que ve y toca cada proveedor", () => {
     return { ...h, viejo, suscrito, ajeno, propio, delRival };
   }
 
-  it("un proveedor ve los suyos y todos los compartidos activos; Betaso Games ve todo", async () => {
+  it("un proveedor ve los suyos y todos los compartidos activos; Tablea Gaming ve todo", async () => {
     const { service } = await catalog();
 
     const names = async (actor: { provider: string | null }) =>
@@ -733,8 +733,8 @@ describe("GameModeService: lo que ve y toca cada proveedor", () => {
     ]);
   });
 
-  // CON `providerId`: Betaso Games mira el catálogo de un proveedor; un proveedor sólo el suyo.
-  it("listFor con providerId: Betaso Games ve lo de ese proveedor, un proveedor sólo lo suyo", async () => {
+  // CON `providerId`: Tablea Gaming mira el catálogo de un proveedor; un proveedor sólo el suyo.
+  it("listFor con providerId: Tablea Gaming ve lo de ese proveedor, un proveedor sólo lo suyo", async () => {
     const { service } = await catalog();
 
     const names = async (actor: { provider: string | null }, providerId: string) =>

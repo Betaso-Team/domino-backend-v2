@@ -6,7 +6,7 @@ import { AmqpDeliveryError, AmqpPublisher } from "./amqp";
 // CONTRA UN DOBLE DE `amqplib`, y no contra un RabbitMQ de verdad, por lo mismo que
 // `mongo-lease.test.ts` y `mongo-history.test.ts`: la suite del dominó no depende de NINGÚN
 // servicio externo y eso es una propiedad del repo y no del shell de quien la corre
-// (`vitest.setup.ts` borra `MONGO_URI`, `REDIS_URL` y `BETASO_GAMES_RABBITMQ_URL`).
+// (`vitest.setup.ts` borra `MONGO_URI`, `REDIS_URL` y `TABLEA_GAMING_RABBITMQ_URL`).
 //
 // El doble se instala con `vi.hoisted` porque la fábrica del `vi.mock` corre ANTES que los imports
 // de este archivo: un `const` declarado acá abajo todavía estaría en su zona muerta.
@@ -215,7 +215,7 @@ describe("AmqpPublisher: mandatory, para que un mensaje sin cola no cuente como 
   it("pide mandatory al broker y usa el messageId del que publica", async () => {
     const { publisher, channels } = harness();
 
-    await publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+    await publisher.publishTopic("tablea_gaming", "domino.match.finished", PAYLOAD, {
       mandatory: true,
       messageId: "m-1:finished",
     });
@@ -238,7 +238,7 @@ describe("AmqpPublisher: mandatory, para que un mensaje sin cola no cuente como 
     });
 
     await expect(
-      publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+      publisher.publishTopic("tablea_gaming", "domino.match.finished", PAYLOAD, {
         mandatory: true,
         messageId: "m-2:finished",
       }),
@@ -254,7 +254,7 @@ describe("AmqpPublisher: mandatory, para que un mensaje sin cola no cuente como 
     });
 
     await expect(
-      publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+      publisher.publishTopic("tablea_gaming", "domino.match.finished", PAYLOAD, {
         mandatory: true,
         messageId: "m-3:finished",
       }),
@@ -265,7 +265,7 @@ describe("AmqpPublisher: mandatory, para que un mensaje sin cola no cuente como 
     const { publisher, channels } = harness();
 
     for (const id of ["a", "b", "c"]) {
-      await publisher.publishTopic("betaso_games", "domino.match.finished", PAYLOAD, {
+      await publisher.publishTopic("tablea_gaming", "domino.match.finished", PAYLOAD, {
         mandatory: true,
         messageId: id,
       });

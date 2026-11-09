@@ -9,11 +9,11 @@ const BILLING_PUBLIC = billing.publicKey.export({ type: "spki", format: "pem" })
 const BILLING_PRIVATE = billing.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const verifier = new JwtVerifier({
   publicKeyPem: BILLING_PUBLIC,
-  issuer: "betaso-games-auth",
+  issuer: "tablea-gaming-auth",
   audience: "domino",
 });
 
-// Como firma billing-auth: ES256, emisor betaso-games-auth y las dos audiencias.
+// Como firma billing-auth: ES256, emisor tablea-gaming-auth y las dos audiencias.
 const billingToken = (
   over: jwt.SignOptions = {},
   key = BILLING_PRIVATE,
@@ -21,7 +21,7 @@ const billingToken = (
 ) =>
   jwt.sign(claims, key, {
     algorithm: "ES256",
-    issuer: "betaso-games-auth",
+    issuer: "tablea-gaming-auth",
     audience: ["orchestrator", "domino"],
     expiresIn: "1h",
     ...over,
@@ -113,7 +113,7 @@ describe("JwtVerifier", () => {
   it("rechaza un ES256 sin exp", async () => {
     const noExp = jwt.sign({ sub: "p-1", game: "domino" }, BILLING_PRIVATE, {
       algorithm: "ES256",
-      issuer: "betaso-games-auth",
+      issuer: "tablea-gaming-auth",
       audience: "domino",
     });
     await expect(verifier.verify(noExp)).rejects.toBeInstanceOf(InvalidTokenError);
@@ -142,7 +142,7 @@ describe("JwtVerifier", () => {
 // clave mala tumba el arranque en vez de fallar jugador por jugador.
 describe("JwtVerifier: validación de la clave de billing-auth", () => {
   const build = (publicKeyPem: string) => () =>
-    new JwtVerifier({ publicKeyPem, issuer: "betaso-games-auth", audience: "domino" });
+    new JwtVerifier({ publicKeyPem, issuer: "tablea-gaming-auth", audience: "domino" });
 
   it("una clave que no es un PEM revienta al construir, nombrando la variable", () => {
     expect(build("esto no es un pem")).toThrow(/BILLING_AUTH_PUBLIC_KEY/);

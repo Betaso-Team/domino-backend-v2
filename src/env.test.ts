@@ -108,7 +108,7 @@ describe("parseEnv", () => {
     });
     expect(parsed.billingAuth).toEqual({
       publicKeyPem: "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----",
-      issuer: "betaso-games-auth",
+      issuer: "tablea-gaming-auth",
       audience: "domino",
     });
   });
@@ -327,7 +327,7 @@ describe("parseEnv", () => {
           ADMIN_API_KEY: "k".repeat(16),
           ORCHESTRATOR_API_KEY: orq,
         }),
-      ).toThrow(/BETASO_GAMES_RABBITMQ_URL/);
+      ).toThrow(/TABLEA_GAMING_RABBITMQ_URL/);
     });
 
     it.each(["ORCHESTRATOR_API_KEY", "ADMIN_API_KEY"])(

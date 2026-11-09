@@ -7,7 +7,7 @@ import { payoutOf } from "./payout";
 
 // EL RESULTADO DE UNA MESA DEL ORQUESTADOR, como hecho que dominó le publica. Es la mitad de dominó
 // del contrato `2026-10-05-dinero-mock-resultados-y-reportes-design` (games-orchestrator): exchange
-// `betaso_games`, routing keys `domino.match.finished` / `domino.match.aborted`.
+// `tablea_gaming`, routing keys `domino.match.finished` / `domino.match.aborted`.
 //
 // DOMINÓ NO MUEVE DINERO, Y TAMPOCO LO OMITE: dice qué pasó. El premio sí viaja —la regla de quién
 // cobra y cuánto es del juego (`payoutOf`)—, y los reembolsos NO: el orquestador devuelve lo que
@@ -15,7 +15,7 @@ import { payoutOf } from "./payout";
 //
 // TODA MESA lo publica: el orquestador es la única puerta de entrada, así que toda mesa es suya.
 
-export const MATCH_RESULT_EXCHANGE = "betaso_games";
+export const MATCH_RESULT_EXCHANGE = "tablea_gaming";
 export const MATCH_FINISHED_KEY = "domino.match.finished";
 export const MATCH_ABORTED_KEY = "domino.match.aborted";
 export type MatchResultKey = typeof MATCH_FINISHED_KEY | typeof MATCH_ABORTED_KEY;

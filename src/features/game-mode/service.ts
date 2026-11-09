@@ -32,15 +32,15 @@ import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode"
 // 1. **Un modo propio de OTRO proveedor no existe**: sale como 404 en toda operación, nunca como 403.
 //    Decir «no podés» sobre algo que no ve le confirmaría que existe.
 // 2. **Un compartido no es secreto pero no es suyo**: lo lista el catálogo público, así que tocarlo
-//    es 403 y no 404. Se lee y se juega; lo editan, lo dan de baja y lo reactivan sólo en Betaso
-//    Games.
+//    es 403 y no 404. Se lee y se juega; lo editan, lo dan de baja y lo reactivan sólo en Tablea
+//    Gaming.
 // 3. **Cada proveedor habla por sí mismo**: crea modos propios suyos, se suscribe él, copia para él.
 //    Pedirlo para otro es 404 `UNKNOWN_PROVIDER` antes de leer nada (otro proveedor no existe para
 //    él, como en la regla 1). El proveedor sobre el que se actúa llega YA RESUELTO
-//    por la frontera HTTP (el del token, o el `?providerId=` de Betaso Games); el chequeo de acá es la
+//    por la frontera HTTP (el del token, o el `?providerId=` de Tablea Gaming); el chequeo de acá es la
 //    segunda llave, para el día que otro llamador se olvide de la primera.
 //
-// Betaso Games (`provider: null`) pasa las tres. El rol (`support` sólo lee) lo resuelve la puerta
+// Tablea Gaming (`provider: null`) pasa las tres. El rol (`support` sólo lee) lo resuelve la puerta
 // HTTP antes de llegar acá: este servicio sólo sabe de QUIÉN es cada modo.
 //
 // ⚠ EL DUEÑO NO SE VERIFICA AL ABRIR UNA MESA. `POST /internal/matches` resuelve el modo activo por
@@ -198,7 +198,7 @@ export class GameModeService {
     return { modes, catalogs };
   }
 
-  // LA FUENTE DEL CATÁLOGO DE UN PROVEEDOR. La lee cualquier rol del proveedor o de Betaso Games; otro
+  // LA FUENTE DEL CATÁLOGO DE UN PROVEEDOR. La lee cualquier rol del proveedor o de Tablea Gaming; otro
   // proveedor es 404 UNKNOWN_PROVIDER (regla 3).
   catalogOf(actor: CatalogActor, providerId: string): Promise<ProviderCatalog> {
     try {
@@ -251,7 +251,7 @@ export class GameModeService {
   // listarlos y abrirlos primero. Igual que las públicas, sin lease; la frontera HTTP las
   // pone detrás de la llave, no el servicio. Cada proveedor ve lo que `visibleTo` le deja.
   //
-  // CON `providerId`, LO QUE VE ESE PROVEEDOR: así Betaso Games mira el catálogo de uno desde el panel
+  // CON `providerId`, LO QUE VE ESE PROVEEDOR: así Tablea Gaming mira el catálogo de uno desde el panel
   // (`?providerId=`). Un proveedor sólo puede pedir el suyo, que es lo mismo que no pedir nada.
   async listFor(actor: CatalogActor, providerId?: string): Promise<readonly GameMode[]> {
     if (providerId !== undefined)
@@ -268,7 +268,7 @@ export class GameModeService {
   create(actor: CatalogActor, input: CreateGameMode): Promise<GameMode> {
     // EL DUEÑO SE DECIDE ANTES DE TOCAR NADA: un proveedor crea sólo modos propios suyos —sin el campo,
     // se lo pone el servicio; con `null` (compartido) es 403 y con el de otro, 404 UNKNOWN_PROVIDER—;
-    // Betaso Games crea compartidos por default o propios del proveedor que nombre.
+    // Tablea Gaming crea compartidos por default o propios del proveedor que nombre.
     let owner: string | null;
     try {
       owner = ownerFor(actor, input.ownerProviderId);
@@ -385,7 +385,7 @@ export class GameModeService {
     });
   }
 
-  // UN PROVEEDOR SE SUSCRIBE A UN COMPARTIDO ACTIVO, o se da de baja. Betaso Games puede hacerlo por
+  // UN PROVEEDOR SE SUSCRIBE A UN COMPARTIDO ACTIVO, o se da de baja. Tablea Gaming puede hacerlo por
   // cualquiera. No mueve la revisión (ver el puerto).
   subscribe(actor: CatalogActor, uuid: string, providerId: string): Promise<GameMode> {
     return this.changeSubscription(actor, uuid, providerId, "add");
@@ -525,7 +525,7 @@ export class GameModeService {
     const mode = await this.found(uuid);
     if (actor.provider === null || mode.ownerProviderId === actor.provider) return mode;
     if (mode.ownerProviderId !== null) throw notFound(uuid);
-    throw new GameModeForbiddenError("un modo compartido lo administra Betaso Games");
+    throw new GameModeForbiddenError("un modo compartido lo administra Tablea Gaming");
   }
 
   // TODA LA LISTA Y UN FILTRO, y no una consulta por nombre. El puerto no tiene `byName` a propósito
@@ -600,7 +600,7 @@ export class GameModeService {
   }
 }
 
-// LA REGLA 3 en una línea: un proveedor actúa sólo sobre sí mismo; Betaso Games, sobre cualquiera.
+// LA REGLA 3 en una línea: un proveedor actúa sólo sobre sí mismo; Tablea Gaming, sobre cualquiera.
 // Otro proveedor no existe para él: 404 `UNKNOWN_PROVIDER`, como el `?providerId=` ajeno que la
 // frontera HTTP ya corta antes (esto es la segunda llave).
 function refuseForeign(actor: CatalogActor, providerId: string, message: string): void {
@@ -614,13 +614,13 @@ function notFound(uuid: string): GameModeNotFoundError {
 }
 
 // EL DUEÑO DE UN MODO NUEVO (regla 3). Un proveedor: el suyo, mande o no el campo; `null`, que es pedir
-// un compartido, es 403 (los compartidos los administra Betaso Games); otro proveedor es 404
-// `UNKNOWN_PROVIDER` (no existe para él). Betaso Games: el que nombre, o compartido.
+// un compartido, es 403 (los compartidos los administra Tablea Gaming); otro proveedor es 404
+// `UNKNOWN_PROVIDER` (no existe para él). Tablea Gaming: el que nombre, o compartido.
 function ownerFor(actor: CatalogActor, requested: string | null | undefined): string | null {
   if (actor.provider === null) return requested ?? null;
   if (requested === undefined || requested === actor.provider) return actor.provider;
   if (requested === null) {
-    throw new GameModeForbiddenError("un modo compartido lo crea Betaso Games");
+    throw new GameModeForbiddenError("un modo compartido lo crea Tablea Gaming");
   }
   throw new UnknownProviderError("un proveedor sólo crea modos propios suyos");
 }
