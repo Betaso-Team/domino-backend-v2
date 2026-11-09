@@ -1,8 +1,9 @@
 import type { PlayerId } from "../../ids";
 import type { MatchState } from "../../state";
+import type { SeatExitKind } from "../../state/player";
 import { playerOf } from "../state-projections";
 
-// ÚNICO escritor de hasAbandoned y de isBot. Que sea el único es verificable con grep, y es
+// ÚNICO escritor de hasAbandoned, de isBot y de leftBy. Que sea el único es verificable con grep, y es
 // lo que hace que la frontera entre actores se sostenga.
 export class MatchPlayer {
   constructor(
@@ -10,8 +11,10 @@ export class MatchPlayer {
     private readonly match: MatchState,
   ) {}
 
-  abandon(): void {
-    playerOf(this.playerId, this.match).hasAbandoned = true;
+  abandon(how: SeatExitKind): void {
+    const player = playerOf(this.playerId, this.match);
+    player.hasAbandoned = true;
+    player.leftBy = how;
   }
 
   /**
@@ -27,7 +30,10 @@ export class MatchPlayer {
    * y es lo que deja que la ronda en curso siga teniendo sentido — las fichas del que se fue no
    * pueden desaparecer de la mesa a mitad de mano.
    */
-  seatBot(): void {
-    playerOf(this.playerId, this.match).isBot = true;
+  seatBot(how: SeatExitKind): void {
+    const player = playerOf(this.playerId, this.match);
+    player.isBot = true;
+    // El que dejó el asiento a la máquina también se fue, y de alguna de las dos maneras.
+    player.leftBy = how;
   }
 }
