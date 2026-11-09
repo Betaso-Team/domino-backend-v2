@@ -21,6 +21,7 @@ import {
   modeOf,
   playerIdsOf,
 } from "../../core/config";
+import { deadlineKindOf } from "../../core/engine/deadline-kind";
 import { RuleViolationError } from "../../core/engine/errors";
 import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
@@ -33,6 +34,7 @@ import {
   type MatchHistory,
   PROBE_INTERVAL_MS,
 } from "../../network";
+import { droppedByServer } from "../../network/connection";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
 import { recordEndingSink } from "../../network/match-record";
 import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
@@ -235,6 +237,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         // jugar su primer turno — y en una mesa donde el resto está esperando su jugada, no llega
         // ninguno. La partida se quedaría quieta hasta el siguiente vencimiento.
         this.bots?.poke();
+      },
+      {
+        shouldInterrupt: () => this.seatLostToServer(),
+        interrupt: () => {
+          this.log.warn(
+            "partida cancelada: el reloj iba a retirar a quien se cayó por el servidor",
+          );
+          this.cancelTable("INTERRUPTED");
+        },
       },
     );
     // El scheduler tiene que estar registrado antes de armar los actores: el conductor
@@ -816,7 +827,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // después por el mismo socket, porque `disconnect` cierra cada cliente recién cuando termina su
   // `onLeave`. Uno que todavía no confirmó el `JOIN_ROOM` lo tiene en la cola de entrada, y esa cola
   // se pierde con el cierre: no lo había visto y no ve el aviso tampoco.
-  private cancelTable(reason: "CHARGE_REJECTED" | "SEATING_TIMEOUT"): void {
+  private cancelTable(reason: "CHARGE_REJECTED" | "SEATING_TIMEOUT" | "INTERRUPTED"): void {
     this.closingByRoom = true;
     for (const client of this.clients) client.send("matchCancelled", { reason });
     void this.disconnect().catch(() => undefined);
@@ -875,6 +886,25 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const player = this.state.players.find((candidate) => candidate.playerId === playerId);
     if (!player) throw new Error(`jugador sin estado: ${playerId}`);
     return player;
+  }
+
+  // EL RELOJ IBA A RETIRAR A QUIEN SE CAYÓ POR CULPA NUESTRA. Vence el turno, ya no le queda reserva
+  // —`extendWithReserve` (round/driver) estira el turno mientras quede, así que solo con la reserva en
+  // cero este vencimiento retira—, el jugador sigue afuera y su última caída fue un error o una
+  // sobrecarga del servidor (`droppedByServer`). Entonces la partida se cancela en vez de perderse: el
+  // cierre sale `INTERRUPTED`, el mismo motivo del apagado, y el orquestador reembolsa todo lo cobrado.
+  // Una máquina no tiene conexión que perder, y el que volvió juega como cualquiera.
+  private seatLostToServer(): boolean {
+    if (this.hasOutcome() || deadlineKindOf(this.state) !== "TURN") return false;
+    const playerId = this.state.currentRound?.currentTurn?.playerId;
+    if (!playerId) return false;
+    const player = this.player(playerId);
+    return (
+      !player.isBot &&
+      !player.connected &&
+      player.extraTimeRemainingMs <= 0 &&
+      droppedByServer(this.connections.connectionOf(playerId))
+    );
   }
 
   private abortReason(): AbortReason {
