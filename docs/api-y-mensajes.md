@@ -339,7 +339,7 @@ con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Cinco rutas que sólo usa el orquestador de Tablea Gaming; las de las mesas son la única puerta
+Seis rutas que sólo usa el orquestador de Tablea Gaming; las de las mesas son la única puerta
 de entrada a una partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 { code: "UNAUTHORIZED" }` es una llave ausente o equivocada, y se decide ANTES de mirar el
@@ -388,6 +388,23 @@ pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `PO
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló) |
+
+**`GET /internal/matches/:matchId/existence`** dice si una partida existe, y **nada más**: si su mesa sigue
+viva en el clúster (el registro compartido, la misma prueba que `.../seat`: su sala anotada por `matchId` y la
+config de esa sala presente) y si quedó registro de ella (el archivo de partidas, sin leer el documento). El
+orquestador lo pregunta antes de dar por perdida una mesa de torneo que nunca le contestó. El documento sigue
+siendo del panel (`GET /internal/matches/:matchId`, con `ADMIN_API_KEY`); esta ruta no lo devuelve.
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status: "success", data: { live, recorded } }` | Siempre que el registro y la base contestan |
+| `400` | `{ code: "MALFORMED", detail }` | El `matchId` es inválido |
+| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `503` | `{ code: "UNAVAILABLE" }` | El registro compartido o la base no contestaron: **nunca** un `false` por una falla |
+
+El registro de una partida se escribe al **arrancar** el juego (el primer reparto, `MatchHistory.open`), y cada
+lote del juego lo crea si falta; las escrituras son de mejor esfuerzo. Una sala creada que nadie llegó a jugar
+no tiene registro (sale `aborted` por el outbox de resultados igual).
 
 **`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total, por modo y por
 torneo. El orquestador lo muestra en los números de su lobby. `playersInMatch` cuenta todas las mesas;
@@ -543,6 +560,7 @@ antes de mirar la forma.
 | `POST /internal/players/:userId/seat` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/players/:userId/match` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/census` (orquestador) | — |
+| `GET /internal/matches/:matchId/existence` (orquestador) | — |
 | `GET /internal/game-modes` (orquestador) | — |
 
 Los `409`, `403`, `400 FREE_ROOM_WITH_ENTRY` y `503 CATALOG_BUSY` del catálogo llevan en `detail` el

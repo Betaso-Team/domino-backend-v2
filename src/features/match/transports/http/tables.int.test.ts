@@ -49,7 +49,9 @@ const deps = (over: Partial<TablesDeps> = {}): TablesDeps => ({
       ]),
       byTournament: new Map([["t-1", 2]]),
     }),
+    isLive: async (matchId) => matchId === "m-live",
   },
+  archive: { hasRecord: async (matchId) => matchId === "m-live" || matchId === "m-stored" },
   logger: fakeLogger(),
   orchestratorApiKey: KEY,
   ...over,
@@ -95,6 +97,59 @@ describe("tablesRoutes", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("/internal/players/:userId/match"),
     );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("/internal/matches/:matchId/existence"),
+    );
+  });
+
+  describe("GET /internal/matches/:matchId/existence", () => {
+    const ask = (base: string, matchId: string, key: string | null = KEY) =>
+      fetch(`${base}/internal/matches/${matchId}/existence`, {
+        headers: key ? { "x-internal-api-key": key } : {},
+      });
+
+    it("dice solo si la mesa sigue viva y si quedó registro, nunca el registro", async () => {
+      const base = await serve();
+      for (const [matchId, data] of [
+        ["m-live", { live: true, recorded: true }],
+        ["m-stored", { live: false, recorded: true }],
+        ["m-never", { live: false, recorded: false }],
+      ] as const) {
+        const res = await ask(base, matchId);
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ status: "success", data });
+      }
+    });
+
+    it("ante una falla del registro o de la base es 503, nunca un false", async () => {
+      const registryDown = await serve({
+        registry: {
+          matchOf: vi.fn(),
+          publicConfigOf: vi.fn(),
+          census: vi.fn(),
+          isLive: async () => {
+            throw new Error("redis caído");
+          },
+        },
+      });
+      expect((await ask(registryDown, "m-never")).status).toBe(503);
+      const archiveDown = await serve({
+        archive: {
+          hasRecord: async () => {
+            throw new Error("mongo caído");
+          },
+        },
+      });
+      const res = await ask(archiveDown, "m-never");
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ code: "UNAVAILABLE" });
+    });
+
+    it("solo con la llave del orquestador", async () => {
+      const base = await serve();
+      expect((await ask(base, "m-live", null)).status).toBe(401);
+      expect((await ask(base, "m-live", "x".repeat(16))).status).toBe(401);
+    });
   });
 
   it("cuenta quién juega, en total y por modo, solo con la llave", async () => {
@@ -230,6 +285,7 @@ describe("tablesRoutes", () => {
           publicConfigOf: async () =>
             ({ matchId: "m-1", mode: "TOURNAMENT", tournamentId: "t-1" }) as PublicConfig,
           census: vi.fn(),
+          isLive: vi.fn(),
         },
       });
       expect(await (await get(`${base}/internal/players/p-a/match`)).json()).toEqual({
@@ -248,6 +304,7 @@ describe("tablesRoutes", () => {
           matchOf: async () => "room-1",
           publicConfigOf: async () => undefined,
           census: vi.fn(),
+          isLive: vi.fn(),
         },
       });
       const res = await get(`${gone}/internal/players/p-a/match`);

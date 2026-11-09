@@ -521,6 +521,12 @@ export class MongoHistory
     return entriesOf(document);
   }
 
+  // Solo el `_id`, por el índice de `matchId`: nada del documento sale de la base.
+  async hasRecord(matchId: string): Promise<boolean> {
+    const found = await (await this.collection()).findOne({ matchId }, { projection: { _id: 1 } });
+    return found !== null;
+  }
+
   async recordOf(matchId: string): Promise<StoredMatchRecord | undefined> {
     const document = await (await this.collection()).findOne({ matchId });
     return document ? { ...largeLast(document), _id: String(document._id) } : undefined;

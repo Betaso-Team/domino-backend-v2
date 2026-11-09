@@ -128,6 +128,9 @@ const configKey = (roomId: string) => `match_config:${roomId}`;
 // mesa de otro. Con UN solo componente no hay dos mitades que confundir, y el prefijo
 // `player_match:` ya la separa de las demás claves del almacén.
 const playerKey = (userId: string) => `player_match:${userId}`;
+// LA SALA DE CADA PARTIDA, por el `matchId` del orquestador: lo que contesta si una mesa sigue viva sin
+// conocer su sala. Con el mismo TTL y el mismo latido que la config.
+const matchKey = (matchId: string) => `match_room:${matchId}`;
 const CENSUS_KEY = "live_seats";
 
 // EL PLAZO DE TODAS ELLAS, y el latido que lo renueva. Son una sola decisión y no dos:
@@ -245,6 +248,7 @@ export class MatchRegistry {
 
     await Promise.all([
       this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS),
+      this.store.setex(matchKey(config.matchId), roomId, TTL_SECONDS),
       ...active.map((userId) => this.store.setex(playerKey(userId), roomId, TTL_SECONDS)),
       ...released.map((userId) => this.release(userId, roomId)),
     ]);
@@ -299,6 +303,15 @@ export class MatchRegistry {
 
   // En qué sala está sentado, si está en alguna. Es un GET contra el índice que las salas
   // escriben: la respuesta es del CLÚSTER, no de este proceso.
+  /**
+   * SI LA MESA DE ESA PARTIDA SIGUE VIVA en el clúster: su sala anotada y la config de esa sala presente
+   * (la misma prueba que la ruta del asiento). Rechaza si el registro no contesta.
+   */
+  async isLive(matchId: string): Promise<boolean> {
+    const roomId = await this.store.get(matchKey(matchId));
+    return roomId !== undefined && (await this.store.get(configKey(roomId))) !== undefined;
+  }
+
   async matchOf(userId: string): Promise<string | undefined> {
     return await this.store.get(playerKey(userId));
   }
@@ -332,11 +345,13 @@ export class MatchRegistry {
 
   async remove(roomId: string): Promise<void> {
     const seats = this.seatsByRoomId.get(roomId);
-    if (!this.byRoomId.has(roomId) || !seats) return;
+    const config = this.byRoomId.get(roomId);
+    if (!config || !seats) return;
     this.byRoomId.delete(roomId);
     this.seatsByRoomId.delete(roomId);
 
     this.store.del(configKey(roomId));
+    this.store.del(matchKey(config.matchId));
     await this.store.hdel(CENSUS_KEY, roomId);
     for (const userId of seats) {
       await this.release(userId, roomId);
