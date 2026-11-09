@@ -102,11 +102,12 @@ describe("DominoRoom", () => {
     await waitUntil(() => room.state.currentRound?.phase === "PLAYING");
     a.send("ABANDON", {});
     await waitUntil(() => room.state.phase === "PRESENTING_MATCH");
+    // `disconnect()` ya cierra a los dos: esperar su `leave()` después es esperar un `onLeave` que
+    // pudo haber llegado antes, y entonces no llega nunca.
     await room.disconnect();
 
     expect(await historyTypes(matchId)).toContain("MATCH_RESOLVED");
     expect(await historyTypes(matchId)).not.toContain("MATCH_ABORTED");
-    await Promise.all([a.leave().catch(() => 0), b.leave().catch(() => 0)]);
   });
 
   it("sí aborta al disponer una partida todavía sin veredicto", async () => {
