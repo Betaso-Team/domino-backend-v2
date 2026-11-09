@@ -1,15 +1,15 @@
 import { DeadlineExceededError } from "@/shared/deadline";
 import { currentTrace, traceparentOf } from "@/shared/trace";
 
-// The outgoing HTTP client: `fetch` plus a deadline. Nothing else. It knows neither truco nor money
-// nor tournaments, which is what lets it live in `shared/`.
+// The outgoing HTTP client: `fetch` plus a deadline. Nothing else. It knows neither truco nor money,
+// which is what lets it live in `shared/`.
 //
 // **It does not retry, and that is deliberate.** The loop the repo already has sleeps BEFORE each
 // attempt, the first one included: using it here would add half a second to every call even when it
 // succeeds, and all of these are on the critical path to starting a match. But the real reason is
 // correctness: **a POST that moves money is not retried**. If the request landed and the response was
-// lost, the second attempt charges again. Whoever needs retries — the prize delivery, the
-// participation report — does not come through here: it goes out on the queue, with an outbox behind.
+// lost, the second attempt charges again. Whoever needs retries — the match result — does not come
+// through here: it goes out on the queue, with an outbox behind.
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 /**

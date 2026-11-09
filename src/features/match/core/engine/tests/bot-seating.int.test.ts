@@ -42,6 +42,7 @@ describe("el que se va de una mesa de cuatro", () => {
 
     expect(events).toEqual([{ type: "BOT_SEATED", playerId: "u2" }]);
     expect(playerOf("u2", e.match).isBot).toBe(true);
+    expect(playerOf("u2", e.match).leftBy).toBe("voluntary");
     expect(e.match.phase).toBe("PLAYING");
   });
 
@@ -71,6 +72,7 @@ describe("el que se va de una mesa de cuatro", () => {
       { type: "BOT_SEATED", playerId: "u1" },
     ]);
     expect(playerOf("u1", e.match).isBot).toBe(true);
+    expect(playerOf("u1", e.match).leftBy).toBe("timeout");
   });
 
   // ⚠ EL TURNO QUE LA MÁQUINA HEREDA VIENE VENCIDO por ese camino, así que hay que devolverle el

@@ -45,8 +45,10 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
 
 ```ts
 {
+  mode: "CASUAL" | "TOURNAMENT";
+  tournamentId?: string;        // solo en una mesa de torneo
   matchId: string;
-  gameModeId: string;
+  gameModeId: string;           // en una de torneo, "tournament:<tournamentId>"
   seats: string[];              // ids opacos: "seat-1", "seat-2"…
   pointsToWin: number;
   entryFee: number;             // UC completas
@@ -337,17 +339,26 @@ con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Cinco rutas que sólo usa el orquestador de Tablea Gaming; las de las mesas son la única puerta
+Seis rutas que sólo usa el orquestador de Tablea Gaming; las de las mesas son la única puerta
 de entrada a una partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 { code: "UNAUTHORIZED" }` es una llave ausente o equivocada, y se decide ANTES de mirar el
 cuerpo.
 
 **`POST /internal/matches`** abre una mesa. Cuerpo (`CreateMatchRequest`, estricto: una clave de más
-es 400): `mode` (`"CASUAL"`), `matchId`, `gameModeId` (uuid del catálogo), `participants` (2 a 4;
-cada uno `userId`, `displayName`, `currency` y, opcionales, `username` y `profilePicture`), `seed`,
-`teamAssignment` (`SHUFFLED` o `SEAT_ORDER`) y `rateId` (opaco: el `_id` de Mongo de la tasa de
-Betaso).
+es 400), discriminado por `mode`:
+
+- **`"CASUAL"`**: `matchId`, `gameModeId` (uuid del catálogo), `participants` (2 a 4, par; cada uno
+  `userId`, `displayName`, `currency` y, opcionales, `username` y `profilePicture`), `seed`,
+  `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el `_id` de Mongo de la tasa de
+  Betaso) y `betLevels` opcional (abajo).
+- **`"TOURNAMENT"`**: `matchId`, `tournamentId`, `participants` y `teamAssignment` como la casual,
+  `seed` y `rules: { pointsToWin }` (entero de 1 a 100). **Sin** `gameModeId`, `rateId` ni `betLevels`:
+  traer alguno es 400. La mesa no consulta el catálogo: es gratis (`isFreeRoom`, entrada y premio 0),
+  sin aumentos, sin bots y sin revancha, con la ventana de reparto y los plazos de cualquier mesa
+  (la config global, con sus ediciones en caliente). Con la mesa completa **arranca sin pedir cobro**
+  al orquestador. En el snapshot, el registro y el censo su `gameModeId` es
+  `"tournament:<tournamentId>"` y su `rateId` es `"none"`.
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
@@ -361,7 +372,7 @@ Betaso).
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status, data: { matchId, reservation } }` | Sigue en una mesa; el `matchId` es el del orquestador |
+| `200` | `{ status, data: { matchId, mode, tournamentId?, reservation } }` | Sigue en una mesa; el `matchId` es el del orquestador; `mode` es `CASUAL` o `TOURNAMENT` y `tournamentId` va solo en una de torneo |
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
@@ -373,17 +384,35 @@ pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `PO
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status: "success", data: { matchId, roomId } }` | Sigue en una mesa viva; el `matchId` es el del orquestador |
+| `200` | `{ status: "success", data: { matchId, roomId, mode, tournamentId? } }` | Sigue en una mesa viva; el `matchId` es el del orquestador; `mode` y `tournamentId` como en `.../seat` |
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló) |
 
-**`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total y por modo. El
-orquestador lo muestra en los números de su lobby.
+**`GET /internal/matches/:matchId/existence`** dice si una partida existe, y **nada más**: si su mesa sigue
+viva en el clúster (el registro compartido, la misma prueba que `.../seat`: su sala anotada por `matchId` y la
+config de esa sala presente) y si quedó registro de ella (el archivo de partidas, sin leer el documento). El
+orquestador lo pregunta antes de dar por perdida una mesa de torneo que nunca le contestó. El documento sigue
+siendo del panel (`GET /internal/matches/:matchId`, con `ADMIN_API_KEY`); esta ruta no lo devuelve.
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }] } }` | Siempre; un modo sin nadie jugando no aparece |
+| `200` | `{ status: "success", data: { live, recorded } }` | Siempre que el registro y la base contestan |
+| `400` | `{ code: "MALFORMED", detail }` | El `matchId` es inválido |
+| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
+| `503` | `{ code: "UNAVAILABLE" }` | El registro compartido o la base no contestaron: **nunca** un `false` por una falla |
+
+El registro de una partida se escribe al **arrancar** el juego (el primer reparto, `MatchHistory.open`), y cada
+lote del juego lo crea si falta; las escrituras son de mejor esfuerzo. Una sala creada que nadie llegó a jugar
+no tiene registro (sale `aborted` por el outbox de resultados igual).
+
+**`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total, por modo y por
+torneo. El orquestador lo muestra en los números de su lobby. `playersInMatch` cuenta todas las mesas;
+`byGameMode` solo las casuales y `byTournament` solo las de torneo.
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }], byTournament: [{ tournamentId, playersInMatch }] } }` | Siempre; un modo o torneo sin nadie jugando no aparece |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 
 **`GET /internal/game-modes`** devuelve, en una sola lectura, lo que el orquestador necesita para
@@ -414,13 +443,13 @@ proveedor ausente del mapa juega el compartido suscrito. Hoy el único valor pos
 activo por uuid sin mirar su dueño: que un jugador sólo use los modos de su proveedor lo garantiza el
 orquestador.
 
-`CreateMatchRequest` acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
+El `CreateMatchRequest` casual acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
 
 **Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
 
-- **Con la mesa completa**, la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
+- **Con la mesa completa** (solo una casual; la de torneo arranca directo), la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
   (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
   cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
   `CHARGE_REJECTED`. El plazo del cliente HTTP cubre la respuesta entera, cabeceras y cuerpo, y al
@@ -439,13 +468,23 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
 | Campo | Qué es |
 |---|---|
 | `gameSlug`, `matchId`, `roomId`, `gameModeId`, `rateId` | La mesa; `matchId` es el del orquestador |
+| `mode` | `CASUAL` o `TOURNAMENT` |
+| `tournamentId` | Solo en una mesa de torneo |
+| `startedAt` | ISO 8601, el arranque del juego (primer reparto); `null` si nunca arrancó |
 | `endedAt` | ISO 8601, el instante del veredicto |
 | `reason` | `SCORE` o `ABANDONMENT` |
-| `stakes` | `{ entryFee, prize, multiplier, isFreeRoom, bet: { level, extra } \| null }`, en UC |
-| `participants` | `[{ userId, teamId, result }]`; `result` es `won`, `lost` o `abandoned` (el asiento que juega la máquina cuenta como `abandoned`) |
+| `endReason` | Más fino: `SCORE_DOMINO` o `SCORE_BLOCKED` (cómo cerró la última mano), `ABANDONMENT_VOLUNTARY` (alguien del equipo perdedor se rindió con `ABANDON`) o `ABANDONMENT_TIMEOUT` (al equipo perdedor lo retiró el reloj) |
+| `roundsPlayed` | Manos cerradas; la que se cortó por un abandono no cuenta |
+| `finalScore` | `{ A, B }`: el marcador final por equipo |
+| `stakes` | `{ entryFee, prize, multiplier, isFreeRoom, bet: { level, extra } \| null }`, en UC. En una de torneo, `0`, `0`, `1`, `true`, `null` |
+| `participants` | `[{ userId, teamId, result, abandon }]`; `result` es `won`, `lost` o `abandoned` (el asiento que juega la máquina cuenta como `abandoned`); `abandon` es `voluntary` (dijo `ABANDON`), `timeout` (lo retiró el reloj, en la ventana de reparto o en su turno) o `null` (terminó sentado) |
 | `payouts` | `[{ userId, amountUc }]`: los premios que se deben, calculados por `payoutOf` (bots y retirados no cobran; el aumento aceptado va adentro). Solo créditos: el juego no dice qué se cobró |
 
-`domino.match.aborted` (`MatchAbortedPayload`): `gameSlug`, `matchId`, `roomId`, `gameModeId`,
+Los campos `mode`, `tournamentId`, `startedAt`, `endReason`, `roundsPlayed`, `finalScore` y
+`participants[].abandon` llegaron con los torneos (2026-11) y son **aditivos**: los consumidores parsean
+sin `strict`, y los campos de antes no cambiaron.
+
+`domino.match.aborted` (`MatchAbortedPayload`): `gameSlug`, `mode`, `tournamentId` (solo torneo), `matchId`, `roomId`, `gameModeId`,
 `abortedAt`, `reason` (`NEVER_STARTED`, `TILES_NOT_SEEN`, `NEVER_PLAYED`, `INTERRUPTED` o `CHARGE_REJECTED`) y
 `participants: [{ userId }]`.
 
@@ -521,6 +560,7 @@ antes de mirar la forma.
 | `POST /internal/players/:userId/seat` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/players/:userId/match` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/census` (orquestador) | — |
+| `GET /internal/matches/:matchId/existence` (orquestador) | — |
 | `GET /internal/game-modes` (orquestador) | — |
 
 Los `409`, `403`, `400 FREE_ROOM_WITH_ENTRY` y `503 CATALOG_BUSY` del catálogo llevan en `detail` el

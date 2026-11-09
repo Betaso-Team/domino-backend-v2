@@ -94,6 +94,9 @@ export interface SeatSetup {
 export interface MatchSetup {
   readonly roomId: string;
   readonly table: {
+    /** Solo en una mesa de torneo (ausente = casual), con su torneo. */
+    readonly mode?: "TOURNAMENT";
+    readonly tournamentId?: string;
     readonly gameModeId: string;
     /** El nombre del modo COMO SE JUGÓ: el panel puede renombrarlo después. */
     readonly name: string;
@@ -440,6 +443,12 @@ export interface HistoryReader {
 export interface MatchArchive {
   /** El documento de una partida, con su `_id` como texto. `undefined` si no hay. */
   recordOf(matchId: string): Promise<StoredMatchRecord | undefined>;
+  /**
+   * SI HAY DOCUMENTO de esa partida, sin leerlo: lo que el orquestador pregunta para saber si una mesa
+   * existió (`GET /internal/matches/:matchId/existence`). Rechaza si la base no contesta: nunca un
+   * `false` por una falla.
+   */
+  hasRecord(matchId: string): Promise<boolean>;
   /**
    * El documento SIN `_id`, para el detalle de movimientos del backend principal
    * (`/game-data/:roomId`). Busca por `roomId` y, si no, por `matchId`: los documentos viejos no

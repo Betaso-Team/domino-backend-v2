@@ -18,6 +18,7 @@ import {
   DEFAULT_GLOBAL_CONFIG,
   type DominoMatchConfig,
   type GlobalConfigSource,
+  modeOf,
   playerIdsOf,
 } from "../../core/config";
 import { RuleViolationError } from "../../core/engine/errors";
@@ -40,7 +41,10 @@ import {
   type OrchestratorCharges,
   OrchestratorUnavailableError,
 } from "../../network/orchestrator-charges";
-import { type SeatCredentials, UnknownGameModeError, configOf, requestOf } from "../match-contract";
+import { type SeatCredentials, configOf, requestOf } from "../match-contract";
+
+// El nombre de la mesa en el registro cuando no hay modo del catálogo detrás.
+const TOURNAMENT_TABLE_NAME = "Torneo";
 import {
   HEARTBEAT_MS,
   type MatchConfigResponse,
@@ -181,17 +185,21 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // `activeByUuid` y no `byUuid`: un modo dado de baja NO EXISTE desde afuera, y el panel lo da
     // de baja justamente para que deje de sentar mesas.
     const request = requestOf(options);
-    const mode = await rootContainer
-      .resolve<GameModeReader>("GameModeReader")
-      .activeByUuid(request.gameModeId);
-    if (!mode) throw new UnknownGameModeError(request.gameModeId);
+    // LA MESA DE TORNEO NO PASA POR EL CATÁLOGO: sus reglas vienen en el request y no tiene dinero.
+    const mode =
+      request.mode === "TOURNAMENT"
+        ? undefined
+        : await rootContainer
+            .resolve<GameModeReader>("GameModeReader")
+            .activeByUuid(request.gameModeId);
+    const betLevels = request.mode === "CASUAL" ? (request.betLevels ?? []) : [];
     // Acá adentro se rechaza el modo que no es de 2 ni de 4 (`UNSUPPORTED_GAME_MODE`) y la cantidad
     // que no coincide, y las dos cosas pasan ANTES de la génesis: el árbol de la partida nace unas
     // líneas más abajo, en el `child.resolve("MatchState")`.
     //
     // LOS NIVELES DE AUMENTO LOS TRAE EL REQUEST: el que cobra el aumento es el orquestador, y es él
     // quien decide cuáles se ofrecen. Sin `betLevels` la mesa no ofrece aumentar.
-    const config = configOf(request, mode, request.betLevels ?? []);
+    const config = configOf(request, mode, betLevels);
     this.config = config;
     this.seats = playerIdsOf(config);
     // SIN `maxClients`, A PROPÓSITO (portado de truco `b90840b`). La puerta es el chequeo del asiento
@@ -240,7 +248,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const pieces = buildPieces(
       child,
       (events: readonly NetworkMatchEvent[]) => this.notifier.notify(events),
-      { roomId: this.roomId, gameModeName: mode.name },
+      { roomId: this.roomId, gameModeName: mode?.name ?? TOURNAMENT_TABLE_NAME },
     );
     this.history = pieces.history;
     this.connections = new ConnectionMonitor({
@@ -714,6 +722,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     if (this.seated.size < this.seats.length) return;
     this.seating?.clear();
     this.seating = undefined;
+    // UNA MESA DE TORNEO NO COBRA: la inscripción ya la cobró billing al inscribirse, y las partidas son
+    // gratis. Arranca directo, sin preguntarle nada al orquestador; `entryCharge` queda en `idle`, así
+    // que el registro dice que no se cobró nada.
+    if (modeOf(this.config) === "TOURNAMENT") {
+      this.notifier.notify(this.startMatch());
+      return;
+    }
     if (this.entryCharge === "charged") {
       this.notifier.notify(this.startMatch());
       return;

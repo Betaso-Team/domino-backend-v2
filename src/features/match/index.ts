@@ -57,6 +57,7 @@ export { type MatchHttpDeps, matchHttp } from "./transports/http/register";
 // nombrar no se puede atrapar.
 export {
   configOf,
+  tournamentConfigOf,
   type CreateMatchRequest,
   type MatchParticipant,
   replayConfigOf,

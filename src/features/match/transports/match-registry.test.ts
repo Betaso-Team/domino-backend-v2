@@ -64,6 +64,7 @@ describe("MatchRegistry", () => {
     await registry.register("room-1", config, timeouts);
 
     expect(await registry.publicConfigOf("room-1")).toEqual({
+      mode: "CASUAL",
       matchId: "m1",
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
@@ -171,6 +172,23 @@ describe("MatchRegistry", () => {
     expect(await registry.matchOf("u9")).toBeUndefined();
   });
 
+  it("dice si la mesa de una partida sigue viva, por su matchId, en cualquier proceso", async () => {
+    const clock = fakeClock();
+    const store = new MemoryKeyValueStore(clock.now);
+    const registry = new MatchRegistry(store);
+    expect(await registry.isLive("m1")).toBe(false);
+    await registry.register("room-1", config, timeouts);
+    expect(await registry.isLive("m1")).toBe(true);
+    // Otro proceso, el mismo almacén.
+    expect(await new MatchRegistry(store).isLive("m1")).toBe(true);
+    await registry.remove("room-1");
+    expect(await registry.isLive("m1")).toBe(false);
+    // Y una sala que dejó de latir tampoco.
+    await registry.register("room-2", config, timeouts);
+    clock.advance(TTL_SECONDS * 1000 + 1);
+    expect(await registry.isLive("m1")).toBe(false);
+  });
+
   it("deja de exponer una partida eliminada", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
     await registry.register("room-1", config, timeouts);
@@ -193,6 +211,7 @@ describe("MatchRegistry", () => {
     await procesoA.register("room-1", config, timeouts);
 
     expect(await procesoB.publicConfigOf("room-1")).toEqual({
+      mode: "CASUAL",
       matchId: "m1",
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
@@ -401,6 +420,31 @@ describe("MatchRegistry: censo del lobby", () => {
     ]);
   });
 
+  it("cuenta las mesas de torneo por torneo, y no por modo", async () => {
+    const store = new MemoryKeyValueStore();
+    const registry = new MatchRegistry(store);
+    const tournament = replayConfigOf({
+      ...roomOptions,
+      mode: "TOURNAMENT",
+      tournamentId: "t-1",
+      matchId: "m3",
+      gameModeId: "tournament:t-1",
+      seats: [seat("u5", 0), seat("u6", 1)],
+    });
+
+    await registry.register("room-1", config, timeouts);
+    await registry.register("room-3", tournament, timeouts);
+
+    const census = await registry.census();
+    expect(census.playersInMatch).toBe(4);
+    expect([...census.byGameMode]).toEqual([["clasica-2p", 2]]);
+    expect([...census.byTournament]).toEqual([["t-1", 2]]);
+    expect(await registry.publicConfigOf("room-3")).toMatchObject({
+      mode: "TOURNAMENT",
+      tournamentId: "t-1",
+    });
+  });
+
   it("deja de contar antes de barrer una sala que dejó de latir", async () => {
     const clock = fakeClock();
     const store = new MemoryKeyValueStore(clock.now);
@@ -564,13 +608,14 @@ describe("MatchRegistry: el latido por hecho no escribe de más", () => {
 
     await registry.keepAlive("room-1", ["u2"]);
 
-    // config + el `setex` de u2 + el `get` del release de u1, los tres a la vez.
-    expect(counting.maxInFlight()).toBe(3);
+    // config + la sala de la partida + el `setex` de u2 + el `get` del release de u1, los cuatro a la vez.
+    expect(counting.maxInFlight()).toBe(4);
     expect(counting.calls.at(-1)).toBe("hset:live_seats");
-    expect(counting.calls).toHaveLength(5);
+    expect(counting.calls).toHaveLength(6);
     expect(counting.calls).toEqual(
       expect.arrayContaining([
         "setex:match_config:room-1",
+        "setex:match_room:m1",
         "setex:player_match:u2",
         "get:player_match:u1",
         "del:player_match:u1",

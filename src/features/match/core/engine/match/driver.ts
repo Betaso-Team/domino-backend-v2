@@ -73,7 +73,7 @@ export class MatchDriver implements Driver, Retirement {
 
     if (kind === "DEALING") {
       const missing = this.roundDriver.playersMissingTiles();
-      for (const playerId of missing) this.players.abandon(playerId);
+      for (const playerId of missing) this.players.abandon(playerId, "timeout");
       events.push(...missing.map((playerId) => ({ type: "ABANDON", playerId }) as const));
 
       // RETIRAR AL QUE NO LEVANTÓ ANULA LA PARTIDA (`wasAbortedAtDeal`), y por eso ya no hay
@@ -181,13 +181,13 @@ export class MatchDriver implements Driver, Retirement {
    */
   retire(playerId: PlayerId, bySystem: boolean): TransitionResult {
     if (canSeatBot(playerId, new SchemaMatchView(this.match), this.matchConfig)) {
-      this.players.seatBot(playerId);
+      this.players.seatBot(playerId, bySystem ? "timeout" : "voluntary");
       this.roundDriver.restartTurnIfOwnedBy(playerId);
       this.syncTimeout();
       return { events: [{ type: "BOT_SEATED", playerId }], finished: false };
     }
 
-    this.players.abandon(playerId);
+    this.players.abandon(playerId, bySystem ? "timeout" : "voluntary");
     const events: MatchEvent[] = bySystem ? [{ type: "ABANDON", playerId }] : [];
     const transition = this.advance(playerId, "ABANDONED");
     return { events: [...events, ...transition.events], finished: transition.finished };

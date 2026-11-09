@@ -84,7 +84,18 @@ export const PlayerState = schema(
     // ⚠ VA AL FINAL por lo mismo que `isBot`: antes era `noSync()` y no ocupaba índice, así que
     // sincronizarlo en su lugar habría corrido `teamId` y todo lo que sigue. Ver arriba por qué viaja.
     userId: t.string(),
+    // CÓMO SE FUE DEL ASIENTO: `voluntary` (el verbo `ABANDON`) o `timeout` (lo retiró el reloj, en la
+    // ventana de reparto o en su turno). Vacío mientras sigue jugando. Lo escribe el mismo que escribe
+    // `hasAbandoned` e `isBot` (`MatchPlayer`), y lo lee el resultado que se publica (un torneo trata
+    // distinto al que se rinde y al que desaparece).
+    //
+    // `noSync()`: NO VIAJA AL WIRE ni entra en `toJSON()` —no ocupa índice, así que no corre ningún
+    // campo del cliente— porque al front no le hace falta y a los goldens no les cambia nada.
+    leftBy: t.string().noSync().default(""),
   },
   "PlayerState",
 );
 export type PlayerState = SchemaType<typeof PlayerState>;
+
+/** Cómo dejó el asiento quien lo dejó (`PlayerState.leftBy`). */
+export type SeatExitKind = "voluntary" | "timeout";

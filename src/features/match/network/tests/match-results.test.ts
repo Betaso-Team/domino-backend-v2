@@ -1,7 +1,8 @@
 import type { Logger } from "@/shared/logger";
 import { describe, expect, it, vi } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
-import { replayConfigOf } from "../../transports/match-contract";
+import { RoundSummary } from "../../core/state";
+import { configOf, replayConfigOf, requestOf } from "../../transports/match-contract";
 import { MatchResultRecorder, matchResultOf } from "../match-results";
 
 const config = replayConfigOf({
@@ -44,16 +45,21 @@ describe("matchResultOf", () => {
       key: "orq-1:finished",
       payload: {
         gameSlug: "domino",
+        mode: "CASUAL",
         matchId: "orq-1",
         roomId: "room-9",
         gameModeId: "mode-1v1",
         rateId: "69977c3dc3bf3e710572f941",
+        startedAt: null,
         endedAt: "2026-10-05T12:00:00.000Z",
         reason: "SCORE",
+        endReason: "SCORE_DOMINO",
+        roundsPlayed: 0,
+        finalScore: { A: 0, B: 0 },
         stakes: { entryFee: 10, prize: 18, multiplier: 2, isFreeRoom: false, bet: null },
         participants: [
-          { userId: "p-ana", teamId: winnerTeamId, result: "won" },
-          { userId: "p-beto", teamId: teamOf(match, 1), result: "lost" },
+          { userId: "p-ana", teamId: winnerTeamId, result: "won", abandon: null },
+          { userId: "p-beto", teamId: teamOf(match, 1), result: "lost", abandon: null },
         ],
         payouts: [{ userId: "p-ana", amountUc: 18 }],
       },
@@ -114,6 +120,7 @@ describe("matchResultOf", () => {
       key: "orq-1:aborted",
       payload: {
         gameSlug: "domino",
+        mode: "CASUAL",
         matchId: "orq-1",
         roomId: "room-9",
         gameModeId: "mode-1v1",
@@ -137,6 +144,112 @@ describe("matchResultOf", () => {
     );
 
     expect(result?.payload).toMatchObject({ reason: "CHARGE_REJECTED" });
+  });
+
+  it("los hechos del cierre: arranque, manos, marcador y cómo terminó la última", () => {
+    const match = createMatchState(config);
+    match.startedAt = Date.parse("2026-10-05T11:50:00.000Z");
+    if (match.scoreboard) {
+      match.scoreboard.teamA = 100;
+      match.scoreboard.teamB = 37;
+    }
+    match.pastRounds.push(
+      new RoundSummary().assign({
+        roundNumber: 1,
+        winnerId: "seat-1",
+        winnerTeamId: "A",
+        points: 60,
+        reason: "DOMINO",
+      }),
+      new RoundSummary().assign({
+        roundNumber: 2,
+        winnerId: "seat-1",
+        winnerTeamId: "A",
+        points: 40,
+        reason: "BLOCKED",
+      }),
+    );
+
+    const result = matchResultOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: "A", reason: "SCORE" },
+      match,
+      config,
+      "room-9",
+      AT,
+    );
+
+    expect(result?.payload).toMatchObject({
+      startedAt: "2026-10-05T11:50:00.000Z",
+      roundsPlayed: 2,
+      finalScore: { A: 100, B: 37 },
+      endReason: "SCORE_BLOCKED",
+    });
+  });
+
+  it.each([
+    ["voluntary", "ABANDONMENT_VOLUNTARY"],
+    ["timeout", "ABANDONMENT_TIMEOUT"],
+  ] as const)("el que se fue por %s lo dice, y el cierre también", (how, endReason) => {
+    const match = createMatchState(config);
+    const quitter = match.players[1];
+    if (quitter) {
+      quitter.hasAbandoned = true;
+      quitter.leftBy = how;
+    }
+
+    const result = matchResultOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "ABANDONMENT" },
+      match,
+      config,
+      "room-9",
+      AT,
+    );
+
+    expect(result?.payload).toMatchObject({
+      endReason,
+      participants: [{ abandon: null }, { result: "abandoned", abandon: how }],
+    });
+  });
+
+  it("una mesa de torneo lleva su modo y su torneo, en el final y en el aborto", () => {
+    const tournament = configOf(
+      requestOf({
+        mode: "TOURNAMENT",
+        matchId: "orq-t",
+        tournamentId: "t-7",
+        participants: config.seats.map(({ userId, displayName, currency }) => ({
+          userId,
+          displayName,
+          currency,
+        })),
+        seed: "seed",
+        teamAssignment: "SEAT_ORDER",
+        rules: { pointsToWin: 50 },
+      }),
+      undefined,
+    );
+    const match = createMatchState(tournament);
+
+    const finished = matchResultOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" },
+      match,
+      tournament,
+      "room-9",
+      AT,
+    );
+    expect(finished?.payload).toMatchObject({
+      mode: "TOURNAMENT",
+      tournamentId: "t-7",
+      stakes: { entryFee: 0, prize: 0, isFreeRoom: true, bet: null },
+    });
+    const aborted = matchResultOf(
+      { type: "MATCH_ABORTED", reason: "NEVER_STARTED" },
+      match,
+      tournament,
+      "room-9",
+      AT,
+    );
+    expect(aborted?.payload).toMatchObject({ mode: "TOURNAMENT", tournamentId: "t-7" });
   });
 
   it("lo que no es un desenlace no es un resultado", () => {

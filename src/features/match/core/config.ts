@@ -36,7 +36,18 @@ export interface MatchSeat {
   readonly currency: string;
 }
 
+/** De qué clase es la mesa: casual (con dinero, del catálogo) o de un torneo (gratis, sin catálogo). */
+export type MatchMode = "CASUAL" | "TOURNAMENT";
+
 export interface DominoMatchConfig {
+  /**
+   * AUSENTE ES CASUAL, y es a propósito: la mesa casual no lo escribe, así que su snapshot, su registro
+   * y los goldens siguen siendo los de siempre. Una mesa de torneo lo trae junto con su `tournamentId`.
+   * Se lee con `modeOf`.
+   */
+  readonly mode?: "TOURNAMENT";
+  /** El torneo de la mesa; solo con `mode: "TOURNAMENT"`. */
+  readonly tournamentId?: string;
   readonly matchId: string;
   readonly gameModeId: string;
   readonly seed: string;
@@ -123,6 +134,10 @@ export interface DominoMatchConfig {
 // reglas necesitan (`betLevels`, `isFreeRoom`, `enableBots`) están arriba, sin adaptador y sin
 // cast.
 export type { BetLevel };
+
+/** La clase de la mesa, con el ausente leído como casual. */
+export const modeOf = (config: Pick<DominoMatchConfig, "mode">): MatchMode =>
+  config.mode ?? "CASUAL";
 
 /** Los ids OPACOS de la mesa, en orden de asiento. Es lo único que el motor consume. */
 export const playerIdsOf = (config: DominoMatchConfig): readonly PlayerId[] =>

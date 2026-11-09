@@ -506,6 +506,10 @@ export function describeHistoryContract(
       expect(await history.snapshotOf("no-existe")).toBeUndefined();
       expect(await history.recordOf("no-existe")).toBeUndefined();
       expect(await history.of("no-existe")).toEqual([]);
+      // Si hay documento, sin leerlo: lo que pregunta el orquestador.
+      expect(await history.hasRecord("m-1")).toBe(true);
+      expect(await history.hasRecord("m-sin-sala")).toBe(true);
+      expect(await history.hasRecord("no-existe")).toBe(false);
     });
 
     it("el listado: la más nueva primero, el resumen sin los arreglos", async () => {

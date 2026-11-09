@@ -1,5 +1,10 @@
 import type { KeyValueStore } from "@/shared/kv";
-import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
+import {
+  type DominoMatchConfig,
+  type GlobalDominoConfig,
+  type MatchMode,
+  modeOf,
+} from "../core/config";
 
 /**
  * LOS PLAZOS CON LOS QUE NACIÓ LA MESA, para que el front dibuje el anillo con el largo de verdad.
@@ -28,6 +33,10 @@ export function publicTimeoutsOf(global: GlobalDominoConfig): PublicMatchTimeout
 }
 
 export interface PublicMatchConfig {
+  /** `CASUAL` o `TOURNAMENT`: el front y el orquestador separan las mesas de torneo con esto. */
+  readonly mode: MatchMode;
+  /** El torneo de la mesa; solo en una de torneo. */
+  readonly tournamentId?: string;
   readonly matchId: string;
   readonly gameModeId: string;
   readonly seats: readonly string[];
@@ -61,7 +70,12 @@ export function publicConfigOf(
   config: DominoMatchConfig,
   timeouts: PublicMatchTimeouts,
 ): PublicMatchConfig {
+  const mode = modeOf(config);
   return {
+    mode,
+    ...(mode === "TOURNAMENT" && config.tournamentId !== undefined
+      ? { tournamentId: config.tournamentId }
+      : {}),
     matchId: config.matchId,
     gameModeId: config.gameModeId,
     seats: config.seats.map(({ playerId }) => playerId),
@@ -114,6 +128,9 @@ const configKey = (roomId: string) => `match_config:${roomId}`;
 // mesa de otro. Con UN solo componente no hay dos mitades que confundir, y el prefijo
 // `player_match:` ya la separa de las demás claves del almacén.
 const playerKey = (userId: string) => `player_match:${userId}`;
+// LA SALA DE CADA PARTIDA, por el `matchId` del orquestador: lo que contesta si una mesa sigue viva sin
+// conocer su sala. Con el mismo TTL y el mismo latido que la config.
+const matchKey = (matchId: string) => `match_room:${matchId}`;
 const CENSUS_KEY = "live_seats";
 
 // EL PLAZO DE TODAS ELLAS, y el latido que lo renueva. Son una sola decisión y no dos:
@@ -137,12 +154,18 @@ const DEAD_MS = 4 * HEARTBEAT_MS;
 interface CensusEntry {
   readonly seats: number;
   readonly gameModeId: string;
+  /** Solo en una mesa de torneo. Las entradas escritas antes de los torneos no lo tienen. */
+  readonly tournamentId?: string;
   readonly at: number;
 }
 
 export interface MatchCensusCount {
+  /** Todos los asientos que siguen jugando, casuales y de torneo. */
   readonly playersInMatch: number;
+  /** Solo las mesas casuales: una de torneo no tiene modo del catálogo. */
   readonly byGameMode: ReadonlyMap<string, number>;
+  /** Las mesas de torneo, por torneo. */
+  readonly byTournament: ReadonlyMap<string, number>;
 }
 
 // EL REGISTRO DE PARTIDAS VIVAS DEL CLÚSTER. La `DominoRoom` se anota al nacer, late mientras
@@ -225,6 +248,7 @@ export class MatchRegistry {
 
     await Promise.all([
       this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS),
+      this.store.setex(matchKey(config.matchId), roomId, TTL_SECONDS),
       ...active.map((userId) => this.store.setex(playerKey(userId), roomId, TTL_SECONDS)),
       ...released.map((userId) => this.release(userId, roomId)),
     ]);
@@ -263,7 +287,12 @@ export class MatchRegistry {
     await this.store.hset(
       CENSUS_KEY,
       roomId,
-      JSON.stringify({ seats: active.length, gameModeId: config.gameModeId, at: this.now() }),
+      JSON.stringify({
+        seats: active.length,
+        gameModeId: config.gameModeId,
+        ...(config.tournamentId === undefined ? {} : { tournamentId: config.tournamentId }),
+        at: this.now(),
+      }),
     );
   }
 
@@ -274,6 +303,15 @@ export class MatchRegistry {
 
   // En qué sala está sentado, si está en alguna. Es un GET contra el índice que las salas
   // escriben: la respuesta es del CLÚSTER, no de este proceso.
+  /**
+   * SI LA MESA DE ESA PARTIDA SIGUE VIVA en el clúster: su sala anotada y la config de esa sala presente
+   * (la misma prueba que la ruta del asiento). Rechaza si el registro no contesta.
+   */
+  async isLive(matchId: string): Promise<boolean> {
+    const roomId = await this.store.get(matchKey(matchId));
+    return roomId !== undefined && (await this.store.get(configKey(roomId))) !== undefined;
+  }
+
   async matchOf(userId: string): Promise<string | undefined> {
     return await this.store.get(playerKey(userId));
   }
@@ -282,6 +320,7 @@ export class MatchRegistry {
     const now = this.now();
     let playersInMatch = 0;
     const byGameMode = new Map<string, number>();
+    const byTournament = new Map<string, number>();
 
     for (const [roomId, raw] of Object.entries(await this.store.hgetall(CENSUS_KEY))) {
       const entry = parseCensus(raw);
@@ -291,19 +330,28 @@ export class MatchRegistry {
       }
       if (now - entry.at >= STALE_MS) continue;
       playersInMatch += entry.seats;
+      if (entry.tournamentId !== undefined) {
+        byTournament.set(
+          entry.tournamentId,
+          (byTournament.get(entry.tournamentId) ?? 0) + entry.seats,
+        );
+        continue;
+      }
       byGameMode.set(entry.gameModeId, (byGameMode.get(entry.gameModeId) ?? 0) + entry.seats);
     }
 
-    return { playersInMatch, byGameMode };
+    return { playersInMatch, byGameMode, byTournament };
   }
 
   async remove(roomId: string): Promise<void> {
     const seats = this.seatsByRoomId.get(roomId);
-    if (!this.byRoomId.has(roomId) || !seats) return;
+    const config = this.byRoomId.get(roomId);
+    if (!config || !seats) return;
     this.byRoomId.delete(roomId);
     this.seatsByRoomId.delete(roomId);
 
     this.store.del(configKey(roomId));
+    this.store.del(matchKey(config.matchId));
     await this.store.hdel(CENSUS_KEY, roomId);
     for (const userId of seats) {
       await this.release(userId, roomId);
@@ -327,6 +375,7 @@ function parseCensus(raw: string): CensusEntry | undefined {
     const entry = JSON.parse(raw) as Partial<CensusEntry>;
     return typeof entry.seats === "number" &&
       typeof entry.gameModeId === "string" &&
+      (entry.tournamentId === undefined || typeof entry.tournamentId === "string") &&
       typeof entry.at === "number"
       ? (entry as CensusEntry)
       : undefined;
