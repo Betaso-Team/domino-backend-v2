@@ -50,6 +50,9 @@ export interface GameModeRepository extends GameModeReader {
 // redeclara acá para que el core no dependa de la frontera HTTP (el tipado estructural las une).
 export interface CatalogActor {
   readonly provider: string | null;
+  // Quién, para lo que el catálogo anuncia: el nombre del admin (o `ADMIN_API_KEY`). Opcional: una
+  // lectura no lo necesita.
+  readonly name?: string;
 }
 
 export const BETASO_GAMES: CatalogActor = { provider: null };

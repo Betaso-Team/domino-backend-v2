@@ -44,8 +44,11 @@ pieza del dominó.
   compartidos, suscriptores **explícitos** (`subscribers`; ausente = `[]` = nadie). Cada proveedor
   elige la **fuente** de su catálogo entero (`provider_catalogs`: `shared` | `own`, ausente =
   `shared`). El público `GET /game-modes` sirve sólo compartidos; el orquestador lee modos y fuentes
-  por `GET /internal/game-modes`. **El catálogo no publica a ningún broker**: el exchange `betaso`,
-  su outbox, `/sync` y `RABBITMQ_URL` se fueron; Betaso lee dominó del orquestador. Ver «Incremento
+  por `GET /internal/game-modes`. **El catálogo no publica sus modos a ningún broker**: el exchange
+  `betaso`, su outbox, `/sync` y `RABBITMQ_URL` se fueron; Betaso lee dominó del orquestador. Lo que sí
+  sale es el **anuncio** de cada cambio (`domino.config.*`, a `betaso_games`, por su propio outbox
+  `catalog_event_outbox`, después de escribir) para el servicio de notificaciones; ver «Anuncios del
+  catálogo» en `docs/api-y-mensajes.md`. Ver «Incremento
   completo — modos con dueño: fuente del catálogo y sin exchange `betaso`».
 - **La revancha**: el motor abre la ventana (`isRematchEnabled: true` en `configOf`), pero nadie abre
   la compuerta, así que sale siempre con `eligible: false`. Revancha de verdad pide que el orquestador

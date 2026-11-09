@@ -581,6 +581,10 @@ describe("GameModeService: sus dependencias", () => {
       // El uuid determinista de la copia a un proveedor: `node:crypto` y nada más.
       "./copy-uuid",
       "./core/catalog",
+      // EL PUERTO DE LOS ANUNCIOS (`domino.config.*`, para el servicio de notificaciones): un puerto
+      // del core, no un publicador. Los modos siguen sin publicarse; lo que sale es el aviso de que
+      // alguien los cambió, por su propio outbox (`OutboxCatalogEvents`, en el root).
+      "./core/catalog-events",
       "./core/game-mode",
       // CON `@/` Y SIN EXTENSIÓN, que es la convención del repo: el alias marca que el import SALE
       // del módulo. La lista sigue siendo exacta, y de paso esto es lo que hace que la convención

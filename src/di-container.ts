@@ -1,12 +1,15 @@
 import "reflect-metadata";
 import { JwtVerifier, adminTokenCheck } from "@/features/auth";
 import {
+  type CatalogEvent,
+  type CatalogTopic,
   type GameModeReader,
   GameModeService,
   MemoryGameModeRepository,
   MemoryProviderCatalogs,
   MongoGameModeRepository,
   MongoProviderCatalogs,
+  OutboxCatalogEvents,
 } from "@/features/game-mode";
 import {
   ColyseusMatchGateway,
@@ -293,8 +296,37 @@ if (orchestratorCharges) {
 // sería peor.
 export const gameModes = gameModeRepository;
 rootContainer.register<GameModeReader>("GameModeReader", { useValue: gameModeRepository });
+// LOS ANUNCIOS DEL CATÁLOGO (`domino.config.*`) al mismo broker que los resultados, por su PROPIO
+// outbox y despachador: un anuncio que no sale nunca frena un resultado. Sin broker, se acumulan.
+const catalogEventOutbox: OutboxStore<CatalogTopic, CatalogEvent["payload"]> = mongo
+  ? new MongoOutboxStore(mongo, "catalog_event_outbox", clock, {
+      sentRetentionSeconds: 7 * 24 * 3600,
+    })
+  : new MemoryOutboxStore(clock);
+export const catalogEventDispatcher = betasoGamesAmqp
+  ? new TopicOutboxDispatcher({
+      exchange: MATCH_RESULT_EXCHANGE,
+      leaseName: "catalog-event-publisher",
+      queue: catalogEventOutbox,
+      delivery: betasoGamesAmqp,
+      lease: catalogLease,
+      clock,
+      log: logger,
+      label: "anuncio del catálogo",
+      perTick: 20,
+      stuckAfterMs: 10 * 60_000,
+      publishOptions: (entry) => ({ mandatory: true, messageId: entry.dedupeKey }),
+    })
+  : undefined;
+catalogEventDispatcher?.start();
 rootContainer.register(GameModeService, {
-  useValue: new GameModeService(gameModeRepository, providerCatalogs, catalogLease),
+  useValue: new GameModeService(
+    gameModeRepository,
+    providerCatalogs,
+    catalogLease,
+    () => clock.now(),
+    new OutboxCatalogEvents(catalogEventOutbox, () => catalogEventDispatcher?.wake(), logger),
+  ),
 });
 
 // ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────
@@ -430,6 +462,7 @@ export async function shutdown(): Promise<void> {
   //    un resultado entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
   //    duplicado que el consumidor ya deduplica, pero el costo de esperar son milisegundos.
   await matchResultDispatcher?.close();
+  await catalogEventDispatcher?.close();
   // El barrido de estadísticas se para antes de drenar: un tick nuevo escribiría en una base que se cierra.
   statsRecorder.stop();
   await historyPort.drain();

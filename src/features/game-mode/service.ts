@@ -16,6 +16,15 @@ import {
   offeredTo,
   visibleTo,
 } from "./core/catalog";
+import {
+  type CatalogEvent,
+  type CatalogEvents,
+  NO_CATALOG_EVENTS,
+  copiesEvent,
+  modeEvent,
+  sourceEvent,
+  subscriptionEvent,
+} from "./core/catalog-events";
 import type { CreateGameMode, GameMode, UpdateGameMode } from "./core/game-mode";
 
 // EL ÁMBITO DE LOS PROVEEDORES, en tres reglas que todas las operaciones de acá comparten:
@@ -126,7 +135,17 @@ export class GameModeService {
     private readonly catalogs: ProviderCatalogRepository,
     private readonly lease: Lease,
     private readonly now: () => number = Date.now,
+    // LO QUE SE ANUNCIA DE CADA CAMBIO (`domino.config.*`), después de escribirlo. Sin broker, nada.
+    private readonly events: CatalogEvents = NO_CATALOG_EVENTS,
   ) {}
+
+  private tell(event: CatalogEvent): Promise<void> {
+    return this.events.announce(event);
+  }
+
+  private at(): Date {
+    return new Date(this.now());
+  }
 
   // LAS LECTURAS NO TOMAN EL LEASE, y no es una optimización: un GET público que compitiera por el
   // lease del escritor fallaría con 503 cada vez que el panel está editando, y el lease no protege
@@ -219,7 +238,12 @@ export class GameModeService {
           );
         }
       }
-      return this.catalogs.set(providerId, source, actor.name);
+      const before = await this.catalogs.of(providerId);
+      const catalog = await this.catalogs.set(providerId, source, actor.name);
+      if (before.source !== source) {
+        await this.tell(sourceEvent(actor, providerId, source, this.at()));
+      }
+      return catalog;
     });
   }
 
@@ -272,7 +296,9 @@ export class GameModeService {
           `ya existe un modo "${input.name}" de ${input.playersQuantity} jugadores`,
         );
       }
-      return this.repository.create({ ...input, ownerProviderId: owner });
+      const mode = await this.repository.create({ ...input, ownerProviderId: owner });
+      await this.tell(modeEvent(actor, mode, "created", this.at()));
+      return mode;
     });
   }
 
@@ -310,7 +336,15 @@ export class GameModeService {
         }
       }
       if (input.isActive === false) await this.refuseEmptyingOwnCatalog(current);
-      return this.write(uuid, input);
+      const mode = await this.write(uuid, input);
+      const action =
+        input.isActive === false && current.isActive
+          ? "deactivated"
+          : input.isActive === true && !current.isActive
+            ? "reactivated"
+            : "updated";
+      await this.tell(modeEvent(actor, mode, action, this.at()));
+      return mode;
     });
   }
 
@@ -330,7 +364,9 @@ export class GameModeService {
       // LOS SUSCRIPTORES SE QUEDAN: la baja de un compartido no los vacía, así que reactivarlo lo
       // vuelve a ofrecer a los mismos proveedores. El catálogo efectivo ya excluye los inactivos.
       await this.refuseEmptyingOwnCatalog(current);
-      return this.write(uuid, { isActive: false });
+      const mode = await this.write(uuid, { isActive: false });
+      await this.tell(modeEvent(actor, mode, "deactivated", this.at()));
+      return mode;
     });
   }
 
@@ -343,7 +379,9 @@ export class GameModeService {
           `el modo ${uuid} ya está activo`,
         );
       }
-      return this.write(uuid, { isActive: true });
+      const mode = await this.write(uuid, { isActive: true });
+      await this.tell(modeEvent(actor, mode, "reactivated", this.at()));
+      return mode;
     });
   }
 
@@ -414,6 +452,7 @@ export class GameModeService {
         // los puede fabricar— no den dos copias que se salteen la regla de unicidad.
         all.push(written.mode);
       }
+      if (created.length > 0) await this.tell(copiesEvent(actor, providerId, this.at()));
       return { created, existing, skipped };
     });
   }
@@ -448,7 +487,11 @@ export class GameModeService {
         change === "add"
           ? await this.repository.addSubscriber(uuid, providerId)
           : await this.repository.removeSubscriber(uuid, providerId);
-      return this.subscribersWritten(uuid, updated);
+      const mode = this.subscribersWritten(uuid, updated);
+      if (current.subscribers.includes(providerId) !== (change === "add")) {
+        await this.tell(subscriptionEvent(actor, mode, providerId, change, this.at()));
+      }
+      return mode;
     });
   }
 
