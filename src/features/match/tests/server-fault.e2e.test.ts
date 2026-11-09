@@ -76,6 +76,8 @@ describe("el reloj iba a retirar a quien se cayó", () => {
     // ANTES SE LE DIO LA RESERVA: el primer vencimiento la gastó (y quedó en el historial); recién el
     // que lo iba a retirar cancela.
     expect(await linesOf(matchId)).toContain("SYSTEM DEADLINE_EXPIRED");
+    // El aviso viaja por el socket y el historial se escribe en el servidor: el historial llega antes.
+    await waitUntil(() => cancelled.length > 0, 3_000);
     expect(cancelled).toEqual([{ reason: "INTERRUPTED" }]);
   }, 10_000);
 
