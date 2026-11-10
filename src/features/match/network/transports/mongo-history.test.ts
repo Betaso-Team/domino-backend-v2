@@ -798,6 +798,7 @@ describe("MongoHistory: la cabecera y el cierre", () => {
       "matchEndReason_1_createdAt_-1__id_-1",
       "status_1_createdAt_-1__id_-1",
       "table.tournamentId_1_createdAt_-1__id_-1",
+      "seats.providerId_1_createdAt_-1__id_-1",
       "matchEndedAt_1_statsPending",
     ]);
     expect(updateOne).toHaveBeenCalledTimes(2);

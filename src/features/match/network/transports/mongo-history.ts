@@ -95,7 +95,7 @@ export type MatchHistoryDocument = {
   matchId: string;
   // Opcionales: la forma vieja no los guardaba. Se declaran por los filtros del listado.
   roomId?: string;
-  seats?: { userId: string }[];
+  seats?: { userId: string; providerId?: string }[];
   // Opcional: los documentos de antes de la v2.1 no la llevan.
   version?: number;
   // Opcional: solo una mesa de torneo lo lleva. Se declara por el filtro del listado.
@@ -117,7 +117,7 @@ export type MatchHistoryDocument = {
   lostEntries?: number;
 };
 
-// LOS OCHO ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS NUEVE ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -144,6 +144,10 @@ export type MatchHistoryDocument = {
 //   · `table.tournamentId` PARCIAL con el orden del listado detrás: las partidas de un torneo. Solo
 //     las mesas de torneo lo llevan, así que el índice no carga los millones de casuales; la igualdad
 //     del filtro implica el `$exists` del parcial y el planificador lo usa (medido).
+//   · `seats.providerId` con el orden del listado detrás: las partidas de un proveedor, que es como
+//     ve el listado un admin de proveedor (siempre lo lleva). MULTIKEY como el del jugador, por lo
+//     mismo: el arreglo es sólo el prefijo y lo fija la igualdad. Dos asientos del mismo proveedor dan
+//     una sola clave: la partida sale una vez. No es parcial: casi toda partida nueva lo lleva.
 //
 // El filtro por `_id` no necesita uno: el de la colección ya está.
 //
@@ -176,6 +180,10 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
       key: { "table.tournamentId": 1, createdAt: -1, _id: -1 },
       name: "table.tournamentId_1_createdAt_-1__id_-1",
       partialFilterExpression: { "table.tournamentId": { $exists: true } },
+    },
+    {
+      key: { "seats.providerId": 1, createdAt: -1, _id: -1 },
+      name: "seats.providerId_1_createdAt_-1__id_-1",
     },
     // PARCIAL: sólo lo pendiente, que es una fracción mínima de la colección y casi siempre vacía.
     {
@@ -213,6 +221,7 @@ function filterOf(query: MatchListQuery): ListFilter {
     ...(query.matchEndReason === undefined ? {} : { matchEndReason: query.matchEndReason }),
     ...(query.status === undefined ? {} : { status: query.status }),
     ...(query.tournamentId === undefined ? {} : { "table.tournamentId": query.tournamentId }),
+    ...(query.providerId === undefined ? {} : { "seats.providerId": query.providerId }),
   };
 }
 

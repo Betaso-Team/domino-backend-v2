@@ -1,5 +1,5 @@
 import type { Logger } from "@/logger";
-import { type AdminTokenCheck, requireAdminKey } from "@/shared/http/api-key";
+import { type AdminTokenCheck, adminOf, requireAdminKey } from "@/shared/http/api-key";
 import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
 import { type Response, Router } from "express";
@@ -93,6 +93,7 @@ const LIST_QUERY = z
     matchEndReason: z.enum(MATCH_END_REASONS).optional(),
     status: z.enum(MATCH_STATUSES).optional(),
     tournamentId: id.optional(),
+    providerId: id.optional(),
   })
   .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
     message: "`from` no puede ser posterior a `to`",
@@ -106,6 +107,31 @@ const TIMEOUT_MESSAGE = "La búsqueda tardó demasiado; acota el rango de fechas
 // salen `{ code, detail? }` (`@/shared/http/errors`), como en todo el dominó. Se escribe acá y no se importa de allá porque es de otra
 // feature, y una ruta del dominó no puede depender de los mensajes del catálogo.
 const sendData = (response: Response, data: unknown) => response.json({ status: "success", data });
+
+/**
+ * DE QUÉ PROVEEDOR SON LAS PARTIDAS QUE SE LISTAN, o `undefined` después de contestar el 404. Un admin
+ * de proveedor, siempre el suyo: un `?providerId=` igual se acepta y uno distinto es 404
+ * `UNKNOWN_PROVIDER` —lo de otro proveedor no existe para éste, la regla del catálogo
+ * (`features/game-mode/transports/http/admin.ts`)—. Tablea Gaming (token sin `prv`, o la llave) filtra
+ * por el que nombre, o por ninguno (`null`).
+ */
+function listedProviderOf(
+  response: Response,
+  asked: string | undefined,
+): string | null | undefined {
+  const { provider } = adminOf(response);
+  if (provider === null) return asked ?? null;
+  if (asked !== undefined && asked !== provider) {
+    sendError(response, 404, "UNKNOWN_PROVIDER");
+    return undefined;
+  }
+  return provider;
+}
+
+/** ¿Algún asiento del registro es de este proveedor? Un documento sin asientos no es de nadie. */
+const hasProviderSeat = (record: Record<string, unknown>, provider: string): boolean =>
+  Array.isArray(record.seats) &&
+  record.seats.some((seat) => (seat as { providerId?: unknown } | null)?.providerId === provider);
 
 /**
  * EL REGISTRO DE CADA PARTIDA, para quien lo mira entero: el panel (el listado y el detalle) y el
@@ -136,18 +162,29 @@ export function recordRoutes({
   // Primero QUIÉN SOS y después QUÉ MANDASTE: al revés, un anónimo distinguiría una forma inválida de
   // una válida en rutas que no tiene derecho a tocar.
   //
-  // LAS TRES SON LECTURAS DE TABLEA GAMING (`support` incluido) y ningún admin de PROVEEDOR las abre: el
-  // registro no guarda de qué proveedor es cada asiento, así que no hay ámbito con el que acotarlo, y
-  // abrirlas le mostraría a un proveedor las partidas —y los `userId`— de todos los demás.
+  // LAS TRES SON LECTURAS (`support` incluido). EL LISTADO Y EL DETALLE ABREN A LOS PROVEEDORES, acotados
+  // por el `providerId` que el registro guarda en cada asiento (`seats[].providerId`, lo manda el
+  // orquestador): un admin de proveedor ve sólo las partidas donde se sentó alguno de sus jugadores, y
+  // una sin el campo —grabada antes de que el orquestador lo mandara— sólo la ve Tablea Gaming.
+  //
+  // ⚠ EN UNA CASUAL CRUZADA LOS DOS PROVEEDORES VEN EL DOCUMENTO ENTERO, el asiento del rival incluido
+  // (su `userId`, su nombre, su mano en la timeline). Es aceptado: es la partida que jugó su jugador, y
+  // recortarla dejaría un registro que no se puede rebobinar.
+  //
+  // `/game-data` sigue siendo de Tablea Gaming: es el contrato del backend principal, no del panel.
   const admin = requireAdminKey(adminApiKey, adminTokens, { read: true });
+  const scoped = requireAdminKey(adminApiKey, adminTokens, { read: true, providers: true });
 
   // EL LISTADO, sólo `GET`: el `POST` del mismo path es del orquestador, con su propia llave
   // (`./tables.ts`), y Express los separa por método. La más nueva primero, sin `timeline` ni `rounds`,
   // paginado por cursor (`MatchCursor`) y con el total que se puede contar barato (`MatchListPage`).
   router.get(
     MATCHES_ROUTE,
-    admin,
+    scoped,
     validated({ query: LIST_QUERY }, async ({ query }, response) => {
+      // EL PROVEEDOR DEL TOKEN SE FUERZA: un admin de proveedor no puede listar sin él.
+      const providerId = listedProviderOf(response, query.providerId);
+      if (providerId === undefined) return;
       const {
         pageSize,
         after,
@@ -174,6 +211,7 @@ export function recordRoutes({
           ...(matchEndReason === undefined ? {} : { matchEndReason }),
           ...(status === undefined ? {} : { status }),
           ...(tournamentId === undefined ? {} : { tournamentId }),
+          ...(providerId === null ? {} : { providerId }),
         });
         sendData(response, {
           items: page.items,
@@ -195,12 +233,16 @@ export function recordRoutes({
   // EL DETALLE: el documento entero, con su `_id` como texto. `/:matchId` matchea UN segmento, así que
   // `/:matchId/history` (`./history.ts`) no le llega; igual se registra después de aquél (el orden
   // lo pinea `register.ts`).
+  //
+  // Un admin de proveedor recibe 404 por una partida en la que no se sentó ninguno de sus jugadores, igual
+  // que por una que no existe: lo de otro proveedor no existe para él.
   router.get(
     MATCH_ROUTE,
-    admin,
+    scoped,
     validated({ params: MATCH_PARAMS }, async ({ params }, response) => {
       const record = await archive.recordOf(params.matchId);
-      if (!record) {
+      const { provider } = adminOf(response);
+      if (!record || (provider !== null && !hasProviderSeat(record, provider))) {
         sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }

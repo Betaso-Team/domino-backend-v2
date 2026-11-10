@@ -37,6 +37,7 @@ const ALL_INDEXES = [
   "matchEndedAt_1_statsPending",
   "matchId_1",
   "roomId_1_createdAt_-1__id_-1",
+  "seats.providerId_1_createdAt_-1__id_-1",
   "seats.userId_1_createdAt_-1__id_-1",
   "status_1_createdAt_-1__id_-1",
   "table.tournamentId_1_createdAt_-1__id_-1",
@@ -240,7 +241,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     beforeAll(async () => {
       history = await fresh();
       // Los índices se piden con el primer uso, como en producción, y se crean en segundo plano: los
-      // planes de abajo se miden con los seis ya puestos.
+      // planes de abajo se miden con todos ya puestos.
       await history.list({ pageSize: 1 });
       await vi.waitFor(async () => expect(await indexNames()).toEqual(ALL_INDEXES), INDEX_WAIT);
       // TRESCIENTAS PARTIDAS en quince salas, de a tres por segundo —empates en el mismo milisegundo—,
@@ -268,7 +269,15 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
             `jugador-${(index + 3) % 10}`,
             `jugador-${(index + 6) % 10}`,
             index % 5 === 0 ? `jugador-${index % 10}` : "jugador-x",
-          ].map((userId, seat) => ({ id: `seat-${seat + 1}`, seat, userId })),
+          ].map((userId, seat) => ({
+            id: `seat-${seat + 1}`,
+            seat,
+            userId,
+            // EL PROVEEDOR: los asientos impares son siempre de `betaso` —el mismo proveedor en dos
+            // asientos, dos claves del multikey para un documento— y los pares de uno de cuatro, así que
+            // `prov-1` está en una de cada cuatro partidas.
+            providerId: seat % 2 === 0 ? `prov-${index % 4}` : "betaso",
+          })),
           timeline: [entry(1, { matchId: `p-${index}` })],
         })),
         // TREINTA ABIERTAS, sin motivo y con jugadores propios: el historial del jugador las descarta
@@ -345,6 +354,9 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["fechas + status", () => ({ pageSize: PAGE, from, to, status: "started" })],
       ["tournamentId", () => ({ pageSize: PAGE, tournamentId: "copa" })],
       ["fechas + tournamentId", () => ({ pageSize: PAGE, from, to, tournamentId: "relampago" })],
+      ["providerId (uno de cada cuatro)", () => ({ pageSize: PAGE, providerId: "prov-1" })],
+      ["providerId en dos asientos", () => ({ pageSize: PAGE, providerId: "betaso" })],
+      ["fechas + providerId", () => ({ pageSize: PAGE, from, to, providerId: "prov-2" })],
       [
         "matchId + roomId + id",
         () => ({
@@ -417,6 +429,17 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         });
         expect(inTournament).toBe(items.length);
       }
+      const { providerId } = query();
+      if (providerId !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        expect(new Set(items.map((item) => item._id)).size).toBe(items.length);
+        const provided = await (await collection()).countDocuments({
+          matchId: { $in: items.map((item) => item.matchId) },
+          "seats.providerId": providerId,
+        });
+        expect(provided).toBe(items.length);
+      }
       const { status } = query();
       if (status !== undefined) {
         const { items } = await history.list(query());
@@ -438,6 +461,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["cursor + matchEndReason", { matchEndReason: "ABANDONMENT" }, 2, 4],
       ["cursor + status", { status: "aborted" }, 2, 4],
       ["cursor + tournamentId", { tournamentId: "copa" }, 2, 4],
+      ["cursor + providerId", { providerId: "prov-1" }, 2, 4],
     ] as const)(
       "%s: sin COLLSCAN, sin SORT y sin leer de más",
       async (_name, filters, depth, pageSize) => {
@@ -503,6 +527,29 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       expect(seen).toHaveLength(seated);
       expect(new Set(seen).size).toBe(seated);
       expect((await history.list({ pageSize: 1, userId: "jugador-5" })).total).toBe(seated);
+    });
+
+    // EL MISMO PROVEEDOR EN DOS ASIENTOS (`betaso` en los impares de todas), por lo mismo: una vez en el
+    // recorrido y una vez en el total.
+    it("un proveedor en dos asientos sale una vez: el recorrido entero y el total", async () => {
+      const provided = await (await collection()).countDocuments({ "seats.providerId": "betaso" });
+      expect(provided).toBe(300);
+
+      const seen: string[] = [];
+      let after: MatchCursor | undefined;
+      do {
+        const page = await history.list({
+          pageSize: 50,
+          providerId: "betaso",
+          ...(after ? { after } : {}),
+        });
+        seen.push(...page.items.map((item) => item._id));
+        after = page.next;
+      } while (after);
+
+      expect(seen).toHaveLength(provided);
+      expect(new Set(seen).size).toBe(provided);
+      expect((await history.list({ pageSize: 1, providerId: "betaso" })).total).toBe(provided);
     });
 
     // MOTIVO + JUGADOR NO TIENE ÍNDICE PROPIO, a propósito: Mongo usa uno de los dos y filtra el otro

@@ -90,6 +90,11 @@ export interface SeatSetup {
    * entero y no se recalcula: la tasa de mañana no puede cambiar lo que costó la mesa de hoy.
    */
   readonly price?: SeatPrice;
+  /**
+   * EL PROVEEDOR DEL JUGADOR (`MatchSeat.providerId`), si el orquestador lo mandó. Es lo que acota el
+   * listado y el detalle del panel para un admin de proveedor; sin él, la partida sólo la ve Tablea.
+   */
+  readonly providerId?: string;
 }
 
 /**
@@ -363,6 +368,12 @@ export interface MatchListQuery {
    * casual y la forma vieja no coinciden nunca.
    */
   readonly tournamentId?: string;
+  /**
+   * Un proveedor: el `providerId` de CUALQUIERA de los asientos (`seats[].providerId`), exacto. En una
+   * casual cruzada la partida sale para los dos proveedores. Un documento sin el campo —grabado antes,
+   * o la forma vieja— no coincide nunca.
+   */
+  readonly providerId?: string;
 }
 
 /**

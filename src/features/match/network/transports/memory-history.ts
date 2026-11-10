@@ -284,7 +284,17 @@ function matches(document: Stored, query: MatchListQuery): boolean {
   if (query.status !== undefined && document.status !== query.status) return false;
   if (query.tournamentId !== undefined && tournamentOf(document) !== query.tournamentId)
     return false;
+  if (query.providerId !== undefined && !providedBy(document, query.providerId)) return false;
   return true;
+}
+
+// `{ "seats.providerId": x }` de Mongo: alguno de los asientos, exacto. Sin el campo no coincide.
+function providedBy(document: Stored, providerId: string): boolean {
+  const seats = document.seats;
+  return (
+    Array.isArray(seats) &&
+    seats.some((seat) => (seat as { providerId?: unknown } | null)?.providerId === providerId)
+  );
 }
 
 // `{ "table.tournamentId": x }` de Mongo: solo una mesa de torneo lo lleva.
