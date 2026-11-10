@@ -1,6 +1,6 @@
 import { rootContainer } from "@/di-container";
 import { env } from "@/env";
-import { CASUAL_2P } from "@/tests/game-mode-catalog";
+import { CASUAL_2P } from "@/tests/table-modes";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
@@ -242,18 +242,16 @@ describe("ciclo de vida de una partida", () => {
     expect(JSON.parse(body)).toEqual({
       mode: "CASUAL",
       matchId: "m-c1-c2",
-      // EL UUID DEL MODO RESUELTO, y ya no el nombre que el request traía: desde la Tarea 10 el
-      // snapshot guarda lo que el catálogo devolvió. Sale del modo sembrado y no de un literal
-      // porque el repositorio de memoria lo genera al crearlo.
+      // EL UUID DEL MODO que el pedido nombró.
       gameModeId: CASUAL_2P.uuid,
       seats: ["seat-1", "seat-2"],
-      // LOS TRES NÚMEROS SALEN DEL CATÁLOGO y siguen siendo los mismos: van como literal para que
-      // este endpoint quede pineado contra el modo y no contra sí mismo.
+      // LOS TRES NÚMEROS SALEN DEL MODO EN LÍNEA: van como literal para que este endpoint quede
+      // pineado contra el modo y no contra sí mismo.
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
       betLevels: [],
-      // LAS DOS REGLAS DE LA MESA QUE EL FRONT DIBUJA, del modo sembrado.
+      // LAS DOS REGLAS DE LA MESA QUE EL FRONT DIBUJA, del modo en línea.
       isFreeRoom: false,
       enableBots: false,
       // LOS PLAZOS CON LOS QUE NACIÓ, los del entorno de la suite: el front dibuja el anillo con ellos.

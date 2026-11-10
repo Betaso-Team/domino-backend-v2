@@ -1,6 +1,5 @@
 import { rootContainer } from "@/di-container";
 import { InvalidTokenError, type TokenVerifier } from "@/features/auth";
-import type { GameModeReader } from "@/features/game-mode";
 import type { Logger } from "@/logger";
 import { eventLoopP99Ms } from "@/shared/event-loop-lag";
 import { StateView } from "@colyseus/schema";
@@ -43,7 +42,7 @@ import {
 } from "../../network/orchestrator-charges";
 import { type SeatCredentials, configOf, requestOf } from "../match-contract";
 
-// El nombre de la mesa en el registro cuando no hay modo del catálogo detrás.
+// El nombre de la mesa en el registro cuando no hay modo detrás: la de torneo.
 const TOURNAMENT_TABLE_NAME = "Torneo";
 import {
   HEARTBEAT_MS,
@@ -165,9 +164,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // 'error')» en vez de nombrar el campo que vino mal. MEDIDO, no deducido: es lo que imprimía
     // el test de opciones inválidas antes de mover estas dos líneas.
     //
-    // LA TAREA 10 SUMÓ TRES LANZADORES MÁS en esta misma ventana —el modo que no existe, el modo
-    // de cuatro y la cantidad que no coincide—, y los tres caen acá con el logger ya puesto. Es la
-    // razón de que la resolución del catálogo vaya DESPUÉS de estas dos líneas y no antes.
+    // LA VALIDACIÓN DEL REQUEST Y LA CANTIDAD QUE NO COINCIDE CON EL MODO lanzan en esta misma
+    // ventana, y caen acá con el logger ya puesto.
     const rootLogger = rootContainer.resolve<Logger>("Logger");
     this.log = rootLogger.child({ roomId: this.roomId });
 
@@ -177,31 +175,19 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const global = rootContainer.resolve<GlobalConfigSource>("GlobalConfigSource")();
     this.reconnectionWindowSeconds = global.reconnectionWindowSeconds;
 
-    // EL CATÁLOGO ES LA AUTORIDAD, Y SE CONSULTA UNA SOLA VEZ. El request nombra un modo; de acá
-    // salen los puntos y el dinero de la mesa, y lo que queda en `config` es una COPIA. La sala no
-    // vuelve a preguntar nunca más: editar un modo mientras hay una partida en curso no puede
-    // cambiarle el premio a una mesa ya cobrada, y `replay` rebobina con lo grabado y sin base.
-    //
-    // `activeByUuid` y no `byUuid`: un modo dado de baja NO EXISTE desde afuera, y el panel lo da
-    // de baja justamente para que deje de sentar mesas.
+    // EL MODO VIENE EN EL REQUEST (`gameMode`): el catálogo es del orquestador, que manda los números
+    // con los que cobró. Lo que queda en `config` es una COPIA: editar el modo mientras hay una
+    // partida en curso no puede cambiarle el premio a una mesa ya cobrada, y `replay` rebobina con lo
+    // grabado y sin base.
     const request = requestOf(options);
-    // LA MESA DE TORNEO NO PASA POR EL CATÁLOGO: sus reglas vienen en el request y no tiene dinero.
-    // TAMPOCO LA CASUAL QUE TRAE SU MODO EN LÍNEA (`gameMode`, fase C): el orquestador ya es el
-    // dueño del catálogo y manda los números con los que cobró; leer el de dominó sería otra copia.
-    const mode =
-      request.mode === "TOURNAMENT" || request.gameMode
-        ? undefined
-        : await rootContainer
-            .resolve<GameModeReader>("GameModeReader")
-            .activeByUuid(request.gameModeId);
     const betLevels = request.mode === "CASUAL" ? (request.betLevels ?? []) : [];
-    // Acá adentro se rechaza el modo que no es de 2 ni de 4 (`UNSUPPORTED_GAME_MODE`) y la cantidad
-    // que no coincide, y las dos cosas pasan ANTES de la génesis: el árbol de la partida nace unas
-    // líneas más abajo, en el `child.resolve("MatchState")`.
+    // Acá adentro se rechaza la cantidad que no coincide con el modo (`SEAT_COUNT_MISMATCH`), ANTES
+    // de la génesis: el árbol de la partida nace unas líneas más abajo, en el
+    // `child.resolve("MatchState")`.
     //
     // LOS NIVELES DE AUMENTO LOS TRAE EL REQUEST: el que cobra el aumento es el orquestador, y es él
     // quien decide cuáles se ofrecen. Sin `betLevels` la mesa no ofrece aumentar.
-    const config = configOf(request, mode, betLevels);
+    const config = configOf(request, betLevels);
     this.config = config;
     this.seats = playerIdsOf(config);
     // SIN `maxClients`, A PROPÓSITO (portado de truco `b90840b`). La puerta es el chequeo del asiento
@@ -252,10 +238,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       (events: readonly NetworkMatchEvent[]) => this.notifier.notify(events),
       {
         roomId: this.roomId,
-        gameModeName:
-          (request.mode === "CASUAL" ? request.gameMode?.name : undefined) ??
-          mode?.name ??
-          TOURNAMENT_TABLE_NAME,
+        gameModeName: request.mode === "CASUAL" ? request.gameMode.name : TOURNAMENT_TABLE_NAME,
       },
     );
     this.history = pieces.history;

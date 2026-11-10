@@ -4,7 +4,7 @@ import type { CreateMatchRequest, MatchParticipant } from "@/features/match";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import { mintBillingToken } from "./billing-auth-keys";
 import { fakeOrchestrator } from "./fake-orchestrator";
-import { CASUAL_2P } from "./game-mode-catalog";
+import { CASUAL_2P, type TableMode } from "./table-modes";
 
 // Scaffolding de la app ensamblada. Vive en la raíz porque lo consumen varias features (match,
 // settings); dejar una copia en cada una es exactamente lo que hace divergir sus tokens y mesas.
@@ -23,7 +23,7 @@ export async function bootTestServer(port: number): Promise<ColyseusTestServer> 
   // el que se IMPORTA, y esa división existe justamente para que ningún test arrastre lo que main
   // registra.
   //
-  // Va acá y no en cada archivo por lo mismo que el modo del catálogo se siembra en un solo
+  // Va acá y no en cada archivo por lo mismo que los modos de la suite se escriben en un solo
   // lugar: el que escriba el E2E número veinte no tiene por qué saber esto. `start()` es
   // idempotente —sale temprano si ya hay intervalo— y va `unref`eado, así que ni se duplica entre
   // archivos ni sostiene el proceso al terminar.
@@ -82,15 +82,16 @@ export function casualTable(
   seats: readonly ParticipantInput[],
   seed = "seed-e2e",
   // EL MODO POR PARÁMETRO, y el default es el de dos porque es el de casi toda la suite. Sin
-  // esto, una mesa de cuatro se pediría contra `CASUAL_2P` y `configOf` la rechazaría por
+  // esto, una mesa de cuatro se pediría con `CASUAL_2P` y `configOf` la rechazaría por
   // cantidad — con un error que apunta al pedido cuando lo que está mal es el modo.
-  gameModeId: string = CASUAL_2P.uuid,
-): CreateMatchRequest {
+  table: TableMode = CASUAL_2P,
+): CreateMatchRequest & { mode: "CASUAL" } {
   const participants = seats.map(participantOf);
   return {
     mode: "CASUAL",
     matchId: `m-${participants.map(({ userId }) => userId).join("-")}`,
-    gameModeId,
+    gameModeId: table.uuid,
+    gameMode: table.gameMode,
     participants,
     seed,
     teamAssignment: "SHUFFLED",

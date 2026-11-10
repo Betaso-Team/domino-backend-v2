@@ -10,7 +10,7 @@ import {
   participantOf,
   waitUntil,
 } from "@/tests/e2e";
-import { CASUAL_2P, CASUAL_4P } from "@/tests/game-mode-catalog";
+import { CASUAL_4P } from "@/tests/table-modes";
 import type { Room } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
@@ -76,9 +76,9 @@ export interface SeatedMatch {
 
 /**
  * LA MESA DE CUATRO, gemela de `seatPair` y por el mismo camino: el `CreateMatchRequest` del
- * orquestador contra el modo de cuatro del catálogo.
+ * orquestador con el modo de cuatro en línea.
  *
- * No es `seatPair` con más asientos porque el MODO es otro: la cantidad la decide el catálogo y
+ * No es `seatPair` con más asientos porque el MODO es otro: la cantidad la decide el modo y
  * `configOf` rechaza el pedido que no coincide, así que cruzar cuatro participantes con
  * `CASUAL_2P` no sienta a nadie. Todo lo demás del arnés —`revealHands`, `playOneTurn`,
  * `playUntilDecided`— es agnóstico a cuántos hay sentados y no se tocó.
@@ -88,8 +88,8 @@ export async function seatFour(
   seats: readonly [ParticipantInput, ParticipantInput, ParticipantInput, ParticipantInput],
   seed?: string,
 ): Promise<SeatedMatch> {
-  const options = casualTable(seats, seed, CASUAL_4P.uuid);
-  const config = configOf(requestOf(options), CASUAL_4P);
+  const options = casualTable(seats, seed, CASUAL_4P);
+  const config = configOf(requestOf(options));
   const room = await server.createRoom("domino", options);
   const clients: SeatedMatch["clients"] = {};
   for (const seat of config.seats) {
@@ -103,15 +103,15 @@ export async function seatPair(
   server: ColyseusTestServer,
   seats: readonly [ParticipantInput, ParticipantInput],
   seed?: string,
-  // LO QUE EL ORQUESTADOR PUEDE AGREGARLE AL PEDIDO: los niveles de aumento y el modo en línea (con
-  // otro `gameModeId`, para medir que la sala no lee el catálogo).
+  // LO QUE EL ORQUESTADOR PUEDE AGREGARLE O CAMBIARLE AL PEDIDO: los niveles de aumento y otro modo
+  // en línea.
   extra: Partial<Pick<CasualMatchRequest, "betLevels" | "gameMode" | "gameModeId">> = {},
 ): Promise<SeatedMatch> {
   const options = { ...casualTable(seats, seed), ...extra };
-  // EL MISMO PAR QUE LA SALA: el request validado y el modo sembrado. Si acá se armara el config a
+  // EL MISMO CONFIG QUE LA SALA: sale del request validado. Si acá se armara el config a
   // mano, el arnés describiría una mesa distinta de la que el servidor creó y los `seat-N` con los
   // que los tests hablan podrían no ser los suyos.
-  const config = configOf(requestOf(options), CASUAL_2P);
+  const config = configOf(requestOf(options));
   const room = await server.createRoom("domino", options);
   const clients: SeatedMatch["clients"] = {};
   for (const seat of config.seats) {
