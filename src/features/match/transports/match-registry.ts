@@ -162,7 +162,7 @@ interface CensusEntry {
 export interface MatchCensusCount {
   /** Todos los asientos que siguen jugando, casuales y de torneo. */
   readonly playersInMatch: number;
-  /** Solo las mesas casuales: una de torneo no tiene modo del catálogo. */
+  /** Solo las mesas casuales: una de torneo no tiene modo. */
   readonly byGameMode: ReadonlyMap<string, number>;
   /** Las mesas de torneo, por torneo. */
   readonly byTournament: ReadonlyMap<string, number>;

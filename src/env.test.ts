@@ -132,16 +132,6 @@ describe("parseEnv", () => {
     expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY }).adminApiKey).toBeUndefined();
   });
 
-  it("CATALOG_READ_ONLY está apagado por omisión y solo lo enciende un 1", () => {
-    expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY }).catalogReadOnly).toBe(false);
-    expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, CATALOG_READ_ONLY: "0" }).catalogReadOnly).toBe(
-      false,
-    );
-    expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, CATALOG_READ_ONLY: "1" }).catalogReadOnly).toBe(
-      true,
-    );
-  });
-
   it("rechaza una ADMIN_API_KEY corta en vez de aceptar una llave enumerable", () => {
     expect(() => parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, ADMIN_API_KEY: "corta" })).toThrow(
       /ADMIN_API_KEY/,
@@ -155,9 +145,9 @@ describe("parseEnv", () => {
     expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY }).redisUrl).toBeUndefined();
   });
 
-  // LA VIEJA RABBITMQ_URL (el exchange `betaso` del catálogo) YA NO SE LEE: un `.env` que todavía la
-  // tenga arranca igual, y nada en el entorno la expone.
-  it("ignora RABBITMQ_URL: el catálogo no publica a ningún broker", () => {
+  // LA VIEJA RABBITMQ_URL (el exchange `betaso`) YA NO SE LEE: un `.env` que todavía la tenga arranca
+  // igual, y nada en el entorno la expone.
+  it("ignora RABBITMQ_URL: dominó no publica al broker de Betaso", () => {
     const env = parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, RABBITMQ_URL: "amqp://x" });
     expect(Object.keys(env)).not.toContain("rabbitmqUrl");
   });
@@ -165,8 +155,8 @@ describe("parseEnv", () => {
   // EN PRODUCCIÓN LAS DOS SON OBLIGATORIAS, y acá está la asimetría que vale escribir: fuera
   // de producción, "ausente" es la decisión legítima de una instancia que corre sola y sin
   // infraestructura. En producción es lo contrario — un despliegue productivo sin `MONGO_URI`
-  // arranca creyendo que persiste, y sin `ADMIN_API_KEY` deja el catálogo sin su API
-  // administrativa. Las dos fallan en SILENCIO, que es exactamente la clase de error que un
+  // arranca creyendo que persiste, y sin `ADMIN_API_KEY` deja al panel sin el historial ni la
+  // configuración en caliente. Las dos fallan en SILENCIO, que es exactamente la clase de error que un
   // arranque tiene que rechazar.
   describe("en producción exige la infraestructura completa", () => {
     const productivo = {

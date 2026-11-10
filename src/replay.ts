@@ -123,12 +123,9 @@ function fromArgs(id: string): Omit<ReplayInput, "entries"> {
   // `isDealWindowEnabled` deje de estar siempre encendida, le daban al CLI una partida
   // distinta de la que la sala jugó, en silencio y sin que tsc dijera nada.
   //
-  // ⛔ Y ES `replayConfigOf` Y NO `configOf`, QUE ES LA MITAD DE LA TAREA 10. Desde que el catálogo
-  // es la autoridad, `configOf` pide el `GameMode` resuelto: usarlo acá obligaría al CLI de soporte
-  // a consultar Mongo —o peor, a consultarlo y encontrar el modo YA EDITADO—, y entonces rebobinar
-  // una partida vieja la reconstruiría con los puntos y el premio de hoy. Una partida se rebobina
-  // con el snapshot que TENÍA. Por eso este archivo no importa nada de `features/game-mode`, y hay
-  // un test que lo mide sobre la lista exacta de imports.
+  // ⛔ Y ES `replayConfigOf` Y NO `configOf`. `configOf` arma una mesa que NACE a partir del pedido
+  // del orquestador, con su modo en línea; una partida vieja se rebobina con el snapshot que TENÍA,
+  // nunca con el modo de hoy. Hay un test que mide la lista exacta de imports de este archivo.
   //
   // LOS ASIENTOS SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
   // siendo IDS DE ASIENTO —el vocabulario con el que el historial grabó la partida—, y un
