@@ -192,10 +192,6 @@ const casualRequest = z
     checkTableShape(participants, context, "participants"),
   );
 
-// EL TECHO DE PUNTOS ES EL DEL CATÁLOGO (`game-mode/transports/http/schemas.ts`): una mesa de torneo
-// no puede pedir una partida que ningún modo casual podría tener.
-const MAX_POINTS_TO_WIN = 100;
-
 // LA MESA DE TORNEO, y NO TRAE DINERO NI CATÁLOGO: ni `gameModeId`, ni `rateId`, ni `betLevels`. Las
 // partidas de un torneo son gratis —la inscripción la cobró billing al inscribirse— y las reglas las
 // manda el orquestador, que las copió del torneo. `strictObject` rechaza cualquier campo de dinero:
@@ -209,8 +205,12 @@ const tournamentRequest = z
     participants: z.array(participant).min(2).max(4),
     seed: nonBlank,
     teamAssignment,
+    // SIN TECHO PROPIO: el tope de puntos de un torneo es una decisión de producto de
+    // `apps/tournaments` (su ajuste `maxPointsToWin`). El motor solo usa `pointsToWin` como meta
+    // (`referee.ts`), así que acá se exige únicamente la regla técnica: un entero positivo seguro. El
+    // 100 del catálogo casual (`game-mode/transports/http/schemas.ts`) es de ese catálogo, no del motor.
     rules: z.strictObject({
-      pointsToWin: z.number().int().positive().max(MAX_POINTS_TO_WIN),
+      pointsToWin: z.number().int().positive().safe(),
     }),
   })
   .superRefine(({ participants }, context) =>

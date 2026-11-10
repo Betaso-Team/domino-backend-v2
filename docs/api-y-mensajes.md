@@ -426,7 +426,8 @@ es 400), discriminado por `mode`:
   `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el `_id` de Mongo de la tasa de
   Betaso) y `betLevels` opcional (abajo).
 - **`"TOURNAMENT"`**: `matchId`, `tournamentId`, `participants` y `teamAssignment` como la casual,
-  `seed` y `rules: { pointsToWin }` (entero de 1 a 100). **Sin** `gameModeId`, `rateId` ni `betLevels`:
+  `seed` y `rules: { pointsToWin }` (entero positivo seguro; el tope lo decide `apps/tournaments`, no
+  el dominó, cuyo motor solo usa `pointsToWin` como meta). **Sin** `gameModeId`, `rateId` ni `betLevels`:
   traer alguno es 400. La mesa no consulta el catálogo: es gratis (`isFreeRoom`, entrada y premio 0),
   sin aumentos, sin bots y sin revancha, con la ventana de reparto y los plazos de cualquier mesa
   (la config global, con sus ediciones en caliente). Con la mesa completa **arranca sin pedir cobro**
