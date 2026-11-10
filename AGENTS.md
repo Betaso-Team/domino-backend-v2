@@ -33,23 +33,22 @@ pieza del dominó.
   `settlementOf`, que se cambió porque el orquestador usa «settlement» para algo más amplio.
 - **Un solo emisor de tokens: billing-auth.** El `JwtVerifier` acepta solo ES256 contra
   `BILLING_AUTH_PUBLIC_KEY` (obligatoria); no hay HS256 ni secreto compartido con el backend de
-  Betaso. La administración (catálogo, historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la
-  llave nuestra, no la de un cliente.
+  Betaso. La administración (historial, `/internal/settings`) abre con `ADMIN_API_KEY`, la llave
+  nuestra, no la de un cliente.
 - **Cada admin tiene proveedor y rol.** El token de admin de billing-auth trae `prv` (el proveedor;
   `null` = Tablea Gaming) y `role` (`admin` | `support`), **obligatorios**: sin alguno, 401. `requireAdminKey` **cierra por default**: una ruta es de Tablea Gaming y de escritura salvo
-  que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Hoy sólo
-  el catálogo declara `providers`; el historial, los registros, `/game-data` y `/internal/settings`
-  son de Tablea Gaming. Ver «Incremento completo — modos con dueño y suscripciones».
-- **Los modos tienen dueño** (`ownerProviderId`: `null` compartido, un id propio de ese proveedor) y los
-  compartidos, suscriptores **explícitos** (`subscribers`; ausente = `[]` = nadie). Cada proveedor
-  elige la **fuente** de su catálogo entero (`provider_catalogs`: `shared` | `own`, ausente =
-  `shared`). El público `GET /game-modes` sirve sólo compartidos; el orquestador lee modos y fuentes
-  por `GET /internal/game-modes`. **El catálogo no publica sus modos a ningún broker**: el exchange
-  `betaso`, su outbox, `/sync` y `RABBITMQ_URL` se fueron; Betaso lee dominó del orquestador. Lo que sí
-  sale es el **anuncio** de cada cambio (`domino.config.*`, a `tablea_gaming`, por su propio outbox
-  `catalog_event_outbox`, después de escribir) para el servicio de notificaciones; ver «Anuncios del
-  catálogo» en `docs/api-y-mensajes.md`. Ver «Incremento
-  completo — modos con dueño: fuente del catálogo y sin exchange `betaso`».
+  que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Hoy ninguna
+  ruta declara `providers` (lo declaraba el catálogo, que se borró): el historial, los registros,
+  `/game-data` y `/internal/settings` son de Tablea Gaming. Ver «Incremento completo — modos con dueño y
+  suscripciones».
+- **Dominó no tiene catálogo de modos (C7, 2026-11-10).** El catálogo es del orquestador, el único
+  que lo lee y lo edita: cada `POST /internal/matches` casual trae el modo entero (`gameMode`,
+  obligatorio) además de `gameModeId`, que solo nombra la mesa. `configOf(request, betLevels)` arma la
+  mesa con él; la única negativa de la sala es `422 SEAT_COUNT_MISMATCH`. Se borraron la feature
+  `game-mode`, `/game-modes…`, `GET /internal/game-modes`, los anuncios `domino.config.*` y su outbox,
+  `CATALOG_READ_ONLY` y `modes:subscribe-existing`; las colecciones (`game_modes_domino`,
+  `provider_catalogs`, `catalog_event_outbox`) quedan en la base sin tocar. `game_mode_leases` sigue en
+  uso (el lease de resultados y estadísticas). Ver «Incremento completo — sin catálogo en dominó».
 - **La revancha**: el motor abre la ventana (`isRematchEnabled: true` en `configOf`), pero nadie abre
   la compuerta, así que sale siempre con `eligible: false`. Revancha de verdad pide que el orquestador
   vuelva a cobrar.
@@ -71,20 +70,15 @@ pieza del dominó.
   cubre cabeceras y cuerpo, y al vencer es `DeadlineExceededError`. Ver «Incremento completo — el
   cliente HTTP aborta con el plazo».
 - **Todo error HTTP es `{ code, detail? }`** (`sendError` de `shared/http/errors.ts`): ninguna ruta
-  contesta `{ error }` ni `{ status: "error", message }`, y lo de otro proveedor es 404
-  (`?providerId=` ajeno → `UNKNOWN_PROVIDER`). La tabla ruta → códigos está en
+  contesta `{ error }` ni `{ status: "error", message }`. La tabla ruta → códigos está en
   `docs/api-y-mensajes.md` («Errores») y la pinea `src/tests/error-shape.e2e.test.ts`. ⚠ Rompe al panel
   si se despliega antes de que el panel acepte `{ code, detail? }`. Ver «Incremento completo — errores
   con código».
 - **Mesas de torneo (`mode: "TOURNAMENT"`).** El torneo es de `apps/tournaments` del orquestador; el
-  dominó solo juega la mesa: sin catálogo, gratis, sin aumentos, bots ni revancha, y arranca sin pedir
+  dominó solo juega la mesa: sin modo, gratis, sin aumentos, bots ni revancha, y arranca sin pedir
   cobro. `src/features/tournament` (el de Betaso, nunca cableado) se borró. Ver «Incremento completo —
   la mesa de torneo».
 
-- **El catálogo se va al orquestador (fase C, 2026-11-10).** La mesa casual acepta el modo en línea
-  (`gameMode`): con él la sala no lee el catálogo. `GET /internal/game-modes` trae `revision` (= `__v`)
-  y `CATALOG_READ_ONLY=1` pone en 409 las escrituras de admin del catálogo. El catálogo se borra recién
-  en C7. Ver «Incremento completo — el catálogo pasa al orquestador».
 - **El registro de partidas vivas (Redis) renueva por reloj y suelta por hecho.** El latido de 30 s
   re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
   (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
@@ -3108,8 +3102,28 @@ de antes.
 - **`CATALOG_READ_ONLY`** (`env.ts`, `admin.ts`): un `rejectWrites` detrás de `scoped` en las ocho
   escrituras (incluida la reactivación, que es un GET). Después de autenticar, antes de validar.
   No cubre `modes:subscribe-existing`, que escribe directo a Mongo.
-- **Pendiente, C7** (después del corte y del front): borrar la feature `game-mode`, el camino por
-  `gameModeId` y las rutas del catálogo.
+- **C7, hecho**: ver «Incremento completo — sin catálogo en dominó».
+
+## Incremento completo — sin catálogo en dominó (rama `feat/sin-catalogo`, 2026-11-10)
+
+Paso C7 del spec `docs/superpowers/specs/2026-11-10-catalogo-en-orquestador-design.md` del monorepo del
+orquestador. Sin maniobra de migración ni modo de solo lectura: rompe al panel (todo `/game-modes…` da
+404) y al Domino Front si todavía lee `GET /game-modes/:uuid`. Los datos ya estaban en el orquestador.
+
+- **`gameMode` obligatorio** en la casual (`match-contract.ts`); sin él, `400`. `configOf(request,
+  betLevels)` ya no recibe un modo resuelto. Se fueron `UnknownGameModeError` y
+  `UnsupportedGameModeError` (el schema ya limita `playersQuantity` a 2 o 4); `SeatCountMismatchError`
+  queda, con el `gameModeId` en el mensaje.
+- **Borrado**: `src/features/game-mode/` entera, `src/subscribe-existing.ts` y su script,
+  `CATALOG_READ_ONLY`, el registro de `GameModeReader`/`GameModeService`, el despachador
+  `catalogEventDispatcher` y su paso del apagado. El lease de `di-container.ts` se llama `jobsLease`;
+  su colección sigue siendo `game_mode_leases` (renombrarla deja dos versiones sin exclusión).
+- **Se quedan**: `ADMIN_API_KEY` (historial y `/internal/settings`), `payoutOf` y `payouts[].amountUc`
+  (se calculan con el modo en línea), `stakes` del resultado y `entryFee`/`prize` de `/config/:roomId`.
+  La opción `providers` de `requireAdminKey` queda sin usuarios en `main`.
+- **Tests**: `src/tests/table-modes.ts` (`CASUAL_2P`, `CASUAL_4P` en línea) reemplaza al sembrado del
+  catálogo; `casualTable(seats, seed, table)` recibe el modo, no un uuid. `admin-scope.e2e` pinea que las
+  rutas del catálogo dan 404.
 
 ## Commits
 

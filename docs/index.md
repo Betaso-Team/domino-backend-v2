@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "Dominó Betaso"
   text: "Documentación técnica"
-  tagline: Motor · salas Colyseus · catálogo · persistencia · operación
+  tagline: Motor · salas Colyseus · persistencia · operación
   actions:
     - theme: brand
       text: Entender la arquitectura
