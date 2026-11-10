@@ -164,6 +164,12 @@ const schema = z.object({
    */
   ADMIN_API_KEY: z.string().min(16, "ADMIN_API_KEY debe tener al menos 16 caracteres").optional(),
   /**
+   * EL CATÁLOGO EN SOLO LECTURA, para el corte en que el catálogo pasa al orquestador (fase C, paso
+   * C5). Con "1", toda ruta de ESCRITURA del catálogo de admin contesta `409 CATALOG_READ_ONLY` y las
+   * lecturas siguen; las mesas siguen abriendo. Cualquier otro valor (o ausente) lo deja apagado.
+   */
+  CATALOG_READ_ONLY: z.string().optional(),
+  /**
    * DE ENTRADA, la que presenta el ORQUESTADOR para abrir mesas y devolver asientos. Otra llave y
    * no la de administración, por la misma regla que separó las demás: quien administra el catálogo no abre
    * mesas, y quien abre mesas no administra. Ausente ⇒ esas rutas no existen (fail closed).
@@ -373,6 +379,8 @@ export interface Env {
   readonly billingAuth: BillingAuthTrust;
   /** DE ENTRADA. `undefined` ⇒ esta instancia no se administra. Ver ADMIN_API_KEY. */
   readonly adminApiKey: string | undefined;
+  /** `true` ⇒ las escrituras de admin del catálogo responden 409. Ver CATALOG_READ_ONLY. */
+  readonly catalogReadOnly: boolean;
   /** DE ENTRADA. `undefined` ⇒ el orquestador no puede abrir mesas acá. Ver ORCHESTRATOR_API_KEY. */
   readonly orchestratorApiKey: string | undefined;
   /**
@@ -489,6 +497,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       audience: parsed.JWT_AUDIENCE,
     },
     adminApiKey: parsed.ADMIN_API_KEY,
+    catalogReadOnly: parsed.CATALOG_READ_ONLY === "1",
     orchestratorApiKey: parsed.ORCHESTRATOR_API_KEY,
     orchestratorCallback:
       parsed.ORCHESTRATOR_API_KEY !== undefined &&

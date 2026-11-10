@@ -210,6 +210,39 @@ describe("tablesRoutes", () => {
     expect((await post(`${base}/internal/matches`, { ...request, rateId: " " })).status).toBe(400);
   });
 
+  // EL MODO EN LÍNEA (fase C): viaja tal cual a la sala, y uno fuera de las guardas es 400.
+  it("pasa el modo en línea a la sala, y rechaza uno fuera del contrato", async () => {
+    const gameMode = {
+      name: "Clásica",
+      playersQuantity: 2,
+      pointsToWin: 100,
+      multiplier: 1,
+      entryFee: 1.5,
+      prize: 2.5,
+      isFreeRoom: false,
+      enableBots: false,
+    };
+    const opened: CreateMatchRequest[] = [];
+    const base = await serve({
+      tables: {
+        ...deps().tables,
+        openRequest: async (r) => {
+          opened.push(r);
+          return deps().tables.openRequest(r);
+        },
+      },
+    });
+
+    expect((await post(`${base}/internal/matches`, { ...request, gameMode })).status).toBe(201);
+    expect(opened[0]).toMatchObject({ gameModeId: "mode-2p", gameMode });
+    for (const bad of [{ multiplier: 1.5 }, { pointsToWin: 0 }, { entryFee: -1 }, { extra: 1 }]) {
+      expect(
+        (await post(`${base}/internal/matches`, { ...request, gameMode: { ...gameMode, ...bad } }))
+          .status,
+      ).toBe(400);
+    }
+  });
+
   it("abre una mesa de torneo, y le rechaza cualquier campo de dinero", async () => {
     const base = await serve();
     const { gameModeId: _m, rateId: _r, ...rest } = request;

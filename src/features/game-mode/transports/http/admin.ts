@@ -2,7 +2,7 @@ import type { Logger } from "@/logger";
 import { type AdminTokenCheck, adminOf, requireAdminKey } from "@/shared/http/api-key";
 import { sendError } from "@/shared/http/errors";
 import { validated } from "@/shared/http/validated";
-import { type Response, Router } from "express";
+import { type RequestHandler, type Response, Router } from "express";
 import type { GameModeService } from "../../service";
 import {
   BASE,
@@ -83,16 +83,27 @@ function optionalProviderOf(
   return providerOf(response, asked);
 }
 
+const rejectWrites: RequestHandler = (_request, response) => {
+  sendError(
+    response,
+    409,
+    "CATALOG_READ_ONLY",
+    "el catálogo está en solo lectura: se administra desde el orquestador",
+  );
+};
+
 export function adminRoutes({
   service,
   logger,
   adminApiKey,
   adminTokens,
+  catalogReadOnly = false,
 }: {
   readonly service: GameModeService;
   readonly logger: Logger;
   readonly adminApiKey: string | undefined;
   readonly adminTokens?: AdminTokenCheck;
+  readonly catalogReadOnly?: boolean;
 }): Router {
   const router = Router();
 
@@ -122,6 +133,11 @@ export function adminRoutes({
 
   // LAS PUERTAS: las dos abren a los proveedores, que el servicio acota; sólo `scopedReader` a `support`.
   const scoped = requireAdminKey(adminApiKey, adminTokens, { providers: true });
+  // EL CATÁLOGO EN SOLO LECTURA (`CATALOG_READ_ONLY`, el corte de la fase C): toda escritura contesta
+  // `409 CATALOG_READ_ONLY` DESPUÉS de autenticar —quien no tiene llave sigue viendo 401/403, no se
+  // entera del estado del catálogo— y ANTES de validar el cuerpo. Las lecturas (`scopedReader`) no
+  // pasan por acá. La reactivación es un GET pero escribe, así que también lo lleva.
+  const writer: RequestHandler[] = catalogReadOnly ? [scoped, rejectWrites] : [scoped];
   const scopedReader = requireAdminKey(adminApiKey, adminTokens, { providers: true, read: true });
 
   // LAS LECTURAS DEL PANEL, con los dados de baja incluidos. Van acá y no en `catalog.ts` porque
@@ -198,7 +214,7 @@ export function adminRoutes({
     // LA CREDENCIAL PRIMERO Y EL SCHEMA DESPUÉS, en todas las mutaciones: al revés, un anónimo
     // puede distinguir "forma inválida" de "forma válida" en una ruta que no tiene derecho a
     // tocar.
-    scoped,
+    ...writer,
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         await service.reactivate(adminOf(response), params.uuid);
@@ -211,7 +227,7 @@ export function adminRoutes({
 
   router.post(
     BASE,
-    scoped,
+    ...writer,
     validated({ body: CREATE_BODY }, async ({ body }, response) => {
       try {
         const admin = adminOf(response);
@@ -232,7 +248,7 @@ export function adminRoutes({
   // una copia a medias— no crea lo que ya estaba. No la tapa nada: no hay `POST /game-modes/:uuid`.
   router.post(
     `${BASE}/copies`,
-    scoped,
+    ...writer,
     validated({ query: PROVIDER_QUERY }, async ({ query }, response) => {
       const providerId = providerOf(response, query.providerId);
       if (providerId === undefined) return;
@@ -251,7 +267,7 @@ export function adminRoutes({
   // del modo llamado "source". Lo pinea el test que asserta la lista de registros en orden.
   router.put(
     `${BASE}/source`,
-    scoped,
+    ...writer,
     validated(
       { query: PROVIDER_QUERY, body: CATALOG_SOURCE_BODY },
       async ({ query, body }, response) => {
@@ -273,7 +289,7 @@ export function adminRoutes({
 
   router.put(
     `${BASE}/:uuid`,
-    scoped,
+    ...writer,
     validated({ params: UUID_PARAMS, body: UPDATE_BODY }, async ({ params, body }, response) => {
       try {
         const admin = adminOf(response);
@@ -288,7 +304,7 @@ export function adminRoutes({
   // LAS SUSCRIPCIONES DEL PROVEEDOR RESUELTO: tres segmentos, así que `/:uuid` no las tapa.
   router.put(
     `${BASE}/:uuid/subscription`,
-    scoped,
+    ...writer,
     validated(
       { params: UUID_PARAMS, query: PROVIDER_QUERY },
       async ({ params, query }, response) => {
@@ -307,7 +323,7 @@ export function adminRoutes({
 
   router.delete(
     `${BASE}/:uuid/subscription`,
-    scoped,
+    ...writer,
     validated(
       { params: UUID_PARAMS, query: PROVIDER_QUERY },
       async ({ params, query }, response) => {
@@ -326,7 +342,7 @@ export function adminRoutes({
 
   router.delete(
     `${BASE}/:uuid`,
-    scoped,
+    ...writer,
     validated({ params: UUID_PARAMS }, async ({ params }, response) => {
       try {
         // SIN `data`, igual que v1 (`routes.ts:167-170`): la baja devuelve el mensaje y nada más.

@@ -223,6 +223,7 @@ const registerHttp = (app: Application) => {
       logger,
       adminApiKey: env.adminApiKey,
       adminTokens: rootContainer.resolve<AdminTokenCheck>("AdminTokenCheck"),
+      catalogReadOnly: env.catalogReadOnly,
       orchestratorApiKey: env.orchestratorApiKey,
     }),
   );

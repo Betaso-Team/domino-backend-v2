@@ -83,6 +83,10 @@ pieza del dominó.
   cobro. `src/features/tournament` (el de Betaso, nunca cableado) se borró. Ver «Incremento completo —
   la mesa de torneo».
 
+- **El catálogo se va al orquestador (fase C, 2026-11-10).** La mesa casual acepta el modo en línea
+  (`gameMode`): con él la sala no lee el catálogo. `GET /internal/game-modes` trae `revision` (= `__v`)
+  y `CATALOG_READ_ONLY=1` pone en 409 las escrituras de admin del catálogo. El catálogo se borra recién
+  en C7. Ver «Incremento completo — el catálogo pasa al orquestador».
 - **El registro de partidas vivas (Redis) renueva por reloj y suelta por hecho.** El latido de 30 s
   re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
   (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
@@ -3168,6 +3172,25 @@ Más `no-circular`, que no es regla de imports sino invariante del grafo.
   tipado contra la interfaz no puede, por construcción.
 - **Plata de por medio.** Es un juego con dinero real. Un caso no cubierto no es un bug de
   estilo: es plata que sale. Cuando dudes entre rechazar y ignorar en silencio, rechazá.
+
+## Incremento completo — el catálogo pasa al orquestador (rama `feat/catalogo-en-orquestador`, 2026-11-10)
+
+Pasos C4 (y el `revision` que pide C2) del spec `docs/superpowers/specs/2026-11-10-catalogo-en-orquestador-design.md`
+del monorepo del orquestador. Todo aditivo: sin `gameMode` ni `CATALOG_READ_ONLY` la instancia hace lo
+de antes.
+
+- **`gameMode` en línea** (`match-contract.ts`, `inlineGameMode`): `{ name, playersQuantity: 2|4,
+  pointsToWin, multiplier, entryFee, prize, isFreeRoom, enableBots }`, estricto. Puntos y multiplicador
+  enteros positivos seguros, importes `ucAmount`. `configOf` toma el modo del pedido si viene
+  (`termsOf`) e ignora el del catálogo; `domino-room.ts` no llama a `activeByUuid` y el registro usa
+  `gameMode.name`. `gameModeId` sigue nombrando la mesa. ⚠ El catálogo de dominó acepta multiplicador
+  no entero (`min(1)`); el en línea no, como el del orquestador.
+- **`revision`** en `toInternalDTO`: el mismo número que `__v`.
+- **`CATALOG_READ_ONLY`** (`env.ts`, `admin.ts`): un `rejectWrites` detrás de `scoped` en las ocho
+  escrituras (incluida la reactivación, que es un GET). Después de autenticar, antes de validar.
+  No cubre `modes:subscribe-existing`, que escribe directo a Mongo.
+- **Pendiente, C7** (después del corte y del front): borrar la feature `game-mode`, el camino por
+  `gameModeId` y las rutas del catálogo.
 
 ## Commits
 

@@ -278,3 +278,37 @@ describe("el registro por proveedor", () => {
     expect((await get(`/internal/matches/${match.config.matchId}`, as("parley"))).status).toBe(404);
   });
 });
+
+// EL MODO EN LÍNEA (fase C): el orquestador manda el modo con el que cobró y la sala no lee el
+// catálogo. El uuid no está en el catálogo de la suite, así que si la sala lo leyera la mesa no
+// nacería (`UNKNOWN_GAME_MODE`); el registro nombra la mesa con `gameModeId` y `gameMode.name`.
+describe("el registro de una mesa con el modo en línea", () => {
+  it("lleva el nombre y los importes del modo del pedido", async () => {
+    const gameModeId = "00000000-0000-4000-8000-00000000c4c4";
+    const match = await seatPair(server, ["rec11", "rec12"], "seed-en-linea", {
+      gameModeId,
+      gameMode: {
+        name: "Modo del orquestador",
+        playersQuantity: 2,
+        pointsToWin: 60,
+        multiplier: 2,
+        entryFee: 3,
+        prize: 5,
+        isFreeRoom: false,
+        enableBots: false,
+      },
+    });
+    await revealHands(match);
+    await act(match, "rec11", "ABANDON");
+    await waitUntil(async () => closed(await recordOf(match.config.matchId)), 3_000);
+
+    const record = await recordOf(match.config.matchId);
+    expect(record).toMatchObject({
+      status: "finished",
+      table: { gameModeId, name: "Modo del orquestador", entryFeeInUC: 3, prizeInUC: 5 },
+      matchConfig: { pointsToWin: 60 },
+    });
+    const [, stayed] = record?.players as Doc[];
+    expect(stayed).toMatchObject({ userId: "rec12", chargedInUC: 3, prizePaidInUC: 5 });
+  });
+});

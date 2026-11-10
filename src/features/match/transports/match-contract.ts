@@ -168,13 +168,34 @@ const betLevel = z.strictObject({
 // EL REQUEST VIVO DE UNA MESA CASUAL. No trae `pointsToWin`, ni `entryFee`, ni `prize`: los tres salen
 // del catálogo, y el `strictObject` los RECHAZA en vez de ignorarlos. La diferencia importa — ignorarlos
 // dejaría a un llamador creyendo que fijó la economía de la mesa mientras el modo la pisa en silencio.
+// EL MODO EN LÍNEA (fase C: el catálogo pasa al orquestador). Con él, la mesa no lee el catálogo de
+// dominó: el orquestador manda los siete campos que `configOf` usa, más el nombre para el historial,
+// tomados de la misma fila con la que armó la planilla y el libro de billing. Las guardas son las del
+// snapshot (`matchSnapshot`): enteros positivos seguros para los puntos, `ucAmount` para los importes;
+// el multiplicador además entero, como lo pide el catálogo del orquestador. Se llama `gameMode` y no
+// `mode` porque `mode` es el discriminante de la unión.
+const inlineGameMode = z.strictObject({
+  name: z.string().min(1).max(100),
+  playersQuantity: z.union([z.literal(2), z.literal(4)]),
+  pointsToWin: z.number().int().positive().safe(),
+  multiplier: z.number().int().positive().safe(),
+  entryFee: ucAmount,
+  prize: ucAmount,
+  isFreeRoom: z.boolean(),
+  enableBots: z.boolean(),
+});
+
 const casualRequest = z
   .strictObject({
     mode: z.literal("CASUAL"),
     matchId: nonBlank,
     // EL NOMBRE DEL MODO Y NO SU CONTENIDO. Quien lo resuelve es la sala, contra el catálogo, con
     // `activeByUuid`: un modo dado de baja no existe desde afuera y no puede sentar una mesa.
+    //
+    // Con `gameMode` (abajo), el uuid ya no se resuelve: queda para el historial, el censo y el
+    // resultado, que siguen nombrando la mesa por él.
     gameModeId: nonBlank,
+    gameMode: inlineGameMode.optional(),
     // El techo de cuatro es de FORMA y no la regla del 4P: la cantidad real la decide el modo, y
     // el rechazo del 4P vive en `configOf`, que es el único que ve los dos.
     participants: z.array(participant).min(2).max(4),
@@ -288,6 +309,23 @@ const matchSnapshot = z
 export const createMatchRequestSchema = createRequest;
 
 export type MatchParticipant = z.infer<typeof participant>;
+export type InlineGameMode = z.infer<typeof inlineGameMode>;
+
+/**
+ * LO QUE `configOf` TOMA DE UN MODO, venga del catálogo (`GameMode`) o en línea en el pedido
+ * (`gameMode`, con el `gameModeId` como `uuid`). Las dos formas lo cumplen sin conversión.
+ */
+export type TableTerms = Pick<
+  GameMode,
+  | "uuid"
+  | "playersQuantity"
+  | "pointsToWin"
+  | "entryFee"
+  | "prize"
+  | "multiplier"
+  | "isFreeRoom"
+  | "enableBots"
+>;
 export type CreateMatchRequest = z.infer<typeof createRequest>;
 export type CasualMatchRequest = z.infer<typeof casualRequest>;
 export type TournamentMatchRequest = z.infer<typeof tournamentRequest>;
@@ -322,7 +360,7 @@ export class UnknownGameModeError extends Error {
  */
 export class UnsupportedGameModeError extends Error {
   override readonly name = "UnsupportedGameModeError";
-  constructor(mode: GameMode) {
+  constructor(mode: TableTerms) {
     super(
       `UNSUPPORTED_GAME_MODE: el modo ${mode.uuid} es de ${mode.playersQuantity} jugadores y este motor solo sienta mesas de 2 o de 4`,
     );
@@ -336,7 +374,7 @@ export class UnsupportedGameModeError extends Error {
  */
 export class SeatCountMismatchError extends Error {
   override readonly name = "SeatCountMismatchError";
-  constructor(requested: number, mode: GameMode) {
+  constructor(requested: number, mode: TableTerms) {
     super(
       `SEAT_COUNT_MISMATCH: el modo ${mode.uuid} sienta ${mode.playersQuantity} jugadores y el pedido trae ${requested}`,
     );
@@ -363,12 +401,15 @@ export function requestOf(input: unknown): CreateMatchRequest {
  */
 export function configOf(
   request: CreateMatchRequest,
-  mode: GameMode | undefined,
+  catalogMode: GameMode | undefined,
   betLevels: readonly BetLevel[] = [],
 ): DominoMatchConfig {
   // LA MESA DE TORNEO NO TIENE MODO NI NIVELES: se arma con lo que trae el request, y lo que el
-  // llamador pase en `mode`/`betLevels` no la toca.
+  // llamador pase en `catalogMode`/`betLevels` no la toca.
   if (request.mode === "TOURNAMENT") return tournamentConfigOf(request);
+  // EL MODO EN LÍNEA GANA: si el pedido trae `gameMode`, la sala no lee el catálogo y un
+  // `catalogMode` que llegue igual se ignora. Las guardas de abajo valen para los dos caminos.
+  const mode = termsOf(request, catalogMode);
   if (!mode) throw new UnknownGameModeError(request.gameModeId);
   // EL ORDEN DE LAS DOS GUARDAS IMPORTA: primero "no sabemos jugar este modo" y después "pediste
   // mal la cantidad". Al revés, un pedido de tres contra un modo de tres saldría con el error de
@@ -426,6 +467,17 @@ export function configOf(
     // multiplicar ni premio que escalar. Es la regla de v1 (`on-propose-bet-multiplier.ts:46`).
     betLevels: mode.isFreeRoom ? [] : betLevels,
   };
+}
+
+/**
+ * EL MODO DE UNA MESA CASUAL: el que trae el pedido en línea (`gameMode`, con `gameModeId` como
+ * uuid) o, sin él, el del catálogo. `undefined` si ninguno de los dos.
+ */
+function termsOf(
+  request: CasualMatchRequest,
+  catalogMode: GameMode | undefined,
+): TableTerms | undefined {
+  return request.gameMode ? { uuid: request.gameModeId, ...request.gameMode } : catalogMode;
 }
 
 /**

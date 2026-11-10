@@ -24,6 +24,8 @@ export interface GameModeHttpDeps {
   readonly adminApiKey: string | undefined;
   /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
   readonly adminTokens?: AdminTokenCheck;
+  /** `true` ⇒ las escrituras de admin responden `409 CATALOG_READ_ONLY`. Ver CATALOG_READ_ONLY. */
+  readonly catalogReadOnly?: boolean;
   /** `undefined` ⇒ el catálogo del orquestador (`GET /internal/game-modes`) NO se registra. */
   readonly orchestratorApiKey: string | undefined;
 }

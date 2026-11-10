@@ -103,8 +103,9 @@ export async function seatPair(
   server: ColyseusTestServer,
   seats: readonly [ParticipantInput, ParticipantInput],
   seed?: string,
-  // LO QUE EL ORQUESTADOR PUEDE AGREGARLE AL PEDIDO, hoy los niveles de aumento.
-  extra: Pick<CasualMatchRequest, "betLevels"> = {},
+  // LO QUE EL ORQUESTADOR PUEDE AGREGARLE AL PEDIDO: los niveles de aumento y el modo en línea (con
+  // otro `gameModeId`, para medir que la sala no lee el catálogo).
+  extra: Partial<Pick<CasualMatchRequest, "betLevels" | "gameMode" | "gameModeId">> = {},
 ): Promise<SeatedMatch> {
   const options = { ...casualTable(seats, seed), ...extra };
   // EL MISMO PAR QUE LA SALA: el request validado y el modo sembrado. Si acá se armara el config a

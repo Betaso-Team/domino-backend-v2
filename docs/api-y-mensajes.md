@@ -424,7 +424,7 @@ es 400), discriminado por `mode`:
   `userId`, `displayName`, `currency` y, opcionales, `username`, `profilePicture`, `price` y
   `providerId`), `seed`,
   `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el `_id` de Mongo de la tasa de
-  Betaso) y `betLevels` opcional (abajo).
+  Betaso), `betLevels` opcional (abajo) y `gameMode` opcional (el modo en línea, abajo).
 - **`"TOURNAMENT"`**: `matchId`, `tournamentId`, `participants` y `teamAssignment` como la casual,
   `seed` y `rules: { pointsToWin }` (entero positivo seguro; el tope lo decide `apps/tournaments`, no
   el dominó, cuyo motor solo usa `pointsToWin` como meta). **Sin** `gameModeId`, `rateId` ni `betLevels`:
@@ -501,16 +501,20 @@ proveedor como Betaso vea las bajas); un valor que no sea `0` o `1` es `400`.
               "entryFee": 10, "playersQuantity": 2, "pointsToWin": 25, "isActive": true,
               "isFreeRoom": false, "enableBots": false, "betLevels": [],
               "createdAt": "…", "updatedAt": "…", "__v": 0,
-              "ownerProviderId": null, "subscribers": ["betaso"] } ],
+              "ownerProviderId": null, "subscribers": ["betaso"], "revision": 0 } ],
   "catalogs": { "parley": "own" } }
 ```
 
 `catalogs` es un mapa `providerId → fuente` con **sólo** los proveedores que no están en `shared`: un
 proveedor ausente del mapa juega el compartido suscrito. Hoy el único valor posible es `"own"`.
 
+`revision` es la revisión del modo: el mismo número que `__v`, con el nombre que le da el catálogo
+del orquestador (su importación lo copia a su columna `revision`). Avanza con cada edición del modo;
+suscribir o desuscribir no la mueve. `__v` se queda, por compatibilidad.
+
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status, data: [GameModeDTO & { ownerProviderId, subscribers }], catalogs: { [providerId]: "own" } }` | Siempre |
+| `200` | `{ status, data: [GameModeDTO & { ownerProviderId, subscribers, revision }], catalogs: { [providerId]: "own" } }` | Siempre |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada (la del panel tampoco la abre) |
 
 ⚠ **El dominó no verifica el proveedor al abrir una mesa.** `POST /internal/matches` resuelve el modo
@@ -547,6 +551,31 @@ gratis nunca lo traen). El dominó no hace cuentas con esto: lo congela en el as
 `seatPrices` de la config y elige lo cobrado y lo pagado al cerrar (`chargedInPlayerCurrency` =
 `entry` + el `entry` del nivel aceptado; `prizePaidInPlayerCurrency` = `prize` o el del nivel, sólo
 para quien cobra premio), que es lo que devuelve `GET /me/matches`. Cobra billing, en UC.
+
+**El modo en línea (`gameMode`).** El catálogo de modos pasa al orquestador (fase C de
+`2026-11-10-catalogo-en-orquestador-design.md`, en el repo del orquestador). Mientras tanto, la mesa
+casual acepta el modo entero en el pedido, junto a `gameModeId`:
+
+```ts
+gameMode?: {
+  name: string;               // 1 a 100 caracteres; es el `table.name` del registro
+  playersQuantity: 2 | 4;     // número, no texto
+  pointsToWin: number;        // entero positivo seguro
+  multiplier: number;         // entero positivo seguro
+  entryFee: number;           // UC, finito, >= 0, <= MAX_SAFE_INTEGER (decimales sí)
+  prize: number;              // ídem
+  isFreeRoom: boolean;
+  enableBots: boolean;
+}                             // estricto: una clave de más es 400
+```
+
+- **Con `gameMode`**, la sala no lee el catálogo de dominó: los puntos, el dinero, el multiplicador,
+  `isFreeRoom` y `enableBots` de la mesa salen de ahí, y el nombre del registro es `gameMode.name`.
+  `gameModeId` no se resuelve (puede no estar en el catálogo de dominó) y sigue nombrando la mesa en el
+  snapshot, el registro, el censo y el resultado. La cantidad de `participants` tiene que ser
+  `playersQuantity` (`422 SEAT_COUNT_MISMATCH`), y una mesa gratis no ofrece aumentos.
+- **Sin `gameMode`**, la mesa funciona como siempre: resuelve `gameModeId` contra el catálogo activo.
+- Una mesa de torneo no lo acepta (400).
 
 **Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
@@ -659,12 +688,21 @@ antes de mirar la forma.
 | `PUT /game-modes/source[?providerId=]` | `400 PROVIDER_REQUIRED`, `404 UNKNOWN_PROVIDER`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
 | `GET`/`PATCH`/`DELETE /internal/settings/:section` | `404 SETTINGS_SECTION_NOT_FOUND` |
 | `GET /internal/settings` | — |
-| `POST /internal/matches` (orquestador) | `422 UNKNOWN_GAME_MODE` \| `UNSUPPORTED_GAME_MODE` \| `SEAT_COUNT_MISMATCH` |
+| `POST /internal/matches` (orquestador) | `422 UNKNOWN_GAME_MODE` (sin `gameMode`) \| `UNSUPPORTED_GAME_MODE` \| `SEAT_COUNT_MISMATCH` |
 | `POST /internal/players/:userId/seat` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/players/:userId/match` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/census` (orquestador) | — |
 | `GET /internal/matches/:matchId/existence` (orquestador) | — |
 | `GET /internal/game-modes` (orquestador) | — |
+
+**El catálogo en solo lectura.** Con `CATALOG_READ_ONLY=1` (el corte de la fase C, cuando el
+catálogo pasa al orquestador), toda escritura de admin del catálogo —`POST /game-modes`,
+`PUT`/`DELETE /game-modes/:uuid`, `GET /game-modes/reactive/:uuid`, `PUT`/`DELETE
+/game-modes/:uuid/subscription`, `POST /game-modes/copies` y `PUT /game-modes/source`— responde
+`409 { code: "CATALOG_READ_ONLY", detail }` sin tocar nada. Se decide **después** de la credencial (sin
+ella sigue siendo `401`, y `support` sigue siendo `403`) y **antes** de validar el cuerpo. Las lecturas
+(`GET /game-modes/admin…`, el catálogo público y `GET /internal/game-modes`) siguen, y las mesas siguen
+abriendo con el catálogo de dominó o con su `gameMode`.
 
 Los `409`, `403`, `400 FREE_ROOM_WITH_ENTRY` y `503 CATALOG_BUSY` del catálogo llevan en `detail` el
 mensaje del servicio (por ejemplo, «el modo … es el último propio activo de parley…: primero volvé la
