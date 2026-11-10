@@ -65,6 +65,16 @@ curl -X PUT -H "x-internal-api-key: $ADMIN_API_KEY" \
   "https://<host>/game-modes/<uuid>/subscription?providerId=betaso"
 ```
 
+**El catálogo en solo lectura (`CATALOG_READ_ONLY`).** Apagado por omisión; con `CATALOG_READ_ONLY=1`
+y un reinicio, toda escritura de admin del catálogo responde `409 CATALOG_READ_ONLY` y las lecturas, el
+`GET /internal/game-modes` del orquestador y las mesas siguen. Es el primer paso del corte en que el
+catálogo pasa al orquestador (paso C5 del spec `2026-11-10-catalogo-en-orquestador-design.md` del repo
+del orquestador): dominó deja de escribir antes de que el orquestador importe, y desde ahí el
+orquestador manda el modo en línea (`gameMode`) en cada mesa casual. Volver atrás es
+`CATALOG_READ_ONLY=0` y reiniciar; lo que se haya escrito en el orquestador después del corte no vuelve
+solo a dominó. `npm run modes:subscribe-existing` escribe directo a la base y no lo mira: no correrlo
+con el catálogo en solo lectura.
+
 `npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
 siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local, dev y stage, `info` en
 prod) salvo un `LOG_LEVEL` explícito. Cada línea lleva `instance`, `release` y el `traceId` de la
