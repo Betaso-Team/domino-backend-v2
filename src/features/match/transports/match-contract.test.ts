@@ -249,6 +249,116 @@ describe("configOf", () => {
   });
 });
 
+// EL MODO EN LÍNEA (fase C): el orquestador manda el modo con el que cobró y la mesa no lee el
+// catálogo de dominó. Las guardas son las del snapshot, y la cantidad de asientos se sigue midiendo.
+describe("configOf con el modo en línea (`gameMode`)", () => {
+  const gameMode = {
+    name: "Clásica del orquestador",
+    playersQuantity: 2,
+    pointsToWin: 75,
+    multiplier: 3,
+    entryFee: 1.5,
+    prize: 2.75,
+    isFreeRoom: false,
+    enableBots: true,
+  } as const;
+  const inline = { ...request, gameMode };
+
+  it("arma la mesa con el modo del pedido y no con el del catálogo", () => {
+    const config = configOf(requestOf(inline), modeOf());
+
+    expect(config).toMatchObject({
+      gameModeId: "mode-2p",
+      pointsToWin: 75,
+      multiplier: 3,
+      entryFee: 1.5,
+      prize: 2.75,
+      isFreeRoom: false,
+      enableBots: true,
+    });
+  });
+
+  it("no necesita el catálogo: sin modo resuelto la mesa nace igual", () => {
+    const config = configOf(requestOf(inline), undefined);
+
+    expect(config.pointsToWin).toBe(75);
+    expect(config.gameModeId).toBe("mode-2p");
+  });
+
+  it("la mesa gratis en línea no ofrece aumentar", () => {
+    const levels = [{ level: 2, extra: 1, additionalPoints: 0 }];
+    const config = configOf(
+      requestOf({ ...inline, gameMode: { ...gameMode, isFreeRoom: true } }),
+      undefined,
+      levels,
+    );
+
+    expect(config.betLevels).toEqual([]);
+    expect(configOf(requestOf(inline), undefined, levels).betLevels).toEqual(levels);
+  });
+
+  it("sienta cuatro con un modo en línea de cuatro", () => {
+    const config = configOf(
+      requestOf({
+        ...inline,
+        participants: [...participants, extra(1), extra(2)],
+        gameMode: { ...gameMode, playersQuantity: 4 },
+      }),
+      undefined,
+    );
+
+    expect(config.seats).toHaveLength(4);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    [
+      "cuatro contra un modo en línea de dos",
+      { participants: [...participants, extra(1), extra(2)] },
+    ],
+    ["dos contra un modo en línea de cuatro", { gameMode: { ...gameMode, playersQuantity: 4 } }],
+  ])("rechaza %s con SEAT_COUNT_MISMATCH", (_name, override) => {
+    expect(() => configOf(requestOf({ ...inline, ...override }), modeOf())).toThrow(
+      /SEAT_COUNT_MISMATCH/,
+    );
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ["sin nombre", { name: "" }],
+    ["nombre de más de 100", { name: "x".repeat(101) }],
+    ["tres jugadores", { playersQuantity: 3 }],
+    ["jugadores como string", { playersQuantity: "2" }],
+    ["puntos en cero", { pointsToWin: 0 }],
+    ["puntos fraccionarios", { pointsToWin: 1.5 }],
+    ["puntos fuera del rango seguro", { pointsToWin: Number.MAX_SAFE_INTEGER + 1 }],
+    ["multiplicador en cero", { multiplier: 0 }],
+    ["multiplicador fraccionario", { multiplier: 1.5 }],
+    ["entrada negativa", { entryFee: -1 }],
+    ["premio infinito", { prize: Number.POSITIVE_INFINITY }],
+    ["premio fuera del rango seguro", { prize: Number.MAX_SAFE_INTEGER + 1 }],
+    ["sin isFreeRoom", { isFreeRoom: undefined }],
+    ["sin enableBots", { enableBots: undefined }],
+    ["un campo de más", { betLevels: [] }],
+    ["el uuid adentro", { uuid: "otro" }],
+  ])("rechaza un modo en línea %s", (_name, override) => {
+    expect(() => requestOf({ ...inline, gameMode: { ...gameMode, ...override } })).toThrow();
+  });
+
+  it("una mesa de torneo no acepta un modo en línea", () => {
+    expect(() =>
+      requestOf({
+        mode: "TOURNAMENT",
+        matchId: "t-match",
+        tournamentId: "t-1",
+        participants,
+        seed: "s",
+        teamAssignment: "SEAT_ORDER",
+        rules: { pointsToWin: 50 },
+        gameMode,
+      }),
+    ).toThrow();
+  });
+});
+
 // EL SNAPSHOT GRABADO, que es la otra mitad de la tarea: una partida tiene que poder rebobinarse
 // sin catálogo. `replayConfigOf` valida la mesa ENTERA —asientos numerados, puntos y dinero
 // adentro— y no consulta nada; es lo que permite que editar un modo no cambie una partida vieja.
