@@ -1,6 +1,7 @@
 import { rootContainer } from "@/di-container";
 import { env } from "@/env";
 import { bootTestServer, casualTable, mintToken, waitUntil } from "@/tests/e2e";
+import { CASUAL_4P } from "@/tests/table-modes";
 import { matchMaker } from "@colyseus/core";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -293,10 +294,15 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect((await post("/internal/players/nadie/seat")).status).toBe(404);
   });
 
-  it("contesta 422 a un modo que no existe", async () => {
-    const res = await post("/internal/matches", casualTable(["o-e", "o-f"], "seed", "no-existe"));
+  it("contesta 422 a una mesa cuyos asientos no son los del modo", async () => {
+    const res = await post("/internal/matches", casualTable(["o-e", "o-f"], "seed", CASUAL_4P));
     expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ code: "UNKNOWN_GAME_MODE" });
+    expect(await res.json()).toEqual({ code: "SEAT_COUNT_MISMATCH" });
+  });
+
+  it("contesta 400 a una mesa casual sin su modo en línea", async () => {
+    const { gameMode: _, ...withoutMode } = casualTable(["o-e2", "o-f2"]);
+    expect((await post("/internal/matches", withoutMode)).status).toBe(400);
   });
 
   it("no abre nada con la llave del panel: cada llave abre lo suyo", async () => {

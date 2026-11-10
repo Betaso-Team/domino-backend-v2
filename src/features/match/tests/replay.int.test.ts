@@ -191,27 +191,19 @@ describe("replay desde el registro guardado", () => {
   });
 });
 
-// EL REPLAY NO CONSULTA EL CATÁLOGO, Y SE MIDE SOBRE LA LISTA EXACTA DE IMPORTS del entrypoint.
-//
-// "Nunca consulta `GameModeReader`" es una propiedad NEGATIVA, y un test de comportamiento no la
-// puede probar: un reader envenenado que lanzara al llamarse sólo diría que HOY no se llama con
-// esta entrada. Lo que sí la sostiene es estructural — `src/replay.ts` no importa nada de
-// `features/game-mode`, así que no tiene con qué preguntar—, y la lista CERRADA es lo que obliga a
-// que cualquier dependencia nueva pase por acá y por el argumento que la justifique.
-//
-// Lo que esta guarda no cubre, dicho para no creerle de más: un `await import()` dinámico o un
-// `rootContainer.resolve("GameModeReader")` —el container ya está importado— pasarían verdes. Es
-// el piso, no el techo; lo que de verdad sostiene la propiedad es que `replayConfigOf` sea puro y
-// no pida un `GameMode`, que es lo que mide `match-contract.test.ts`.
+// EL REPLAY REBOBINA CON EL SNAPSHOT GRABADO, Y SE MIDE SOBRE LA LISTA EXACTA DE IMPORTS del
+// entrypoint: la lista CERRADA es lo que obliga a que cualquier dependencia nueva pase por acá y por el
+// argumento que la justifique. Lo que de verdad sostiene la propiedad es que `replayConfigOf` sea puro,
+// que es lo que mide `match-contract.test.ts`.
 describe("el CLI de replay: sus dependencias", () => {
-  it("no consulta el catálogo de modos: rebobina con el snapshot grabado", () => {
+  it("rebobina con el snapshot grabado y nada más", () => {
     const source = readFileSync("src/replay.ts", "utf8");
     const imported = [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
 
     // LOS DE LA FEATURE VAN CON `@/` Y LOS DOS DE LA RAÍZ RELATIVOS, que es exactamente la
     // convención: el alias marca que el import SALE del módulo, y `di-container` y `logger` son
     // vecinos de `replay.ts` en `src/`. La lista sigue siendo exacta, así que un import nuevo
-    // —empezando por el catálogo, que es el que esta guarda existe para prohibir— pasa por acá.
+    // pasa por acá.
     expect([...imported].sort()).toEqual([
       "./di-container",
       "./logger",

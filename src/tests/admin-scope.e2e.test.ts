@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // EL ÁMBITO DE CADA ADMIN, DE PUNTA A PUNTA: un token firmado como lo firma billing-auth, el
 // verificador de verdad, la puerta de verdad y la ruta montada por `app.config.ts`. Vive acá arriba
-// porque cruza tres features —catálogo, partida y configuración— y lo que mide es el CABLEADO: que
+// porque cruza dos features —partida y configuración— y lo que mide es el CABLEADO: que
 // ninguna ruta de administración se haya montado sin decir a quién abre.
 //
 // ⚠ ES EL HUECO ENTRE DESPLIEGUES: el día que billing-auth emite tokens de proveedor, todo lo que no
@@ -119,183 +119,25 @@ describe("el ámbito de los admins (integración)", () => {
     for (const who of ["games", "parley"] as const) {
       expect((await call(who, "GET", "/internal/census")).status).toBe(401);
       expect((await call(who, "GET", "/internal/players/u-1/match")).status).toBe(401);
-      expect((await call(who, "GET", "/internal/game-modes")).status).toBe(401);
     }
-    expect((await call("key", "GET", "/internal/game-modes")).status).toBe(401);
   });
 
-  // EL CATÁLOGO, CON EL PROVEEDOR DENTRO DE SU ÁMBITO: crea su modo propio, que no sale al público y
-  // que el orquestador ve con su dueño; el otro proveedor ni lo ve.
-  it("un proveedor crea un modo propio que sólo ven él, Tablea Gaming y el orquestador", async () => {
-    const created = await call("parley", "POST", "/game-modes", {
-      name: "Clásica de Parley",
-      prize: 18,
-      entryFee: 10,
-      playersQuantity: 2,
-    });
-    expect(created.status).toBe(201);
-    const mode = (created.body as { data: Record<string, unknown> }).data;
-    expect(mode).toMatchObject({ ownerProviderId: "parley" });
-    // UN PROVEEDOR NO VE LISTAS DE SUSCRIPTORES, ni siquiera la (vacía) de su propio modo.
-    expect(mode).not.toHaveProperty("subscribers");
-    const uuid = mode.uuid as string;
-
-    const publico = (await call("parley", "GET", "/game-modes")).body as {
-      data: Array<{ uuid: string }>;
-    };
-    expect(publico.data.map((m) => m.uuid)).not.toContain(uuid);
-    expect((await call("parley", "GET", `/game-modes/${uuid}`)).status).toBe(404);
-
-    expect((await call("rival", "GET", `/game-modes/admin/${uuid}`)).status).toBe(404);
-    expect((await call("rival", "PUT", `/game-modes/${uuid}`, { prize: 1 })).status).toBe(404);
-    expect((await call("parleySupport", "GET", `/game-modes/admin/${uuid}`)).status).toBe(200);
-    expect((await call("parleySupport", "PUT", `/game-modes/${uuid}`, { prize: 1 })).status).toBe(
-      403,
-    );
-    expect((await call("games", "GET", `/game-modes/admin/${uuid}`)).body).toMatchObject({
-      data: { uuid, ownerProviderId: "parley", subscribers: [] },
-    });
-
-    const internal = (await call("orchestrator", "GET", "/internal/game-modes")).body as {
-      data: Array<{ uuid: string; ownerProviderId: string | null }>;
-    };
-    expect(internal.data.find((m) => m.uuid === uuid)).toMatchObject({
-      ownerProviderId: "parley",
-      subscribers: [],
-    });
-  });
-
-  it("un proveedor se suscribe a sí mismo y no edita un compartido", async () => {
-    const created = await call("games", "POST", "/game-modes", {
-      name: "Compartida e2e",
-      prize: 18,
-      entryFee: 10,
-      playersQuantity: 2,
-    });
-    const uuid = (created.body as { data: { uuid: string } }).data.uuid;
-
-    expect(
-      (await call("support", "PUT", `/game-modes/${uuid}/subscription?providerId=parley`)).status,
-    ).toBe(403);
-    // Parley se suscribe a sí mismo sin nombrarse; a otro no —otro proveedor no existe para él: 404
-    // UNKNOWN_PROVIDER—; el compartido no lo edita.
-    expect((await call("parley", "PUT", `/game-modes/${uuid}/subscription`)).status).toBe(200);
-    expect(
-      await call("parley", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`),
-    ).toEqual({ status: 404, body: { code: "UNKNOWN_PROVIDER" } });
-    // Tablea Gaming nombra al proveedor; sin `?providerId=` es 400.
-    expect(await call("games", "PUT", `/game-modes/${uuid}/subscription`)).toMatchObject({
-      status: 400,
-      body: { code: "PROVIDER_REQUIRED" },
-    });
-    expect(
-      (await call("games", "PUT", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
-    ).toBe(200);
-    expect(
-      (await call("games", "DELETE", `/game-modes/${uuid}/subscription?providerId=rival`)).status,
-    ).toBe(200);
-    // La ruta vieja, con el proveedor en el path, ya no existe.
-    expect((await call("games", "PUT", `/game-modes/${uuid}/subscriptions/parley`)).status).toBe(
-      404,
-    );
-    expect(await call("parley", "PUT", `/game-modes/${uuid}`, { prize: 1 })).toMatchObject({
-      status: 403,
-      body: { code: "FORBIDDEN" },
-    });
-    expect((await call("games", "GET", `/game-modes/admin/${uuid}`)).body).toMatchObject({
-      data: { subscribers: ["parley"] },
-    });
-  });
-
-  // LA FUENTE `own` DE PUNTA A PUNTA: pasar exige un propio activo, y con la fuente en `own` el último
-  // propio activo no se da de baja hasta volver a `shared`. La fuente se lee en el listado del panel.
-  it("la fuente `own` protege el último modo propio activo", async () => {
-    expect((await call("rival", "PUT", "/game-modes/source", { source: "own" })).status).toBe(409);
-    const created = await call("rival", "POST", "/game-modes", {
-      name: "Único del rival e2e",
-      prize: 18,
-      entryFee: 10,
-      playersQuantity: 2,
-    });
-    const uuid = (created.body as { data: { uuid: string } }).data.uuid;
-    expect((await call("rival", "PUT", "/game-modes/source", { source: "own" })).status).toBe(200);
-    expect((await call("rival", "GET", "/game-modes/admin")).body).toMatchObject({ source: "own" });
-    expect((await call("games", "GET", "/game-modes/admin?providerId=rival")).body).toMatchObject({
-      source: "own",
-    });
-    expect((await call("games", "GET", "/game-modes/admin")).body).not.toHaveProperty("source");
-
-    // Paginada si se pide: una página y el total, la misma lista en el mismo orden; sin pedirla, entera.
-    const toda = (await call("games", "GET", "/game-modes/admin")).body as {
-      data: Array<{ uuid: string }>;
-    };
-    expect(toda).not.toHaveProperty("total");
-    expect((await call("games", "GET", "/game-modes/admin?page=2&pageSize=1")).body).toEqual({
-      status: "success",
-      data: toda.data.slice(1, 2),
-      total: toda.data.length,
-      page: 2,
-      pageSize: 1,
-    });
-    expect((await call("rival", "GET", "/game-modes/admin?pageSize=1")).body).toMatchObject({
-      source: "own",
-      page: 1,
-      pageSize: 1,
-    });
-    expect((await call("games", "GET", "/game-modes/admin?pageSize=101")).status).toBe(400);
-    // Los filtros van antes de la página: el total es el de lo filtrado.
-    const propios = toda.data.filter(
-      (m) => (m as { ownerProviderId?: string | null }).ownerProviderId != null,
-    );
-    expect(
-      (await call("games", "GET", "/game-modes/admin?owner=own&pageSize=100")).body,
-    ).toMatchObject({ data: propios, total: propios.length });
-    expect((await call("games", "GET", "/game-modes/admin?players=3")).status).toBe(400);
-
-    const baja = await call("rival", "DELETE", `/game-modes/${uuid}`);
-    expect(baja.status).toBe(409);
-    expect(baja.body).toMatchObject({ code: "OWN_CATALOG_EMPTY" });
-    expect((baja.body as { detail: string }).detail).toContain("shared");
-    expect((await call("rival", "PUT", `/game-modes/${uuid}`, { isActive: false })).status).toBe(
-      409,
-    );
-
-    // Tablea Gaming la vuelve a `shared` por el proveedor; sin `?providerId=` es 400.
-    expect((await call("games", "PUT", "/game-modes/source", { source: "shared" })).status).toBe(
-      400,
-    );
-    expect(
-      await call("parley", "PUT", "/game-modes/source?providerId=rival", { source: "shared" }),
-    ).toEqual({ status: 404, body: { code: "UNKNOWN_PROVIDER" } });
-    expect(
-      (await call("games", "PUT", "/game-modes/source?providerId=rival", { source: "shared" }))
-        .status,
-    ).toBe(200);
-    expect((await call("rival", "DELETE", `/game-modes/${uuid}`)).status).toBe(200);
-  });
-
-  it("la copia de los compartidos: el proveedor del token, o el que nombre Tablea Gaming", async () => {
-    expect((await call("parley", "POST", "/game-modes/copies")).status).toBe(200);
-    expect(await call("parley", "POST", "/game-modes/copies?providerId=rival")).toEqual({
-      status: 404,
-      body: { code: "UNKNOWN_PROVIDER" },
-    });
-    expect((await call("parleySupport", "POST", "/game-modes/copies")).status).toBe(403);
-    // La lectura tampoco: el listado de otro proveedor no existe para éste.
-    expect(await call("parley", "GET", "/game-modes/admin?providerId=rival")).toEqual({
-      status: 404,
-      body: { code: "UNKNOWN_PROVIDER" },
-    });
-    expect((await call("games", "POST", "/game-modes/copies")).status).toBe(400);
-    expect((await call("key", "POST", "/game-modes/copies?providerId=parley")).status).toBe(200);
-  });
-
+  // EL CATÁLOGO DE MODOS ES DEL ORQUESTADOR: dominó no sirve ninguna de sus rutas, ni a un admin de
+  // Tablea Gaming ni al orquestador.
   it.each([
-    ["POST", "/game-modes/copy-shared"],
-    ["GET", "/game-modes/catalogs/parley"],
-    ["PUT", "/game-modes/catalogs/parley"],
+    ["GET", "/game-modes"],
+    ["GET", "/game-modes/00000000-0000-4000-8000-000000000001"],
+    ["GET", "/game-modes/admin"],
+    ["POST", "/game-modes"],
+    ["PUT", "/game-modes/00000000-0000-4000-8000-000000000001"],
+    ["DELETE", "/game-modes/00000000-0000-4000-8000-000000000001"],
+    ["PUT", "/game-modes/source"],
+    ["POST", "/game-modes/copies"],
+    ["GET", "/internal/game-modes"],
   ])("%s %s ya no existe", async (method, path) => {
-    const body = method === "GET" ? undefined : { providerId: "parley", source: "own" };
-    expect((await call("games", method, path, body)).status).toBe(404);
+    const body = method === "GET" || method === "DELETE" ? undefined : {};
+    for (const who of ["games", "orchestrator"] as const) {
+      expect((await call(who, method, path, body)).status).toBe(404);
+    }
   });
 });

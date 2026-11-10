@@ -23,20 +23,19 @@ flowchart LR
     Room["DominoRoom\nautenticación y transporte"]
     Router["MessageRouter\ndecoder + handler"]
     Engine["Motor síncrono\nreglas + estado"]
-    HTTP["Express\nAPI interna, config, catálogo y sondas"]
+    HTTP["Express\nAPI interna, config y sondas"]
     Registry["MatchRegistry"]
-    Catalog["GameModeService"]
     History["MatchHistory"]
     Results["MatchResultRecorder\noutbox de resultados"]
   end
 
   Redis[("Redis\ndriver, presence, registro")]
-  Mongo[("MongoDB\nhistorial, catálogo, fuentes, outbox de resultados")]
+  Mongo[("MongoDB\nhistorial, estadísticas, outbox de resultados")]
   Games[("RabbitMQ tablea_gaming\nresultados de partida")]
 
   Client --> Proxy
   Panel --> Proxy
-  Orch -->|"abrir mesa, reasentar, censo, catálogo"| HTTP
+  Orch -->|"abrir mesa con su modo, reasentar, censo"| HTTP
   Proxy --> Room
   Proxy --> HTTP
   Room --> Router --> Engine
@@ -44,11 +43,9 @@ flowchart LR
   Room --> History
   Room -->|"cobro de entrada y aumentos"| Orch
   Room --> Results
-  HTTP --> Catalog
   HTTP --> Registry
   Registry <--> Redis
   History <--> Mongo
-  Catalog <--> Mongo
   Results <--> Mongo
   Results --> Games
   Games --> Orch
@@ -56,9 +53,9 @@ flowchart LR
 
 Los procesos no se hablan directamente. Redis hace que sus salas, reservas y registros formen un
 solo clúster. Mongo guarda lo que debe sobrevivir a un reinicio. El broker de juegos es una salida con
-outbox: una partida puede seguir jugando si está temporalmente caído. El catálogo no publica a ningún
-broker: el orquestador lo lee por `GET /internal/game-modes` (modos con dueño y suscriptores, y la
-fuente `shared`/`own` de cada proveedor), y los proveedores —Betaso incluido— lo leen del orquestador.
+outbox: una partida puede seguir jugando si está temporalmente caído. Dominó no tiene catálogo de
+modos: el catálogo es del orquestador, que manda el modo entero (`gameMode`) en cada mesa casual, y los
+proveedores —Betaso incluido— lo leen del orquestador.
 
 ## Las capas
 
@@ -82,16 +79,13 @@ explícita del jugador.
 sequenceDiagram
   actor Orch as Orquestador
   participant Room as DominoRoom
-  participant Modes as GameModeReader
   participant Registry as MatchRegistry
   participant Player as Cliente
   participant Engine as Motor
   participant History as Historial
 
-  Orch->>Room: POST /internal/matches (participantes, gameModeId, niveles)
-  Room->>Modes: resolver modo activo
-  Modes-->>Room: puntos, apuesta y premio
-  Room->>Room: validar config y crear génesis
+  Orch->>Room: POST /internal/matches (participantes, gameModeId, gameMode, niveles)
+  Room->>Room: validar el pedido, congelar el modo y crear génesis
   Room->>Registry: registrar config, asientos y censo
   Room-->>Orch: roomId y una reserva por jugador
 
@@ -121,8 +115,9 @@ sequenceDiagram
 
 La única forma de abrir una mesa es `POST /internal/matches`, que llama el orquestador. Si hay
 mantenimiento, el orquestador no abre mesas: el dominó no tiene interruptor propio.
-`DominoRoom.onCreate` valida el pedido (`requestOf`), resuelve el modo del catálogo y lo convierte en
-un `DominoMatchConfig` congelado. La identidad externa se transforma una sola vez en asientos opacos
+`DominoRoom.onCreate` valida el pedido (`requestOf`) y lo convierte, con su modo en línea, en un
+`DominoMatchConfig` congelado (`configOf`): editar el modo en el orquestador vale para la mesa
+siguiente. La identidad externa se transforma una sola vez en asientos opacos
 (`seat-1`, `seat-2`, …); el motor no conoce plataformas ni UUIDs.
 
 La partida arranca recién cuando el orquestador confirma el cobro de la entrada a todos. Si no lo
@@ -200,7 +195,6 @@ son fases distintas: cada una espera una clase diferente de input o timeout.
 | Registro de salas y presence | Redis compartido entre procesos | Implementación local de Colyseus; clúster de un proceso |
 | `MatchRegistry` | Redis, TTL y censo compartido | `MemoryKeyValueStore`; válido para una sola instancia |
 | Historial (un registro v2.1 por partida) | MongoDB, persiste reinicios | `MemoryHistory`, el mismo documento, limitado a 200 partidas y al proceso |
-| Catálogo y fuentes por proveedor | MongoDB (`game_modes_domino`, `provider_catalogs`) | Repositorios de memoria |
 | Resultado de partida | RabbitMQ `tablea_gaming` con confirmaciones | El outbox de resultados acumula; sin Mongo, muere con el proceso |
 | Cobros de entrada y aumento | Orquestador por HTTP | La mesa no arranca, o el aumento se anula |
 
@@ -219,7 +213,7 @@ Un juego nunca mueve dinero: el dominó no tiene billetera, ni ledger, ni creden
   `tablea_gaming`. Quien paga es el orquestador, a través de billing-auth.
 - La ventana de revancha se abre con la compuerta cerrada (`eligible: false`): una revancha
   necesitaría que el orquestador vuelva a cobrar, y eso no existe todavía.
-- Una mesa de torneo (`mode: "TOURNAMENT"`) no toca dinero: no tiene modo del catálogo, es gratis,
+- Una mesa de torneo (`mode: "TOURNAMENT"`) no toca dinero: no tiene modo, es gratis,
   sin aumentos, sin bots y sin revancha, y arranca sin pedirle cobro al orquestador. El torneo
   (inscripción, tabla, premios) es de `apps/tournaments` del orquestador; el dominó solo juega la
   mesa y publica su resultado con `mode`, `tournamentId` y los hechos que el torneo puntúa.
@@ -235,7 +229,6 @@ La API que este backend le expone al orquestador está en `docs/api-y-mensajes.m
 4. `src/features/match/transports/colyseus/commands/`: entrada de mensajes.
 5. `src/features/match/network/`: historial y efectos hacia la plataforma. El registro de cada
    partida —cabecera, timeline, manos y desenlace— está en `history.ts` y `match-record.ts`.
-6. `src/features/game-mode/`: catálogo, dueños, suscripciones y fuente de cada proveedor.
-7. `src/features/reactions/`: los gestos de la mesa (lista fija, límite por jugador); el cable está
+6. `src/features/reactions/`: los gestos de la mesa (lista fija, límite por jugador); el cable está
    en `match/transports/colyseus/reactions.ts`.
-8. `src/di-container.ts` y `src/app.config.ts`: decisiones de infraestructura.
+7. `src/di-container.ts` y `src/app.config.ts`: decisiones de infraestructura.

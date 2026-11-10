@@ -15,10 +15,20 @@ function fakeLogger(): Logger {
   return logger;
 }
 
-const request: CreateMatchRequest = {
+const request = {
   mode: "CASUAL",
   matchId: "m-1",
   gameModeId: "mode-2p",
+  gameMode: {
+    name: "Clásica",
+    playersQuantity: 2,
+    pointsToWin: 100,
+    multiplier: 1,
+    entryFee: 1.5,
+    prize: 2.5,
+    isFreeRoom: false,
+    enableBots: false,
+  },
   participants: [
     { userId: "p-a", displayName: "ana", currency: "VES" },
     { userId: "p-b", displayName: "beto", currency: "VES" },
@@ -26,7 +36,7 @@ const request: CreateMatchRequest = {
   seed: "seed-1",
   teamAssignment: "SEAT_ORDER",
   rateId: "69977c3dc3bf3e710572f941",
-};
+} satisfies CreateMatchRequest;
 
 type PublicConfig = Awaited<ReturnType<TablesDeps["registry"]["publicConfigOf"]>>;
 
@@ -210,18 +220,9 @@ describe("tablesRoutes", () => {
     expect((await post(`${base}/internal/matches`, { ...request, rateId: " " })).status).toBe(400);
   });
 
-  // EL MODO EN LÍNEA (fase C): viaja tal cual a la sala, y uno fuera de las guardas es 400.
-  it("pasa el modo en línea a la sala, y rechaza uno fuera del contrato", async () => {
-    const gameMode = {
-      name: "Clásica",
-      playersQuantity: 2,
-      pointsToWin: 100,
-      multiplier: 1,
-      entryFee: 1.5,
-      prize: 2.5,
-      isFreeRoom: false,
-      enableBots: false,
-    };
+  // EL MODO EN LÍNEA: viaja tal cual a la sala; sin él, o fuera de las guardas, es 400.
+  it("pasa el modo en línea a la sala, y rechaza uno ausente o fuera del contrato", async () => {
+    const { gameMode, ...withoutMode } = request;
     const opened: CreateMatchRequest[] = [];
     const base = await serve({
       tables: {
@@ -235,6 +236,7 @@ describe("tablesRoutes", () => {
 
     expect((await post(`${base}/internal/matches`, { ...request, gameMode })).status).toBe(201);
     expect(opened[0]).toMatchObject({ gameModeId: "mode-2p", gameMode });
+    expect((await post(`${base}/internal/matches`, withoutMode)).status).toBe(400);
     for (const bad of [{ multiplier: 1.5 }, { pointsToWin: 0 }, { entryFee: -1 }, { extra: 1 }]) {
       expect(
         (await post(`${base}/internal/matches`, { ...request, gameMode: { ...gameMode, ...bad } }))
@@ -245,7 +247,7 @@ describe("tablesRoutes", () => {
 
   it("abre una mesa de torneo, y le rechaza cualquier campo de dinero", async () => {
     const base = await serve();
-    const { gameModeId: _m, rateId: _r, ...rest } = request;
+    const { gameModeId: _m, gameMode: _g, rateId: _r, ...rest } = request;
     const tournament = {
       ...rest,
       mode: "TOURNAMENT",
@@ -265,14 +267,14 @@ describe("tablesRoutes", () => {
     const base = await serve({
       tables: {
         openRequest: async () => {
-          throw new Error("UNKNOWN_GAME_MODE: no hay un modo activo con uuid x");
+          throw new Error("SEAT_COUNT_MISMATCH: el modo x sienta 4 jugadores y el pedido trae 2");
         },
         seatBack: vi.fn(),
       },
     });
     const res = await post(`${base}/internal/matches`, request);
     expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ code: "UNKNOWN_GAME_MODE" });
+    expect(await res.json()).toEqual({ code: "SEAT_COUNT_MISMATCH" });
   });
 
   it("contesta 500 ante cualquier otra falla, sin disfrazarla de rechazo", async () => {

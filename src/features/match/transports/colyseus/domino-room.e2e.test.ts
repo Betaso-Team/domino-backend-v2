@@ -1,4 +1,4 @@
-import { gameModes, rootContainer } from "@/di-container";
+import { rootContainer } from "@/di-container";
 import {
   type ParticipantInput,
   bootTestServer,
@@ -8,13 +8,14 @@ import {
   participantOf,
   waitUntil,
 } from "@/tests/e2e";
+import { CASUAL_2P, CASUAL_4P } from "@/tests/table-modes";
 import { ColyseusSDK } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type GlobalDominoConfig, globalConfigWith } from "../../core/config";
 import type { MatchState } from "../../core/state";
 import type { HistoryReader } from "../../network/history";
-import type { CreateMatchRequest, MatchParticipant } from "../match-contract";
+import type { MatchParticipant } from "../match-contract";
 import { MatchRegistry } from "../match-registry";
 import type { DominoRoom } from "./domino-room";
 
@@ -210,41 +211,16 @@ describe("DominoRoom", () => {
     await Promise.all([a.leave(), b.leave()]);
   });
 
-  // EL CATÁLOGO ES LA AUTORIDAD, Y LA SALA LO CONSULTA. Estos cinco `it` son el cableado: los
-  // rechazos en sí los mide `match-contract.test.ts` en aislamiento, pero que `onCreate` LLAME al
-  // catálogo —y que no atrape lo que lanza— es una arista aparte, y es justo la que un refactor
-  // rompe en silencio. Una sala creada con un modo inventado ya cobró la inscripción.
-  it("no crea la sala con un modo que no está en el catálogo", async () => {
+  // EL MODO VIENE EN EL PEDIDO, y sin él no hay mesa: dominó no tiene catálogo que consultar. Los
+  // rechazos en sí los mide `match-contract.test.ts` en aislamiento; acá se mide que `onCreate`
+  // valide y no atrape lo que lanza.
+  it("no crea la sala casual sin su modo en línea", async () => {
     const testServer = requiredServer();
+    const { gameMode: _, ...withoutMode } = options("match-without-mode");
 
-    await expect(
-      testServer.createRoom<DominoRoom>("domino", {
-        ...options("match-unknown-mode"),
-        gameModeId: "00000000-0000-4000-8000-00000000dead",
-      }),
-    ).rejects.toThrow(/UNKNOWN_GAME_MODE/);
-  });
-
-  // UN MODO DADO DE BAJA NO EXISTE DESDE AFUERA, y esta es la diferencia entre `activeByUuid` y
-  // `byUuid`. El panel da de baja un modo justamente para que deje de sentar mesas; con `byUuid`
-  // el retiro sería decorativo y el modo seguiría cobrando.
-  it("no crea la sala con un modo dado de baja", async () => {
-    const testServer = requiredServer();
-    const retirado = await gameModes.create({
-      name: "retirado-2p",
-      playersQuantity: 2,
-      pointsToWin: 50,
-      entryFee: 10,
-      prize: 20,
-    });
-    await gameModes.update(retirado.uuid, { isActive: false });
-
-    await expect(
-      testServer.createRoom<DominoRoom>("domino", {
-        ...options("match-inactive-mode"),
-        gameModeId: retirado.uuid,
-      }),
-    ).rejects.toThrow(/UNKNOWN_GAME_MODE/);
+    await expect(testServer.createRoom<DominoRoom>("domino", withoutMode)).rejects.toThrow(
+      /gameMode/,
+    );
   });
 
   // LA MESA DE CUATRO NACE, y hasta este incremento se rechazaba antes de génesis: `payoutOf`
@@ -252,13 +228,6 @@ describe("DominoRoom", () => {
   // veredicto —sin premio y sin reembolso, plata trabada—. La abrió la regla de reparto de v1.
   it("crea la sala de cuatro y reparte los cuatro asientos", async () => {
     const testServer = requiredServer();
-    const cuatro = await gameModes.create({
-      name: "clasica-4p",
-      playersQuantity: 4,
-      pointsToWin: 100,
-      entryFee: 125,
-      prize: 250,
-    });
 
     const room = await testServer.createRoom<DominoRoom>("domino", {
       ...options("match-4p", [
@@ -266,7 +235,8 @@ describe("DominoRoom", () => {
         { userId: "c", displayName: "C", currency: "VES" },
         { userId: "d", displayName: "D", currency: "VES" },
       ]),
-      gameModeId: cuatro.uuid,
+      gameModeId: CASUAL_4P.uuid,
+      gameMode: CASUAL_4P.gameMode,
     });
 
     const state = room.state as MatchState;
@@ -302,56 +272,41 @@ describe("DominoRoom", () => {
     ).rejects.toThrow(/SEAT_COUNT_MISMATCH/);
   });
 
-  // EL SNAPSHOT SE CONGELA EN `onCreate`, y esta es la mitad reproducible de la tarea. El catálogo
-  // se consulta UNA vez; editar el modo después no puede cambiarle los puntos ni el premio a una
-  // mesa cuya inscripción YA se cobró. Sin esto —con una sala que releyera el catálogo— un cambio
-  // de precio del panel reescribiría en caliente la economía de todas las partidas en curso.
-  it("congela el modo: editarlo después no cambia ni el estado ni la configuración pública", async () => {
+  // CADA MESA ES SU MODO EN LÍNEA, aunque dos nombren el mismo `gameModeId`: el orquestador edita el
+  // modo entre una mesa y la siguiente, y la que ya se cobró conserva los números con los que nació.
+  // Sin esto —con una sala que recordara los números por `gameModeId`— un cambio de precio
+  // reescribiría la economía de las partidas en curso.
+  it("toma los números de su modo en línea: otra mesa del mismo modo editado no la cambia", async () => {
     const testServer = requiredServer();
-    const editable = await gameModes.create({
-      name: "editable-2p",
-      playersQuantity: 2,
-      pointsToWin: 100,
-      entryFee: 125,
-      prize: 250,
-    });
-    const room = await testServer.createRoom<DominoRoom>("domino", {
-      ...options("match-frozen-mode"),
-      gameModeId: editable.uuid,
-    });
+    const room = await testServer.createRoom<DominoRoom>("domino", options("match-frozen-mode"));
 
     expect(room.state.pointsToWin).toBe(100);
     expect(await configOfRoom(testServer, room.roomId)).toMatchObject({
+      gameModeId: CASUAL_2P.uuid,
       pointsToWin: 100,
       entryFee: 125,
       prize: 250,
       betLevels: [],
     });
 
-    await gameModes.update(editable.uuid, { pointsToWin: 7, entryFee: 1, prize: 2 });
-
-    // Los números van como LITERAL y no releídos del modo: leerlos del catálogo mediría que dos
-    // lecturas del mismo dato coinciden, y quedaría verde si la sala empezara a releerlo.
-    expect(room.state.pointsToWin).toBe(100);
-    expect(await configOfRoom(testServer, room.roomId)).toMatchObject({
-      pointsToWin: 100,
-      entryFee: 125,
-      prize: 250,
-      betLevels: [],
-    });
-
-    // Y LA EDICIÓN SÍ OCURRIÓ, que es lo que impide que las tres aserciones de arriba pasen por la
-    // razón equivocada: una mesa NUEVA nace con los valores nuevos. Sin esta vuelta, un `update`
-    // que no escribiera nada dejaría el test verde midiendo el catálogo que nunca cambió.
     const nueva = await testServer.createRoom<DominoRoom>("domino", {
       ...options("match-after-edit"),
-      gameModeId: editable.uuid,
+      gameMode: { ...CASUAL_2P.gameMode, pointsToWin: 7, entryFee: 1, prize: 2 },
     });
     expect(nueva.state.pointsToWin).toBe(7);
     expect(await configOfRoom(testServer, nueva.roomId)).toMatchObject({
+      gameModeId: CASUAL_2P.uuid,
       pointsToWin: 7,
       entryFee: 1,
       prize: 2,
+    });
+
+    // Los números van como LITERAL: la primera mesa sigue con los suyos.
+    expect(room.state.pointsToWin).toBe(100);
+    expect(await configOfRoom(testServer, room.roomId)).toMatchObject({
+      pointsToWin: 100,
+      entryFee: 125,
+      prize: 250,
     });
 
     await Promise.all([room.disconnect(), nueva.disconnect()]);
@@ -414,12 +369,11 @@ const defaultParticipants = [
   { userId: "b", displayName: "B", currency: "VES" },
 ] as const;
 
-// El request YA NO TRAE DINERO NI PUNTOS: los pone el modo que `src/tests/game-mode-catalog.ts`
-// sembró en el catálogo del container, que es el mismo que la sala resuelve.
+// El dinero y los puntos los trae el modo en línea de `src/tests/table-modes.ts` (`CASUAL_2P`).
 function options(
   matchId: string,
   participants: readonly MatchParticipant[] = defaultParticipants,
-): CreateMatchRequest {
+): ReturnType<typeof casualTable> {
   return {
     ...casualTable(participants, "seed"),
     matchId,
@@ -429,7 +383,12 @@ function options(
 
 async function configOfRoom(testServer: ColyseusTestServer, roomId: string) {
   const response = await fetch(`http://127.0.0.1:${portOf(testServer)}/config/${roomId}`);
-  return (await response.json()) as { pointsToWin: number; entryFee: number; prize: number };
+  return (await response.json()) as {
+    gameModeId: string;
+    pointsToWin: number;
+    entryFee: number;
+    prize: number;
+  };
 }
 
 // Un string es azúcar para "de la plataforma de siempre": los tests que no miden

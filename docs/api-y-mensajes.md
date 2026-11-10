@@ -1,7 +1,8 @@
 # API HTTP y mensajes
 
-El juego usa WebSocket/Colyseus para la partida y HTTP para configuración, operación, catálogo y la
-API del orquestador. No hay Swagger: los mensajes de sala no son HTTP y los contratos se mantienen
+El juego usa WebSocket/Colyseus para la partida y HTTP para configuración, operación y la API del
+orquestador. Dominó no tiene catálogo de modos: los modos son del orquestador, que los lee y los edita,
+y manda el modo entero en cada mesa casual (`gameMode`, en «API del orquestador»). No hay Swagger: los mensajes de sala no son HTTP y los contratos se mantienen
 tipados en el código.
 
 ## Salas Colyseus
@@ -128,15 +129,7 @@ handler. Un cliente que no lo escucha solo ve un aviso del SDK.
 | `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts` y, opcional, `seatPrices` por `seat-N`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
 | `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`; y, sólo si su asiento se sentó con `price`, `currency`, `betInPlayerCurrency` y `prizeInPlayerCurrency` como texto decimal, congelados al cerrar). Página de 1 a 50, 10 por defecto |
-| `GET /game-modes` | Modos **compartidos** activos del catálogo, con el DTO de siempre (sin dueño ni suscriptores) |
-| `GET /game-modes/:uuid` | Un modo compartido activo; uno dado de baja o propio de un proveedor responde 404 |
 | `GET /reactions` | La lista de gestos de `SEND_REACTION`, sin credencial (ver abajo) |
-
-Los dos `GET /game-modes` responden los `200` con `Cache-Control: public, max-age=10` (el `404`, con
-`no-store`), y el servidor guarda la lista de activos 5 s por proceso: una edición hecha en otra
-instancia puede tardar hasta 5 s en verse en ésta, más lo que la guarde un caché intermedio. La
-instancia que atiende la edición la ve en el acto. Abrir una mesa nunca usa esa lista: lee el modo
-fresco.
 
 **`GET /reactions`** responde con `Cache-Control: public, max-age=300` la lista fija del dominó (vive
 en el código, `src/features/reactions/static-catalog.ts`, y es la misma para todos los proveedores):
@@ -171,7 +164,7 @@ salen `{ code, detail? }` (ver [«Errores»](#errores)).
 
 **Quién entra.** El default es el cerrado: una ruta es de Tablea Gaming y de escritura salvo que diga
 lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las rutas que acotan su
-ámbito —las del catálogo, y el listado y el detalle de partidas—; en todas las demás recibe
+ámbito —el listado y el detalle de partidas—; en todas las demás recibe
 `403 { code: "FORBIDDEN" }`.
 
 | Rutas | Tablea Gaming `admin` (y la llave) | Tablea Gaming `support` | Proveedor `admin` | Proveedor `support` |
@@ -180,23 +173,6 @@ lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las r
 | `GET /internal/matches/:matchId/history`, `GET /internal/players/:userId/matches`, `/game-data/:roomId` | sí | sí | 403 | 403 |
 | `GET /internal/settings…` | sí | sí | 403 | 403 |
 | `PATCH`/`DELETE /internal/settings/:section` | sí | 403 | 403 | 403 |
-| `GET /game-modes/admin`, `/admin/:uuid` | todo (o el catálogo de `?providerId=`) | ídem | los suyos y todos los compartidos activos (con `subscribed`) | ídem |
-| `POST /game-modes` | compartido o propio de cualquiera | 403 | sólo propio suyo | 403 |
-| `PUT`/`DELETE /game-modes/:uuid`, `GET /game-modes/reactive/:uuid` | todo | 403 | sólo los propios suyos | 403 |
-| `PUT`/`DELETE /game-modes/:uuid/subscription` | el de `?providerId=` | 403 | él mismo | 403 |
-| `POST /game-modes/copies` | para el de `?providerId=` | 403 | para él mismo | 403 |
-| `PUT /game-modes/source` | la del de `?providerId=` | 403 | la suya | 403 |
-
-**El proveedor sobre el que actúa una ruta sale del token**, nunca del path ni del cuerpo. Un admin de
-proveedor no lo nombra: es el suyo (un `?providerId=` igual al suyo se acepta; uno distinto responde
-`404 { code: "UNKNOWN_PROVIDER" }`: otro proveedor no existe para él, como sus modos propios). Tablea
-Gaming (token sin `prv`, o la llave) lo nombra con `?providerId=`, obligatorio en las rutas que actúan
-sobre un proveedor (suscripción, copias, fuente): sin él, `400 { code: "PROVIDER_REQUIRED", detail }`.
-En `GET /game-modes/admin` es opcional.
-
-Dentro del catálogo, un modo **propio de otro proveedor** no existe para un proveedor: toda operación
-sobre él responde `404 { code: "MODE_NOT_FOUND" }`. Un modo **compartido** no es secreto (lo lista el
-catálogo público): tocarlo sin poder responde `403 { code: "FORBIDDEN", detail }`.
 
 | Método y ruta | Uso |
 |---|---|
@@ -205,104 +181,10 @@ catálogo público): tocarlo sin poder responde `403 { code: "FORBIDDEN", detail
 | `GET /internal/matches/:matchId` | El documento guardado de una partida, entero; a un proveedor, sólo si algún asiento es suyo |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `GET /internal/players/:userId/matches?page=&limit=` | Historial de un jugador para el panel: la misma página que `GET /me/matches` le devuelve a ese `userId` (mismos parámetros y límites), dentro de `{ status: "success", data }`. El `userId` sigue la regla de texto del filtro del listado |
-| `GET /game-modes/admin[?providerId=]` | Los modos que ve el admin, dados de baja incluidos, y la fuente del catálogo si hay un proveedor (ver abajo) |
-| `GET /game-modes/admin/:uuid` | Un modo que ve el admin; 404 si no existe o no lo ve |
-| `POST /game-modes` | Crea un modo; `ownerProviderId` opcional (ver abajo) |
-| `PUT /game-modes/:uuid` | Aplica un patch al modo (el dueño y los suscriptores no se editan acá) |
-| `DELETE /game-modes/:uuid` | Baja lógica: escribe sólo `isActive`, los suscriptores se conservan |
-| `GET /game-modes/reactive/:uuid` | Reactiva; conserva el verbo de v1 por compatibilidad |
-| `PUT /game-modes/:uuid/subscription[?providerId=]` | Suscribe al proveedor a un compartido activo; responde `200` con el modo |
-| `DELETE /game-modes/:uuid/subscription[?providerId=]` | Lo da de baja; responde `200` con el modo |
-| `POST /game-modes/copies[?providerId=]` | Copia a modos propios los compartidos a los que el proveedor está suscrito (sin cuerpo) |
-| `PUT /game-modes/source[?providerId=]` | Cambia la fuente del catálogo del proveedor: `{ source: "shared" \| "own" }` |
 | `GET /internal/settings` | Las secciones de config en caliente (`match`; en local y dev también `deal` y `starting-score`): en vigor, overrides y editables |
 | `GET /internal/settings/:section` | Una sección |
 | `PATCH /internal/settings/:section` | Parche de uno o más campos; cotas estrictas, clave desconocida = 400 |
 | `DELETE /internal/settings/:section` | Vuelve la sección a los defaults del entorno |
-
-### Modos con dueño y suscripciones
-
-Cada modo tiene un dueño, `ownerProviderId`: `null` es un modo **compartido** de Tablea Gaming; un id es
-un modo **propio** de ese proveedor, que sólo juegan sus jugadores. Un admin de proveedor crea sólo
-modos propios suyos: sin el campo se lo pone el servicio; con `null` es `403 FORBIDDEN` y con el id de
-otro proveedor, `404 UNKNOWN_PROVIDER` (lo de otro proveedor no existe para él). Los compartidos llevan
-además `subscribers`, los proveedores que los juegan:
-
-- **La lista es explícita.** Un compartido se ofrece sólo a los proveedores de su lista; un documento
-  sin el campo se lee `[]`, igual que un compartido nuevo: no se ofrece a nadie hasta que se
-  suscriban. Un modo propio también lleva `[]`: no tiene suscriptores. Los compartidos de antes de las
-  suscripciones se suscriben una vez con `npm run modes:subscribe-existing` (`operacion.md`).
-- Cada proveedor se suscribe o se da de baja él mismo (Tablea Gaming puede hacerlo por cualquiera, con
-  `?providerId=`). Las dos son idempotentes. La suscripción vale sólo sobre compartidos **activos**;
-  sobre uno inactivo o propio, `409`. No hay ruta para fijar la lista entera.
-- Las escrituras de suscriptores **no avanzan `__v` ni `updatedAt`**: suscribirse no es una edición
-  del modo.
-- La unicidad (`name + playersQuantity` al crear, `name` al renombrar, con el hueco heredado de v1)
-  vale **por dueño**: dos proveedores pueden tener cada uno su «Clásica».
-
-Lo que ve cada uno en `GET /game-modes/admin` y `/admin/:uuid`: el DTO de v1 más `ownerProviderId`.
-Tablea Gaming ve también `subscribers`; un proveedor no (es información de los otros), sino
-`subscribed: true | false` en cada compartido: si él está suscrito. Un proveedor ve sus modos propios
-(también los dados de baja) y **todos los compartidos activos**, para elegir a cuáles suscribirse; un
-compartido dado de baja sólo lo sigue viendo si estaba suscrito. Lo que JUEGA no cambia: sus propios o
-los compartidos a los que está suscrito, según la fuente. Tablea Gaming ve todos los modos, o con
-`?providerId=` lo que ve ese proveedor.
-
-**`GET /game-modes/admin` se pagina si se pide**: con `?page=` o `?pageSize=` (de 1 a 100; si falta uno,
-página 1 y 20 por página) responde una página de la misma lista, en el mismo orden, y el total:
-`{ status, data, total, page, pageSize }` (más `source` si hay un proveedor resuelto). Sin ninguno,
-la lista entera como siempre. Fuera de rango: `400`. Los filtros se aplican antes de la página (el total
-es el de lo filtrado) y se combinan: `active=true` (solo los activos), `players=2|4`, `free=true|false`
-(gratis o pagas) y `owner=shared|own`.
-
-**`POST /game-modes/copies`** (sin cuerpo) copia los compartidos **activos** a los que el proveedor está
-suscrito a modos propios suyos, con los mismos números y niveles. El uuid de cada copia
-es determinista (v5 de RFC 4122: espacio = uuid del origen, nombre = `providerId`), así que repetirla
-completa una copia a medias sin duplicar y no pisa lo que el proveedor ya editó. Responde `200`:
-
-```json
-{ "status": "success", "data": {
-  "created":  [{ "sourceUuid": "…", "uuid": "…" }],
-  "existing": [{ "sourceUuid": "…", "uuid": "…" }],
-  "skipped":  [{ "sourceUuid": "…", "name": "…", "playersQuantity": 2,
-                 "reason": "NAME_TAKEN", "conflictUuid": "…" }] } }
-```
-
-`NAME_TAKEN`: el proveedor ya tenía un modo propio con ese nombre y esa cantidad y otro uuid.
-`INVALID_SOURCE_UUID`: el uuid del origen no tiene forma de UUID y no se puede derivar el de la copia.
-
-### La fuente del catálogo de cada proveedor
-
-Cada proveedor elige qué catálogo juega, **entero**: `shared` (los compartidos activos a los que está
-suscrito) u `own` (sólo sus modos propios activos). Un proveedor que nunca la cambió está en `shared`.
-La guarda el dominó (colección `provider_catalogs`) y la aplica el orquestador al armar el catálogo
-efectivo (un proveedor que juega contra todos usa siempre el compartido, decida lo que decida acá).
-El camino habitual para pasar a `own`: `POST /game-modes/copies`, editar las copias, y recién ahí la
-fuente.
-
-**La fuente se lee en `GET /game-modes/admin`** cuando hay un proveedor resuelto (un token de proveedor,
-o Tablea Gaming con `?providerId=`): la respuesta suma `source` junto a `data`. Tablea Gaming sin
-`?providerId=` recibe todos los modos y ningún `source`.
-
-```json
-{ "status": "success", "data": [ … ], "source": "own" }
-```
-
-**`PUT /game-modes/source` `{ "source": "shared" | "own" }`** responde `200`:
-
-```json
-{ "status": "success", "data": {
-  "providerId": "parley", "source": "own",
-  "updatedAt": "2026-10-28T12:00:00.000Z", "updatedBy": "pia" } }
-```
-
- Pasar a `own` exige **al menos un modo propio activo** del proveedor: si no, `409`
-(quedaría sin lobby). Volver a `shared` siempre se puede. Y al revés: con la fuente en `own`, dar de baja (o
-desactivar por `PUT` con `isActive: false`) el **último** modo propio activo del proveedor es `409`;
-primero hay que volver a `shared`. Un proveedor sólo lee y cambia la suya
-(`404 UNKNOWN_PROVIDER` sobre otra); `support` lee y no cambia.
-
-Los códigos del catálogo, ruta por ruta, están en [«Errores»](#errores).
 
 ### El registro de cada partida
 
@@ -396,14 +278,6 @@ si no, por `matchId` (los documentos viejos no guardaban la sala).
 Las tres van con la llave o el token de admin; sin credencial, `401 { code: "UNAUTHORIZED" }` antes de
 mirar la forma. El `POST /internal/matches` del orquestador es otra ruta, con su llave.
 
-**Niveles de aumento de un modo.** `POST` y `PUT /game-modes` aceptan `betLevels`:
-`[{ level, extra, additionalPoints }]`. `level` es el multiplicador de la entrada y el premio (entero
-≥ 2), `extra` se suma al multiplicador de ranking y `additionalPoints` es lo que el ganador suma de
-más. Los niveles son únicos y el `extra` crece con el nivel; si no, la respuesta es 400. Sin
-`betLevels`, un modo nuevo no ofrece aumentar (`[]`). En el `PUT`, la lista reemplaza a la anterior y
-`[]` apaga los aumentos. El `GET` público devuelve `betLevels` ordenados por nivel, y el orquestador los
-lee de ahí (y de `GET /internal/game-modes`).
-
 **Config en caliente.** Una edición llega a las mesas que nacen DESPUÉS; una mesa ya abierta conserva
 los plazos con los que nació. El proceso que atiende el `PATCH` se refresca en el acto y el resto
 del clúster converge en 5 s. Fuera de lo editable queda `tilesPerPlayer` (regla de juego): se rechaza
@@ -411,7 +285,7 @@ con 400 en vez de aceptarse e ignorarse.
 
 ### API del orquestador
 
-Seis rutas que sólo usa el orquestador de Tablea Gaming; las de las mesas son la única puerta
+Cinco rutas que sólo usa el orquestador de Tablea Gaming; las de las mesas son la única puerta
 de entrada a una partida. Van con `x-internal-api-key` igual a
 `ORCHESTRATOR_API_KEY` (`ADMIN_API_KEY` no las abre); sin esa variable no se registran y responden 404.
 Un `401 { code: "UNAUTHORIZED" }` es una llave ausente o equivocada, y se decide ANTES de mirar el
@@ -420,15 +294,15 @@ cuerpo.
 **`POST /internal/matches`** abre una mesa. Cuerpo (`CreateMatchRequest`, estricto: una clave de más
 es 400), discriminado por `mode`:
 
-- **`"CASUAL"`**: `matchId`, `gameModeId` (uuid del catálogo), `participants` (2 a 4, par; cada uno
-  `userId`, `displayName`, `currency` y, opcionales, `username`, `profilePicture`, `price` y
-  `providerId`), `seed`,
-  `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el `_id` de Mongo de la tasa de
-  Betaso), `betLevels` opcional (abajo) y `gameMode` opcional (el modo en línea, abajo).
+- **`"CASUAL"`**: `matchId`, `gameModeId` (el uuid del modo en el catálogo del orquestador; dominó no lo
+  resuelve, nombra la mesa), `gameMode` (**obligatorio**: el modo en línea, abajo), `participants` (2 a
+  4, par; cada uno `userId`, `displayName`, `currency` y, opcionales, `username`, `profilePicture`,
+  `price` y `providerId`), `seed`, `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el
+  `_id` de Mongo de la tasa de Betaso) y `betLevels` opcional (abajo).
 - **`"TOURNAMENT"`**: `matchId`, `tournamentId`, `participants` y `teamAssignment` como la casual,
   `seed` y `rules: { pointsToWin }` (entero positivo seguro; el tope lo decide `apps/tournaments`, no
-  el dominó, cuyo motor solo usa `pointsToWin` como meta). **Sin** `gameModeId`, `rateId` ni `betLevels`:
-  traer alguno es 400. La mesa no consulta el catálogo: es gratis (`isFreeRoom`, entrada y premio 0),
+  el dominó, cuyo motor solo usa `pointsToWin` como meta). **Sin** `gameModeId`, `gameMode`, `rateId` ni
+  `betLevels`: traer alguno es 400. Es gratis (`isFreeRoom`, entrada y premio 0),
   sin aumentos, sin bots y sin revancha, con la ventana de reparto y los plazos de cualquier mesa
   (la config global, con sus ediciones en caliente). Con la mesa completa **arranca sin pedir cobro**
   al orquestador. En el snapshot, el registro y el censo su `gameModeId` es
@@ -439,7 +313,8 @@ es 400), discriminado por `mode`:
 | `201` | `{ status, data: { roomId, seats: [{ userId, reservation }] } }` | La sala nació; cada jugador consume su `reservation` |
 | `400` | `{ code: "MALFORMED", detail }` | El cuerpo no cumple la forma |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `422` | `{ code: "UNKNOWN_GAME_MODE" }`, `"UNSUPPORTED_GAME_MODE"` o `"SEAT_COUNT_MISMATCH"` | La sala rechazó la mesa: modo inexistente o dado de baja, 4P, o cantidad que no coincide con el modo |
+| `400` | `{ code: "MALFORMED", detail }` | También: una casual sin `gameMode`, o con un `gameMode` fuera de su forma |
+| `422` | `{ code: "SEAT_COUNT_MISMATCH" }` | La sala rechazó la mesa: la cantidad de `participants` no es la del modo |
 | `500` | `{ code: "INTERNAL" }` | Cualquier otra falla es nuestra |
 
 **`POST /internal/players/:userId/seat`** devuelve el asiento de quien sigue jugando (sin cuerpo).
@@ -489,37 +364,9 @@ torneo. El orquestador lo muestra en los números de su lobby. `playersInMatch` 
 | `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }], byTournament: [{ tournamentId, playersInMatch }] } }` | Siempre; un modo o torneo sin nadie jugando no aparece |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 
-**`GET /internal/game-modes`** devuelve, en una sola lectura, lo que el orquestador necesita para
-armar el catálogo efectivo de cada proveedor: los modos activos —compartidos y propios— con el DTO de
-v1 más `ownerProviderId` y `subscribers` (siempre una lista; `[]` es nadie), y las **fuentes** que se
-apartan del default. `?includeInactive=1` suma los dados de baja (para el historial y para que un
-proveedor como Betaso vea las bajas); un valor que no sea `0` o `1` es `400`.
-
-```json
-{ "status": "success",
-  "data": [ { "_id": "…", "uuid": "…", "name": "Clásica", "multiplier": 1, "prize": 18,
-              "entryFee": 10, "playersQuantity": 2, "pointsToWin": 25, "isActive": true,
-              "isFreeRoom": false, "enableBots": false, "betLevels": [],
-              "createdAt": "…", "updatedAt": "…", "__v": 0,
-              "ownerProviderId": null, "subscribers": ["betaso"], "revision": 0 } ],
-  "catalogs": { "parley": "own" } }
-```
-
-`catalogs` es un mapa `providerId → fuente` con **sólo** los proveedores que no están en `shared`: un
-proveedor ausente del mapa juega el compartido suscrito. Hoy el único valor posible es `"own"`.
-
-`revision` es la revisión del modo: el mismo número que `__v`, con el nombre que le da el catálogo
-del orquestador (su importación lo copia a su columna `revision`). Avanza con cada edición del modo;
-suscribir o desuscribir no la mueve. `__v` se queda, por compatibilidad.
-
-| Estado | Cuerpo | Cuándo |
-|---|---|---|
-| `200` | `{ status, data: [GameModeDTO & { ownerProviderId, subscribers, revision }], catalogs: { [providerId]: "own" } }` | Siempre |
-| `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada (la del panel tampoco la abre) |
-
-⚠ **El dominó no verifica el proveedor al abrir una mesa.** `POST /internal/matches` resuelve el modo
-activo por uuid sin mirar su dueño: que un jugador sólo use los modos de su proveedor lo garantiza el
-orquestador.
+⚠ **El dominó no verifica el modo ni el proveedor al abrir una mesa.** `POST /internal/matches` juega el
+modo que le mandan: que exista, esté activo y sea de los que el proveedor del jugador ofrece lo
+garantiza el orquestador.
 
 El `CreateMatchRequest` casual acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
@@ -552,12 +399,12 @@ gratis nunca lo traen). El dominó no hace cuentas con esto: lo congela en el as
 `entry` + el `entry` del nivel aceptado; `prizePaidInPlayerCurrency` = `prize` o el del nivel, sólo
 para quien cobra premio), que es lo que devuelve `GET /me/matches`. Cobra billing, en UC.
 
-**El modo en línea (`gameMode`).** El catálogo de modos pasa al orquestador (fase C de
-`2026-11-10-catalogo-en-orquestador-design.md`, en el repo del orquestador). Mientras tanto, la mesa
-casual acepta el modo entero en el pedido, junto a `gameModeId`:
+**El modo en línea (`gameMode`).** El catálogo de modos es del orquestador
+(`2026-11-10-catalogo-en-orquestador-design.md`, en su repo), y la mesa casual trae el modo entero en el
+pedido, junto a `gameModeId`:
 
 ```ts
-gameMode?: {
+gameMode: {
   name: string;               // 1 a 100 caracteres; es el `table.name` del registro
   playersQuantity: 2 | 4;     // número, no texto
   pointsToWin: number;        // entero positivo seguro
@@ -569,13 +416,14 @@ gameMode?: {
 }                             // estricto: una clave de más es 400
 ```
 
-- **Con `gameMode`**, la sala no lee el catálogo de dominó: los puntos, el dinero, el multiplicador,
-  `isFreeRoom` y `enableBots` de la mesa salen de ahí, y el nombre del registro es `gameMode.name`.
-  `gameModeId` no se resuelve (puede no estar en el catálogo de dominó) y sigue nombrando la mesa en el
-  snapshot, el registro, el censo y el resultado. La cantidad de `participants` tiene que ser
-  `playersQuantity` (`422 SEAT_COUNT_MISMATCH`), y una mesa gratis no ofrece aumentos.
-- **Sin `gameMode`**, la mesa funciona como siempre: resuelve `gameModeId` contra el catálogo activo.
-- Una mesa de torneo no lo acepta (400).
+- Los puntos, el dinero, el multiplicador, `isFreeRoom` y `enableBots` de la mesa salen de ahí, y el
+  nombre del registro es `gameMode.name`. Se congelan al abrir la mesa: editar el modo en el
+  orquestador vale para la mesa siguiente.
+- `gameModeId` no se resuelve contra nada y nombra la mesa en el snapshot, el registro, el censo y el
+  resultado.
+- La cantidad de `participants` tiene que ser `playersQuantity` (`422 SEAT_COUNT_MISMATCH`), y una mesa
+  gratis no ofrece aumentos.
+- Sin `gameMode`, o con uno fuera de esta forma, es `400`. Una mesa de torneo no lo acepta (400).
 
 **Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
@@ -622,32 +470,12 @@ sin `strict`, y los campos de antes no cambiaron.
 El contrato completo vive en el monorepo del orquestador:
 `docs/superpowers/specs/2026-10-05-dinero-mock-resultados-y-reportes-design.md`.
 
-### Anuncios del catálogo (`domino.config.*`)
-
-Cada cambio del catálogo se anuncia en el exchange `tablea_gaming` (el de `TABLEA_GAMING_RABBITMQ_URL`), para el
-servicio de notificaciones de Tablea Gaming. Salen de su propio outbox (`catalog_event_outbox`, con su propio
-despachador): un anuncio que no sale nunca frena un resultado de partida. Se encolan **después** de escribir
-el cambio (Mongo no tiene transacciones en este despliegue): un proceso que muere entre las dos cosas pierde
-ese aviso. `messageId = <uuid>:<topic>`.
-
-| Topic | Payload (además de `gameSlug`, `occurredAt`, `actor`) | Cuándo |
-| --- | --- | --- |
-| `domino.config.shared_game_mode.{created,updated,deactivated,reactivated}` | `modeId`, `name` | un modo compartido se crea, se edita, se da de baja o se reactiva |
-| `domino.config.provider_game_mode.{created,updated,deactivated,reactivated}` | `providerId`, `modeId`, `name` | lo mismo con un modo propio de un proveedor |
-| `domino.config.provider_game_mode.subscribed` · `.unsubscribed` | `providerId`, `modeId`, `name` | un proveedor se suscribe a un compartido o se da de baja (solo si cambió) |
-| `domino.config.provider_game_mode.copied` | `providerId` | se copiaron compartidos como propios (solo si se creó alguno) |
-| `domino.config.catalog_source.changed` | `providerId`, `source` | cambió la fuente del catálogo de un proveedor (solo si cambió) |
-
-`gameSlug` es `domino`. `actor` es `{ kind: "admin", name }`: el `sub` del token de admin, o `ADMIN_API_KEY`
-para la llave de administración.
-
 ## Errores
 
 **Todo error HTTP del dominó es `{ code, detail? }`.** `code` es una constante en mayúsculas que el
 cliente compara; `detail`, cuando viaja, es texto para una persona y no se parsea. Es el mismo
 vocabulario que los rechazos del socket (`{ code: "MALFORMED", detail }`). Las respuestas de éxito no
-cambian (`{ status: "success", data }` del catálogo y del panel, `{ status: "success", message }` de
-la baja y la reactivación), y `/health` y `/ready` siguen siendo sondas del balanceador con su propia
+cambian (`{ status: "success", data }` del panel y del orquestador), y `/health` y `/ready` siguen siendo sondas del balanceador con su propia
 forma (`503 { status: "not-ready", missing }`).
 
 **Comunes a toda ruta** (no se repiten abajo):
@@ -669,48 +497,25 @@ antes de mirar la forma.
 | `GET /matches/:roomId` | `401 UNAUTHORIZED`, `404 ROOM_NOT_FOUND` |
 | `GET /me/matches` | `401 UNAUTHORIZED`, `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
 | `GET /me/stats` | `401 UNAUTHORIZED`, `503 STATS_TIMEOUT` (+ `detail`) |
-| `GET /game-modes` | — |
-| `GET /game-modes/:uuid` | `404 MODE_NOT_FOUND` |
 | `GET /reactions` | — |
 | `GET /internal/matches` | `404 UNKNOWN_PROVIDER` (un proveedor nombra otro), `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
 | `GET /internal/matches/:matchId` | `404 MATCH_NOT_FOUND` (también a un proveedor sin asiento en ella) |
 | `GET /internal/matches/:matchId/history` | `404 MATCH_NOT_FOUND` |
 | `GET /game-data/:roomId` | `404 MATCH_NOT_FOUND` |
 | `GET /internal/players/:userId/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
-| `GET /game-modes/admin[?providerId=]` | `404 UNKNOWN_PROVIDER` |
-| `GET /game-modes/admin/:uuid` | `404 MODE_NOT_FOUND` |
-| `POST /game-modes` | `400 FREE_ROOM_WITH_ENTRY`, `403 FORBIDDEN` (un proveedor pide un compartido, `ownerProviderId: null`), `404 UNKNOWN_PROVIDER` (un proveedor crea para otro), `409 MODE_DUPLICATE`, `503 CATALOG_BUSY` |
-| `PUT /game-modes/:uuid` | `400 FREE_ROOM_WITH_ENTRY`, `403 FORBIDDEN` (un proveedor sobre un compartido), `404 MODE_NOT_FOUND`, `409 MODE_DUPLICATE`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
-| `DELETE /game-modes/:uuid` | `403 FORBIDDEN`, `404 MODE_NOT_FOUND`, `409 MODE_ALREADY_INACTIVE`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
-| `GET /game-modes/reactive/:uuid` | `403 FORBIDDEN`, `404 MODE_NOT_FOUND`, `409 MODE_ALREADY_ACTIVE`, `503 CATALOG_BUSY` |
-| `PUT`/`DELETE /game-modes/:uuid/subscription[?providerId=]` | `400 PROVIDER_REQUIRED`, `404 UNKNOWN_PROVIDER`, `404 MODE_NOT_FOUND`, `409 MODE_NOT_SHARED`, `409 MODE_INACTIVE`, `503 CATALOG_BUSY` |
-| `POST /game-modes/copies[?providerId=]` | `400 PROVIDER_REQUIRED`, `404 UNKNOWN_PROVIDER`, `503 CATALOG_BUSY` |
-| `PUT /game-modes/source[?providerId=]` | `400 PROVIDER_REQUIRED`, `404 UNKNOWN_PROVIDER`, `409 OWN_CATALOG_EMPTY`, `503 CATALOG_BUSY` |
 | `GET`/`PATCH`/`DELETE /internal/settings/:section` | `404 SETTINGS_SECTION_NOT_FOUND` |
 | `GET /internal/settings` | — |
-| `POST /internal/matches` (orquestador) | `422 UNKNOWN_GAME_MODE` (sin `gameMode`) \| `UNSUPPORTED_GAME_MODE` \| `SEAT_COUNT_MISMATCH` |
+| `POST /internal/matches` (orquestador) | `422 SEAT_COUNT_MISMATCH` |
 | `POST /internal/players/:userId/seat` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/players/:userId/match` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/census` (orquestador) | — |
 | `GET /internal/matches/:matchId/existence` (orquestador) | — |
-| `GET /internal/game-modes` (orquestador) | — |
 
-**El catálogo en solo lectura.** Con `CATALOG_READ_ONLY=1` (el corte de la fase C, cuando el
-catálogo pasa al orquestador), toda escritura de admin del catálogo —`POST /game-modes`,
-`PUT`/`DELETE /game-modes/:uuid`, `GET /game-modes/reactive/:uuid`, `PUT`/`DELETE
-/game-modes/:uuid/subscription`, `POST /game-modes/copies` y `PUT /game-modes/source`— responde
-`409 { code: "CATALOG_READ_ONLY", detail }` sin tocar nada. Se decide **después** de la credencial (sin
-ella sigue siendo `401`, y `support` sigue siendo `403`) y **antes** de validar el cuerpo. Las lecturas
-(`GET /game-modes/admin…`, el catálogo público y `GET /internal/game-modes`) siguen, y las mesas siguen
-abriendo con el catálogo de dominó o con su `gameMode`.
-
-Los `409`, `403`, `400 FREE_ROOM_WITH_ENTRY` y `503 CATALOG_BUSY` del catálogo llevan en `detail` el
-mensaje del servicio (por ejemplo, «el modo … es el último propio activo de parley…: primero volvé la
-fuente a shared»). Los `404` no llevan `detail`: un modo, una partida o un proveedor de otro proveedor
-responden igual que uno que no existe.
+Los `404` no llevan `detail`.
 
 Fuera de esta tabla quedan las rutas que no se registran (sin `ADMIN_API_KEY` u
-`ORCHESTRATOR_API_KEY`) y cualquier path desconocido: los contesta el 404 por defecto de Express, en
+`ORCHESTRATOR_API_KEY`) y cualquier path desconocido (dominó no sirve `/game-modes…` ni
+`GET /internal/game-modes`: el catálogo es del orquestador): los contesta el 404 por defecto de Express, en
 HTML.
 
 ## Eventos y salidas

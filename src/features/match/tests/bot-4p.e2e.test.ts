@@ -1,4 +1,4 @@
-import { gameModes, rootContainer } from "@/di-container";
+import { rootContainer } from "@/di-container";
 import {
   type ParticipantInput,
   bootTestServer,
@@ -19,7 +19,20 @@ import type { DominoRoom } from "../transports/colyseus/domino-room";
 // empuje. Sin ese empuje todo lo demás está bien y la mesa se queda quieta igual.
 
 let server: ColyseusTestServer | undefined;
-let gameModeId = "";
+
+const BOTS_MODE = {
+  uuid: "cuatro-con-bots",
+  gameMode: {
+    name: "cuatro-con-bots",
+    playersQuantity: 4,
+    pointsToWin: 200,
+    multiplier: 1,
+    entryFee: 10,
+    prize: 20,
+    isFreeRoom: false,
+    enableBots: true,
+  },
+} as const;
 
 const PARTICIPANTS = [
   { userId: "ada", displayName: "Ada", currency: "VES" },
@@ -30,15 +43,6 @@ const PARTICIPANTS = [
 
 beforeAll(async () => {
   server = await bootTestServer(2_601);
-  const mode = await gameModes.create({
-    name: "cuatro-con-bots",
-    playersQuantity: 4,
-    pointsToWin: 200,
-    entryFee: 10,
-    prize: 20,
-    enableBots: true,
-  });
-  gameModeId = mode.uuid;
 });
 
 afterAll(async () => {
@@ -63,10 +67,9 @@ const seatFour = async () => {
   const testServer = requiredServer();
   const matchId = `bots-${Date.now()}`;
   const room = await testServer.createRoom<DominoRoom>("domino", {
-    ...casualTable(PARTICIPANTS, "bots-seed"),
+    ...casualTable(PARTICIPANTS, "bots-seed", BOTS_MODE),
     matchId,
     teamAssignment: "SEAT_ORDER",
-    gameModeId,
   });
 
   const clients = [];

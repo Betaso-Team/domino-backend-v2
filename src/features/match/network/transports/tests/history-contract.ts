@@ -13,8 +13,7 @@ import type {
 import type { StatsBacklog } from "../../player-stats";
 import type { HistoryAdapterOptions } from "../stored-record";
 
-// EL CONTRATO DEL REGISTRO, ESCRITO UNA SOLA VEZ Y CORRIDO CONTRA LOS DOS ADAPTADORES, por el criterio
-// del catálogo (`features/game-mode/transports/tests/repository-contract.ts`): `MemoryHistory` no es un
+// EL CONTRATO DEL REGISTRO, ESCRITO UNA SOLA VEZ Y CORRIDO CONTRA LOS DOS ADAPTADORES: `MemoryHistory` no es un
 // doble —es el de la instancia sin Mongo y el que usa la suite—, así que un documento que en memoria
 // sale con otra forma es un `/game-data` distinto entre dos despliegues del mismo servidor.
 //

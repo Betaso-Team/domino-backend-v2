@@ -102,17 +102,15 @@ const LIST_QUERY = z
 
 const TIMEOUT_MESSAGE = "La búsqueda tardó demasiado; acota el rango de fechas";
 
-// EL ENVELOPE DE LAS RUTAS DEL PANEL, el mismo de las lecturas administrativas del catálogo
-// (`features/game-mode/transports/http/admin.ts`): `{ status, data }` al encontrar. Los errores
-// salen `{ code, detail? }` (`@/shared/http/errors`), como en todo el dominó. Se escribe acá y no se importa de allá porque es de otra
-// feature, y una ruta del dominó no puede depender de los mensajes del catálogo.
+// EL ENVELOPE DE LAS RUTAS DEL PANEL: `{ status, data }` al encontrar. Los errores salen
+// `{ code, detail? }` (`@/shared/http/errors`), como en todo el dominó.
 const sendData = (response: Response, data: unknown) => response.json({ status: "success", data });
 
 /**
  * DE QUÉ PROVEEDOR SON LAS PARTIDAS QUE SE LISTAN, o `undefined` después de contestar el 404. Un admin
  * de proveedor, siempre el suyo: un `?providerId=` igual se acepta y uno distinto es 404
- * `UNKNOWN_PROVIDER` —lo de otro proveedor no existe para éste, la regla del catálogo
- * (`features/game-mode/transports/http/admin.ts`)—. Tablea Gaming (token sin `prv`, o la llave) filtra
+ * `UNKNOWN_PROVIDER` —lo de otro proveedor no existe para éste—. Tablea Gaming (token sin `prv`, o la
+ * llave) filtra
  * por el que nombre, o por ninguno (`null`).
  */
 function listedProviderOf(

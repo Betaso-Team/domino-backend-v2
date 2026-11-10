@@ -1,7 +1,7 @@
 import { env } from "@/env";
 import { mintAdminToken } from "@/tests/billing-auth-keys";
 import { fakeOrchestrator } from "@/tests/fake-orchestrator";
-import { CASUAL_2P } from "@/tests/game-mode-catalog";
+import { CASUAL_2P } from "@/tests/table-modes";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ChargeRejectedError } from "../network/orchestrator-charges";
@@ -61,7 +61,7 @@ describe("el registro de una partida jugada", () => {
       matchEndReason: "SCORE",
       table: {
         gameModeId: CASUAL_2P.uuid,
-        name: CASUAL_2P.name,
+        name: CASUAL_2P.gameMode.name,
         entryFeeInUC: 125,
         prizeInUC: 250,
         isFree: false,
@@ -279,9 +279,8 @@ describe("el registro por proveedor", () => {
   });
 });
 
-// EL MODO EN LÍNEA (fase C): el orquestador manda el modo con el que cobró y la sala no lee el
-// catálogo. El uuid no está en el catálogo de la suite, así que si la sala lo leyera la mesa no
-// nacería (`UNKNOWN_GAME_MODE`); el registro nombra la mesa con `gameModeId` y `gameMode.name`.
+// EL MODO EN LÍNEA: el orquestador manda el modo con el que cobró, y el registro nombra la mesa con
+// `gameModeId` y `gameMode.name` y la cobra con sus importes, no con los del modo de la suite.
 describe("el registro de una mesa con el modo en línea", () => {
   it("lleva el nombre y los importes del modo del pedido", async () => {
     const gameModeId = "00000000-0000-4000-8000-00000000c4c4";

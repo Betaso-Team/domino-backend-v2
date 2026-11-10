@@ -2,7 +2,7 @@ import { matchResults, rootContainer } from "@/di-container";
 import type { Logger } from "@/shared/logger";
 import { joinAs } from "@/tests/e2e";
 import { fakeOrchestrator } from "@/tests/fake-orchestrator";
-import { CASUAL_2P } from "@/tests/game-mode-catalog";
+import { CASUAL_2P } from "@/tests/table-modes";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DominoMatchConfig } from "../core/config";
 import {
@@ -190,6 +190,7 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
       mode: "CASUAL",
       matchId: "m-solo",
       gameModeId: CASUAL_2P.uuid,
+      gameMode: CASUAL_2P.gameMode,
       participants: [
         { userId: "s1", displayName: "s1", currency: "VES" },
         { userId: "s2", displayName: "s2", currency: "VES" },
@@ -213,6 +214,7 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
       mode: "CASUAL",
       matchId: "m-plazo",
       gameModeId: CASUAL_2P.uuid,
+      gameMode: CASUAL_2P.gameMode,
       participants: [
         { userId: "t1", displayName: "t1", currency: "VES" },
         { userId: "t2", displayName: "t2", currency: "VES" },

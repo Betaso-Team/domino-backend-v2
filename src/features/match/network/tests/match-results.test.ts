@@ -226,7 +226,6 @@ describe("matchResultOf", () => {
         teamAssignment: "SEAT_ORDER",
         rules: { pointsToWin: 50 },
       }),
-      undefined,
     );
     const match = createMatchState(tournament);
 

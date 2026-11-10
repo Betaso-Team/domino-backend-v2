@@ -1,9 +1,4 @@
 import type { Identity } from "@/features/auth";
-// EL ÚNICO CRUCE DE `match` HACIA `game-mode`, y entra por la superficie de la feature (Regla 4):
-// nada de este archivo sabe que el catálogo tiene un repositorio, un outbox ni una API. La arista
-// va en un solo sentido —`game-mode` redeclaró su `Clock` estructural en la Tarea 4 justamente
-// para no tener que importar de acá— y eso es lo que mantiene el grafo acíclico.
-import type { GameMode } from "@/features/game-mode";
 import { z } from "zod";
 import type { BetLevel, DominoMatchConfig } from "../core/config";
 
@@ -16,7 +11,7 @@ import type { BetLevel, DominoMatchConfig } from "../core/config";
 // `DominoMatchConfig` es un dato confiable, y eso incluye la moneda, la tasa y los montos.
 //
 // SON DOS ENTRADAS Y POR ESO SON DOS FUNCIONES. `requestOf` valida lo que el orquestador PIDE —una
-// mesa, unos participantes y el uuid de un modo—; `replayConfigOf` valida un snapshot YA GRABADO,
+// mesa, unos participantes y su modo—; `replayConfigOf` valida un snapshot YA GRABADO,
 // que trae los asientos numerados y el dinero adentro. Meterlas en una sola con campos opcionales
 // haría que la mesa que nace y la partida que se rebobina compartieran reglas que no comparten:
 // el 4P se rechaza al nacer y se rebobina sin objeción, porque la historia ya pasó.
@@ -165,15 +160,14 @@ const betLevel = z.strictObject({
   additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
 
-// EL REQUEST VIVO DE UNA MESA CASUAL. No trae `pointsToWin`, ni `entryFee`, ni `prize`: los tres salen
-// del catálogo, y el `strictObject` los RECHAZA en vez de ignorarlos. La diferencia importa — ignorarlos
-// dejaría a un llamador creyendo que fijó la economía de la mesa mientras el modo la pisa en silencio.
-// EL MODO EN LÍNEA (fase C: el catálogo pasa al orquestador). Con él, la mesa no lee el catálogo de
-// dominó: el orquestador manda los siete campos que `configOf` usa, más el nombre para el historial,
-// tomados de la misma fila con la que armó la planilla y el libro de billing. Las guardas son las del
-// snapshot (`matchSnapshot`): enteros positivos seguros para los puntos, `ucAmount` para los importes;
-// el multiplicador además entero, como lo pide el catálogo del orquestador. Se llama `gameMode` y no
-// `mode` porque `mode` es el discriminante de la unión.
+// EL REQUEST VIVO DE UNA MESA CASUAL. Trae su modo ENTERO en línea (`gameMode`): el catálogo de modos
+// es del orquestador, que lo lee y lo edita, y dominó no guarda ninguno. El orquestador manda los siete
+// campos que `configOf` usa, más el nombre para el historial, tomados de la misma fila con la que armó la
+// planilla y el libro de billing. Las guardas son las del snapshot (`matchSnapshot`): enteros positivos
+// seguros para los puntos, `ucAmount` para los importes; el multiplicador además entero, como lo pide el
+// catálogo del orquestador. Se llama `gameMode` y no `mode` porque `mode` es el discriminante de la
+// unión. `strictObject` rechaza `pointsToWin`, `entryFee` o `prize` sueltos en el pedido: la economía de
+// la mesa viaja solo dentro del modo.
 const inlineGameMode = z.strictObject({
   name: z.string().min(1).max(100),
   playersQuantity: z.union([z.literal(2), z.literal(4)]),
@@ -189,13 +183,10 @@ const casualRequest = z
   .strictObject({
     mode: z.literal("CASUAL"),
     matchId: nonBlank,
-    // EL NOMBRE DEL MODO Y NO SU CONTENIDO. Quien lo resuelve es la sala, contra el catálogo, con
-    // `activeByUuid`: un modo dado de baja no existe desde afuera y no puede sentar una mesa.
-    //
-    // Con `gameMode` (abajo), el uuid ya no se resuelve: queda para el historial, el censo y el
-    // resultado, que siguen nombrando la mesa por él.
+    // EL UUID DEL MODO NO SE RESUELVE: nombra la mesa en el snapshot, el historial, el censo y el
+    // resultado. Los números de la mesa los trae `gameMode`.
     gameModeId: nonBlank,
-    gameMode: inlineGameMode.optional(),
+    gameMode: inlineGameMode,
     // El techo de cuatro es de FORMA y no la regla del 4P: la cantidad real la decide el modo, y
     // el rechazo del 4P vive en `configOf`, que es el único que ve los dos.
     participants: z.array(participant).min(2).max(4),
@@ -229,7 +220,7 @@ const tournamentRequest = z
     // SIN TECHO PROPIO: el tope de puntos de un torneo es una decisión de producto de
     // `apps/tournaments` (su ajuste `maxPointsToWin`). El motor solo usa `pointsToWin` como meta
     // (`referee.ts`), así que acá se exige únicamente la regla técnica: un entero positivo seguro. El
-    // 100 del catálogo casual (`game-mode/transports/http/schemas.ts`) es de ese catálogo, no del motor.
+    // 100 del catálogo casual del orquestador es de ese catálogo, no del motor.
     rules: z.strictObject({
       pointsToWin: z.number().int().positive().safe(),
     }),
@@ -311,21 +302,6 @@ export const createMatchRequestSchema = createRequest;
 export type MatchParticipant = z.infer<typeof participant>;
 export type InlineGameMode = z.infer<typeof inlineGameMode>;
 
-/**
- * LO QUE `configOf` TOMA DE UN MODO, venga del catálogo (`GameMode`) o en línea en el pedido
- * (`gameMode`, con el `gameModeId` como `uuid`). Las dos formas lo cumplen sin conversión.
- */
-export type TableTerms = Pick<
-  GameMode,
-  | "uuid"
-  | "playersQuantity"
-  | "pointsToWin"
-  | "entryFee"
-  | "prize"
-  | "multiplier"
-  | "isFreeRoom"
-  | "enableBots"
->;
 export type CreateMatchRequest = z.infer<typeof createRequest>;
 export type CasualMatchRequest = z.infer<typeof casualRequest>;
 export type TournamentMatchRequest = z.infer<typeof tournamentRequest>;
@@ -334,49 +310,20 @@ export interface SeatCredentials extends Identity {
   readonly token: string;
 }
 
-// LOS TRES RECHAZOS DEL CATÁLOGO, con su código adentro del mensaje. Van juntos porque son las
-// formas de "este modo no puede sentar esta mesa" y el que lee un log quiere verlas al lado.
-// El código viaja en el `message` y no solo en el `name` porque es lo único que cruza el cable:
-// Colyseus propaga el mensaje al que pidió crear la sala, y el llamador tiene que poder distinguir
-// "ese modo no existe" de "ese modo no lo sabemos jugar".
-
-/** El modo no está en el catálogo, o está dado de baja. Desde afuera son el mismo caso. */
-export class UnknownGameModeError extends Error {
-  override readonly name = "UnknownGameModeError";
-  constructor(gameModeId: string) {
-    super(`UNKNOWN_GAME_MODE: no hay un modo activo con uuid ${gameModeId}`);
-  }
-}
-
-/**
- * ⚠ ESTE MOTOR SIENTA MESAS DE DOS Y DE CUATRO, Y NADA MÁS. La de cuatro se abrió trayendo la
- * regla de reparto de v1 —cada ganador cobra `prize` entero, el socio que se fue no cobra y su
- * mitad se queda en la casa (`domino-room-state.ts:672-678`)— y el piso de `payoutOf` sigue
- * siendo la última red: un equipo ganador sin nadie que cobre cierra la partida en vez de pagar.
- *
- * Lo que este error rechaza ahora es una mesa de tres, de seis o de uno: cantidades que ni las
- * reglas ni el reparto contemplan. `assignTeams` ya exige un número par, pero lanza DESPUÉS de
- * génesis y con un mensaje de invariante — acá se rechaza antes, con el modo a la vista.
- */
-export class UnsupportedGameModeError extends Error {
-  override readonly name = "UnsupportedGameModeError";
-  constructor(mode: TableTerms) {
-    super(
-      `UNSUPPORTED_GAME_MODE: el modo ${mode.uuid} es de ${mode.playersQuantity} jugadores y este motor solo sienta mesas de 2 o de 4`,
-    );
-  }
-}
-
 /**
  * El request pidió una cantidad de asientos que no es la del modo. Sin esta guarda, cuatro
  * participantes sobre un modo de dos se sientan igual y juegan una partida cuyo premio e
- * inscripción se configuraron para una mesa que no es ésa.
+ * inscripción se configuraron para una mesa que no es ésa. El código viaja en el `message` porque
+ * es lo único que cruza el cable: Colyseus propaga el mensaje al que pidió crear la sala.
+ *
+ * Un modo que no es de 2 ni de 4 no llega hasta acá: `gameMode.playersQuantity` solo acepta esos
+ * dos, que son las mesas que este motor sabe sentar.
  */
 export class SeatCountMismatchError extends Error {
   override readonly name = "SeatCountMismatchError";
-  constructor(requested: number, mode: TableTerms) {
+  constructor(requested: number, request: CasualMatchRequest) {
     super(
-      `SEAT_COUNT_MISMATCH: el modo ${mode.uuid} sienta ${mode.playersQuantity} jugadores y el pedido trae ${requested}`,
+      `SEAT_COUNT_MISMATCH: el modo ${request.gameModeId} sienta ${request.gameMode.playersQuantity} jugadores y el pedido trae ${requested}`,
     );
   }
 }
@@ -386,46 +333,29 @@ export function requestOf(input: unknown): CreateMatchRequest {
 }
 
 /**
- * EL SNAPSHOT DE LA MESA, congelado acá y para siempre. Toma el request vivo y el modo YA
- * RESUELTO, y de ahí en adelante la partida no vuelve a consultar el catálogo: editar un modo
- * mientras una mesa juega no puede cambiarle los puntos ni el premio, porque lo que la mesa
- * consume es esta copia. Es también lo que permite que `replay` rebobine sin base de datos.
- */
-/**
- * @param betLevels los niveles de aumento que esta mesa ofrece, YA RESUELTOS. Entran por
- * parámetro y no se consultan acá por lo mismo que el modo: esta función es SÍNCRONA y pura, y
- * el catálogo de niveles vive en el backend principal. Quien los trae es la sala, que es async.
+ * EL SNAPSHOT DE LA MESA, congelado acá y para siempre. Toma el request vivo, con su modo en línea, y
+ * de ahí en adelante la partida no vuelve a mirar ningún catálogo: editar un modo en el orquestador
+ * mientras una mesa juega no puede cambiarle los puntos ni el premio, porque lo que la mesa consume es
+ * esta copia. Es también lo que permite que `replay` rebobine sin base de datos.
  *
- * El default vacío es el reposo: una instancia sin `BETASO_BACKEND_URL` no ofrece aumentar, y eso es
- * correcto en vez de estar roto.
+ * @param betLevels los niveles de aumento que esta mesa ofrece, YA RESUELTOS: los trae el request
+ * (`betLevels`), y entran por parámetro para que esta función siga siendo síncrona y pura. El default
+ * vacío es el reposo: la mesa no ofrece aumentar.
  */
 export function configOf(
   request: CreateMatchRequest,
-  catalogMode: GameMode | undefined,
   betLevels: readonly BetLevel[] = [],
 ): DominoMatchConfig {
   // LA MESA DE TORNEO NO TIENE MODO NI NIVELES: se arma con lo que trae el request, y lo que el
-  // llamador pase en `catalogMode`/`betLevels` no la toca.
+  // llamador pase en `betLevels` no la toca.
   if (request.mode === "TOURNAMENT") return tournamentConfigOf(request);
-  // EL MODO EN LÍNEA GANA: si el pedido trae `gameMode`, la sala no lee el catálogo y un
-  // `catalogMode` que llegue igual se ignora. Las guardas de abajo valen para los dos caminos.
-  const mode = termsOf(request, catalogMode);
-  if (!mode) throw new UnknownGameModeError(request.gameModeId);
-  // EL ORDEN DE LAS DOS GUARDAS IMPORTA: primero "no sabemos jugar este modo" y después "pediste
-  // mal la cantidad". Al revés, un pedido de tres contra un modo de tres saldría con el error de
-  // cantidad —que coincide— y nadie se enteraría de que el problema es el modo.
-  if (mode.playersQuantity !== 2 && mode.playersQuantity !== 4) {
-    throw new UnsupportedGameModeError(mode);
-  }
+  const mode = request.gameMode;
   if (request.participants.length !== mode.playersQuantity) {
-    throw new SeatCountMismatchError(request.participants.length, mode);
+    throw new SeatCountMismatchError(request.participants.length, request);
   }
   return {
     matchId: request.matchId,
-    // EL MODO QUE SE RESOLVIÓ, no el que el request nombró. Hoy son el mismo string; el día que la
-    // resolución acepte un alias, el snapshot tiene que guardar lo resuelto o el replay rebobina
-    // una mesa que nunca existió.
-    gameModeId: mode.uuid,
+    gameModeId: request.gameModeId,
     // EL ID DEL ASIENTO ES OPACO Y POSICIONAL. Adentro de la partida nadie necesita saber
     // de qué plataforma viene quién: el motor, el historial y el wire hablan de `seat-N`,
     // así que un `playerId` que se filtre no dice nada de la cuenta de nadie. Y es
@@ -436,9 +366,7 @@ export function configOf(
       playerId: `seat-${index + 1}`,
     })),
     seed: request.seed,
-    // LOS TRES NÚMEROS DEL CATÁLOGO. Es el cambio entero de esta tarea: el que pide la mesa nombra
-    // un modo, y cuánto vale la mesa lo dice el modo. Un llamador ya no puede inventarse la
-    // economía de una partida.
+    // LOS NÚMEROS DEL MODO. El que pide la mesa manda su modo, y cuánto vale la mesa lo dice el modo.
     pointsToWin: mode.pointsToWin,
     teamAssignment: request.teamAssignment,
     // La ventana siempre está encendida en este contrato: es control de presencia
@@ -447,9 +375,8 @@ export function configOf(
     rateId: request.rateId,
     entryFee: mode.entryFee,
     prize: mode.prize,
-    // EL PESO DEL MODO EN EL RANKING. Sale del catálogo como los otros tres números y se congela
-    // por la misma razón: el panel puede cambiarle el peso al modo mientras la mesa se juega, y el
-    // ganador tiene que sumar con el peso que aceptó al sentarse.
+    // EL PESO DEL MODO, congelado como los otros números: el ganador suma con el peso que aceptó al
+    // sentarse aunque el modo se edite mientras se juega.
     multiplier: mode.multiplier,
     isFreeRoom: mode.isFreeRoom,
     enableBots: mode.enableBots,
@@ -458,10 +385,8 @@ export function configOf(
     // existe. El cliente ve la ventana con `eligible: false` durante `rematchWindowMs` y la mesa
     // termina. Cuando el orquestador abra revanchas, éste es el campo y el coordinador es suyo.
     isRematchEnabled: true,
-    // LOS QUE EL LLAMADOR TRAJO. Vacío = la mesa no ofrece aumentar, que es el reposo y lo que
-    // hace v1 cuando no consigue el catálogo: falla CERRADO. Se congelan con el resto de la
-    // economía — el panel puede cambiar los niveles de un modo mientras la mesa se juega, y el
-    // que aceptó un x5 lo aceptó al precio de cuando se sentó.
+    // LOS QUE EL LLAMADOR TRAJO. Vacío = la mesa no ofrece aumentar, que es el reposo: falla
+    // CERRADO. Se congelan con el resto de la economía.
     //
     // LA MESA GRATIS NO OFRECE AUMENTAR, traiga lo que traiga el request: no hay entrada que
     // multiplicar ni premio que escalar. Es la regla de v1 (`on-propose-bet-multiplier.ts:46`).
@@ -470,21 +395,10 @@ export function configOf(
 }
 
 /**
- * EL MODO DE UNA MESA CASUAL: el que trae el pedido en línea (`gameMode`, con `gameModeId` como
- * uuid) o, sin él, el del catálogo. `undefined` si ninguno de los dos.
- */
-function termsOf(
-  request: CasualMatchRequest,
-  catalogMode: GameMode | undefined,
-): TableTerms | undefined {
-  return request.gameMode ? { uuid: request.gameModeId, ...request.gameMode } : catalogMode;
-}
-
-/**
- * EL `gameModeId` DE UNA MESA DE TORNEO. No hay modo del catálogo detrás; el campo sigue siendo
+ * EL `gameModeId` DE UNA MESA DE TORNEO. No hay modo detrás; el campo sigue siendo
  * obligatorio en el snapshot, el registro, el censo y el resultado, y con el torneo adentro agrupa
  * las mesas de un mismo torneo en el censo. Un consumidor que filtre por modo no lo confunde con un
- * uuid del catálogo.
+ * uuid de modo.
  */
 export const tournamentGameModeId = (tournamentId: string): string => `tournament:${tournamentId}`;
 
@@ -495,7 +409,7 @@ export const tournamentGameModeId = (tournamentId: string): string => `tournamen
 export const NO_RATE = "none";
 
 /**
- * EL SNAPSHOT DE UNA MESA DE TORNEO, sin catálogo: las reglas vienen en el request y el resto es fijo.
+ * EL SNAPSHOT DE UNA MESA DE TORNEO, sin modo: las reglas vienen en el request y el resto es fijo.
  * Gratis (`isFreeRoom`, sin entrada ni premio ni aumentos), sin bots —un torneo se juega entre los
  * inscritos; el que se va, pierde— y sin revancha —se vuelve a jugar cuando el torneo lo diga, no
  * cuando los dos se pongan de acuerdo—. Los plazos son los mismos de cualquier mesa: salen de la

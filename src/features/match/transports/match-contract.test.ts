@@ -1,17 +1,15 @@
-import type { GameMode } from "@/features/game-mode";
 import { describe, expect, it } from "vitest";
 import { configOf, replayConfigOf, requestOf } from "./match-contract";
 
 // LAS DOS FRONTERAS, y desde esta tarea son dos porque las entradas son dos cosas distintas.
 //
-// `requestOf` valida lo que matchmaking PIDE: una mesa, unos participantes y el NOMBRE de un modo.
-// Ya no trae dinero ni puntos — el catálogo es la autoridad, y un request que pudiera declararlos
-// sería un llamador inventándose la economía de la mesa—. `configOf` los copia del modo resuelto.
+// `requestOf` valida lo que el orquestador PIDE: una mesa, unos participantes y su modo en línea
+// (`gameMode`). El dinero y los puntos viajan solo dentro del modo, y `configOf` los copia de ahí.
 //
 // `replayConfigOf` valida el snapshot YA GRABADO: la misma mesa, con sus asientos numerados y su
 // dinero adentro. No consulta nada. Son dos funciones y no una con un parámetro opcional porque
 // miden cosas distintas: una decide si una mesa puede NACER, la otra si un snapshot guardado se
-// puede REBOBINAR, y el día que el catálogo cambie de reglas la segunda no puede cambiar con él.
+// puede REBOBINAR, y el día que los modos cambien de reglas la segunda no puede cambiar con él.
 const participants = [
   {
     userId: "ada",
@@ -27,43 +25,37 @@ const participants = [
   },
 ] as const;
 
+// EL MODO, escrito a mano. Los importes son UC completas (`entryFee: 125` son 125 UC) y difieren de
+// todo lo demás del pedido, que es lo que hace visible de dónde salió cada número.
+const gameMode = {
+  name: "clasica-2p",
+  playersQuantity: 2,
+  pointsToWin: 100,
+  multiplier: 1,
+  entryFee: 125,
+  prize: 250,
+  isFreeRoom: false,
+  enableBots: false,
+} as const;
+
 const request = {
   mode: "CASUAL",
   matchId: "match-1",
   gameModeId: "mode-2p",
+  gameMode,
   participants,
   seed: "seed-1",
   teamAssignment: "SHUFFLED",
   rateId: "00000000-0000-4000-8000-000000000001",
 } as const;
 
-// EL MODO, escrito a mano y no traído del catálogo: esta suite mide la TRADUCCIÓN, no el
-// repositorio. Los importes son UC completas (`entryFee: 125` son 125 UC) y difieren de todo lo
-// que el request podría traer, que es lo que hace visible de dónde salió cada número.
-const AT = new Date("2026-09-15T00:00:00.000Z");
-const modeOf = (overrides: Partial<GameMode> = {}): GameMode => ({
-  id: "0123456789abcdef01234567",
-  uuid: "mode-2p",
-  name: "clasica-2p",
-  multiplier: 1,
-  prize: 250,
-  entryFee: 125,
-  playersQuantity: 2,
-  pointsToWin: 100,
-  isActive: true,
-  isFreeRoom: false,
-  enableBots: false,
-  betLevels: [],
-  ownerProviderId: null,
-  subscribers: [],
-  createdAt: AT,
-  updatedAt: AT,
-  version: 0,
-  ...overrides,
+/** El pedido con otro modo en línea. */
+const withMode = (overrides: Record<string, unknown>, input: object = request) => ({
+  ...input,
+  gameMode: { ...gameMode, ...overrides },
 });
 
-const configFrom = (input: unknown = request, mode: GameMode = modeOf()) =>
-  configOf(requestOf(input), mode);
+const configFrom = (input: unknown = request) => configOf(requestOf(input));
 
 // OTRO PRINCIPAL CUALQUIERA, para armar mesas de largo distinto del válido. Cada uno es un
 // `userId` nuevo, así que lo único que estas filas ejercen es el LARGO — si reusaran uno
@@ -75,21 +67,23 @@ const extra = (n: number) => ({
 });
 
 describe("requestOf", () => {
-  // EL DINERO Y LOS PUNTOS YA NO ENTRAN POR ACÁ, y este es el test que lo pinea. El `strictObject`
-  // los rechaza en vez de ignorarlos: un request que los trae describe a un llamador que todavía
-  // cree que puede fijar la economía de la mesa, y aceptarlos en silencio lo dejaría creerlo —con
-  // los valores del catálogo pisándolos y nadie enterándose de la discrepancia.
+  // EL DINERO Y LOS PUNTOS SUELTOS NO ENTRAN, y este es el test que lo pinea. El `strictObject`
+  // los rechaza en vez de ignorarlos: van dentro de `gameMode`, y aceptarlos sueltos en silencio
+  // dejaría al llamador creyendo que fijó algo que el modo pisa.
   it.each<[string, Record<string, unknown>]>([
     ["pointsToWin", { pointsToWin: 7 }],
     ["entryFee", { entryFee: 1 }],
     ["prize", { prize: 2 }],
-  ])("rechaza que el request traiga %s: eso lo decide el catálogo", (_name, override) => {
+  ])("rechaza que el request traiga %s fuera del modo", (_name, override) => {
     expect(() => requestOf({ ...request, ...override })).toThrow();
   });
 
   it.each<[string, Record<string, unknown>]>([
     ["rateId vacío", { rateId: " " }],
     ["gameModeId vacío", { gameModeId: " " }],
+    ["sin gameModeId", { gameModeId: undefined }],
+    // SIN SU MODO NO HAY MESA: dominó no tiene catálogo de donde sacarlo.
+    ["sin gameMode", { gameMode: undefined }],
     // LAS TRES DEL LARGO DE LA MESA. Sin ellas, borrar el `superRefine` de paridad deja la
     // suite entera en verde y una mesa de 3 revienta recién adentro de `assignTeams` — o sea
     // después de crear la sala, que es después del cobro.
@@ -208,37 +202,31 @@ describe("configOf", () => {
     ]);
   });
 
-  // EL CATÁLOGO ES LA AUTORIDAD, y esto es lo único que lo mide en aislamiento. Los tres números
-  // salen del MODO y no del request, que ya ni siquiera puede nombrarlos: un llamador no puede
-  // inventarse cuántos puntos vale la mesa ni cuánto cobra ni cuánto paga.
-  //
-  // Los valores van como LITERAL y no leídos del modo: recalcularlos con el mismo campo que la
-  // implementación copia mediría que dos lecturas del mismo dato coinciden, y seguiría verde el
-  // día que alguien vuelva a tomarlos del request.
   // LA MESA GRATIS NO OFRECE AUMENTAR aunque el llamador traiga niveles: no hay entrada que
   // multiplicar ni premio que escalar. Es la regla de v1 (`on-propose-bet-multiplier.ts:46`) y la de
   // truco (`092f42b`).
   it("en mesa gratis no hay niveles de aumento aunque el request los traiga", () => {
     const levels = [{ level: 2, extra: 5, additionalPoints: 10 }];
-    expect(configOf(requestOf(request), modeOf(), levels).betLevels).toEqual(levels);
-    expect(configOf(requestOf(request), modeOf({ isFreeRoom: true }), levels).betLevels).toEqual(
-      [],
+    expect(configOf(requestOf(request), levels).betLevels).toEqual(levels);
+    expect(configOf(requestOf(withMode({ isFreeRoom: true })), levels).betLevels).toEqual([]);
+  });
+
+  // Los valores van como LITERAL y no leídos del modo: recalcularlos con el mismo campo que la
+  // implementación copia mediría que dos lecturas del mismo dato coinciden.
+  it("arma la mesa con el modo del pedido", () => {
+    const config = configFrom(
+      withMode({ pointsToWin: 75, multiplier: 3, entryFee: 1.5, prize: 2.75, enableBots: true }),
     );
-  });
 
-  it("copia pointsToWin, entryFee y prize del modo", () => {
-    const config = configFrom(request, modeOf({ pointsToWin: 33, entryFee: 1.5, prize: 2.75 }));
-    expect(config.pointsToWin).toBe(33);
-    expect(config.entryFee).toBe(1.5);
-    expect(config.prize).toBe(2.75);
-  });
-
-  // EL `gameModeId` DEL SNAPSHOT ES EL DEL MODO RESUELTO y no el del request. Hoy son iguales
-  // —la sala busca por ese uuid—, y esa es justamente la razón de escribir el resuelto: el día que
-  // la resolución acepte un alias o un nombre, el snapshot tiene que guardar lo que se resolvió y
-  // no lo que se pidió, o el replay rebobina una mesa que nunca existió.
-  it("graba el modo que resolvió, no el que el request nombró", () => {
-    expect(configFrom(request, modeOf({ uuid: "mode-resuelto" })).gameModeId).toBe("mode-resuelto");
+    expect(config).toMatchObject({
+      gameModeId: "mode-2p",
+      pointsToWin: 75,
+      multiplier: 3,
+      entryFee: 1.5,
+      prize: 2.75,
+      isFreeRoom: false,
+      enableBots: true,
+    });
   });
 
   it("conserva matchId, seed, teamAssignment y rateId del request", () => {
@@ -254,7 +242,7 @@ describe("configOf", () => {
   // EL `rateId` ES DEL QUE COBRA, no nuestro. El de Betaso es el `_id` de Mongo de su documento de
   // tasas, no un UUID: exigir una forma que el emisor no promete es rechazar mesas legítimas.
   it("acepta un rateId que no es UUID", () => {
-    const config = configFrom({ ...request, rateId: "69977c3dc3bf3e710572f941" }, modeOf({}));
+    const config = configFrom({ ...request, rateId: "69977c3dc3bf3e710572f941" });
     expect(config.rateId).toBe("69977c3dc3bf3e710572f941");
   });
 
@@ -278,8 +266,10 @@ describe("configOf", () => {
   // regla de reparto de v1, no borrar la guarda.
   it("sienta un modo de cuatro y le copia los bots", () => {
     const config = configFrom(
-      { ...request, participants: [...participants, extra(1), extra(2)] },
-      modeOf({ playersQuantity: 4, enableBots: true }),
+      withMode(
+        { playersQuantity: 4, enableBots: true },
+        { ...request, participants: [...participants, extra(1), extra(2)] },
+      ),
     );
 
     expect(config.seats.map(({ playerId }) => playerId)).toEqual([
@@ -291,103 +281,23 @@ describe("configOf", () => {
     expect(config.enableBots).toBe(true);
   });
 
-  // ⚠ LO QUE SIGUE RECHAZÁNDOSE ES LA CANTIDAD QUE NI LAS REGLAS NI EL REPARTO CONTEMPLAN, y se
-  // rechaza ACÁ y no en la sala por la misma razón de siempre: `configOf` es lo único que ve el
-  // request Y el modo, y es por donde pasa TODA mesa que nace. `assignTeams` también exige un
-  // número par, pero lanza DESPUÉS de génesis y con un mensaje de invariante que no nombra el
-  // modo.
-  it.each([[3], [6], [1]])("rechaza un modo de %i con UNSUPPORTED_GAME_MODE", (quantity) => {
-    expect(() =>
-      configFrom(
-        { ...request, participants: [...participants, extra(1), extra(2)] },
-        modeOf({ playersQuantity: quantity as 2 | 4 }),
-      ),
-    ).toThrow(/UNSUPPORTED_GAME_MODE/);
-  });
-
   // LA CANTIDAD LA DECIDE EL MODO. Sin esta guarda, un request de cuatro contra un modo de dos
   // sienta a cuatro personas en una mesa cuyo premio se calculó para dos: el motor arranca, la
   // partida se juega y la liquidación reparte mal.
-  it.each<[string, readonly unknown[]]>([
-    ["cuatro contra un modo de dos", [...participants, extra(1), extra(2)]],
-  ])("rechaza %s", (_name, list) => {
-    expect(() => configFrom({ ...request, participants: list })).toThrow(/SEAT_COUNT_MISMATCH/);
+  it.each<[string, object]>([
+    [
+      "cuatro contra un modo de dos",
+      { ...request, participants: [...participants, extra(1), extra(2)] },
+    ],
+    ["dos contra un modo de cuatro", withMode({ playersQuantity: 4 })],
+  ])("rechaza %s con SEAT_COUNT_MISMATCH", (_name, input) => {
+    expect(() => configFrom(input)).toThrow(/SEAT_COUNT_MISMATCH/);
   });
 });
 
-// EL MODO EN LÍNEA (fase C): el orquestador manda el modo con el que cobró y la mesa no lee el
-// catálogo de dominó. Las guardas son las del snapshot, y la cantidad de asientos se sigue midiendo.
-describe("configOf con el modo en línea (`gameMode`)", () => {
-  const gameMode = {
-    name: "Clásica del orquestador",
-    playersQuantity: 2,
-    pointsToWin: 75,
-    multiplier: 3,
-    entryFee: 1.5,
-    prize: 2.75,
-    isFreeRoom: false,
-    enableBots: true,
-  } as const;
-  const inline = { ...request, gameMode };
-
-  it("arma la mesa con el modo del pedido y no con el del catálogo", () => {
-    const config = configOf(requestOf(inline), modeOf());
-
-    expect(config).toMatchObject({
-      gameModeId: "mode-2p",
-      pointsToWin: 75,
-      multiplier: 3,
-      entryFee: 1.5,
-      prize: 2.75,
-      isFreeRoom: false,
-      enableBots: true,
-    });
-  });
-
-  it("no necesita el catálogo: sin modo resuelto la mesa nace igual", () => {
-    const config = configOf(requestOf(inline), undefined);
-
-    expect(config.pointsToWin).toBe(75);
-    expect(config.gameModeId).toBe("mode-2p");
-  });
-
-  it("la mesa gratis en línea no ofrece aumentar", () => {
-    const levels = [{ level: 2, extra: 1, additionalPoints: 0 }];
-    const config = configOf(
-      requestOf({ ...inline, gameMode: { ...gameMode, isFreeRoom: true } }),
-      undefined,
-      levels,
-    );
-
-    expect(config.betLevels).toEqual([]);
-    expect(configOf(requestOf(inline), undefined, levels).betLevels).toEqual(levels);
-  });
-
-  it("sienta cuatro con un modo en línea de cuatro", () => {
-    const config = configOf(
-      requestOf({
-        ...inline,
-        participants: [...participants, extra(1), extra(2)],
-        gameMode: { ...gameMode, playersQuantity: 4 },
-      }),
-      undefined,
-    );
-
-    expect(config.seats).toHaveLength(4);
-  });
-
-  it.each<[string, Record<string, unknown>]>([
-    [
-      "cuatro contra un modo en línea de dos",
-      { participants: [...participants, extra(1), extra(2)] },
-    ],
-    ["dos contra un modo en línea de cuatro", { gameMode: { ...gameMode, playersQuantity: 4 } }],
-  ])("rechaza %s con SEAT_COUNT_MISMATCH", (_name, override) => {
-    expect(() => configOf(requestOf({ ...inline, ...override }), modeOf())).toThrow(
-      /SEAT_COUNT_MISMATCH/,
-    );
-  });
-
+// LAS GUARDAS DEL MODO EN LÍNEA, que son las del snapshot: lo que el orquestador mande mal no llega
+// a sentar una mesa.
+describe("el modo en línea (`gameMode`)", () => {
   it.each<[string, Record<string, unknown>]>([
     ["sin nombre", { name: "" }],
     ["nombre de más de 100", { name: "x".repeat(101) }],
@@ -406,7 +316,7 @@ describe("configOf con el modo en línea (`gameMode`)", () => {
     ["un campo de más", { betLevels: [] }],
     ["el uuid adentro", { uuid: "otro" }],
   ])("rechaza un modo en línea %s", (_name, override) => {
-    expect(() => requestOf({ ...inline, gameMode: { ...gameMode, ...override } })).toThrow();
+    expect(() => requestOf(withMode(override))).toThrow();
   });
 
   it("una mesa de torneo no acepta un modo en línea", () => {
@@ -431,7 +341,7 @@ describe("configOf con el modo en línea (`gameMode`)", () => {
 // EL PROVEEDOR DE CADA ASIENTO (el `prv` de la sesión), para el ámbito del panel. Opcional en las dos
 // entradas —casual y torneo— y en el snapshot; una LLAVE como el `userId`: se normaliza igual.
 describe("requestOf: el proveedor de cada asiento", () => {
-  const { gameModeId: _mode, rateId: _rate, ...shared } = request;
+  const { gameModeId: _mode, gameMode: _gameMode, rateId: _rate, ...shared } = request;
   const tournament = {
     ...shared,
     mode: "TOURNAMENT",
@@ -570,7 +480,7 @@ describe("replayConfigOf", () => {
 
 // LA MESA DE TORNEO: gratis, sin catálogo y sin ningún campo de dinero en el pedido.
 describe("mesa de torneo", () => {
-  const { gameModeId: _mode, rateId: _rate, ...shared } = request;
+  const { gameModeId: _mode, gameMode: _gameMode, rateId: _rate, ...shared } = request;
   const tournament = {
     ...shared,
     mode: "TOURNAMENT",
@@ -578,9 +488,10 @@ describe("mesa de torneo", () => {
     rules: { pointsToWin: 50 },
   } as const;
 
-  it("arma el snapshot sin catálogo: gratis, sin bots, sin aumentos ni revancha", () => {
-    // El modo que se le pase no la toca: no hay catálogo detrás.
-    expect(configOf(requestOf(tournament), modeOf({ pointsToWin: 200, entryFee: 9 }))).toEqual({
+  it("arma el snapshot sin modo: gratis, sin bots, sin aumentos ni revancha", () => {
+    // Los niveles que se le pasen no la tocan.
+    const levels = [{ level: 2, extra: 5, additionalPoints: 10 }];
+    expect(configOf(requestOf(tournament), levels)).toEqual({
       mode: "TOURNAMENT",
       tournamentId: "t-1",
       matchId: "match-1",
@@ -602,17 +513,13 @@ describe("mesa de torneo", () => {
       isRematchEnabled: false,
       betLevels: [],
     });
-    expect(configOf(requestOf(tournament), undefined).pointsToWin).toBe(50);
   });
 
-  // EL TOPE ES DE TORNEOS, no del dominó: 150 (más que el techo del catálogo casual) es una mesa válida.
+  // EL TOPE ES DE TORNEOS, no del dominó: 150 (más que el techo del catálogo casual del orquestador) es
+  // una mesa válida.
   it("acepta más puntos que el catálogo casual", () => {
-    const config = configOf(requestOf({ ...tournament, rules: { pointsToWin: 150 } }), undefined);
+    const config = configOf(requestOf({ ...tournament, rules: { pointsToWin: 150 } }));
     expect(config.pointsToWin).toBe(150);
-  });
-
-  it("una casual sin modo resuelto es UNKNOWN_GAME_MODE", () => {
-    expect(() => configOf(requestOf(request), undefined)).toThrow(/UNKNOWN_GAME_MODE/);
   });
 
   it.each([
@@ -646,13 +553,11 @@ describe("mesa de torneo", () => {
       { userId: "max", displayName: "Max", currency: "VES" },
       { userId: "zoe", displayName: "Zoe", currency: "VES" },
     ];
-    expect(
-      configOf(requestOf({ ...tournament, participants: four }), undefined).seats,
-    ).toHaveLength(4);
+    expect(configOf(requestOf({ ...tournament, participants: four })).seats).toHaveLength(4);
   });
 
   it("el snapshot de torneo se rebobina con su torneo; el torneo sin modo, o al revés, no", () => {
-    const config = configOf(requestOf(tournament), undefined);
+    const config = configOf(requestOf(tournament));
     expect(replayConfigOf(config)).toEqual(config);
     const { tournamentId: _t, ...withoutTournament } = config;
     expect(() => replayConfigOf(withoutTournament)).toThrow();
