@@ -132,6 +132,16 @@ describe("parseEnv", () => {
     expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY }).adminApiKey).toBeUndefined();
   });
 
+  it("CATALOG_READ_ONLY está apagado por omisión y solo lo enciende un 1", () => {
+    expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY }).catalogReadOnly).toBe(false);
+    expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, CATALOG_READ_ONLY: "0" }).catalogReadOnly).toBe(
+      false,
+    );
+    expect(parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, CATALOG_READ_ONLY: "1" }).catalogReadOnly).toBe(
+      true,
+    );
+  });
+
   it("rechaza una ADMIN_API_KEY corta en vez de aceptar una llave enumerable", () => {
     expect(() => parseEnv({ BILLING_AUTH_PUBLIC_KEY: KEY, ADMIN_API_KEY: "corta" })).toThrow(
       /ADMIN_API_KEY/,

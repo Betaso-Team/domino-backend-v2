@@ -186,8 +186,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // de baja justamente para que deje de sentar mesas.
     const request = requestOf(options);
     // LA MESA DE TORNEO NO PASA POR EL CATÁLOGO: sus reglas vienen en el request y no tiene dinero.
+    // TAMPOCO LA CASUAL QUE TRAE SU MODO EN LÍNEA (`gameMode`, fase C): el orquestador ya es el
+    // dueño del catálogo y manda los números con los que cobró; leer el de dominó sería otra copia.
     const mode =
-      request.mode === "TOURNAMENT"
+      request.mode === "TOURNAMENT" || request.gameMode
         ? undefined
         : await rootContainer
             .resolve<GameModeReader>("GameModeReader")
@@ -248,7 +250,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const pieces = buildPieces(
       child,
       (events: readonly NetworkMatchEvent[]) => this.notifier.notify(events),
-      { roomId: this.roomId, gameModeName: mode?.name ?? TOURNAMENT_TABLE_NAME },
+      {
+        roomId: this.roomId,
+        gameModeName:
+          (request.mode === "CASUAL" ? request.gameMode?.name : undefined) ??
+          mode?.name ??
+          TOURNAMENT_TABLE_NAME,
+      },
     );
     this.history = pieces.history;
     this.connections = new ConnectionMonitor({
