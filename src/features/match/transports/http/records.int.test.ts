@@ -222,7 +222,7 @@ describe("recordRoutes: lo que contestan", () => {
 
     const after = cursorOf({ t: Date.parse("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) });
     await get(
-      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted`,
+      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted&tournamentId=t-copa`,
     );
     expect(list).toHaveBeenLastCalledWith({
       pageSize: 5,
@@ -233,6 +233,7 @@ describe("recordRoutes: lo que contestan", () => {
       userId: "u-ana",
       matchEndReason: "CHARGE_REJECTED",
       status: "aborted",
+      tournamentId: "t-copa",
     });
   });
 
@@ -266,6 +267,11 @@ describe("recordRoutes: lo que contestan", () => {
     `userId=${"u".repeat(129)}`,
     "userId=%00",
     "userId=ana&userId=beto",
+    // EL TORNEO, con la regla de los demás ids: ni vacío, ni largo, ni con control, ni dos.
+    "tournamentId=",
+    `tournamentId=${"t".repeat(129)}`,
+    "tournamentId=%00",
+    "tournamentId=a&tournamentId=b",
     // EL MOTIVO, uno de los del dominó y escrito como él: ni inventado, ni en minúscula, ni dos.
     "matchEndReason=",
     "matchEndReason=GANÓ",

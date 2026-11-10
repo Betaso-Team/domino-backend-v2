@@ -282,7 +282,14 @@ function matches(document: Stored, query: MatchListQuery): boolean {
     return false;
   }
   if (query.status !== undefined && document.status !== query.status) return false;
+  if (query.tournamentId !== undefined && tournamentOf(document) !== query.tournamentId)
+    return false;
   return true;
+}
+
+// `{ "table.tournamentId": x }` de Mongo: solo una mesa de torneo lo lleva.
+function tournamentOf(document: Stored): unknown {
+  return (document.table as { tournamentId?: unknown } | undefined)?.tournamentId;
 }
 
 // `{ "seats.userId": x }` de Mongo: alguno de los asientos, exacto. Sin `seats` —la forma vieja— no hay

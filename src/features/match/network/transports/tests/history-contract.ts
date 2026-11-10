@@ -136,6 +136,8 @@ interface Row {
   readonly roomId?: string | null;
   /** El `userId` de cada asiento, en orden; sin esto, los de `SETUP`. */
   readonly users?: readonly string[];
+  /** Una mesa de torneo: su `tournamentId`. Sin esto, casual. */
+  readonly tournamentId?: string;
 }
 
 /** Los asientos de una mesa con estos usuarios, en orden: dos o cuatro. */
@@ -162,6 +164,9 @@ async function seed(
         ...SETUP,
         roomId: row.roomId ?? `room-${row.matchId}`,
         ...(row.users ? { seats: seatsOf(row.users) } : {}),
+        ...(row.tournamentId
+          ? { table: { ...SETUP.table, mode: "TOURNAMENT", tournamentId: row.tournamentId } }
+          : {}),
         matchStartedAt: 1_000,
       });
     await history.drain();
@@ -848,6 +853,50 @@ export function describeHistoryContract(
       const page = await history.list({ pageSize: 10, matchEndReason: "ABANDONMENT" });
       expect({ total: page.total, totalExact: page.totalExact }).toEqual({
         total: 2,
+        totalExact: true,
+      });
+    });
+
+    // EL TORNEO (`table.tournamentId`), exacto: solo las mesas de ese torneo. Una casual no lo lleva y
+    // la forma vieja tampoco: nunca coinciden. Una de torneo que nunca arrancó nace en el cierre, que
+    // también trae la mesa, y sale igual.
+    it("por torneo: exacto, con los demás filtros, y la casual y la vieja nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"], tournamentId: "copa" },
+        { matchId: "m-casual", at: at(20), users: ["ana", "carla"] },
+        { matchId: "m-3", at: at(30), users: ["ana", "dani"], tournamentId: "copa" },
+        { matchId: "m-vieja", at: at(40), roomId: null },
+        { matchId: "m-otra", at: at(50), users: ["ana", "eva"], tournamentId: "relampago" },
+      ]);
+      clock.set(at(60));
+      history.close("m-nunca", {
+        ...CLOSING,
+        roomId: "room-m-nunca",
+        table: { ...CLOSING.table, mode: "TOURNAMENT", tournamentId: "copa" },
+        seats: seatsOf(["beto", "eva"]),
+        status: "aborted",
+        matchEndReason: "NEVER_STARTED",
+      });
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ tournamentId: "copa" })).toEqual(["m-nunca", "m-3", "m-1"]);
+      expect(await ids({ tournamentId: "relampago" })).toEqual(["m-otra"]);
+      expect(await ids({ tournamentId: "no-existe" })).toEqual([]);
+      // CON LOS DEMÁS, por AND: el jugador, las fechas, el estado.
+      expect(await ids({ tournamentId: "copa", userId: "dani" })).toEqual(["m-3"]);
+      expect(await ids({ tournamentId: "copa", from: new Date(at(15)) })).toEqual([
+        "m-nunca",
+        "m-3",
+      ]);
+      expect(await ids({ tournamentId: "copa", status: "aborted" })).toEqual(["m-nunca"]);
+
+      const page = await history.list({ pageSize: 10, tournamentId: "copa" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
+        total: 3,
         totalExact: true,
       });
     });

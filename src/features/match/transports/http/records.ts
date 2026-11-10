@@ -92,6 +92,7 @@ const LIST_QUERY = z
     userId: id.optional(),
     matchEndReason: z.enum(MATCH_END_REASONS).optional(),
     status: z.enum(MATCH_STATUSES).optional(),
+    tournamentId: id.optional(),
   })
   .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
     message: "`from` no puede ser posterior a `to`",
@@ -147,8 +148,19 @@ export function recordRoutes({
     MATCHES_ROUTE,
     admin,
     validated({ query: LIST_QUERY }, async ({ query }, response) => {
-      const { pageSize, after, from, to, matchId, roomId, id, userId, matchEndReason, status } =
-        query;
+      const {
+        pageSize,
+        after,
+        from,
+        to,
+        matchId,
+        roomId,
+        id,
+        userId,
+        matchEndReason,
+        status,
+        tournamentId,
+      } = query;
       try {
         const page = await archive.list({
           pageSize,
@@ -161,6 +173,7 @@ export function recordRoutes({
           ...(userId === undefined ? {} : { userId }),
           ...(matchEndReason === undefined ? {} : { matchEndReason }),
           ...(status === undefined ? {} : { status }),
+          ...(tournamentId === undefined ? {} : { tournamentId }),
         });
         sendData(response, {
           items: page.items,

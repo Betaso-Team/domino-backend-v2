@@ -39,6 +39,7 @@ const ALL_INDEXES = [
   "roomId_1_createdAt_-1__id_-1",
   "seats.userId_1_createdAt_-1__id_-1",
   "status_1_createdAt_-1__id_-1",
+  "table.tournamentId_1_createdAt_-1__id_-1",
 ];
 const INDEX_WAIT = { timeout: 5_000, interval: 20 };
 const indexNames = async () =>
@@ -286,6 +287,24 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
           })),
           timeline: [entry(1, { matchId: `abierta-${index}` })],
         })),
+        // CUARENTA DE TORNEO en dos torneos, intercaladas con las de arriba: el parcial del torneo solo
+        // carga estas, y la página de un torneo tiene que salir de él sin leer casuales.
+        ...Array.from({ length: 40 }, (_, index) => ({
+          matchId: `torneo-${index}`,
+          roomId: `sala-t-${index % 4}`,
+          version: 2.1,
+          status: "finished",
+          matchEndReason: "SCORE",
+          table: { mode: "TOURNAMENT", tournamentId: index % 2 === 0 ? "copa" : "relampago" },
+          createdAt: new Date(T + index * 2_000 + 750),
+          updatedAt: new Date(T + index * 2_000 + 750),
+          seats: [`torneo-${index % 6}`, `torneo-${(index + 1) % 6}`].map((userId, seat) => ({
+            id: `seat-${seat + 1}`,
+            seat,
+            userId,
+          })),
+          timeline: [entry(1, { matchId: `torneo-${index}` })],
+        })),
         ...Array.from({ length: 20 }, (_, index) => ({
           matchId: `vieja-${index}`,
           entries: [entry(1, { matchId: `vieja-${index}` })],
@@ -324,6 +343,8 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ],
       ["status (una de cada trece)", () => ({ pageSize: PAGE, status: "aborted" })],
       ["fechas + status", () => ({ pageSize: PAGE, from, to, status: "started" })],
+      ["tournamentId", () => ({ pageSize: PAGE, tournamentId: "copa" })],
+      ["fechas + tournamentId", () => ({ pageSize: PAGE, from, to, tournamentId: "relampago" })],
       [
         "matchId + roomId + id",
         () => ({
@@ -386,6 +407,16 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         expect(items.length).toBeGreaterThan(0);
         expect(items.every((item) => item.matchEndReason === matchEndReason)).toBe(true);
       }
+      const { tournamentId } = query();
+      if (tournamentId !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        const inTournament = await (await collection()).countDocuments({
+          matchId: { $in: items.map((item) => item.matchId) },
+          "table.tournamentId": tournamentId,
+        });
+        expect(inTournament).toBe(items.length);
+      }
       const { status } = query();
       if (status !== undefined) {
         const { items } = await history.list(query());
@@ -406,6 +437,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["cursor + fechas + userId", { from: new Date(T), to, userId: "jugador-x" }, 2, PAGE],
       ["cursor + matchEndReason", { matchEndReason: "ABANDONMENT" }, 2, 4],
       ["cursor + status", { status: "aborted" }, 2, 4],
+      ["cursor + tournamentId", { tournamentId: "copa" }, 2, 4],
     ] as const)(
       "%s: sin COLLSCAN, sin SORT y sin leer de más",
       async (_name, filters, depth, pageSize) => {

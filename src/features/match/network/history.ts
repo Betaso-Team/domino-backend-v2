@@ -358,6 +358,11 @@ export interface MatchListQuery {
    * estado y no coincide con ninguno. Sin este filtro salen todos: el default lo pone el panel.
    */
   readonly status?: MatchStatus;
+  /**
+   * Un torneo: el `table.tournamentId` de la mesa, exacto. Solo lo llevan las mesas de torneo; una
+   * casual y la forma vieja no coinciden nunca.
+   */
+  readonly tournamentId?: string;
 }
 
 /**
