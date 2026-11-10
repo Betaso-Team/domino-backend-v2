@@ -1,5 +1,4 @@
 import type { TokenVerifier } from "@/features/auth";
-import { GameModeService, gameModeHttp } from "@/features/game-mode";
 import {
   type Clock,
   ColyseusMatchGateway,
@@ -119,8 +118,8 @@ const rooms = {
 // dentro de la flecha no compila aunque el ternario de afuera ya lo haya descartado. Con la
 // copia local sí, y el gate lo cazó con la suite en verde, que es el modo de falla de siempre.
 //
-// EL DOMINÓ NO HABLA CON EL BROKER DE BETASO: el catálogo dejó de publicar al exchange `betaso`
-// (Betaso lee los modos del orquestador), así que el único broker es el de la plataforma de juegos.
+// EL DOMINÓ NO HABLA CON EL BROKER DE BETASO (Betaso lee los modos del orquestador), así que el único
+// broker es el de la plataforma de juegos.
 //
 // AL BROKER DE JUEGOS SE LE PIDE UN `ping()`, que abre el canal SIN publicar: una sonda que publicara
 // mandaría un evento a los consumidores en cada chequeo del balanceador.
@@ -192,7 +191,7 @@ const registerHttp = (app: Application) => {
   app.use(healthRoutes(hardDependencies));
   // CADA FEATURE ES UN ROUTER, y se monta en la raíz porque sus paths son absolutos: la guarda va por
   // ruta y no por prefijo, y las dependencias entran ya resueltas (truco `0b0a467`). El orden de
-  // montaje es el de registro, y sólo importa DENTRO de una feature —el catálogo lo pinea—.
+  // montaje es el de registro, y sólo importa DENTRO de una feature.
   app.use(
     matchHttp({
       registry: rootContainer.resolve(MatchRegistry),
@@ -207,23 +206,6 @@ const registerHttp = (app: Application) => {
       tables: rootContainer.resolve(ColyseusMatchGateway),
       orchestratorApiKey: env.orchestratorApiKey,
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
-    }),
-  );
-  // EL CATÁLOGO, y va ANTES del manejador de errores como todas las demás: Express reconoce ese
-  // manejador por su aridad de cuatro parámetros y solo alcanza lo que se registró antes. Una ruta
-  // puesta después queda con el HTML por defecto de Express, con el stack adentro.
-  //
-  // Los GET son públicos y las cinco mutaciones viven detrás de `adminApiKey`; sin llave no se
-  // registran (fail closed, §`features/game-mode/transports/http/admin.ts`). Quien autentica
-  // al administrador es el orquestador, no el dominó.
-  app.use(
-    gameModeHttp({
-      service: rootContainer.resolve(GameModeService),
-      logger,
-      adminApiKey: env.adminApiKey,
-      adminTokens: rootContainer.resolve<AdminTokenCheck>("AdminTokenCheck"),
-      catalogReadOnly: env.catalogReadOnly,
-      orchestratorApiKey: env.orchestratorApiKey,
     }),
   );
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no

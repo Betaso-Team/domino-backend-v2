@@ -7,7 +7,8 @@ mesa por la API interna de este servidor. El dominó no mueve dinero: le pide al
 cobre y le publica el resultado de cada partida.
 
 Las salas se reparten entre los procesos del clúster, que se ven entre sí por Redis; lo que
-persiste es el historial de cada partida y el catálogo de modos, en Mongo.
+persiste es el historial de cada partida, en Mongo. Los modos de juego no son de este servidor: son
+del orquestador, que manda el modo entero en cada mesa.
 
 Si venís a trabajar sobre el código, lo que tenés que leer es `AGENTS.md`.
 
@@ -34,7 +35,7 @@ docker compose up --build
 ```
 
 `BILLING_AUTH_PUBLIC_KEY` es **obligatoria**: sin ella el proceso no arranca, a propósito.
-`ADMIN_API_KEY` no lo es, pero sin ella las rutas internas del catálogo, del historial y
+`ADMIN_API_KEY` no lo es, pero sin ella las rutas internas del historial y
 de la configuración en caliente **no se registran** y responden 404 — es fail closed, y es el 404 que más se investiga al pedo.
 
 `MONGO_URI` y `REDIS_URL` **no las pongas en el `.env`**: las fija el compose apuntando a los
@@ -54,7 +55,7 @@ reserva nueva en la misma mesa (`POST /internal/players/:userId/seat`). El detal
 `docs/api-y-mensajes.md`.
 
 `GET /config/:roomId` publica los montos con los nombres usados por dominó y truco: `entryFee` y
-`prize`. Ambos son UC completas, iguales a las del catálogo de v1 (`entryFee: 125` son 125 UC) y
+`prize`. Ambos son UC completas, iguales a las del modo que mandó el orquestador (`entryFee: 125` son 125 UC) y
 pueden traer decimales (`1.5` es un UC y medio); convertirlos a la moneda del jugador —con el
 `rateId` de la mesa— y decidir el redondeo es de quien paga, no de este servidor.
 

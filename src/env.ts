@@ -154,9 +154,9 @@ const schema = z.object({
   JWT_AUDIENCE: z.string().min(1).default("domino"),
   /**
    * DE ENTRADA: lo que presenta NUESTRA administración (panel o soporte; no la de un cliente) para
-   * tocar el catálogo de modos, el historial de soporte y la configuración en caliente (`/internal/settings`,
-   * que mueve todos los plazos del juego). A propósito NO es la del orquestador: compartirlas dejaría
-   * que el que administra el catálogo también abra mesas.
+   * leer el historial de soporte y tocar la configuración en caliente (`/internal/settings`, que mueve
+   * todos los plazos del juego). A propósito NO es la del orquestador: compartirlas dejaría que el que
+   * administra también abra mesas.
    *
    * OPCIONAL y sin default: un default es una llave publicada. Ausente significa "esta instancia no
    * se administra" y esas rutas directamente NO se registran. Es fail closed: una ruta interna viva
@@ -164,14 +164,8 @@ const schema = z.object({
    */
   ADMIN_API_KEY: z.string().min(16, "ADMIN_API_KEY debe tener al menos 16 caracteres").optional(),
   /**
-   * EL CATÁLOGO EN SOLO LECTURA, para el corte en que el catálogo pasa al orquestador (fase C, paso
-   * C5). Con "1", toda ruta de ESCRITURA del catálogo de admin contesta `409 CATALOG_READ_ONLY` y las
-   * lecturas siguen; las mesas siguen abriendo. Cualquier otro valor (o ausente) lo deja apagado.
-   */
-  CATALOG_READ_ONLY: z.string().optional(),
-  /**
    * DE ENTRADA, la que presenta el ORQUESTADOR para abrir mesas y devolver asientos. Otra llave y
-   * no la de administración, por la misma regla que separó las demás: quien administra el catálogo no abre
+   * no la de administración, por la misma regla que separó las demás: quien administra no abre
    * mesas, y quien abre mesas no administra. Ausente ⇒ esas rutas no existen (fail closed).
    */
   ORCHESTRATOR_API_KEY: z
@@ -196,8 +190,7 @@ const schema = z.object({
   /**
    * EL BROKER Y VHOST DE LA PLATAFORMA DE JUEGOS (`amqp://usuario:clave@host:puerto/tablea_gaming`),
    * por donde sale el resultado de cada mesa del orquestador hacia el exchange `tablea_gaming`. Es el
-   * ÚNICO broker del dominó: el catálogo ya no publica al exchange `betaso` de Betaso (la vieja
-   * `RABBITMQ_URL` no se lee más).
+   * ÚNICO broker del dominó (la vieja `RABBITMQ_URL`, del exchange `betaso`, no se lee más).
    *
    * Su presencia elige, como `MONGO_URI`: sin ella el outbox de resultados acumula y nadie lo
    * publica. Obligatoria en producción si esta instancia atiende al orquestador.
@@ -379,8 +372,6 @@ export interface Env {
   readonly billingAuth: BillingAuthTrust;
   /** DE ENTRADA. `undefined` ⇒ esta instancia no se administra. Ver ADMIN_API_KEY. */
   readonly adminApiKey: string | undefined;
-  /** `true` ⇒ las escrituras de admin del catálogo responden 409. Ver CATALOG_READ_ONLY. */
-  readonly catalogReadOnly: boolean;
   /** DE ENTRADA. `undefined` ⇒ el orquestador no puede abrir mesas acá. Ver ORCHESTRATOR_API_KEY. */
   readonly orchestratorApiKey: string | undefined;
   /**
@@ -426,9 +417,9 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   // zod siguen siendo opcionales porque FUERA de producción "ausente" es una elección legítima —una
   // instancia sola, sin infraestructura, que es el despliegue de desarrollo y el de la suite—.
   // Adentro de producción esas ausencias fallan en SILENCIO, que es lo que las hace caras:
-  // sin `MONGO_URI` el proceso arranca creyendo que persiste y el catálogo entero muere con él;
-  // sin `ADMIN_API_KEY`
-  // las mutaciones no se registran y el panel recibe 404 donde espera administrar.
+  // sin `MONGO_URI` el proceso arranca creyendo que persiste y el historial entero muere con él;
+  // sin `ADMIN_API_KEY` las rutas de administración no se registran y el panel recibe 404 donde
+  // espera administrar.
   //
   // UN SOLO ERROR QUE LAS ENUMERA, no el primero que aparece: corregir de a una es un despliegue
   // productivo por variable, y cada intento cuesta una ventana. Es el mismo criterio con el que
@@ -497,7 +488,6 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       audience: parsed.JWT_AUDIENCE,
     },
     adminApiKey: parsed.ADMIN_API_KEY,
-    catalogReadOnly: parsed.CATALOG_READ_ONLY === "1",
     orchestratorApiKey: parsed.ORCHESTRATOR_API_KEY,
     orchestratorCallback:
       parsed.ORCHESTRATOR_API_KEY !== undefined &&

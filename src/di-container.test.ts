@@ -32,10 +32,9 @@ describe("el composition root", () => {
     expect(source.match(/\b(Fake\w+|Stub\w+|Mock\w+|Dummy\w+)\b/g) ?? []).toEqual([]);
   });
 
-  // LOS TRES INTERRUPTORES QUE EL CATÁLOGO INVITA A ESCRIBIR, nombrados uno por uno y no cubiertos
-  // por la expresión de más arriba: ésa mira `env.*Driver`, y la forma tentadora acá es un
-  // `env.gameModeDriver === "mongo"` o directamente un `GAME_MODE_DRIVER` en `src/env.ts`. Son tres
-  // piezas nuevas que eligen implementación —repositorio, outbox y publicador—, o sea tres
+  // LOS TRES INTERRUPTORES TENTADORES, nombrados uno por uno y no cubiertos por la expresión de más
+  // arriba: ésa mira `env.*Driver`, y la forma tentadora es directamente un `OUTBOX_DRIVER` en
+  // `src/env.ts`. Son tres piezas que eligen implementación —repositorio, outbox y publicador—, o sea tres
   // oportunidades de convertir una decisión de arquitectura en un valor que alguien tipea en un
   // deploy. La forma correcta ya está escrita abajo: la presencia del DATO elige.
   it.each([["GAME_MODE_DRIVER"], ["OUTBOX_DRIVER"], ["AMQP_DRIVER"]] as const)(
@@ -45,17 +44,16 @@ describe("el composition root", () => {
     },
   );
 
-  // EL REPOSITORIO Y EL LEASE DEL CATÁLOGO ELIGEN JUNTOS Y POR `mongo`, nunca por separado: un lease
-  // de memoria no excluye a la otra instancia, que es lo único que ese lease hace.
-  it("repositorio y lease del catálogo eligen por la misma presencia de Mongo", () => {
-    for (const memoria of ["MemoryGameModeRepository", "MemoryLease"])
-      expect(source).toMatch(new RegExp(`mongo\\s*\\?[\\s\\S]{0,120}?:\\s*new ${memoria}`));
+  // EL LEASE ELIGE POR `mongo`, como el historial: un lease de memoria no excluye a la otra
+  // instancia, que es lo único que ese lease hace.
+  it("el lease elige por la presencia de Mongo", () => {
+    expect(source).toMatch(/mongo\s*\?[\s\S]{0,120}?:\s*new MemoryLease/);
   });
 
-  // EL CATÁLOGO NO PUBLICA SUS MODOS A NINGÚN BROKER: el exchange `betaso` y su outbox se fueron cuando
-  // Betaso pasó a leer los modos del orquestador. El único broker del proceso es el de juegos, donde
-  // sólo salen los anuncios de cada cambio (`domino.config.*`, `catalogEventDispatcher`).
-  it("no hay outbox de modos ni broker de Betaso", () => {
+  // DOMINÓ NO TIENE CATÁLOGO DE MODOS NI PUBLICA A BETASO: los modos son del orquestador, y el único
+  // broker del proceso es el de juegos, donde sale el resultado de cada partida.
+  it("no hay catálogo, outbox de modos ni broker de Betaso", () => {
+    expect(source).not.toMatch(/GameMode|catalogEvent/);
     expect(source).not.toMatch(/GameModeOutbox|\bOutboxDispatcher|outboxDispatcher/);
     expect(source).not.toMatch(/rabbitmqUrl\b/);
   });
@@ -69,7 +67,6 @@ describe("el composition root", () => {
     const apagado = source.slice(source.indexOf("export async function shutdown"));
     const pasos = [
       "matchResultDispatcher?.close",
-      "catalogEventDispatcher?.close",
       "statsRecorder.stop",
       "historyPort.drain",
       "tableaGamingAmqp?.close",
@@ -88,13 +85,16 @@ describe("la superficie Express", () => {
   const source = readFileSync(new URL("./app.config.ts", import.meta.url), "utf8");
 
   // EXPRESS RECONOCE EL MANEJADOR DE ERRORES POR SU ARIDAD DE CUATRO PARÁMETROS, y solo alcanza lo
-  // que se registró ANTES que él. Una ruta del catálogo puesta después devolvería la página HTML por
-  // defecto de Express con el stack adentro, y el `NODE_ENV` por default de este repo es
-  // `development`. El costo de equivocarse es filtrar el stack en una ruta administrativa.
-  it("registra el catálogo antes del manejador de errores", () => {
-    expect(source.indexOf("gameModeHttp(")).toBeGreaterThan(-1);
-    expect(source.indexOf("gameModeHttp(")).toBeLessThan(source.indexOf("httpErrorHandler("));
-  });
+  // que se registró ANTES que él. Una ruta puesta después devolvería la página HTML por defecto de
+  // Express con el stack adentro, y el `NODE_ENV` por default de este repo es `development`. El costo
+  // de equivocarse es filtrar el stack en una ruta administrativa.
+  it.each([["matchHttp("], ["settingsHttp("]])(
+    "registra %s antes del manejador de errores",
+    (router) => {
+      expect(source.indexOf(router)).toBeGreaterThan(-1);
+      expect(source.indexOf(router)).toBeLessThan(source.indexOf("httpErrorHandler("));
+    },
+  );
 
   // EL BROKER DE JUEGOS ENTRA A READINESS Y NO A `/health`. `/health` no consulta NADA a propósito
   // —"reiniciame" es la única respuesta que destruye partidas en curso—.

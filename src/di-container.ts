@@ -1,17 +1,6 @@
 import "reflect-metadata";
 import { JwtVerifier, adminTokenCheck } from "@/features/auth";
 import {
-  type CatalogEvent,
-  type CatalogTopic,
-  type GameModeReader,
-  GameModeService,
-  MemoryGameModeRepository,
-  MemoryProviderCatalogs,
-  MongoGameModeRepository,
-  MongoProviderCatalogs,
-  OutboxCatalogEvents,
-} from "@/features/game-mode";
-import {
   ColyseusMatchGateway,
   DEAL_PRESET_EDITABLE,
   type DealPreset,
@@ -175,16 +164,16 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 // `register` van TIPADOS: sin el parámetro de tipo, tsyringe acepta cualquier valor contra
 // el token y el error aparece recién en el `resolve`, es decir en runtime.
 const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
-// EL LEASE DE LOS TRABAJOS ADMINISTRATIVOS (catálogo y barrido de estadísticas): la misma base, así que
-// el mismo adaptador. Con Mongo excluye procesos; sin Mongo no hay a quién excluir.
-const catalogLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
+// EL LEASE DE LOS TRABAJOS DE FONDO (barrido de estadísticas y despachador de resultados): la misma
+// base, así que el mismo adaptador. Con Mongo excluye procesos; sin Mongo no hay a quién excluir.
+const jobsLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
 // LAS ESTADÍSTICAS DEL JUGADOR se aplican después de cada cierre. Sólo `HistoryPort` pasa por el
 // decorador: los otros tres tokens leen del historial crudo.
 const playerStats = mongo ? new MongoPlayerStats(mongo, logger) : new MemoryPlayerStats();
 const statsRecorder = new PlayerStatsRecorder({
   store: playerStats,
   backlog: history,
-  lease: catalogLease,
+  lease: jobsLease,
   logger,
   now: () => new Date(),
 });
@@ -197,25 +186,6 @@ rootContainer.register<HistoryReader>("HistoryReader", { useValue: history });
 rootContainer.register<MatchArchive>("MatchArchive", { useValue: history });
 // Y EL CUARTO, el del JUGADOR: `GET /me/matches`, lo que jugó el dueño del token.
 rootContainer.register<PlayerLog>("PlayerLog", { useValue: history });
-
-// EL CATÁLOGO DE MODOS, que desde la Tarea 10 es la AUTORIDAD sobre la economía de una mesa: la
-// sala resuelve acá el modo que el request nombró y de él salen `pointsToWin`, `entryFee` y
-// `prize`. Sin este registro ninguna sala puede nacer, así que el token no es opcional.
-//
-// LA PRESENCIA DE `MONGO_URI` ELIGE EL REPOSITORIO Y EL LEASE A LA VEZ, porque son la MISMA base: un
-// lease de memoria no excluiría a la otra instancia, que es lo único que ese lease hace. Se reutiliza
-// la instancia `Mongo` de arriba: son colecciones distintas del mismo cliente, y abrir un segundo
-// cliente sería un pool de conexiones que nadie cierra.
-//
-// EL CATÁLOGO NO PUBLICA A NINGÚN BROKER: el exchange `betaso` de Betaso y su outbox se eliminaron
-// cuando Betaso pasó a leer los modos de dominó del orquestador.
-const gameModeRepository = mongo
-  ? new MongoGameModeRepository(mongo, clock)
-  : new MemoryGameModeRepository(clock);
-// LAS FUENTES DEL CATÁLOGO DE CADA PROVEEDOR (`shared` | `own`), en la misma base que los modos.
-const providerCatalogs = mongo
-  ? new MongoProviderCatalogs(mongo, clock)
-  : new MemoryProviderCatalogs(clock);
 
 // ── LAS MESAS DEL ORQUESTADOR: el resultado y los cobros ────────────────────────────────────────
 //
@@ -238,11 +208,12 @@ const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
 export const matchResultDispatcher = tableaGamingAmqp
   ? new TopicOutboxDispatcher({
       exchange: MATCH_RESULT_EXCHANGE,
-      // OTRO LEASE que el escritor del catálogo: comparten colección, no nombre, así que no se bloquean.
+      // OTRO LEASE que el barrido de estadísticas: comparten colección, no nombre, así que no se
+      // bloquean.
       leaseName: "match-result-publisher",
       queue: matchResultOutbox,
       delivery: tableaGamingAmqp,
-      lease: catalogLease,
+      lease: jobsLease,
       clock,
       log: logger,
       label: "resultado de partida",
@@ -261,7 +232,7 @@ const matchResultRecorder = new MatchResultRecorder({
   log: logger,
 });
 rootContainer.register(MatchResultRecorder, { useValue: matchResultRecorder });
-// Para la suite: lo encolado, sin broker. Se exporta como `gameModes` más abajo.
+// Para la suite: lo encolado, sin broker.
 export const matchResults = matchResultOutbox;
 
 // A QUIÉN LE PIDEN LOS COBROS. Existe si y solo si esta instancia atiende al orquestador: `parseEnv`
@@ -286,48 +257,6 @@ if (orchestratorCharges) {
     }),
   });
 }
-
-// Se registra SOLO el puerto de LECTURA aunque el adaptador sepa escribir: quien crea y edita es
-// la API administrativa del catálogo, que recibe su propio servicio. Un token de escritura acá
-// sería una puerta que la sala podría abrir sin querer.
-//
-// `gameModes` se exporta porque el que siembra el modo de la suite es un módulo de test: un
-// catálogo vacío no puede sentar ninguna mesa, y resolver el token para castearlo a repositorio
-// sería peor.
-export const gameModes = gameModeRepository;
-rootContainer.register<GameModeReader>("GameModeReader", { useValue: gameModeRepository });
-// LOS ANUNCIOS DEL CATÁLOGO (`domino.config.*`) al mismo broker que los resultados, por su PROPIO
-// outbox y despachador: un anuncio que no sale nunca frena un resultado. Sin broker, se acumulan.
-const catalogEventOutbox: OutboxStore<CatalogTopic, CatalogEvent["payload"]> = mongo
-  ? new MongoOutboxStore(mongo, "catalog_event_outbox", clock, {
-      sentRetentionSeconds: 7 * 24 * 3600,
-    })
-  : new MemoryOutboxStore(clock);
-export const catalogEventDispatcher = tableaGamingAmqp
-  ? new TopicOutboxDispatcher({
-      exchange: MATCH_RESULT_EXCHANGE,
-      leaseName: "catalog-event-publisher",
-      queue: catalogEventOutbox,
-      delivery: tableaGamingAmqp,
-      lease: catalogLease,
-      clock,
-      log: logger,
-      label: "anuncio del catálogo",
-      perTick: 20,
-      stuckAfterMs: 10 * 60_000,
-      publishOptions: (entry) => ({ mandatory: true, messageId: entry.dedupeKey }),
-    })
-  : undefined;
-catalogEventDispatcher?.start();
-rootContainer.register(GameModeService, {
-  useValue: new GameModeService(
-    gameModeRepository,
-    providerCatalogs,
-    catalogLease,
-    () => clock.now(),
-    new OutboxCatalogEvents(catalogEventOutbox, () => catalogEventDispatcher?.wake(), logger),
-  ),
-});
 
 // ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────
 //
@@ -462,7 +391,6 @@ export async function shutdown(): Promise<void> {
   //    un resultado entregado al broker y PENDING en Mongo: se republicaría al arrancar, que es un
   //    duplicado que el consumidor ya deduplica, pero el costo de esperar son milisegundos.
   await matchResultDispatcher?.close();
-  await catalogEventDispatcher?.close();
   // El barrido de estadísticas se para antes de drenar: un tick nuevo escribiría en una base que se cierra.
   statsRecorder.stop();
   await historyPort.drain();

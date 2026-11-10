@@ -100,10 +100,8 @@ const LIST_QUERY = z
 
 const TIMEOUT_MESSAGE = "La búsqueda tardó demasiado; acota el rango de fechas";
 
-// EL ENVELOPE DE LAS RUTAS DEL PANEL, el mismo de las lecturas administrativas del catálogo
-// (`features/game-mode/transports/http/admin.ts`): `{ status, data }` al encontrar. Los errores
-// salen `{ code, detail? }` (`@/shared/http/errors`), como en todo el dominó. Se escribe acá y no se importa de allá porque es de otra
-// feature, y una ruta del dominó no puede depender de los mensajes del catálogo.
+// EL ENVELOPE DE LAS RUTAS DEL PANEL: `{ status, data }` al encontrar. Los errores salen
+// `{ code, detail? }` (`@/shared/http/errors`), como en todo el dominó.
 const sendData = (response: Response, data: unknown) => response.json({ status: "success", data });
 
 /**

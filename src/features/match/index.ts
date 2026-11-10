@@ -51,21 +51,18 @@ export { ColyseusMatchGateway } from "./transports/colyseus/gateway";
 export { selectProcessIdToCreateRoom } from "./transports/colyseus/load-balancer";
 export { type MatchHttpDeps, matchHttp } from "./transports/http/register";
 // LAS TRES FUNCIONES DE LA FRONTERA Y SUS TIPOS. `requestOf`/`configOf` son el camino de una mesa
-// que NACE —el segundo pide el `GameMode` ya resuelto contra el catálogo— y `replayConfigOf` el de
-// una que se REBOBINA. Los tres errores salen también: el que pide crear una sala tiene que poder
-// distinguir "ese modo no existe" de "ese modo no lo sabemos jugar", y un error que no se puede
-// nombrar no se puede atrapar.
+// que NACE —con su modo en línea— y `replayConfigOf` el de una que se REBOBINA. El error sale
+// también: un error que no se puede nombrar no se puede atrapar.
 export {
   configOf,
   tournamentConfigOf,
   type CreateMatchRequest,
+  type InlineGameMode,
   type MatchParticipant,
   replayConfigOf,
   requestOf,
   SeatCountMismatchError,
   type SeatCredentials,
-  UnknownGameModeError,
-  UnsupportedGameModeError,
   createMatchRequestSchema,
 } from "./transports/match-contract";
 export {

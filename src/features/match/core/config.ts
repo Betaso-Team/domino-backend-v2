@@ -36,7 +36,7 @@ export interface MatchSeat {
   readonly currency: string;
 }
 
-/** De qué clase es la mesa: casual (con dinero, del catálogo) o de un torneo (gratis, sin catálogo). */
+/** De qué clase es la mesa: casual (con dinero, con su modo) o de un torneo (gratis, sin modo). */
 export type MatchMode = "CASUAL" | "TOURNAMENT";
 
 export interface DominoMatchConfig {

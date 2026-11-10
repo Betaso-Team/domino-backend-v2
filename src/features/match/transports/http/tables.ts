@@ -38,7 +38,7 @@ const SEAT_PARAMS = z.object({
 
 // LOS RECHAZOS DE LA SALA LLEGAN COMO MENSAJE: Colyseus propaga el `message` del error de
 // `onCreate` al que pidió crearla, y el código va adelante (ver `match-contract.ts`).
-const REFUSAL = /^(UNKNOWN_GAME_MODE|UNSUPPORTED_GAME_MODE|SEAT_COUNT_MISMATCH):/;
+const REFUSAL = /^(SEAT_COUNT_MISMATCH):/;
 
 // LA CLASE DE LA MESA en las respuestas que la ubican: el orquestador separa las de torneo. Las mesas
 // anotadas antes de los torneos no traen `mode` en el registro, y son casuales.

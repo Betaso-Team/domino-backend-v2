@@ -38,9 +38,8 @@ de Betaso. El outbox del catálogo, su despachador, `POST /game-modes/sync`, `ev
 `RABBITMQ_URL` se eliminaron.
 
 Betaso lee los modos de dominó **del orquestador**, como cualquier proveedor:
-`GET {ORCHESTRATOR_BASE_URL}/v1/game-modes?includeInactive=1` con su API key de proveedor. El
-orquestador arma el catálogo efectivo de cada proveedor con `GET /internal/game-modes` del dominó
-(modos con dueño y suscriptores, más la fuente `shared`/`own` de cada proveedor). Betaso conserva su
+`GET {ORCHESTRATOR_BASE_URL}/v1/game-modes?includeInactive=1` con su API key de proveedor. Desde el
+2026-11-10 el catálogo entero es del orquestador (dominó no tiene catálogo, ver abajo). Betaso conserva su
 forma propia (`externalId` = `uuid` del modo, `game: "domino"`, `prize`, `entryFee`, `multiplier`,
 `pointsToWin`, `playerCount`) mapeándola de su lado, y las bajas le llegan con `includeInactive=1`.
 
@@ -63,14 +62,16 @@ queda huérfana en las bases que la tenían.
 
 ### Las colecciones de Mongo son las de v1
 
-- `src/features/game-mode/transports/mongo-repository.ts:22`: `GAME_MODE_COLLECTION =
-  "game_modes_domino"`, el nombre que declaró v1. Otro nombre daría un catálogo vacío.
-- `src/di-container.ts:301-308`: los ajustes se leen de `domino_settings`, también de v1.
-- Juntas suponen que v2 corre sobre la base de datos del dominó v1 de Betaso.
-- **Decidido el 2026-10-14: el catálogo de modos y los ajustes viven en el dominó.** El dominó es
-  dueño de los dos: los guarda, los modifica y los sirve; ni el orquestador ni un cliente los
-  administran. Lo que queda abierto de este punto es solo el nombre heredado de las colecciones, que
-  importa el día que el dominó tenga su propia base y no la del dominó v1.
+- ~~`src/features/game-mode/transports/mongo-repository.ts:22`: `GAME_MODE_COLLECTION =
+  "game_modes_domino"`, el nombre que declaró v1.~~ Resuelto el 2026-11-10: dominó ya no tiene
+  catálogo; la colección queda en la base y nadie la lee.
+- `src/di-container.ts`: los ajustes se leen de `domino_settings`, también de v1.
+- Supone que v2 corre sobre la base de datos del dominó v1 de Betaso.
+- ~~**Decidido el 2026-10-14: el catálogo de modos y los ajustes viven en el dominó.**~~ **Decidido el
+  2026-11-10: el catálogo de modos es del orquestador**, que lo guarda, lo edita y manda el modo entero
+  en cada mesa casual (`gameMode`). Los ajustes siguen en el dominó. Lo que queda abierto de este punto
+  es solo el nombre heredado de `domino_settings`, que importa el día que el dominó tenga su propia
+  base y no la del dominó v1.
 
 ### ~~Torneos: escritos contra Betaso, todavía sin cablear~~
 
@@ -82,12 +83,10 @@ llamadas a `championship/championships` ni mensajes a `tournaments_queue` o al e
 
 ## 2. Contratos con la forma de Betaso
 
-### La API admin del catálogo copia el panel de Betaso v1
+### ~~La API admin del catálogo copia el panel de Betaso v1~~
 
-- `src/features/game-mode/transports/http/schemas.ts`: el DTO expone `_id` y `__v` de Mongo porque el
-  panel los parsea.
-- `src/features/game-mode/transports/http/responses.ts`: el envoltorio `{ status, data }` /
-  `{ status, message }` y los mensajes literales de v1, por ejemplo `"Modo de juego no encontrado"`.
+Resuelto el 2026-11-10: la API del catálogo se borró con el catálogo.
+
 - El nombre del header `x-internal-api-key` (`src/shared/http/api-key.ts:18`) se eligió porque es el
   que exige Betaso y el que su panel ya manda. El orquestador usa el mismo.
 
@@ -95,7 +94,7 @@ llamadas a `championship/championships` ni mensajes a `tournaments_queue` o al e
 
 - **UC.** Es la unidad interna de Betaso y la que usa el dominó para la entrada, el premio, los
   aumentos y el reparto:
-  - `src/features/game-mode/core/game-mode.ts`
+  - el modo en línea (`gameMode`, `src/features/match/transports/match-contract.ts`)
   - `src/features/match/core/config.ts`
   - `src/features/match/network/payout.ts`
   - el campo `amountUc` del resultado (`match-results.ts`)
@@ -105,8 +104,8 @@ llamadas a `championship/championships` ni mensajes a `tournaments_queue` o al e
 
 ### Campos del modo que son del ranking de Betaso
 
-`src/features/game-mode/core/game-mode.ts` tiene cuatro campos que vienen del ranking y la liga de
-Betaso:
+El modo en línea (`gameMode`, en `match-contract.ts`) y los niveles de aumento tienen cuatro campos que
+vienen del ranking y la liga de Betaso:
 
 - `multiplier`: el peso del modo en el ranking.
 - `betLevels[].additionalPoints`: los puntos de ranking de cada aumento.
@@ -120,17 +119,18 @@ clave pública de billing-auth (`admin-token-verifier.ts`): no se le pregunta a 
 administrador. Truco, en cambio, sigue validando contra `GET auth/me` de Betaso.
 
 Desde el 2026-10-27 el token dice además de qué proveedor es el admin (`prv`) y con qué rol (`role`), y
-el dominó acota cada ruta (`docs/api-y-mensajes.md`, «HTTP interno»). Betaso es un proveedor más: un
-admin de Betaso entra al catálogo con su ámbito y a nada más.
+el dominó acota cada ruta (`docs/api-y-mensajes.md`, «HTTP interno»). Betaso es un proveedor más: hoy
+un admin de proveedor no entra a ninguna ruta de administración del dominó.
 
 **Decidido el 2026-10-14:** no se porta. El panel será uno propio de Tablea Gaming, con login del
-sistema, y no es del MVP. Mientras tanto el catálogo y los ajustes se administran con `ADMIN_API_KEY`
-desde un cliente HTTP.
+sistema, y no es del MVP. Mientras tanto los ajustes se administran con `ADMIN_API_KEY` desde un
+cliente HTTP.
 
 ## 3. Reglas de negocio copiadas de Betaso v1
 
-- **Niveles de aumento.** El `extra` tiene que crecer con el nivel: es la regla de
-  `bet-increase/lib/monotonic.ts` de Betaso (`game-mode/transports/http/schemas.ts:38`).
+- ~~**Niveles de aumento.** El `extra` tiene que crecer con el nivel: es la regla de
+  `bet-increase/lib/monotonic.ts` de Betaso.~~ La validaba el catálogo de dominó, que se borró; los
+  niveles los decide el orquestador.
 - **Tiempos.** Los límites de los timeouts son los de `Betaso-Domino-Backend`
   (`src/features/match/config-schema.ts:18`): turno de 15 a 300 s y reserva de 10 a 120 s.
 - **Mesa gratis.** No ofrece aumentar, por `isFreeRoom`, igual que en v1.

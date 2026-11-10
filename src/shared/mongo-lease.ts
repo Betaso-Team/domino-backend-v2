@@ -2,29 +2,21 @@ import { randomUUID } from "node:crypto";
 import type { Collection, Document } from "mongodb";
 
 // EXCLUSIÓN DISTRIBUIDA, y una sola primitiva. Es lo que hace que varias instancias del dominó no
-// pisen el mismo trabajo administrativo: el catálogo de modos no tiene un índice único sobre
-// `name + playersQuantity` —v1 no lo tiene y esta migración conserva la colección tal cual—, así que
-// la regla de "no repetir" es una consulta seguida de una escritura. Sin lease, dos procesos pasan
-// los dos la consulta y insertan los dos. Lo mismo del otro lado: dos dispatchers del outbox
-// publicarían el mismo evento.
+// pisen el mismo trabajo de fondo: dos despachadores del outbox publicarían el mismo resultado, y dos
+// barridos de estadísticas aplicarían la misma partida dos veces.
 //
-// ⚠ **v1 NO SERIALIZA NADA DE ESTO, y por eso esta pieza es nueva y no un port.** Su
-// `GameModeService.create` hace `findOne({ name, playersQuantity })` y después `create(...)` sin
-// lock, sin transacción y sin índice que lo respalde
-// (`Betaso-Domino-Backend/src/game-modes/game-mode.service.ts:57-69`); su `update` compara sólo el
-// nombre (`:100-103`). Los únicos `Mutex` de v1 (`async-mutex`) son DE PROCESO y son de las salas y
-// del matchmaking del lobby (`rooms/domino-four-room.ts:47`, `rooms/lobby-room.ts:42`) — el catálogo
-// no toca ninguno. O sea: v2 es estrictamente más fuerte que v1 acá, no compatible-y-distinto.
-//
-// Vive en `shared/` porque su ciclo de vida es del PROCESO y no de una feature, y porque lo usan dos
-// consumidores de la misma feature por caminos distintos (el servicio del catálogo y el dispatcher
-// del outbox). No importa nada de `features/`: es la regla de imports que lo obliga y también lo que
-// lo hace verdad — un lease no sabe qué se serializa adentro.
+// Vive en `shared/` porque su ciclo de vida es del PROCESO y no de una feature. No importa nada de
+// `features/`: es la regla de imports que lo obliga y también lo que lo hace verdad — un lease no sabe
+// qué se serializa adentro.
 
 // LA COLECCIÓN, en una constante y no en una variable de entorno, por el mismo argumento que
-// `HISTORY_COLLECTION` y `GAME_MODE_COLLECTION`: el dominó es su único escritor, así que un nombre
+// `HISTORY_COLLECTION`: el dominó es su único escritor, así que un nombre
 // configurable sería un valor que nadie cambia y que se puede escribir mal — y escribirlo mal acá es
 // dos procesos que creen tener el lock porque están mirando colecciones distintas.
+//
+// ⚠ EL NOMBRE ES HISTÓRICO: nació con el catálogo de modos, que ya no está en dominó, pero la colección
+// la siguen usando el despachador de resultados y el barrido de estadísticas. Renombrarla es dos
+// versiones desplegadas a la vez mirando colecciones distintas, o sea sin exclusión.
 export const LEASE_COLLECTION = "game_mode_leases";
 
 // EL CÓDIGO DE CLAVE DUPLICADA de Mongo. Se compara el NÚMERO y nunca el texto: el mensaje real trae
@@ -37,25 +29,22 @@ const DUPLICATE_KEY = 11000;
 // LA PRIMITIVA, y es una sola. `within` corre el trabajo SÓLO si consiguió el lease.
 //
 // **`undefined` SIGNIFICA "NO SE ADQUIRIÓ", y es un desenlace normal y no un error.** De eso cuelgan
-// los dos consumidores: el servicio del catálogo lo convierte en un 503 (`GameModeWriteBusyError`) y
-// el dispatcher del outbox se saltea el tick. Un `within` que lanzara en vez de devolver `undefined`
-// haría que un catálogo ocupado se viera como una caída, y el operador buscaría el problema en la
-// base. El precio del contrato está escrito: un `work()` que devuelve `undefined` de verdad no se
+// los consumidores: el dispatcher del outbox y el barrido de estadísticas se saltean el tick. Un
+// `within` que lanzara en vez de devolver `undefined` haría que un lease ocupado se viera como una
+// caída, y el operador buscaría el problema en la base. El precio del contrato está escrito: un `work()` que devuelve `undefined` de verdad no se
 // distingue de un lease no adquirido. Ninguno de los dos llamadores lo hace.
 //
 // NO RENUEVA el lease mientras el trabajo corre, y eso es deliberado. Lo que hay que saber: si
 // `work()` tarda MÁS que `ttlMs`, otro proceso puede tomar el lease y ejecutar en paralelo, y el
 // primero no se entera. La contramedida no es un renovador —es una pieza con su propio temporizador,
 // su propio fallo y su propia carrera—, es que adentro del lease no vayan trabajos largos: el
-// dispatcher toma UNA entrada por tick y no un bucle, y una mutación del catálogo son dos escrituras
-// a Mongo. Si algún día hace falta un trabajo largo, se parte en pasos, no se agrega renovación.
+// dispatcher toma pocas entradas por tick y no un bucle sin fin. Si algún día hace falta un trabajo largo, se parte en pasos, no se agrega renovación.
 export interface Lease {
   within<T>(name: string, ttlMs: number, work: () => Promise<T>): Promise<T | undefined>;
 }
 
 // LO MÍNIMO QUE ESTE ADAPTADOR NECESITA de la conexión, declarado como interfaz estructural y no como
-// la clase `Mongo`. Es el tercer gemelo de lo mismo (`HistoryStore` en `mongo-history.ts`,
-// `CollectionSource` en `game-mode/transports/mongo-repository.ts`): `Mongo` los satisface a los tres
+// la clase `Mongo`. Es el gemelo de `HistoryStore` en `mongo-history.ts`: `Mongo` satisface a los dos
 // sin saberlo, así que el cableado no cambia y la suite le puede dar un doble sin un
 // `as unknown as Mongo`. Repetido y no compartido a propósito de este lado: `shared/` no puede
 // importar de `features/`, y bajar la de la feature hasta acá la volvería un tipo que ninguna de las
@@ -65,9 +54,8 @@ export interface CollectionSource {
 }
 
 // El reloj INYECTADO, no `Date.now()` directo: es lo que permite que la suite mida el vencimiento sin
-// esperar quince segundos de verdad. Se redeclara acá por lo mismo que en
-// `game-mode/transports/mongo-repository.ts` — el tipado estructural une las dos sin que ninguna sepa
-// de la otra.
+// esperar quince segundos de verdad. Se redeclara acá porque `shared/` no importa de `features/`: el
+// tipado estructural une las dos sin que ninguna sepa de la otra.
 export interface Clock {
   now(): number;
 }
