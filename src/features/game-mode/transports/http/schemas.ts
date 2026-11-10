@@ -277,13 +277,23 @@ export function toAdminDTO(
 }
 
 // LO QUE VE EL ORQUESTADOR: todo, con dueño y suscriptores (siempre una lista; `[]` es nadie).
+//
+// `revision` ES EL MISMO NÚMERO QUE `__v`, con el nombre que el orquestador le da en su catálogo
+// (fase C: la importación lo copia a su columna `revision`). Va aparte del `__v` histórico para que
+// el orquestador no tenga que hablar el idioma de Mongoose; `__v` se queda porque ya lo lee.
 export interface InternalGameModeDTO extends GameModeDTO {
   readonly ownerProviderId: string | null;
   readonly subscribers: readonly string[];
+  readonly revision: number;
 }
 
 export function toInternalDTO(mode: GameMode): InternalGameModeDTO {
-  return { ...toDTO(mode), ownerProviderId: mode.ownerProviderId, subscribers: mode.subscribers };
+  return {
+    ...toDTO(mode),
+    ownerProviderId: mode.ownerProviderId,
+    subscribers: mode.subscribers,
+    revision: mode.version,
+  };
 }
 
 // EL CUERPO PARSEADO → LA ENTRADA DEL CASO DE USO, y lo único que hace es SACAR `isActive`. La

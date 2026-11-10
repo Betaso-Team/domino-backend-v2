@@ -78,6 +78,7 @@ function harness(
   over: {
     adminApiKey?: string | undefined;
     orchestratorApiKey?: string | undefined;
+    catalogReadOnly?: boolean;
     lease?: Lease;
     repository?: GameModeRepository;
   } = {},
@@ -105,6 +106,7 @@ function harness(
       logger,
       adminApiKey: "adminApiKey" in over ? over.adminApiKey : KEY,
       adminTokens,
+      catalogReadOnly: over.catalogReadOnly,
       orchestratorApiKey: "orchestratorApiKey" in over ? over.orchestratorApiKey : ORCHESTRATOR_KEY,
     }),
   );
@@ -190,6 +192,11 @@ function adminWireDtoOf(mode: GameMode): Record<string, unknown> {
     ownerProviderId: mode.ownerProviderId,
     subscribers: mode.subscribers,
   };
+}
+
+// LO QUE VE EL ORQUESTADOR: lo del admin de Tablea Gaming más `revision` (= `__v`).
+function internalWireDtoOf(mode: GameMode): Record<string, unknown> {
+  return { ...adminWireDtoOf(mode), revision: mode.version };
 }
 
 // EL REGISTRO, MEDIDO SIN SERVIDOR. Lo que se mide acá es una decisión de wiring —qué rutas llegan a
@@ -1070,8 +1077,21 @@ describe("GET /internal/game-modes", () => {
     expect(response.status).toBe(200);
     const data = (response.body as { data: Array<Record<string, unknown>> }).data;
     expect(data).toHaveLength(2);
-    expect(data).toContainEqual(adminWireDtoOf(viejo));
-    expect(data).toContainEqual(adminWireDtoOf(propio));
+    expect(data).toContainEqual(internalWireDtoOf(viejo));
+    expect(data).toContainEqual(internalWireDtoOf(propio));
+  });
+
+  it("`revision` es el `__v` del modo y avanza con cada edición", async () => {
+    const app = harness();
+    const modo = await app.repository.create(clasica({ name: "Revisado" }));
+    await app.repository.update(modo.uuid, { prize: 7 });
+    await app.repository.update(modo.uuid, { prize: 8 });
+
+    const response = await app.get("/internal/game-modes", ORCHESTRATOR_KEY);
+
+    const [dto] = (response.body as { data: Array<{ revision: number; __v: number }> }).data;
+    expect(dto?.revision).toBe(2);
+    expect(dto?.__v).toBe(2);
   });
 
   it("con includeInactive=1 suma los dados de baja, y otro valor es 400", async () => {
@@ -1113,6 +1133,56 @@ describe("GET /internal/game-modes", () => {
     const app = harness({ orchestratorApiKey: undefined });
 
     expect((await app.get("/internal/game-modes", ORCHESTRATOR_KEY)).status).toBe(404);
+  });
+});
+
+// EL CORTE DE LA FASE C: el catálogo pasa al orquestador y dominó deja de aceptar escrituras.
+describe("CATALOG_READ_ONLY", () => {
+  const READ_ONLY = { code: "CATALOG_READ_ONLY", detail: expect.any(String) };
+
+  it("toda escritura de admin es 409 CATALOG_READ_ONLY y no toca el catálogo", async () => {
+    const app = harness({ catalogReadOnly: true });
+    const modo = await app.repository.create(clasica({ name: "Fijo" }));
+    await app.repository.update(modo.uuid, { isActive: false });
+    const antes = await app.repository.all();
+
+    const writes: Array<() => Promise<Response>> = [
+      () => app.post("/game-modes", { ...clasica({ name: "Nuevo" }) }, KEY),
+      () => app.put(`/game-modes/${modo.uuid}`, { prize: 9 }, KEY),
+      () => app.del(`/game-modes/${modo.uuid}`, KEY),
+      () => app.get(`/game-modes/reactive/${modo.uuid}`, KEY),
+      () => app.post("/game-modes/copies?providerId=parley", undefined, KEY),
+      () => app.put("/game-modes/source?providerId=parley", { source: "own" }, KEY),
+      () => app.put(`/game-modes/${modo.uuid}/subscription?providerId=parley`, undefined, KEY),
+      () => app.del(`/game-modes/${modo.uuid}/subscription?providerId=parley`, KEY),
+      () => app.put(`/game-modes/${modo.uuid}`, { prize: 9 }, as("parley")),
+    ];
+    for (const write of writes) {
+      expect(await write()).toEqual({ status: 409, body: READ_ONLY });
+    }
+    expect(await app.repository.all()).toEqual(antes);
+  });
+
+  it("autentica antes: sin credencial sigue siendo 401 y support sigue siendo 403", async () => {
+    const app = harness({ catalogReadOnly: true });
+
+    expect((await app.post("/game-modes", clasica({ name: "X" }))).status).toBe(401);
+    expect((await app.post("/game-modes", clasica({ name: "X" }), as("support"))).status).toBe(403);
+  });
+
+  it("las lecturas siguen: el admin, el público y el del orquestador", async () => {
+    const app = harness({ catalogReadOnly: true });
+    const modo = await app.repository.create(clasica({ name: "Leído" }));
+
+    expect((await app.get("/game-modes/admin", KEY)).status).toBe(200);
+    expect((await app.get(`/game-modes/admin/${modo.uuid}`, as("support"))).status).toBe(200);
+    expect((await app.get("/internal/game-modes", ORCHESTRATOR_KEY)).status).toBe(200);
+  });
+
+  it("apagado (por omisión), las escrituras pasan", async () => {
+    const app = harness();
+
+    expect((await app.post("/game-modes", clasica({ name: "Nuevo" }), KEY)).status).toBe(201);
   });
 });
 
