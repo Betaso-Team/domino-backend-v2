@@ -371,6 +371,12 @@ describe("mesa de torneo", () => {
     expect(configOf(requestOf(tournament), undefined).pointsToWin).toBe(50);
   });
 
+  // EL TOPE ES DE TORNEOS, no del dominó: 150 (más que el techo del catálogo casual) es una mesa válida.
+  it("acepta más puntos que el catálogo casual", () => {
+    const config = configOf(requestOf({ ...tournament, rules: { pointsToWin: 150 } }), undefined);
+    expect(config.pointsToWin).toBe(150);
+  });
+
   it("una casual sin modo resuelto es UNKNOWN_GAME_MODE", () => {
     expect(() => configOf(requestOf(request), undefined)).toThrow(/UNKNOWN_GAME_MODE/);
   });
@@ -385,7 +391,8 @@ describe("mesa de torneo", () => {
     ["sin reglas", { rules: undefined }],
     ["puntos en cero", { rules: { pointsToWin: 0 } }],
     ["puntos fraccionarios", { rules: { pointsToWin: 1.5 } }],
-    ["más puntos que el catálogo", { rules: { pointsToWin: 101 } }],
+    ["puntos negativos", { rules: { pointsToWin: -1 } }],
+    ["puntos fuera del rango seguro", { rules: { pointsToWin: Number.MAX_SAFE_INTEGER + 1 } }],
     ["reglas de más", { rules: { pointsToWin: 50, entryFee: 1 } }],
     ["un solo jugador", { participants: [participants[0]] }],
     ["tres jugadores", { participants: [...participants, { ...participants[0], userId: "x" }] }],
