@@ -170,12 +170,14 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas. 
 salen `{ code, detail? }` (ver [«Errores»](#errores)).
 
 **Quién entra.** El default es el cerrado: una ruta es de Tablea Gaming y de escritura salvo que diga
-lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las rutas del catálogo que
-acotan su ámbito; en todas las demás recibe `403 { code: "FORBIDDEN" }`.
+lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las rutas que acotan su
+ámbito —las del catálogo, y el listado y el detalle de partidas—; en todas las demás recibe
+`403 { code: "FORBIDDEN" }`.
 
 | Rutas | Tablea Gaming `admin` (y la llave) | Tablea Gaming `support` | Proveedor `admin` | Proveedor `support` |
 |---|---|---|---|---|
-| `/internal/matches…`, `/game-data/:roomId` | sí | sí | 403 | 403 |
+| `GET /internal/matches`, `GET /internal/matches/:matchId` | todo (o el proveedor de `?providerId=`) | ídem | sólo las partidas con algún asiento suyo | ídem |
+| `GET /internal/matches/:matchId/history`, `GET /internal/players/:userId/matches`, `/game-data/:roomId` | sí | sí | 403 | 403 |
 | `GET /internal/settings…` | sí | sí | 403 | 403 |
 | `PATCH`/`DELETE /internal/settings/:section` | sí | 403 | 403 | 403 |
 | `GET /game-modes/admin`, `/admin/:uuid` | todo (o el catálogo de `?providerId=`) | ídem | los suyos y todos los compartidos activos (con `subscribed`) | ídem |
@@ -199,8 +201,8 @@ catálogo público): tocarlo sin poder responde `403 { code: "FORBIDDEN", detail
 | Método y ruta | Uso |
 |---|---|
 | `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte (lee `timeline` y, en los documentos viejos, `entries`) |
-| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=&matchEndReason=&status=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
-| `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
+| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=&matchEndReason=&status=&tournamentId=&providerId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor; un proveedor ve sólo las suyas (ver «El registro de cada partida») |
+| `GET /internal/matches/:matchId` | El documento guardado de una partida, entero; a un proveedor, sólo si algún asiento es suyo |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `GET /internal/players/:userId/matches?page=&limit=` | Historial de un jugador para el panel: la misma página que `GET /me/matches` le devuelve a ese `userId` (mismos parámetros y límites), dentro de `{ status: "success", data }`. El `userId` sigue la regla de texto del filtro del listado |
 | `GET /game-modes/admin[?providerId=]` | Los modos que ve el admin, dados de baja incluidos, y la fuente del catálogo si hay un proveedor (ver abajo) |
@@ -311,7 +313,8 @@ actos y hechos; `rounds`, lo que las reglas concluyeron de cada mano) y se cierr
 (`status: "finished" | "aborted"`, `matchEndedAt`, `matchDurationInMs`, `matchEndReason`, ganadores,
 `players` con su salida y su plata, `rateId`, `betMultiplier` y `rankingMultiplier`). Un asiento que se
 sentó con `price` lo guarda en `seats[]` y `players[]`, y su plata suma `chargedInPlayerCurrency` y
-`prizePaidInPlayerCurrency` (texto decimal, elegidos del precio con la regla de UC). Una mesa que nunca
+`prizePaidInPlayerCurrency` (texto decimal, elegidos del precio con la regla de UC). Un asiento cuyo
+participante trajo `providerId` lo guarda también en `seats[]` y `players[]`. Una mesa que nunca
 arrancó nace en el cierre. Los instantes son fechas (ISO en el JSON); las duraciones, números. Los
 documentos de antes de la v2.1 (`{ matchId, entries, createdAt, updatedAt }`) se siguen leyendo en las
 cuatro rutas.
@@ -331,6 +334,8 @@ combinan con AND:
 | `userId` | Un jugador: igual al `userId` de **alguno** de los asientos (`seats[].userId`), en mesas de dos o de cuatro. Una partida en la que el mismo usuario ocupa dos asientos sale una vez. Los documentos de antes de la v2.1 no tienen asientos y no coinciden nunca | ídem `matchId`, o repetido |
 | `matchEndReason` | El motivo del cierre, exacto: `SCORE`, `ABANDONMENT`, `NEVER_STARTED`, `TILES_NOT_SEEN`, `NEVER_PLAYED`, `INTERRUPTED` o `CHARGE_REJECTED`. Una partida todavía abierta no tiene motivo y no coincide con ninguno | otro valor (en minúsculas incluido), vacío o repetido |
 | `status` | El estado del documento, exacto: `started` (abierta), `finished` o `aborted`. Sin él salen todos los estados. Los documentos de antes de la v2.1 no tienen estado y no coinciden nunca | otro valor (en mayúsculas incluido), vacío o repetido |
+| `tournamentId` | Un torneo: igual al `table.tournamentId` de la mesa. Una casual y los documentos viejos no lo llevan y no coinciden nunca | ídem `matchId`, o repetido |
+| `providerId` | Un proveedor: igual al `providerId` de **alguno** de los asientos (`seats[].providerId`). Una casual cruzada sale para los dos proveedores, y una vez aunque el proveedor ocupe dos asientos. Una partida grabada sin el campo no coincide nunca. **Un admin de proveedor siempre lo tiene puesto con el suyo**: nombrar el suyo es lo mismo, y nombrar otro responde `404 { code: "UNKNOWN_PROVIDER" }` | ídem `matchId`, o repetido |
 
 Un parámetro que no está en la tabla se ignora (`page` incluido: ya no existe). `from` igual a `to` es
 un rango vacío, no un error.
@@ -377,7 +382,12 @@ Cada fila es un resumen: sin `timeline` ni `rounds`. Un documento viejo aparece 
 (`_id`, `matchId`, `game`, `createdAt`, `updatedAt`) y sale en todo listado que no filtre por sala.
 
 **`GET /internal/matches/:matchId`** — `200 { status: "success", data: <documento> }`, con el `_id`
-como texto y `rounds`/`timeline` al final; `404 { code: "MATCH_NOT_FOUND" }`.
+como texto y `rounds`/`timeline` al final; `404 { code: "MATCH_NOT_FOUND" }`. A un admin de proveedor,
+el mismo `404` si ningún asiento lleva su `providerId` (una partida grabada sin el campo sólo la ve
+Tablea Gaming).
+
+⚠ En una casual cruzada los dos proveedores ven el documento **entero**, el asiento del rival incluido
+(su `userId`, su nombre y su mano en la timeline): es la partida que jugó su jugador.
 
 **`GET /game-data/:roomId`** — el contrato del backend principal, igual que en truco: `200` con el
 documento pelado (sin envelope y sin `_id`) y `404 { code: "MATCH_NOT_FOUND" }`. Busca por `roomId` y,
@@ -411,7 +421,8 @@ cuerpo.
 es 400), discriminado por `mode`:
 
 - **`"CASUAL"`**: `matchId`, `gameModeId` (uuid del catálogo), `participants` (2 a 4, par; cada uno
-  `userId`, `displayName`, `currency` y, opcionales, `username`, `profilePicture` y `price`), `seed`,
+  `userId`, `displayName`, `currency` y, opcionales, `username`, `profilePicture`, `price` y
+  `providerId`), `seed`,
   `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el `_id` de Mongo de la tasa de
   Betaso) y `betLevels` opcional (abajo).
 - **`"TOURNAMENT"`**: `matchId`, `tournamentId`, `participants` y `teamAssignment` como la casual,
@@ -507,6 +518,13 @@ orquestador.
 
 El `CreateMatchRequest` casual acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
+
+**`participants[].providerId`** (opcional, en la casual y en la de torneo) es el proveedor del jugador
+(el `prv` de su sesión en billing-auth), con la regla de texto del `userId` (sin vacíos; se recortan los
+espacios). La mesa no lo usa para jugar: lo guarda en `seats[]` y `players[]` del registro, y es lo que
+acota el listado y el detalle de partidas para un admin de proveedor. ⚠ El orquestador lo manda recién
+**después** de que esta versión del dominó esté desplegada: una anterior lo rechaza con 400 (el cuerpo
+es estricto) y no abre la mesa.
 
 **`participants[].price`** (opcional) es lo que la mesa le cuesta y le paga a ese jugador **en su
 moneda**, con la cotización de billing:
@@ -624,8 +642,8 @@ antes de mirar la forma.
 | `GET /game-modes` | — |
 | `GET /game-modes/:uuid` | `404 MODE_NOT_FOUND` |
 | `GET /reactions` | — |
-| `GET /internal/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
-| `GET /internal/matches/:matchId` | `404 MATCH_NOT_FOUND` |
+| `GET /internal/matches` | `404 UNKNOWN_PROVIDER` (un proveedor nombra otro), `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
+| `GET /internal/matches/:matchId` | `404 MATCH_NOT_FOUND` (también a un proveedor sin asiento en ella) |
 | `GET /internal/matches/:matchId/history` | `404 MATCH_NOT_FOUND` |
 | `GET /game-data/:roomId` | `404 MATCH_NOT_FOUND` |
 | `GET /internal/players/:userId/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |

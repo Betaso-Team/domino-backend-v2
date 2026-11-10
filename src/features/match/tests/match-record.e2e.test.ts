@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { mintAdminToken } from "@/tests/billing-auth-keys";
 import { fakeOrchestrator } from "@/tests/fake-orchestrator";
 import { CASUAL_2P } from "@/tests/game-mode-catalog";
 import type { ColyseusTestServer } from "@colyseus/testing";
@@ -240,5 +241,40 @@ describe("el registro y el historial en la moneda del jugador", () => {
     const other = await rowOf("rec8");
     expect(other).toMatchObject({ result: "abandoned", bet: 125, prize: 0 });
     expect(other).not.toHaveProperty("currency");
+  });
+});
+
+// EL PROVEEDOR DE CADA ASIENTO, del pedido del orquestador al registro y al panel: la sala lo congela en
+// el asiento, el registro lo guarda en `seats[]` y en `players[]`, y un admin de ese proveedor ve la
+// partida en el listado y en el detalle.
+describe("el registro por proveedor", () => {
+  it("el asiento guarda su proveedor, y el admin de ese proveedor ve la partida", async () => {
+    const match = await seatPair(server, [
+      { userId: "rec9", displayName: "Nueve", currency: "VES", providerId: "betaso" },
+      { userId: "rec10", displayName: "Diez", currency: "VES" },
+    ]);
+    await revealHands(match);
+    await act(match, "rec10", "ABANDON");
+    await waitUntil(async () => closed(await recordOf(match.config.matchId)), 3_000);
+
+    const record = await recordOf(match.config.matchId);
+    for (const field of ["seats", "players"] as const) {
+      const [provided, plain] = record?.[field] as Doc[];
+      expect(provided).toMatchObject({ userId: "rec9", providerId: "betaso" });
+      expect(plain).not.toHaveProperty("providerId");
+    }
+
+    const as = (prv: string) => ({
+      authorization: `Bearer ${mintAdminToken("pia", { prv, role: "support" })}`,
+    });
+    const listed = async (prv: string) => {
+      const response = await get("/internal/matches?pageSize=100", as(prv));
+      const body = (await response.json()) as { data: { items: Doc[] } };
+      return body.data.items.map((item) => item.matchId);
+    };
+    expect(await listed("betaso")).toEqual([match.config.matchId]);
+    expect(await listed("parley")).toEqual([]);
+    expect((await get(`/internal/matches/${match.config.matchId}`, as("betaso"))).status).toBe(200);
+    expect((await get(`/internal/matches/${match.config.matchId}`, as("parley"))).status).toBe(404);
   });
 });

@@ -39,6 +39,8 @@ export interface MatchSeat {
   readonly profilePicture?: string;
   readonly currency: string;
   readonly price?: SeatPrice;
+  /** El proveedor del jugador, si el orquestador lo mandó: el ámbito del panel por proveedor. */
+  readonly providerId?: string;
 }
 
 /**

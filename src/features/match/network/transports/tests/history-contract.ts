@@ -136,18 +136,29 @@ interface Row {
   readonly roomId?: string | null;
   /** El `userId` de cada asiento, en orden; sin esto, los de `SETUP`. */
   readonly users?: readonly string[];
+  /** Una mesa de torneo: su `tournamentId`. Sin esto, casual. */
+  readonly tournamentId?: string;
+  /** El `providerId` de cada asiento, en el orden de `users`; `undefined` = el asiento sin proveedor. */
+  readonly providers?: readonly (string | undefined)[];
 }
 
-/** Los asientos de una mesa con estos usuarios, en orden: dos o cuatro. */
-const seatsOf = (users: readonly string[]): MatchSetup["seats"] =>
-  users.map((userId, seat) => ({
-    id: `seat-${seat + 1}`,
-    teamId: seat % 2 === 0 ? "A" : "B",
-    seat,
-    userId,
-    displayName: userId,
-    currency: "VES",
-  }));
+/** Los asientos de una mesa con estos usuarios, en orden: dos o cuatro, con su proveedor si lo hay. */
+const seatsOf = (
+  users: readonly string[],
+  providers: readonly (string | undefined)[] = [],
+): MatchSetup["seats"] =>
+  users.map((userId, seat) => {
+    const providerId = providers[seat];
+    return {
+      id: `seat-${seat + 1}`,
+      teamId: seat % 2 === 0 ? "A" : "B",
+      seat,
+      userId,
+      displayName: userId,
+      currency: "VES",
+      ...(providerId === undefined ? {} : { providerId }),
+    };
+  });
 
 async function seed(
   history: HistoryHarness,
@@ -161,7 +172,10 @@ async function seed(
       history.open(row.matchId, {
         ...SETUP,
         roomId: row.roomId ?? `room-${row.matchId}`,
-        ...(row.users ? { seats: seatsOf(row.users) } : {}),
+        ...(row.users ? { seats: seatsOf(row.users, row.providers) } : {}),
+        ...(row.tournamentId
+          ? { table: { ...SETUP.table, mode: "TOURNAMENT", tournamentId: row.tournamentId } }
+          : {}),
         matchStartedAt: 1_000,
       });
     await history.drain();
@@ -850,6 +864,112 @@ export function describeHistoryContract(
         total: 2,
         totalExact: true,
       });
+    });
+
+    // EL TORNEO (`table.tournamentId`), exacto: solo las mesas de ese torneo. Una casual no lo lleva y
+    // la forma vieja tampoco: nunca coinciden. Una de torneo que nunca arrancó nace en el cierre, que
+    // también trae la mesa, y sale igual.
+    it("por torneo: exacto, con los demás filtros, y la casual y la vieja nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"], tournamentId: "copa" },
+        { matchId: "m-casual", at: at(20), users: ["ana", "carla"] },
+        { matchId: "m-3", at: at(30), users: ["ana", "dani"], tournamentId: "copa" },
+        { matchId: "m-vieja", at: at(40), roomId: null },
+        { matchId: "m-otra", at: at(50), users: ["ana", "eva"], tournamentId: "relampago" },
+      ]);
+      clock.set(at(60));
+      history.close("m-nunca", {
+        ...CLOSING,
+        roomId: "room-m-nunca",
+        table: { ...CLOSING.table, mode: "TOURNAMENT", tournamentId: "copa" },
+        seats: seatsOf(["beto", "eva"]),
+        status: "aborted",
+        matchEndReason: "NEVER_STARTED",
+      });
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ tournamentId: "copa" })).toEqual(["m-nunca", "m-3", "m-1"]);
+      expect(await ids({ tournamentId: "relampago" })).toEqual(["m-otra"]);
+      expect(await ids({ tournamentId: "no-existe" })).toEqual([]);
+      // CON LOS DEMÁS, por AND: el jugador, las fechas, el estado.
+      expect(await ids({ tournamentId: "copa", userId: "dani" })).toEqual(["m-3"]);
+      expect(await ids({ tournamentId: "copa", from: new Date(at(15)) })).toEqual([
+        "m-nunca",
+        "m-3",
+      ]);
+      expect(await ids({ tournamentId: "copa", status: "aborted" })).toEqual(["m-nunca"]);
+
+      const page = await history.list({ pageSize: 10, tournamentId: "copa" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
+        total: 3,
+        totalExact: true,
+      });
+    });
+
+    // EL PROVEEDOR (`seats[].providerId`), exacto: cualquier asiento, así que una casual cruzada sale para
+    // los dos. Un asiento sin proveedor —una partida grabada antes de que el orquestador lo mandara— y la
+    // forma vieja no coinciden nunca. La que nunca arrancó nace en el cierre con sus asientos y sale igual.
+    it("por proveedor: cualquier asiento, una vez, con los demás filtros, y sin el campo nunca", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"], providers: ["betaso", "betaso"] },
+        {
+          matchId: "m-cruzada",
+          at: at(20),
+          users: ["ana", "pia"],
+          providers: ["betaso", "parley"],
+        },
+        { matchId: "m-sin", at: at(30), users: ["ana", "carla"] },
+        { matchId: "m-vieja", at: at(40), roomId: null },
+        {
+          matchId: "m-parley",
+          at: at(50),
+          users: ["pia", "pedro"],
+          providers: ["parley", "parley"],
+        },
+      ]);
+      clock.set(at(60));
+      history.close("m-nunca", {
+        ...CLOSING,
+        roomId: "room-m-nunca",
+        seats: seatsOf(["beto", "eva"], ["betaso", "betaso"]),
+        status: "aborted",
+        matchEndReason: "NEVER_STARTED",
+      });
+      await history.drain();
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ providerId: "betaso" })).toEqual(["m-nunca", "m-cruzada", "m-1"]);
+      expect(await ids({ providerId: "parley" })).toEqual(["m-parley", "m-cruzada"]);
+      // EXACTO: ni prefijo, ni mayúsculas, ni un proveedor que no jugó.
+      for (const providerId of ["beta", "BETASO", "rival"]) {
+        expect(await ids({ providerId })).toEqual([]);
+      }
+      // CON LOS DEMÁS, por AND: el jugador, las fechas, el estado.
+      expect(await ids({ providerId: "parley", userId: "ana" })).toEqual(["m-cruzada"]);
+      expect(await ids({ providerId: "betaso", to: new Date(at(15)) })).toEqual(["m-1"]);
+      expect(await ids({ providerId: "betaso", status: "aborted" })).toEqual(["m-nunca"]);
+
+      const page = await history.list({ pageSize: 10, providerId: "betaso" });
+      expect({ total: page.total, totalExact: page.totalExact }).toEqual({
+        total: 3,
+        totalExact: true,
+      });
+      const opened = await history.recordOf("m-cruzada");
+      expect((opened?.seats as { providerId?: string }[]).map((seat) => seat.providerId)).toEqual([
+        "betaso",
+        "parley",
+      ]);
+      const unseated = await history.recordOf("m-sin");
+      expect(unseated?.seats as object[]).not.toContainEqual(
+        expect.objectContaining({ providerId: expect.anything() }),
+      );
     });
 
     // EL ESTADO (`status`), exacto: `started` es la abierta, `finished` y `aborted` las cerradas. La

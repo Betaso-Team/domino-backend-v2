@@ -318,6 +318,40 @@ describe("configOf", () => {
 // EL SNAPSHOT GRABADO, que es la otra mitad de la tarea: una partida tiene que poder rebobinarse
 // sin catálogo. `replayConfigOf` valida la mesa ENTERA —asientos numerados, puntos y dinero
 // adentro— y no consulta nada; es lo que permite que editar un modo no cambie una partida vieja.
+// EL PROVEEDOR DE CADA ASIENTO (el `prv` de la sesión), para el ámbito del panel. Opcional en las dos
+// entradas —casual y torneo— y en el snapshot; una LLAVE como el `userId`: se normaliza igual.
+describe("requestOf: el proveedor de cada asiento", () => {
+  const { gameModeId: _mode, rateId: _rate, ...shared } = request;
+  const tournament = {
+    ...shared,
+    mode: "TOURNAMENT",
+    tournamentId: "t-1",
+    rules: { pointsToWin: 50 },
+  } as const;
+  const provided = <T extends object>(base: T, providerId: unknown) => ({
+    ...base,
+    participants: [{ ...participants[0], providerId }, participants[1]],
+  });
+
+  it("lo deja en el asiento, sin espacios, en la casual y en la de torneo", () => {
+    for (const base of [request, tournament]) {
+      const config = configFrom(provided(base, " betaso "));
+      expect(config.seats[0]?.providerId).toBe("betaso");
+      expect(config.seats[1]).not.toHaveProperty("providerId");
+    }
+  });
+
+  it.each<[string, unknown]>([
+    ["vacío", ""],
+    ["en blanco", "  "],
+    ["numérico", 7],
+    ["nulo", null],
+  ])("rechaza un proveedor %s", (_name, providerId) => {
+    expect(() => requestOf(provided(request, providerId))).toThrow();
+    expect(() => requestOf(provided(tournament, providerId))).toThrow();
+  });
+});
+
 describe("replayConfigOf", () => {
   const snapshot = {
     matchId: "match-1",
@@ -403,6 +437,16 @@ describe("replayConfigOf", () => {
       seats: [{ ...snapshot.seats[0], price: { ...price, currency: "USD" } }, snapshot.seats[1]],
     };
     expect(() => replayConfigOf(foreign)).toThrow();
+  });
+
+  // UNA PARTIDA GRABADA ANTES DEL PROVEEDOR SE REBOBINA SIN ÉL, y una que lo trajo lo conserva.
+  it("rebobina con y sin el proveedor del asiento", () => {
+    expect(replayConfigOf(snapshot).seats.some((seat) => "providerId" in seat)).toBe(false);
+    const provided = {
+      ...snapshot,
+      seats: [{ ...snapshot.seats[0], providerId: "betaso" }, snapshot.seats[1]],
+    };
+    expect(replayConfigOf(provided).seats[0]?.providerId).toBe("betaso");
   });
 
   // EL DECIMAL ES UN MONTO VÁLIDO, y este test es el que separa la convención de v1 de la que

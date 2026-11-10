@@ -37,9 +37,11 @@ pieza del dominó.
   llave nuestra, no la de un cliente.
 - **Cada admin tiene proveedor y rol.** El token de admin de billing-auth trae `prv` (el proveedor;
   `null` = Tablea Gaming) y `role` (`admin` | `support`), **obligatorios**: sin alguno, 401. `requireAdminKey` **cierra por default**: una ruta es de Tablea Gaming y de escritura salvo
-  que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Hoy sólo
-  el catálogo declara `providers`; el historial, los registros, `/game-data` y `/internal/settings`
-  son de Tablea Gaming. Ver «Incremento completo — modos con dueño y suscripciones».
+  que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Declaran
+  `providers` el catálogo y el listado y el detalle de partidas (`GET /internal/matches[/:matchId]`,
+  acotados por `seats[].providerId`); el historial de soporte, `/internal/players/:userId/matches`,
+  `/game-data` y `/internal/settings` son de Tablea Gaming. Ver «Incremento completo — modos con dueño y
+  suscripciones» y «Incremento completo — partidas por proveedor».
 - **Los modos tienen dueño** (`ownerProviderId`: `null` compartido, un id propio de ese proveedor) y los
   compartidos, suscriptores **explícitos** (`subscribers`; ausente = `[]` = nadie). Cada proveedor
   elige la **fuente** de su catálogo entero (`provider_catalogs`: `shared` | `own`, ausente =
@@ -59,8 +61,8 @@ pieza del dominó.
   (`GET /game-data/:roomId`), el endpoint de soporte y el CLI de replay, que ya no pide argumentos.
   Ver «Incremento completo — el registro v2.1 de cada partida».
 - **El listado del panel filtra y pagina por cursor** (`after`, `from`/`to`, `matchId`, `roomId`, `id`,
-  `userId` —cualquier asiento, `seats[].userId`—)
-  con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
+  `userId` —cualquier asiento, `seats[].userId`—, `matchEndReason`, `status`, `tournamentId`,
+  `providerId` —cualquier asiento, `seats[].providerId`—) con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
   ordena en memoria, y una página honda cuesta lo mismo que la primera. Ver «Incremento completo — el
   listado del panel con filtros y cursor».
 - **El outbox de resultados no se bloquea por la cabeza**: la espera tras un fallo es del broker
@@ -3268,3 +3270,29 @@ del monorepo del orquestador). Toca el camino del dinero solo para APAGARLO en l
 - `computeQuality` y las constantes de calidad que vivían en `features/tournament/` siguen en `main`
   antes de este merge (`git show dc1f513:src/features/tournament/quality.ts`): el orquestador las porta.
 
+
+## Incremento completo — partidas por proveedor (rama `feat/match-records-by-provider`)
+
+Para que la pantalla «Partidas» del panel se abra a los admins de proveedor (`admin` y `support`), cada uno
+con las suyas. Sale de `fbd41aa` (`feat/match-list-tournament-filter`), que sumó el filtro `tournamentId`
+al listado (igualdad sobre `table.tournamentId`, índice `table.tournamentId_1_createdAt_-1__id_-1`
+PARCIAL sobre las mesas de torneo).
+
+- **`participants[].providerId`** (opcional, casual y torneo, `match-contract.ts`): el `prv` de la sesión
+  del jugador. Es una llave como el `userId` (`identityPart`: sin vacíos, recortado). El snapshot lo
+  acepta igual (sin default), así que los goldens y lo grabado antes rebobinan idéntico.
+  ⚠ **El orquestador despliega DESPUÉS del dominó**: el `strictObject` de `participant` rechaza el campo
+  en una versión vieja y la mesa no abre.
+- **El registro lo guarda por asiento** (`SeatSetup.providerId`, `matchSetupOf`), sólo si vino; el cierre
+  lo copia a `players[]` porque extiende el asiento. `recordedReplayOf` no lo lee: el motor no lo usa.
+- **`MatchListQuery.providerId`** → `{ "seats.providerId": x }` (cualquier asiento; memoria con el mismo
+  `some`), cuenta en `isFiltered`. Índice nuevo `seats.providerId_1_createdAt_-1__id_-1`, MULTIKEY como el
+  del jugador y no parcial, en el segundo `createIndexes` (son nueve). Sin el campo no coincide nunca.
+- **Las rutas** (`records.ts`): `GET /internal/matches` y `GET /internal/matches/:matchId` con
+  `{ read: true, providers: true }`. Al listado de un proveedor se le FUERZA `providerId = prv`; nombrar
+  otro es `404 UNKNOWN_PROVIDER` (la regla del catálogo); Tablea filtra opcional con `?providerId=`. El
+  detalle es `404 MATCH_NOT_FOUND` a un proveedor sin asiento en la partida. El historial de soporte,
+  `/internal/players/:userId/matches` y `/game-data` siguen siendo de Tablea (`admin-scope.e2e.test.ts`).
+- ⚠ **Una casual cruzada la ven los dos proveedores ENTERA**, el asiento del rival incluido (`userId`,
+  nombre, su mano en la timeline). Aceptado: recortarla dejaría un registro que no se rebobina.
+- Sin verificar: el `explain` del índice nuevo (`mongo-history.int.test.ts`, pide `MONGO_INT_URI`).

@@ -77,6 +77,23 @@ describe("matchSetupOf", () => {
     expect(setup.seats[1]).not.toHaveProperty("username");
   });
 
+  // EL PROVEEDOR DE CADA ASIENTO, el ámbito del panel: se copia si vino, y el que no lo trajo no lo
+  // inventa (una partida de antes, o un orquestador que todavía no lo manda).
+  it("copia el proveedor del asiento que lo trajo, y el que no lo trajo queda sin él", () => {
+    const provided = replayConfigOf({
+      ...config,
+      seats: [{ ...config.seats[0], providerId: "betaso" }, config.seats[1]],
+    });
+
+    const { seats } = matchSetupOf(provided, DEFAULT_GLOBAL_CONFIG, createMatchState(provided), {
+      roomId: "r",
+      gameModeName: "m",
+    });
+
+    expect(seats[0]?.providerId).toBe("betaso");
+    expect(seats[1]).not.toHaveProperty("providerId");
+  });
+
   // TODOS LOS PLAZOS, EN UNA SOLA UNIDAD. La reconexión es el único en segundos y se guarda en ms; lo
   // que no es un plazo —las fichas por mano— va aparte.
   it("guarda cada plazo en ms, la reconexión incluida, y nada que no sea un plazo", () => {

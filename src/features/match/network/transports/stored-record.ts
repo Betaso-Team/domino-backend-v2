@@ -153,7 +153,9 @@ export const isFiltered = (query: MatchListQuery): boolean =>
   query.id !== undefined ||
   query.userId !== undefined ||
   query.matchEndReason !== undefined ||
-  query.status !== undefined;
+  query.status !== undefined ||
+  query.tournamentId !== undefined ||
+  query.providerId !== undefined;
 
 const createdAtOf = (document: StoredMatchRecord): number | undefined =>
   document.createdAt instanceof Date ? document.createdAt.getTime() : undefined;

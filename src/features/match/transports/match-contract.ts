@@ -98,6 +98,11 @@ const participantShape = z.strictObject({
   profilePicture: nonBlank.optional(),
   currency: nonBlank,
   price: seatPrice.optional(),
+  // EL PROVEEDOR DEL JUGADOR (el `prv` de su sesión en billing-auth), para que el panel le muestre a cada
+  // proveedor sus partidas y sólo ésas. Es una LLAVE —se compara contra el `prv` del token del admin—, así
+  // que se normaliza como el `userId`. Opcional: el orquestador lo manda recién después de que este campo
+  // exista acá (el `strictObject` lo rechazaría), y una partida grabada antes no lo tiene.
+  providerId: identityPart.optional(),
 });
 
 // EL PRECIO VA EN LA MONEDA QUE SE COBRA, y si no coincide el que se equivocó es el que lo mandó: el
