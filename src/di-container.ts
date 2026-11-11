@@ -31,6 +31,7 @@ import {
   MatchResultRecorder,
 } from "@/features/match/network/match-results";
 import {
+  BET_CHARGE_TIMEOUT_MS,
   OrchestratorBetCharger,
   type OrchestratorCharges,
 } from "@/features/match/network/orchestrator-charges";
@@ -278,7 +279,9 @@ export const matchResults = matchResultOutbox;
 // exige la URL y la llave junto con `ORCHESTRATOR_API_KEY`.
 const orchestratorCharges: OrchestratorCharges | undefined = env.orchestratorCallback
   ? new HttpOrchestratorCharges(
-      new HttpClient({ baseUrl: env.orchestratorCallback.url, timeoutMs: 10_000 }),
+      // El plazo de cada cobro lo pone `HttpOrchestratorCharges` por llamada (y lo promete en
+      // `x-charge-deadline`); el del cliente no se usa para cobrar.
+      new HttpClient({ baseUrl: env.orchestratorCallback.url }),
       env.orchestratorCallback.apiKey,
     )
   : undefined;
@@ -289,9 +292,9 @@ if (orchestratorCharges) {
   rootContainer.register(OrchestratorBetCharger, {
     useValue: new OrchestratorBetCharger({
       orchestrator: orchestratorCharges,
-      // EL TECHO DE v1 (15 s), generoso a propósito: el que espera es un jugador que ya apretó
-      // «acepto», y el trato espera, con la mesa diciendo x2, a lo sumo esto.
-      timeoutMs: 15_000,
+      // EL MISMO PLAZO que el HTTP del aumento y que su `x-charge-deadline` (15 s, el techo de v1):
+      // acá es la red para un puerto que no aborte solo.
+      timeoutMs: BET_CHARGE_TIMEOUT_MS,
       log: logger,
     }),
   });

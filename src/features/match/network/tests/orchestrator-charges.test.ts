@@ -124,7 +124,7 @@ describe("OrchestratorBetCharger", () => {
 describe("HttpOrchestratorCharges", () => {
   let server: Server;
   let base: string;
-  const seen: Array<{ url?: string; key?: string; body: string }> = [];
+  const seen: Array<{ url?: string; key?: string; body: string; deadline?: string }> = [];
   let status = 200;
   let reply = "{}";
   let hang = false;
@@ -136,7 +136,12 @@ describe("HttpOrchestratorCharges", () => {
         body += chunk;
       });
       request.on("end", () => {
-        seen.push({ url: request.url, key: request.headers["x-internal-api-key"] as string, body });
+        seen.push({
+          url: request.url,
+          key: request.headers["x-internal-api-key"] as string,
+          body,
+          deadline: request.headers["x-charge-deadline"] as string,
+        });
         const head = response.writeHead(status, { "content-type": "application/json" });
         // CUERPO COLGADO: las cabeceras salen y el cuerpo no termina nunca.
         if (hang) head.write('{"ok":');
@@ -154,10 +159,13 @@ describe("HttpOrchestratorCharges", () => {
       }),
   );
 
+  const NOW = Date.UTC(2026, 10, 11, 12);
   const client = (timeoutMs?: number) =>
     new HttpOrchestratorCharges(
-      new HttpClient({ baseUrl: base, ...(timeoutMs !== undefined && { timeoutMs }) }),
+      new HttpClient({ baseUrl: base }),
       "callback-key-123456",
+      { entryMs: timeoutMs ?? 10_000, betMs: timeoutMs ?? 15_000 },
+      () => NOW,
     );
 
   it("pide la entrada y el aumento con la llave del orquestador", async () => {
@@ -165,12 +173,19 @@ describe("HttpOrchestratorCharges", () => {
     await client().chargeEntry("m/1");
     await client().chargeBet("m-1", 1, 3);
 
+    // `x-charge-deadline`: el instante (epoch ms) en que el dominó deja de esperar cada cobro.
     expect(seen.slice(-2)).toEqual([
-      { url: "/v1/matches/m%2F1/charges", key: "callback-key-123456", body: "{}" },
+      {
+        url: "/v1/matches/m%2F1/charges",
+        key: "callback-key-123456",
+        body: "{}",
+        deadline: String(NOW + 10_000),
+      },
       {
         url: "/v1/matches/m-1/bets",
         key: "callback-key-123456",
         body: '{"step":1,"level":3}',
+        deadline: String(NOW + 15_000),
       },
     ]);
   });
