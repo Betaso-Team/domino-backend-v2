@@ -17,7 +17,11 @@ import type { MatchState } from "../../core/state";
 import type { HistoryReader } from "../../network/history";
 import { ENABLED_SEATS, ENABLED_SEATS_TOKEN, type MatchParticipant } from "../match-contract";
 import { MatchRegistry } from "../match-registry";
-import type { DominoRoom } from "./domino-room";
+import {
+  type DominoRoom,
+  MAX_MESSAGES_PER_SECOND,
+  MAX_MESSAGES_PER_SECOND_TOKEN,
+} from "./domino-room";
 
 let server: ColyseusTestServer | undefined;
 let originalGlobalConfig: GlobalDominoConfig;
@@ -344,7 +348,16 @@ describe("DominoRoom", () => {
   // llegar al motor, y el log de rechazos de ese asiento sale muestreado.
   it("corta la conexión que pasa el tope de mensajes por segundo", async () => {
     const testServer = requiredServer();
-    const room = await testServer.createRoom<DominoRoom>("domino", options("match-flood"));
+    // El de producción: la suite sube el tope (`vitest.setup.ts`) porque el arnés juega a máquina.
+    const suiteCap = rootContainer.resolve<number>(MAX_MESSAGES_PER_SECOND_TOKEN);
+    rootContainer.register<number>(MAX_MESSAGES_PER_SECOND_TOKEN, {
+      useValue: MAX_MESSAGES_PER_SECOND,
+    });
+    const room = await testServer
+      .createRoom<DominoRoom>("domino", options("match-flood"))
+      .finally(() =>
+        rootContainer.register<number>(MAX_MESSAGES_PER_SECOND_TOKEN, { useValue: suiteCap }),
+      );
     expect(room.maxMessagesPerSecond).toBe(25);
     const a = await connect(testServer, room, "a");
     let closed: number | undefined;

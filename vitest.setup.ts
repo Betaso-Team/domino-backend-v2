@@ -80,6 +80,10 @@ delete process.env.REDIS_URL;
 // así que el modo de falla del olvido no sería un rojo sino una suite que se queda esperando.
 delete process.env.TABLEA_GAMING_RABBITMQ_URL;
 process.env.PORT ??= "2567";
+// EL TOPE DE MENSAJES DE LA SALA, ALTO EN LA SUITE: el arnés juega a velocidad de máquina —un turno por
+// tick— y un cliente de test pasa los 25 por segundo de producción sin ser un abuso. El tope lo mide
+// su propio e2e, que registra el de producción (`domino-room.e2e.test.ts`).
+process.env.MAX_MESSAGES_PER_SECOND ??= "100000";
 // LOS PLAZOS SE DIVIDEN EN LOS QUE VENCEN Y LOS QUE SE CANCELAN (truco `9d543c6`), no en cortos
 // y largos. Los que VENCEN —las pausas de presentación— los espera el flujo entero en cada mano,
 // así que cuestan su valor cada vez: van a UN TICK. Colyseus avanza el reloj de la sala cada
