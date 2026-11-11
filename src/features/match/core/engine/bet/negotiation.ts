@@ -1,4 +1,4 @@
-import { UC_KEY, readAmount, ucOnly } from "@/shared/money";
+import { UC, UC_DECIMALS, fixed, readAmount } from "@/shared/money";
 import type { BetLevel } from "../../config";
 import type { PlayerId } from "../../ids";
 import type { MatchState } from "../../state";
@@ -45,10 +45,10 @@ export class BetNegotiation {
     offer.level = option.level;
     offer.extra = option.extra;
     offer.additionalPoints = option.additionalPoints;
-    // EN LA CONVENCIÓN DE MONTOS, porque el estado ES el wire: `{ uc: "10.0000" }`. Su forma decimal
-    // más corta y sin redondear, así que `settle` lo vuelve a leer como el MISMO número.
-    const { uc } = ucOnly(readAmount(additionalEntryFee, UC_KEY));
-    if (uc !== undefined) offer.additionalEntryFee.set(UC_KEY, uc);
+    // EN LA CONVENCIÓN DE MONTOS, porque el estado ES el wire: texto en UC, la moneda de la mesa
+    // (`"10.0000"`). Su forma decimal más corta rellenada y sin redondear, así que `settle` lo vuelve a
+    // leer como el MISMO número.
+    offer.additionalEntryFee = fixed(readAmount(additionalEntryFee, UC), UC_DECIMALS);
     offer.turnRemainingMs = turnRemainingMs;
     currentRoundOf(this.match).betOffer = offer;
   }
@@ -79,8 +79,9 @@ export class BetNegotiation {
       this.match.acceptedBetLevel = offer.level;
     }
     const { turnRemainingMs, level, extra } = offer;
-    // El texto que `open` escribió es la forma más corta del número, así que vuelve idéntico.
-    const additionalEntryFee = Number(offer.additionalEntryFee.get(UC_KEY) ?? "0");
+    // El texto que `open` escribió es la forma más corta del número con ceros a la derecha, así que
+    // vuelve idéntico. Vacío no lo deja `open`; si apareciera, no hay nada que cobrar.
+    const additionalEntryFee = Number(offer.additionalEntryFee || "0");
     round.betOffer = undefined;
     return {
       accepted,

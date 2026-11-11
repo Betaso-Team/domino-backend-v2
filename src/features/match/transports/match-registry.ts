@@ -1,12 +1,12 @@
 import type { KeyValueStore } from "@/shared/kv";
-import type { Money } from "@/shared/money";
+import { UC } from "@/shared/money";
 import {
   type DominoMatchConfig,
   type GlobalDominoConfig,
   type MatchMode,
   modeOf,
 } from "../core/config";
-import { type SeatPriceView, seatPriceView, ucOf } from "../network/amounts";
+import { type SeatPriceView, seatPriceView, ucText } from "../network/amounts";
 
 /**
  * LOS PLAZOS CON LOS QUE NACIÓ LA MESA, para que el front dibuje el anillo con el largo de verdad.
@@ -44,12 +44,17 @@ export interface PublicMatchConfig {
   readonly seats: readonly string[];
   readonly pointsToWin: number;
   /**
-   * LO QUE LA MESA COBRA Y PAGA, en la convención de montos (`network/amounts.ts`): `{ uc: "125.0000" }`.
-   * Solo `uc`, porque la mesa es de todos sus asientos y cada uno paga en su moneda: la cifra en la
-   * moneda de cada asiento está en `seatPrices`.
+   * LA MONEDA DE LA MESA, que es siempre UC: la mesa es de todos sus asientos y cada uno paga en su
+   * moneda, así que sus montos son los del catálogo, en UC. La cifra en la moneda de cada asiento está
+   * en `seatPrices`, que es otra entidad con su propio `currency`.
    */
-  readonly entryFee: Money;
-  readonly prize: Money;
+  readonly currency: typeof UC;
+  /**
+   * LO QUE LA MESA COBRA Y PAGA, en la convención de montos (`network/amounts.ts`): texto decimal con
+   * los 4 decimales de UC (`"125.0000"`), sin redondear.
+   */
+  readonly entryFee: string;
+  readonly prize: string;
   /**
    * LOS NIVELES DE AUMENTO QUE LA MESA OFRECE (truco `58ce78f`), para que el front pinte el aumento
    * ANTES de proponer. Con el `extra` del catálogo: el front lo muestra junto al nivel, y no es
@@ -72,9 +77,9 @@ export interface PublicMatchConfig {
   /**
    * LO QUE LA MESA CUESTA Y PAGA EN LA MONEDA DE CADA ASIENTO, por su id opaco (`seat-1` → precio). El
    * front toma el de su asiento y pinta la entrada, el premio y cada aumento en Bs. o en lo que pague
-   * el jugador. Cada monto en la convención, con su moneda como llave y su `uc` al lado
-   * (`{ ves: "200.00", uc: "2.0000" }`): la `currency` hermana ya no viaja. Sólo los asientos que
-   * trajeron precio, y AUSENTE si ninguno lo trajo (mesa gratis, orquestador viejo): el front sigue en
+   * el jugador. Cada precio es una entidad en la convención: `{ currency: "VES", rateId, rate, entry:
+   * "200.00", prize, levels }`, con la tasa de la mesa (`rateId`) con la que billing cotizó cada monto, y
+   * sin `uc`. Sólo los asientos que trajeron precio, y AUSENTE si ninguno lo trajo (mesa gratis, orquestador viejo): el front sigue en
    * UC. No es secreto —el rival ve cuánto paga el otro—, pero no lleva nada más del asiento.
    */
   readonly seatPrices?: Readonly<Record<string, SeatPriceView>>;
@@ -83,8 +88,8 @@ export interface PublicMatchConfig {
 // LA CONFIGURACIÓN PÚBLICA DE UNA MESA, pura: la usan el registro (lo que estampa en el almacén) y la
 // sala (el mensaje `config` que manda al entrar), y tienen que ser la misma. Allowlist explícita:
 // restar `seed` filtraría solo lo conocido hoy y una propiedad secreta agregada mañana se filtraría
-// al wire. Tampoco se exponen campos derivados de la ventana de reparto, ni identidad, ni la tasa de la
-// mesa (`rateId`); la moneda y la tasa de cada asiento salen sólo dentro de su `seatPrices`.
+// al wire. Tampoco se exponen campos derivados de la ventana de reparto ni identidad. La tasa de la mesa
+// (`rateId`) sale sólo dentro de cada `seatPrices`, que es el registro cotizado con ella.
 export function publicConfigOf(
   config: DominoMatchConfig,
   timeouts: PublicMatchTimeouts,
@@ -101,8 +106,9 @@ export function publicConfigOf(
     pointsToWin: config.pointsToWin,
     // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot: el DTO
     // público publica el mismo monto que la mesa cobró, en UC, con la forma de la convención.
-    entryFee: ucOf(config.entryFee),
-    prize: ucOf(config.prize),
+    currency: UC,
+    entryFee: ucText(config.entryFee),
+    prize: ucText(config.prize),
     betLevels: config.betLevels.map(({ level, extra, additionalPoints }) => ({
       level,
       extra,
@@ -121,12 +127,10 @@ export function publicConfigOf(
   };
 }
 
-// CAMPO POR CAMPO, como el resto (`seatPriceView`): el precio del snapshot es el que validó el
-// contrato, y un campo que se le sume mañana no tiene por qué salir solo. Los `decimals` tampoco salen:
-// ya están en el relleno de cada monto.
+// CAMPO POR CAMPO, como el resto (`seatPriceView`), con la tasa de la mesa.
 function seatPricesOf(config: DominoMatchConfig): Pick<PublicMatchConfig, "seatPrices"> {
   const priced = config.seats.flatMap(({ playerId, price }) =>
-    price === undefined ? [] : [[playerId, seatPriceView(price, config)] as const],
+    price === undefined ? [] : [[playerId, seatPriceView(price, config.rateId)] as const],
   );
   return priced.length === 0 ? {} : { seatPrices: Object.fromEntries(priced) };
 }

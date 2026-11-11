@@ -1,5 +1,5 @@
 import { env } from "@/env";
-import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
+import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { mintAdminToken } from "@/tests/billing-auth-keys";
 import { fakeOrchestrator } from "@/tests/fake-orchestrator";
 import { CASUAL_2P } from "@/tests/table-modes";
@@ -63,9 +63,10 @@ describe("el registro de una partida jugada", () => {
       table: {
         gameModeId: CASUAL_2P.uuid,
         name: CASUAL_2P.gameMode.name,
-        // EN LA CONVENCIÓN DE MONTOS: Mongo guarda `entryFeeInUC`, el panel lee `{ uc }`.
-        entryFee: { uc: "125.0000" },
-        prize: { uc: "250.0000" },
+        // EN LA CONVENCIÓN DE MONTOS: Mongo guarda `entryFeeInUC`, el panel lee la mesa en UC.
+        currency: "UC",
+        entryFee: "125.0000",
+        prize: "250.0000",
         isFree: false,
       },
       matchConfig: {
@@ -85,14 +86,18 @@ describe("el registro de una partida jugada", () => {
     const players = record?.players as Doc[];
     expect(players.map((player) => player.userId)).toEqual(["rec1", "rec2"]);
     for (const player of players) {
+      // SIN PRECIO, CADA ASIENTO EN UC, con la tasa de la partida.
       expect(player).toMatchObject({
-        charged: { uc: "125.0000" },
-        prizePaid: { uc: player.teamId === winnerTeamId ? "250.0000" : "0.0000" },
+        currency: "UC",
+        rateId: played.config.rateId,
+        charged: "125.0000",
+        prizePaid: player.teamId === winnerTeamId ? "250.0000" : "0.0000",
       });
     }
-    expect(findBareAmounts(record, ["entryFee", "prize", "entry", "charged", "prizePaid"])).toEqual(
+    expect(findBadAmounts(record, ["entryFee", "prize", "entry", "charged", "prizePaid"])).toEqual(
       [],
     );
+    expect(JSON.stringify(record)).not.toContain('"uc"');
     expect(record?.winnerIds).toEqual(
       players.filter((player) => player.teamId === winnerTeamId).map((player) => player.id),
     );
@@ -174,8 +179,8 @@ describe("el registro de las partidas que no terminan jugando", () => {
       });
       expect(record).not.toHaveProperty("matchStartedAt");
       expect((record?.players as Doc[]).map((player) => player.charged)).toEqual([
-        { uc: "0.0000" },
-        { uc: "0.0000" },
+        "0.0000",
+        "0.0000",
       ]);
     } finally {
       fakeOrchestrator.failEntryWith(undefined);
@@ -194,9 +199,10 @@ describe("el registro de las partidas que no terminan jugando", () => {
     expect(left).toMatchObject({
       userId: "rec5",
       exit: { reason: "LEFT" },
-      prizePaid: { uc: "0.0000" },
+      currency: "UC",
+      prizePaid: "0.0000",
     });
-    expect(stayed).toMatchObject({ userId: "rec6", prizePaid: { uc: "250.0000" } });
+    expect(stayed).toMatchObject({ userId: "rec6", currency: "UC", prizePaid: "250.0000" });
     expect(stayed).not.toHaveProperty("exit");
     expect((record?.rounds as Doc[]).at(-1)).toMatchObject({ endReason: "MATCH_ABANDONED" });
   });
@@ -224,28 +230,26 @@ describe("el registro y el historial en la moneda del jugador", () => {
 
     const record = await recordOf(match.config.matchId);
     const [priced, plain] = record?.players as Doc[];
-    // EL PANEL LO LEE EN LA CONVENCIÓN: lo que Mongo guarda en dos campos (`chargedInUC` y
-    // `chargedInPlayerCurrency`) sale en un objeto, con la moneda como llave y el `uc` de la mesa.
+    // EL PANEL LO LEE EN LA CONVENCIÓN: el asiento con precio es una entidad en su moneda, con la tasa
+    // de la partida, y lo cobrado y lo pagado salen de `*InPlayerCurrency`; el que no lo trajo, en UC.
     expect(priced).toMatchObject({
+      currency: "VES",
+      rateId: match.config.rateId,
       userId: "rec7",
       price: {
+        currency: "VES",
+        rateId: match.config.rateId,
         rate: "200",
-        entry: { ves: "25000.00", uc: "125.0000" },
-        prize: { ves: "50000.00", uc: "250.0000" },
-        levels: [
-          {
-            level: 2,
-            entry: { ves: "25000.00", uc: "125.0000" },
-            prize: { ves: "100000.00", uc: "500.0000" },
-          },
-        ],
+        entry: "25000.00",
+        prize: "50000.00",
+        levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
       },
-      charged: { ves: "25000.00", uc: "125.0000" },
-      prizePaid: { ves: "50000.00", uc: "250.0000" },
+      charged: "25000.00",
+      prizePaid: "50000.00",
     });
     expect(priced).not.toHaveProperty("chargedInPlayerCurrency");
     expect(plain).not.toHaveProperty("price");
-    expect(plain).toMatchObject({ charged: { uc: "125.0000" }, prizePaid: { uc: "0.0000" } });
+    expect(plain).toMatchObject({ currency: "UC", charged: "125.0000", prizePaid: "0.0000" });
 
     const rowOf = async (userId: string) => {
       const response = await fetch(`${base}/me/matches`, {
@@ -254,19 +258,19 @@ describe("el registro y el historial en la moneda del jugador", () => {
       const page = (await response.json()) as { items: Doc[] };
       return page.items.find((item) => item.id === match.config.matchId);
     };
-    // LA FILA EN LA CONVENCIÓN DE MONTOS: la moneda del jugador como llave, con su `uc`.
+    // LA FILA EN LA CONVENCIÓN DE MONTOS: en la moneda del precio, o en UC si el asiento no lo trajo.
     expect(await rowOf("rec7")).toMatchObject({
       result: "win",
-      bet: { ves: "25000.00", uc: "125.0000" },
-      prize: { ves: "50000.00", uc: "250.0000" },
+      currency: "VES",
+      bet: "25000.00",
+      prize: "50000.00",
     });
-    const other = await rowOf("rec8");
-    expect(other).toMatchObject({
+    expect(await rowOf("rec8")).toMatchObject({
       result: "abandoned",
-      bet: { uc: "125.0000" },
-      prize: { uc: "0.0000" },
+      currency: "UC",
+      bet: "125.0000",
+      prize: "0.0000",
     });
-    expect(other).not.toHaveProperty("currency");
   });
 });
 
@@ -333,16 +337,18 @@ describe("el registro de una mesa con el modo en línea", () => {
       table: {
         gameModeId,
         name: "Modo del orquestador",
-        entryFee: { uc: "3.0000" },
-        prize: { uc: "5.0000" },
+        currency: "UC",
+        entryFee: "3.0000",
+        prize: "5.0000",
       },
       matchConfig: { pointsToWin: 60 },
     });
     const [, stayed] = record?.players as Doc[];
     expect(stayed).toMatchObject({
       userId: "rec12",
-      charged: { uc: "3.0000" },
-      prizePaid: { uc: "5.0000" },
+      currency: "UC",
+      charged: "3.0000",
+      prizePaid: "5.0000",
     });
   });
 });

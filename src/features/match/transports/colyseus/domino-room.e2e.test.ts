@@ -1,5 +1,4 @@
 import { rootContainer } from "@/di-container";
-import type { Money } from "@/shared/money";
 import {
   type ParticipantInput,
   bootTestServer,
@@ -285,8 +284,9 @@ describe("DominoRoom", () => {
     expect(await configOfRoom(testServer, room.roomId)).toMatchObject({
       gameModeId: CASUAL_2P.uuid,
       pointsToWin: 100,
-      entryFee: { uc: "125.0000" },
-      prize: { uc: "250.0000" },
+      currency: "UC",
+      entryFee: "125.0000",
+      prize: "250.0000",
       betLevels: [],
     });
 
@@ -298,16 +298,18 @@ describe("DominoRoom", () => {
     expect(await configOfRoom(testServer, nueva.roomId)).toMatchObject({
       gameModeId: CASUAL_2P.uuid,
       pointsToWin: 7,
-      entryFee: { uc: "1.0000" },
-      prize: { uc: "2.0000" },
+      currency: "UC",
+      entryFee: "1.0000",
+      prize: "2.0000",
     });
 
     // Los números van como LITERAL: la primera mesa sigue con los suyos.
     expect(room.state.pointsToWin).toBe(100);
     expect(await configOfRoom(testServer, room.roomId)).toMatchObject({
       pointsToWin: 100,
-      entryFee: { uc: "125.0000" },
-      prize: { uc: "250.0000" },
+      currency: "UC",
+      entryFee: "125.0000",
+      prize: "250.0000",
     });
 
     await Promise.all([room.disconnect(), nueva.disconnect()]);
@@ -387,8 +389,9 @@ async function configOfRoom(testServer: ColyseusTestServer, roomId: string) {
   return (await response.json()) as {
     gameModeId: string;
     pointsToWin: number;
-    entryFee: Money;
-    prize: Money;
+    currency: string;
+    entryFee: string;
+    prize: string;
   };
 }
 

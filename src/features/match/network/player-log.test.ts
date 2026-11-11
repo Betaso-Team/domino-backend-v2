@@ -1,4 +1,4 @@
-import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
+import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { describe, expect, it } from "vitest";
 import { paginated, resultFor, rowOf } from "./player-log";
 import { CLOSING } from "./transports/tests/history-contract";
@@ -50,8 +50,9 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
       id: "m-1",
       roomId: "room-1",
       playedAt: "2026-10-26T20:00:00.000Z",
-      bet: { uc: "10.0000" },
-      prize: { uc: "18.0000" },
+      currency: "UC",
+      bet: "10.0000",
+      prize: "18.0000",
       score: 104,
       result: "win",
       freeRoom: false,
@@ -62,8 +63,9 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
 
   it("el que no ganó no ve premio", () => {
     expect(rowOf("u2", finished)).toMatchObject({
-      bet: { uc: "10.0000" },
-      prize: { uc: "0.0000" },
+      currency: "UC",
+      bet: "10.0000",
+      prize: "0.0000",
       score: 40,
       result: "abandoned",
     });
@@ -73,8 +75,9 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
   // orquestador, y mostrar la entrada sería mostrar un cobro que se devolvió.
   it("la cancelada va sin entrada ni premio", () => {
     expect(rowOf("u1", aborted)).toMatchObject({
-      bet: { uc: "0.0000" },
-      prize: { uc: "0.0000" },
+      currency: "UC",
+      bet: "0.0000",
+      prize: "0.0000",
       result: "canceled",
     });
   });
@@ -91,8 +94,8 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
   });
 });
 
-// LA FILA EN SU MONEDA: lo que el cierre congeló, con las mismas dos reglas que la de UC, en la llave de
-// su moneda junto a `uc`. Sólo si el asiento se sentó con precio.
+// LA FILA EN SU MONEDA: lo que el cierre congeló, con las mismas dos reglas que la de UC, con el
+// `currency` del precio y sin `uc`. Sólo si el asiento se sentó con precio.
 describe("rowOf: en la moneda del jugador", () => {
   const price = {
     currency: "VES",
@@ -129,16 +132,18 @@ describe("rowOf: en la moneda del jugador", () => {
   it("el que ganó con un aumento ve la entrada más el aumento y el premio del nivel", () => {
     expect(rowOf("u1", priced)).toMatchObject({
       result: "win",
-      bet: { ves: "4000.00", uc: "20.0000" },
-      prize: { ves: "7200.00", uc: "36.0000" },
+      currency: "VES",
+      bet: "4000.00",
+      prize: "7200.00",
     });
   });
 
   it("el que no ganó ve lo que pagó y ningún premio", () => {
     expect(rowOf("u2", priced)).toMatchObject({
       result: "abandoned",
-      bet: { ves: "4000.00", uc: "20.0000" },
-      prize: { ves: "0.00", uc: "0.0000" },
+      currency: "VES",
+      bet: "4000.00",
+      prize: "0.00",
     });
     const lost = {
       ...priced,
@@ -146,7 +151,8 @@ describe("rowOf: en la moneda del jugador", () => {
     };
     expect(rowOf("u2", lost)).toMatchObject({
       result: "lose",
-      bet: { ves: "4000.00", uc: "20.0000" },
+      currency: "VES",
+      bet: "4000.00",
     });
   });
 
@@ -155,31 +161,42 @@ describe("rowOf: en la moneda del jugador", () => {
     const canceled = { ...priced, status: "aborted", winnerIds: [] };
     expect(rowOf("u1", canceled)).toMatchObject({
       result: "canceled",
-      bet: { ves: "0.00", uc: "0.0000" },
-      prize: { ves: "0.00", uc: "0.0000" },
+      currency: "VES",
+      bet: "0.00",
+      prize: "0.00",
     });
     // Y LA QUE SE ABORTÓ ANTES DE ABRIR, que sólo tiene los asientos del armado.
     const { players, ...bare } = canceled;
     expect(rowOf("u1", bare)).toMatchObject({
       result: "canceled",
-      bet: { ves: "0.00", uc: "0.0000" },
+      currency: "VES",
+      bet: "0.00",
     });
   });
 
-  // SIN PRECIO, `{ uc }` SOLO: el dominó no sabe cuánto fue en la otra moneda y no lo inventa. Y nunca
-  // los campos de antes (`currency`, `*InPlayerCurrency`) ni un monto suelto.
-  it("un asiento sin precio sale en `{ uc }`, y ninguna fila lleva los campos de antes", () => {
+  // SIN PRECIO, EN UC: el dominó no sabe cuánto fue en la otra moneda y no lo inventa. Y nunca los
+  // campos de antes (`*InPlayerCurrency`), un número ni un objeto por moneda.
+  it("un asiento sin precio sale en UC, y ninguna fila lleva los campos de antes", () => {
     for (const row of [rowOf("u1", finished), rowOf("u2", finished), rowOf("u1", aborted)]) {
-      expect(Object.keys(row.bet)).toEqual(["uc"]);
-      expect(Object.keys(row.prize)).toEqual(["uc"]);
+      expect(row.currency).toBe("UC");
     }
     const rows = [rowOf("u1", priced), rowOf("u2", priced), rowOf("u1", finished)];
-    expect(findBareAmounts(rows, ["bet", "prize"])).toEqual([]);
+    expect(findBadAmounts(rows, ["bet", "prize"])).toEqual([]);
     for (const row of rows) {
-      expect(row).not.toHaveProperty("currency");
       expect(row).not.toHaveProperty("betInPlayerCurrency");
       expect(row).not.toHaveProperty("prizeInPlayerCurrency");
+      expect(JSON.stringify(row)).not.toContain('"uc"');
     }
+  });
+
+  // UN AUMENTO A UN NIVEL QUE EL PRECIO NO COTIZÓ deja el cierre sin montos en su moneda: la fila queda
+  // en UC entera, nunca la entrada en una moneda y el premio en otra.
+  it("un asiento con precio sin montos en su moneda queda en UC", () => {
+    const [first] = priced.players;
+    if (!first) throw new Error("falta el asiento");
+    const { chargedInPlayerCurrency, prizePaidInPlayerCurrency, ...uncovered } = first;
+    const row = rowOf("u1", { ...priced, players: [uncovered, priced.players[1]] });
+    expect(row).toMatchObject({ currency: "UC", bet: "20.0000", prize: "36.0000" });
   });
 
   // CON LOS DECIMALES DE LA MONEDA en el precio, el texto congelado se rellena (nunca se recorta).
@@ -192,8 +209,9 @@ describe("rowOf: en la moneda del jugador", () => {
       })),
     };
     expect(rowOf("u1", padded)).toMatchObject({
-      bet: { ves: "4000.000", uc: "20.0000" },
-      prize: { ves: "7200.000", uc: "36.0000" },
+      currency: "VES",
+      bet: "4000.000",
+      prize: "7200.000",
     });
   });
 });

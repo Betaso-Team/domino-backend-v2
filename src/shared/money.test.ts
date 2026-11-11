@@ -1,27 +1,27 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { MoneyError, fixed, money, readAmount, sameAmount, toUc, ucOnly } from "./money";
+import {
+  MoneyError,
+  UC,
+  UC_DECIMALS,
+  assertDecimal,
+  fixed,
+  isDecimal,
+  readAmount,
+  sameAmount,
+} from "./money";
 
 // LOS VECTORES COMPARTIDOS: `money.vectors.json` es copia del de `packages/money` (tablea-gaming-orchestrator,
-// commit 8e9732e), y este archivo corre los mismos casos que `packages/money/src/tests/money.test.ts`.
-// Que pasen acá es lo que prueba que la copia de `money.ts` se comporta igual que el original.
+// commit c9222ea), sin los grupos de lo que la copia de `money.ts` deja afuera (`money`, `ucOnly`, `toUc`,
+// `isReservedCode`). Este archivo corre los mismos casos que `packages/money/src/tests/money.test.ts` para
+// lo que sí se copió: que pasen acá es lo que prueba que la copia se comporta igual que el original.
 
 // Los vectores traen entradas del tipo equivocado a propósito: las funciones las tienen que rechazar
 // también en tiempo de ejecución.
 // biome-ignore lint/suspicious/noExplicitAny: los vectores son datos sueltos de un JSON.
 type Loose = Record<string, any>;
 
-const GROUPS = [
-  "fixed",
-  "fixedErrors",
-  "money",
-  "moneyErrors",
-  "ucOnly",
-  "toUc",
-  "toUcErrors",
-  "readAmount",
-  "readAmountErrors",
-] as const;
+const GROUPS = ["fixed", "fixedErrors", "isDecimal", "readAmount", "readAmountErrors"] as const;
 
 const vectors: Record<(typeof GROUPS)[number], Loose[]> = JSON.parse(
   readFileSync(new URL("./money.vectors.json", import.meta.url), "utf8"),
@@ -41,30 +41,26 @@ describe("fixed", () => {
   });
 });
 
-describe("money", () => {
-  it.each(vectors.money)("money($currency, $amount, $decimals, $uc)", (v: Loose) => {
-    const result = money(v.currency, v.amount, v.decimals, v.uc);
-    // El orden de las llaves es parte de la forma: primero la moneda, después `uc`.
-    expect(JSON.stringify(result)).toBe(JSON.stringify(v.expected));
-    expect(Object.isFrozen(result)).toBe(true);
+describe("el decimal estricto", () => {
+  it.each(vectors.isDecimal)("isDecimal($value) = $expected", (v: Loose) => {
+    expect(isDecimal(v.value)).toBe(v.expected);
   });
 
-  it.each(vectors.moneyErrors)("rechaza money($currency, $amount, $decimals, $uc)", (v: Loose) => {
-    expect(() => money(v.currency, v.amount, v.decimals, v.uc)).toThrow(MoneyError);
+  it.each(vectors.isDecimal)("assertDecimal($value) lanza justo cuando no es uno", (v: Loose) => {
+    if (v.expected) expect(() => assertDecimal(v.value)).not.toThrow();
+    else expect(() => assertDecimal(v.value)).toThrow(MoneyError);
   });
 
-  it.each(vectors.ucOnly)("ucOnly($amount)", (v: Loose) => {
-    expect(ucOnly(v.amount)).toEqual(v.expected);
+  it("nombra el valor en el mensaje", () => {
+    expect(() => assertDecimal("1e5", "el premio")).toThrow(/el premio/);
   });
 });
 
-describe("toUc", () => {
-  it.each(vectors.toUc)("toUc($amount, $rate) = $expected", (v: Loose) => {
-    expect(toUc(v.amount, v.rate)).toBe(v.expected);
-  });
-
-  it.each(vectors.toUcErrors)("rechaza toUc($amount, $rate)", (v: Loose) => {
-    expect(() => toUc(v.amount, v.rate)).toThrow(MoneyError);
+describe("UC", () => {
+  it("es el código como viaja, con 4 decimales", () => {
+    expect(UC).toBe("UC");
+    expect(UC_DECIMALS).toBe(4);
+    expect(fixed("10", UC_DECIMALS)).toBe("10.0000");
   });
 });
 
