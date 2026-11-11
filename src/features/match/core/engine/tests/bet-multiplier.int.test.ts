@@ -49,8 +49,8 @@ describe("aumento de apuesta: proponer", () => {
     expect(e.round().betOffer?.level).toBe(5);
     expect(e.round().betOffer?.extra).toBe(5);
     // 125 * (5 - 1): la mesa entera multiplicada por el nivel, menos lo ya pagado. En la convención de
-    // montos, porque el estado es el wire: un mapa con solo `uc`.
-    expect(e.round().betOffer?.additionalEntryFee.toJSON()).toEqual({ uc: "500.0000" });
+    // montos, porque el estado es el wire: texto en UC, la moneda de la mesa.
+    expect(e.round().betOffer?.additionalEntryFee).toBe("500.0000");
     expect(e.round().betOffer?.additionalPoints).toBe(250);
   });
 

@@ -1,10 +1,10 @@
-import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
+import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { describe, expect, it } from "vitest";
-import { seatMoneyOf, seatPriceView, ucOf, wireEventOf } from "../amounts";
+import { seatPriceView, seatText, ucText, wireEventOf } from "../amounts";
 import { entryView, recordView } from "../record-view";
 
-// LA CONVENCIÓN DE MONTOS EN LA FRONTERA DEL DOMINÓ: lo que `network/amounts.ts` y `record-view.ts`
-// emiten. Las llaves de plata de cada forma, para `findBareAmounts`.
+// LA CONVENCIÓN DE MONTOS v2 EN LA FRONTERA DEL DOMINÓ: lo que `network/amounts.ts` y `record-view.ts`
+// emiten. Las llaves de plata de cada forma, para `findBadAmounts`.
 const RECORD_KEYS = [
   "entryFee",
   "prize",
@@ -16,43 +16,36 @@ const RECORD_KEYS = [
   "additionalEntryFee",
 ];
 
-describe("ucOf: un número en UC como `{ uc }`", () => {
+describe("ucText: un número en UC como texto", () => {
   it.each([
-    [125, { uc: "125.0000" }],
-    [1.5, { uc: "1.5000" }],
-    [0, { uc: "0.0000" }],
-    [1e-7, { uc: "0.0000001" }],
+    [125, "125.0000"],
+    [1.5, "1.5000"],
+    [0, "0.0000"],
+    [1e-7, "0.0000001"],
   ])("%s → %j", (amount, expected) => {
-    expect(ucOf(amount)).toEqual(expected);
+    expect(ucText(amount)).toBe(expected);
   });
 
   // NUNCA REDONDEA: el ruido de un producto en coma flotante vuelve al MISMO número, que es lo que el
   // orquestador compara contra su planilla.
   it("conserva todos los dígitos y vuelve al mismo número", () => {
     const noisy = 0.1 + 0.1 * 2;
-    expect(Number(ucOf(noisy).uc)).toBe(noisy);
+    expect(Number(ucText(noisy))).toBe(noisy);
   });
 });
 
-describe("seatMoneyOf: un monto en la moneda del asiento", () => {
-  it("la moneda en minúsculas primero, `uc` después", () => {
-    const value = seatMoneyOf({ currency: "VES" }, "200", "2");
-    expect(JSON.stringify(value)).toBe('{"ves":"200","uc":"2.0000"}');
+describe("seatText: un monto en la moneda del asiento", () => {
+  it("sin decimales sale como vino", () => {
+    expect(seatText({ currency: "VES" }, "200")).toBe("200");
   });
 
   it("rellena con los decimales de la moneda y nunca recorta", () => {
-    expect(seatMoneyOf({ currency: "VES", decimals: 2 }, "200", "2")).toEqual({
-      ves: "200.00",
-      uc: "2.0000",
-    });
-    expect(seatMoneyOf({ currency: "USD", decimals: 2 }, "1.555", "1.555")).toEqual({
-      usd: "1.555",
-      uc: "1.5550",
-    });
+    expect(seatText({ currency: "VES", decimals: 2 }, "200")).toBe("200.00");
+    expect(seatText({ currency: "USD", decimals: 2 }, "1.555")).toBe("1.555");
   });
 
-  it("un asiento que paga en UC es `{ uc }` solo", () => {
-    expect(seatMoneyOf({ currency: "UC" }, "2", "2")).toEqual({ uc: "2.0000" });
+  it("un asiento que paga en UC lleva los 4 decimales de UC", () => {
+    expect(seatText({ currency: "UC" }, "2")).toBe("2.0000");
   });
 });
 
@@ -60,41 +53,40 @@ describe("seatPriceView: el precio de un asiento", () => {
   const price = {
     currency: "VES",
     rate: "200",
-    entry: "200.00",
+    entry: "200",
     prize: "360.00",
     levels: [
       { level: 2, entry: "200.00", prize: "720.00" },
-      { level: 3, entry: "400.00", prize: "1080.00" },
+      { level: 3, entry: "400.00", prize: "1080.5" },
     ],
+    decimals: 2,
   };
 
-  // EL `uc` SALE DE LA MESA con la regla del cobro: subir a N cobra entryFee × (N − 1) y paga prize × N.
-  it("cada monto con su `uc`, exacto y sin la `currency` hermana", () => {
-    const view = seatPriceView(price, { entryFee: 0.1, prize: 0.18 });
+  it("una entidad en su moneda, con la tasa de la mesa y sin `uc`", () => {
+    const view = seatPriceView(price, "rate-1");
     expect(view).toEqual({
+      currency: "VES",
+      rateId: "rate-1",
       rate: "200",
-      entry: { ves: "200.00", uc: "0.1000" },
-      prize: { ves: "360.00", uc: "0.1800" },
+      entry: "200.00",
+      prize: "360.00",
       levels: [
-        {
-          level: 2,
-          entry: { ves: "200.00", uc: "0.1000" },
-          prize: { ves: "720.00", uc: "0.3600" },
-        },
-        {
-          level: 3,
-          entry: { ves: "400.00", uc: "0.2000" },
-          prize: { ves: "1080.00", uc: "0.5400" },
-        },
+        { level: 2, entry: "200.00", prize: "720.00" },
+        { level: 3, entry: "400.00", prize: "1080.50" },
       ],
     });
-    expect(view).not.toHaveProperty("currency");
-    expect(findBareAmounts(view, RECORD_KEYS)).toEqual([]);
+    expect(view).not.toHaveProperty("decimals");
+    expect(JSON.stringify(view)).not.toContain('"uc"');
+    expect(findBadAmounts(view, RECORD_KEYS)).toEqual([]);
+  });
+
+  it("el código de moneda va tal cual", () => {
+    expect(seatPriceView({ ...price, currency: "USDT" }, "r").currency).toBe("USDT");
   });
 });
 
 describe("wireEventOf: los eventos que difunde la sala", () => {
-  it("`MULTIPLIER_AGREED` lleva lo que cuesta aceptar como `{ uc }`", () => {
+  it("`MULTIPLIER_AGREED` lleva lo que cuesta aceptar en UC, como texto", () => {
     const event = {
       type: "MULTIPLIER_AGREED",
       level: 2,
@@ -102,7 +94,12 @@ describe("wireEventOf: los eventos que difunde la sala", () => {
       additionalEntryFee: 125,
       playerIds: ["seat-1", "seat-2"],
     } as const;
-    expect(wireEventOf(event)).toEqual({ ...event, additionalEntryFee: { uc: "125.0000" } });
+    expect(wireEventOf(event)).toEqual({
+      ...event,
+      currency: "UC",
+      additionalEntryFee: "125.0000",
+    });
+    expect(findBadAmounts(wireEventOf(event), RECORD_KEYS)).toEqual([]);
     // El evento interno no se toca: lo sigue leyendo el cobro del aumento.
     expect(event.additionalEntryFee).toBe(125);
   });
@@ -117,7 +114,7 @@ describe("recordView: el registro como lo lee el panel", () => {
   const price = {
     currency: "VES",
     rate: "200",
-    entry: "25000.00",
+    entry: "25000",
     prize: "50000.00",
     levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
     decimals: 2,
@@ -140,7 +137,7 @@ describe("recordView: el registro como lo lee el panel", () => {
         chargedInUC: 250,
         prizePaidInUC: 500,
         chargedInPlayerCurrency: "50000.00",
-        prizePaidInPlayerCurrency: "100000.00",
+        prizePaidInPlayerCurrency: "100000",
       },
       {
         id: "seat-2",
@@ -151,6 +148,7 @@ describe("recordView: el registro como lo lee el panel", () => {
         prizePaidInUC: 0,
       },
     ],
+    rateId: "rate-1",
     betMultiplier: {
       offeredValues: [2],
       finalValue: 2,
@@ -169,60 +167,102 @@ describe("recordView: el registro como lo lee el panel", () => {
     ],
   };
 
-  it("une los montos en UC y en la moneda del jugador, con su tasa", () => {
+  const priceView = {
+    currency: "VES",
+    rateId: "rate-1",
+    rate: "200",
+    entry: "25000.00",
+    prize: "50000.00",
+    levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
+  };
+
+  it("la mesa en UC y cada asiento en su moneda, con la tasa de la partida", () => {
     const view = recordView(stored) as typeof stored & Record<string, unknown>;
     expect(view.table).toEqual({
       gameModeId: "g",
       name: "Clásica",
-      entryFee: { uc: "125.0000" },
-      prize: { uc: "250.0000" },
+      currency: "UC",
+      entryFee: "125.0000",
+      prize: "250.0000",
       isFree: false,
     });
+    expect(view.seats).toEqual([
+      { id: "seat-1", userId: "u1", currency: "VES", price: priceView },
+      { id: "seat-2", userId: "u2", currency: "VES" },
+    ]);
     expect(view.players).toEqual([
       {
+        currency: "VES",
+        rateId: "rate-1",
         id: "seat-1",
         userId: "u1",
-        currency: "VES",
-        price: {
-          rate: "200",
-          entry: { ves: "25000.00", uc: "125.0000" },
-          prize: { ves: "50000.00", uc: "250.0000" },
-          levels: [
-            {
-              level: 2,
-              entry: { ves: "25000.00", uc: "125.0000" },
-              prize: { ves: "100000.00", uc: "500.0000" },
-            },
-          ],
-        },
+        price: priceView,
         finalScore: 100,
-        charged: { ves: "50000.00", uc: "250.0000" },
-        prizePaid: { ves: "100000.00", uc: "500.0000" },
+        charged: "50000.00",
+        prizePaid: "100000.00",
       },
+      // SIN PRECIO, EN UC: el dominó no sabe cuánto fue en su moneda, y no lo inventa.
       {
+        currency: "UC",
+        rateId: "rate-1",
         id: "seat-2",
         userId: "u2",
-        currency: "VES",
         finalScore: 3,
-        charged: { uc: "250.0000" },
-        prizePaid: { uc: "0.0000" },
+        charged: "250.0000",
+        prizePaid: "0.0000",
       },
     ]);
     expect(view.betMultiplier).toEqual({
       offeredValues: [2],
       finalValue: 2,
-      resultingEntryFee: { uc: "250.0000" },
-      resultingPrize: { uc: "500.0000" },
+      currency: "UC",
+      resultingEntryFee: "250.0000",
+      resultingPrize: "500.0000",
       proposals: [],
     });
-    expect(view.timeline[1]?.payload).toMatchObject({ additionalEntryFee: { uc: "125.0000" } });
+    expect(view.timeline[1]?.payload).toEqual({
+      type: "MULTIPLIER_AGREED",
+      level: 2,
+      extra: 1,
+      currency: "UC",
+      additionalEntryFee: "125.0000",
+    });
     expect(view.rankingMultiplier).toEqual(stored.rankingMultiplier);
   });
 
-  it("no deja ningún monto suelto ni ninguna llave de antes", () => {
+  it("un asiento con precio que el cierre no dejó en su moneda queda en UC", () => {
+    const {
+      chargedInPlayerCurrency: _c,
+      prizePaidInPlayerCurrency: _p,
+      ...seat
+    } = stored.players[0] as (typeof stored.players)[0];
+    const view = recordView({ ...stored, players: [seat] }) as Record<string, unknown>;
+    expect(view.players).toEqual([
+      {
+        currency: "UC",
+        rateId: "rate-1",
+        id: "seat-1",
+        userId: "u1",
+        price: priceView,
+        finalScore: 100,
+        charged: "250.0000",
+        prizePaid: "500.0000",
+      },
+    ]);
+  });
+
+  it("una partida abierta (sin `rateId` todavía) publica el precio sin tasa", () => {
+    const { rateId: _r, players: _p, ...opened } = stored;
+    const view = recordView(opened) as Record<string, unknown>;
+    const [first] = view.seats as Record<string, unknown>[];
+    const { rateId: _none, ...withoutRate } = priceView;
+    expect(first?.price).toEqual(withoutRate);
+  });
+
+  it("no deja ningún monto fuera de la convención ni ninguna llave de antes", () => {
     const text = JSON.stringify(recordView(stored));
-    expect(findBareAmounts(recordView(stored), RECORD_KEYS)).toEqual([]);
-    for (const old of ["InUC", "InPlayerCurrency", '"currency":"VES","rate"']) {
+    expect(findBadAmounts(recordView(stored), RECORD_KEYS)).toEqual([]);
+    for (const old of ["InUC", "InPlayerCurrency", '"uc"', '"ves"']) {
       expect(text).not.toContain(old);
     }
   });

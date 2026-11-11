@@ -1,5 +1,5 @@
 import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
-import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
+import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG } from "../core/config";
 import { replayConfigOf } from "./match-contract";
@@ -16,7 +16,7 @@ import {
 // ni siquiera aceptaría. Va por `replayConfigOf` —la entrada del snapshot ya congelado— y no por
 // `configOf`, que desde la Tarea 10 pide además el `GameMode` resuelto: el registro indexa mesas
 // que ya nacieron, no las hace nacer.
-// Las llaves que llevan plata en el mensaje `config`, para `findBareAmounts`.
+// Las llaves que llevan plata en el mensaje `config`, para `findBadAmounts`.
 const MONEY_KEYS = ["entryFee", "prize", "entry"];
 
 const seat = (userId: string, index: number, currency = "VES") => ({
@@ -73,8 +73,9 @@ describe("MatchRegistry", () => {
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
-      entryFee: { uc: "125.0000" },
-      prize: { uc: "250.0000" },
+      currency: "UC",
+      entryFee: "125.0000",
+      prize: "250.0000",
       betLevels: [],
       isFreeRoom: false,
       enableBots: false,
@@ -153,24 +154,20 @@ describe("MatchRegistry", () => {
       timeouts,
     );
 
-    // EN LA CONVENCIÓN DE MONTOS: la moneda como llave y el `uc` de la mesa al lado (subir a x2 cobra
-    // 125 × 1 y paga 250 × 2), sin la `currency` hermana. Sin `decimals`, los textos salen como vinieron.
+    // EN LA CONVENCIÓN DE MONTOS v2: una entidad en su moneda (el código tal cual), con la tasa de la
+    // mesa con la que billing cotizó, y sin `uc`. Sin `decimals`, los textos salen como vinieron.
     const published = await registry.publicConfigOf("room-1");
     expect(published?.seatPrices).toEqual({
       "seat-1": {
+        currency: "VES",
+        rateId: roomOptions.rateId,
         rate: "200",
-        entry: { ves: "25000.00", uc: "125.0000" },
-        prize: { ves: "50000.00", uc: "250.0000" },
-        levels: [
-          {
-            level: 2,
-            entry: { ves: "25000.00", uc: "125.0000" },
-            prize: { ves: "100000.00", uc: "500.0000" },
-          },
-        ],
+        entry: "25000.00",
+        prize: "50000.00",
+        levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
       },
     });
-    expect(findBareAmounts(published, MONEY_KEYS)).toEqual([]);
+    expect(findBadAmounts(published, MONEY_KEYS)).toEqual([]);
     expect(JSON.stringify(published?.seatPrices)).not.toContain("u1");
     expect(await registry.publicConfigOf("room-404")).toBeUndefined();
   });
@@ -193,28 +190,27 @@ describe("MatchRegistry", () => {
       timeouts,
     );
     expect(published.seatPrices?.["seat-1"]).toEqual({
+      currency: "USD",
+      rateId: roomOptions.rateId,
       rate: "1",
-      entry: { usd: "125.00", uc: "125.0000" },
-      prize: { usd: "250.50", uc: "250.0000" },
-      levels: [
-        {
-          level: 3,
-          entry: { usd: "250.00", uc: "250.0000" },
-          prize: { usd: "751.555", uc: "750.0000" },
-        },
-      ],
+      entry: "125.00",
+      prize: "250.50",
+      levels: [{ level: 3, entry: "250.00", prize: "751.555" }],
     });
     expect(JSON.stringify(published)).not.toContain("decimals");
   });
 
-  // NINGÚN MONTO SUELTO: todo lo que el mensaje `config` lleva de plata es un objeto por moneda. Los
-  // `betLevels[].extra` no son plata (suman al multiplicador de puntos) y siguen siendo números.
-  it("no publica ningún monto suelto", () => {
+  // NINGÚN MONTO FUERA DE LA CONVENCIÓN: todo lo que el mensaje `config` lleva de plata es texto
+  // decimal, sin números ni objetos por moneda. Los `betLevels[].extra` no son plata (suman al
+  // multiplicador de puntos) y siguen siendo números.
+  it("no publica ningún monto fuera de la convención", () => {
     const published = publicConfigOf(
       { ...config, betLevels: [{ level: 2, extra: 1, additionalPoints: 10 }] },
       timeouts,
     );
-    expect(findBareAmounts(published, MONEY_KEYS)).toEqual([]);
+    expect(findBadAmounts(published, MONEY_KEYS)).toEqual([]);
+    expect(JSON.stringify(published)).not.toContain('"uc"');
+    expect(published.currency).toBe("UC");
     expect(published.betLevels).toEqual([{ level: 2, extra: 1, additionalPoints: 10 }]);
   });
 
@@ -306,8 +302,9 @@ describe("MatchRegistry", () => {
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
-      entryFee: { uc: "125.0000" },
-      prize: { uc: "250.0000" },
+      currency: "UC",
+      entryFee: "125.0000",
+      prize: "250.0000",
       betLevels: [],
       isFreeRoom: false,
       enableBots: false,
@@ -393,8 +390,9 @@ describe("MatchRegistry", () => {
       expect(raw).not.toContain(secret);
     }
     expect(JSON.parse(raw ?? "{}")).toMatchObject({
-      entryFee: { uc: "125.0000" },
-      prize: { uc: "250.0000" },
+      currency: "UC",
+      entryFee: "125.0000",
+      prize: "250.0000",
     });
   });
 

@@ -102,17 +102,20 @@ pieza del dominó.
   decimal de billing); el asiento lo congela, la config pública lo publica en `seatPrices` y el cierre
   elige lo cobrado y lo pagado en su moneda para `GET /me/matches`. Los montos en UC no cambian. Ver
   «Incremento completo — el precio en la moneda del jugador».
-- **Todo monto que el dominó emite va en la convención de montos** de Tablea Gaming (2026-11):
-  `{ ves: "25000.00", uc: "125.0000" }`, una llave por moneda y sin `currency` al lado. Vale para el
-  mensaje `config` y `GET /config/:roomId` (`entryFee`, `prize`, `seatPrices`), el estado
-  (`betOffer.additionalEntryFee`, un `MapSchema<string>` con solo `uc`), el evento `MULTIPLIER_AGREED`
-  al salir a la mesa, `GET /me/matches`, `domino.match.finished` (`stakes`, `payouts[].amount`) y las
-  lecturas del registro (`network/record-view.ts`). `src/shared/money.ts` es copia tal cual de
-  `packages/money` del orquestador (commit en la cabecera) y corre sus vectores; se cambia allá primero.
-  El motor, el snapshot y Mongo siguen con números en UC y textos: la forma es de la frontera
-  (`network/amounts.ts`). El `uc` nunca se redondea (el orquestador compara `Number(uc)` con su
-  planilla). `betLevels[].extra` no es plata y sigue siendo número. El orquestador puede mandar
-  `price.decimals` (aditivo) para rellenar la moneda del jugador. Ver `docs/api-y-mensajes.md`, «Montos».
+- **Todo monto que el dominó emite va en la convención de montos v2** de Tablea Gaming (2026-11): cada
+  entidad lleva un `currency` y sus montos son texto decimal plano en esa moneda, rellenado y sin
+  redondear, sin `uc` al lado. **La mesa está en UC** (`currency: "UC"`): el mensaje `config` y
+  `GET /config/:roomId` (`entryFee`, `prize`), el estado (`betOffer.additionalEntryFee`, un
+  `t.string()` en UC en el mismo índice que el número de antes), el evento `MULTIPLIER_AGREED` al salir
+  a la mesa, `domino.match.finished` (`stakes`, `payouts[]`) y la cabecera del registro. **Cada asiento
+  con precio está en su moneda** (el código de billing tal cual): `seatPrices[seat]` y el asiento del
+  registro, con el `rateId` de la mesa, y la fila de `GET /me/matches`; sin precio, en UC.
+  `src/shared/money.ts` es copia de `packages/money` del orquestador (commit en la cabecera, sin lo que
+  el dominó no usa) y corre sus vectores; se cambia allá primero. El motor, el snapshot y Mongo siguen
+  con números en UC y textos: la forma es de la frontera (`network/amounts.ts`,
+  `network/record-view.ts`). El texto en UC nunca se redondea (el orquestador compara `Number(texto)`
+  con su planilla). `betLevels[].extra` no es plata y sigue siendo número. Antes (v1, 2026-11-11) cada
+  monto era un objeto por moneda (`{ ves, uc }`). Ver `docs/api-y-mensajes.md`, «Montos».
 
 ## El plan es la autoridad
 

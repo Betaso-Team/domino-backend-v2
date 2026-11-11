@@ -30,75 +30,21 @@
     { "text": "10", "decimals": -1 },
     { "text": "10", "decimals": 1.5 }
   ],
-  "money": [
-    {
-      "currency": "VES",
-      "amount": "1000",
-      "decimals": 2,
-      "uc": "10",
-      "expected": { "ves": "1000.00", "uc": "10.0000" }
-    },
-    { "currency": "USD", "amount": "5.5", "decimals": 2, "expected": { "usd": "5.50" } },
-    { "currency": "ves", "amount": "1.005", "decimals": 2, "expected": { "ves": "1.005" } },
-    {
-      "currency": "VES",
-      "amount": "-150",
-      "decimals": 2,
-      "uc": "-1.5",
-      "expected": { "ves": "-150.00", "uc": "-1.5000" }
-    },
-    {
-      "currency": "VES",
-      "amount": "0",
-      "decimals": 2,
-      "uc": "0",
-      "expected": { "ves": "0.00", "uc": "0.0000" }
-    },
-    { "currency": "UC", "amount": "10", "decimals": 2, "expected": { "uc": "10.0000" } },
-    { "currency": "uc", "amount": "0.00001", "decimals": 2, "expected": { "uc": "0.00001" } },
-    {
-      "currency": "UC",
-      "amount": "10",
-      "decimals": 2,
-      "uc": "10.00",
-      "expected": { "uc": "10.0000" }
-    },
-    { "currency": "USDT", "amount": "3", "decimals": 6, "expected": { "usdt": "3.000000" } }
-  ],
-  "moneyErrors": [
-    { "currency": "UC", "amount": "10", "decimals": 4, "uc": "11" },
-    { "currency": "VE-S", "amount": "10", "decimals": 2 },
-    { "currency": "", "amount": "10", "decimals": 2 },
-    { "currency": "VES", "amount": 10, "decimals": 2 },
-    { "currency": "VES", "amount": "10", "decimals": 2, "uc": "1e1" }
-  ],
-  "ucOnly": [
-    { "amount": "10", "expected": { "uc": "10.0000" } },
-    { "amount": "-2.5", "expected": { "uc": "-2.5000" } }
-  ],
-  "toUc": [
-    { "amount": "1000.00", "rate": "100", "expected": "10.0000" },
-    { "amount": "1", "rate": "3", "expected": "0.3333" },
-    { "amount": "2", "rate": "3", "expected": "0.6667" },
-    { "amount": "-250", "rate": "3", "expected": "-83.3333" },
-    { "amount": "100", "rate": "36.57", "expected": "2.7345" },
-    { "amount": "36.50", "rate": "36.5", "expected": "1.0000" },
-    { "amount": "12345.67", "rate": "0.0001", "expected": "123456700.0000" },
-    { "amount": "0", "rate": "36.5", "expected": "0.0000" },
-    { "amount": "0.00005", "rate": "1", "expected": "0.0001" },
-    { "amount": "0.00004999", "rate": "1", "expected": "0.0000" },
-    { "amount": "-0.00005", "rate": "1", "expected": "-0.0001" },
-    { "amount": "-0.00001", "rate": "1", "expected": "0.0000" },
-    { "amount": "0.5", "rate": "10000", "expected": "0.0001" },
-    { "amount": "0.000049999999999999999995", "rate": "1", "expected": "0.0001" },
-    { "amount": "0.0000499999999999999949", "rate": "1", "expected": "0.0000" }
-  ],
-  "toUcErrors": [
-    { "amount": "10", "rate": "0" },
-    { "amount": "10", "rate": "0.000" },
-    { "amount": "10", "rate": "-1" },
-    { "amount": "abc", "rate": "1" },
-    { "amount": "10", "rate": "1e2" }
+  "isDecimal": [
+    { "value": "0", "expected": true },
+    { "value": "-12.5", "expected": true },
+    { "value": "1000.00", "expected": true },
+    { "value": "0.0001", "expected": true },
+    { "value": "1e5", "expected": false },
+    { "value": "01", "expected": false },
+    { "value": "+1", "expected": false },
+    { "value": "1.", "expected": false },
+    { "value": ".5", "expected": false },
+    { "value": "", "expected": false },
+    { "value": "1,5", "expected": false },
+    { "value": " 1", "expected": false },
+    { "value": 10, "expected": false },
+    { "value": null, "expected": false }
   ],
   "readAmount": [
     { "value": "1000.00", "currency": "VES", "expected": "1000.00" },
@@ -110,7 +56,13 @@
     { "value": 1e21, "currency": "VES", "expected": "1000000000000000000000" },
     { "value": { "ves": "1000.00", "uc": "10.0000" }, "currency": "VES", "expected": "1000.00" },
     { "value": { "ves": "1000.00", "uc": "10.0000" }, "currency": "UC", "expected": "10.0000" },
-    { "value": { "ves": "1000.00", "uc": "10.0000" }, "currency": "uc", "expected": "10.0000" }
+    { "value": { "ves": "1000.00", "uc": "10.0000" }, "currency": "uc", "expected": "10.0000" },
+    { "value": { "VES": "1000.00" }, "currency": "VES", "expected": "1000.00" },
+    { "value": { "VES": "1000.00" }, "currency": "ves", "expected": "1000.00" },
+    { "value": { "UC": "10.0000" }, "currency": "UC", "expected": "10.0000" },
+    { "value": { "uc": "10.0000" }, "currency": "UC", "expected": "10.0000" },
+    { "value": { "ves": "10.00", "VES": "10" }, "currency": "VES", "expected": "10" },
+    { "value": "10.0000", "currency": "UC", "expected": "10.0000" }
   ],
   "readAmountErrors": [
     { "value": null, "currency": "VES" },
@@ -120,6 +72,10 @@
     { "value": "1e5", "currency": "VES" },
     { "value": { "uc": "10.0000" }, "currency": "VES" },
     { "value": { "ves": 10 }, "currency": "VES" },
-    { "value": { "ves": "10" }, "currency": "VE-S" }
+    { "value": { "ves": "10" }, "currency": "VE-S" },
+    { "value": { "VES": 10 }, "currency": "VES" },
+    { "value": { "ves": "10.00", "VES": "11.00" }, "currency": "VES" },
+    { "value": { "usd": "10.00" }, "currency": "VES" },
+    { "value": "", "currency": "VES" }
   ]
 }

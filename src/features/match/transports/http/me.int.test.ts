@@ -90,14 +90,21 @@ describe("GET /me/matches: lo que jugó el dueño del token", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({
       items: [
-        { id: "m-1", result: "win", bet: { uc: "10.0000" }, prize: { uc: "18.0000" }, score: 104 },
+        {
+          id: "m-1",
+          result: "win",
+          currency: "UC",
+          bet: "10.0000",
+          prize: "18.0000",
+          score: 104,
+        },
       ],
       page: 1,
       perPage: 10,
       totalItems: 1,
     });
     expect(await (await get(`${base}/me/matches`, "tok-u2")).json()).toMatchObject({
-      items: [{ id: "m-1", result: "abandoned", prize: { uc: "0.0000" } }],
+      items: [{ id: "m-1", result: "abandoned", currency: "UC", prize: "0.0000" }],
     });
   });
 
