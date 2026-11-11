@@ -32,6 +32,11 @@ sentó, normalizado con `trim()`.
 El cliente no envía `playerId`: el handler lo toma del asiento autenticado. Cada payload pasa por un
 decoder estricto antes de alcanzar el comando.
 
+**Tope de mensajes**: cada conexión puede mandar hasta `MAX_MESSAGES_PER_SECOND` mensajes por segundo
+(default **25**); el que pasa el tope pierde la conexión (Colyseus la cierra con `1011`) y puede volver
+con su reserva o su token de reconexión. Los rechazos (`illegal`) se contestan siempre; en el log del
+servidor salen muestreados, cinco por minuto por asiento y clase, más una línea con los que se callaron.
+
 ### Reacciones
 
 `SEND_REACTION` `{ reactionId: string }` (de 1 a 64 caracteres; un campo de más, como el
@@ -372,8 +377,17 @@ es 400), discriminado por `mode`:
 | `400` | `{ code: "MALFORMED", detail }` | El cuerpo no cumple la forma |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `400` | `{ code: "MALFORMED", detail }` | También: una casual sin `gameMode`, o con un `gameMode` fuera de su forma; y **toda mesa de cuatro** (`gameMode.playersQuantity: 4`, o más de dos `participants`, casual o de torneo) |
+| `409` | `{ code: "MATCH_OPENING" }` | Otro pedido con el mismo `matchId` está abriendo la sala y no terminó en 5 s. Reintentable |
 | `422` | `{ code: "SEAT_COUNT_MISMATCH" }` | La sala rechazó la mesa: la cantidad de `participants` no es la del modo. Con sólo mesas de dos ya no se puede pedir por esta ruta (un modo de dos con dos participantes siempre coincide); queda como guarda de la sala |
 | `500` | `{ code: "INTERNAL" }` | Cualquier otra falla es nuestra |
+
+**Una sala por `matchId`.** Si la partida ya tiene sala viva —el orquestador reintentó un `POST` cuya
+respuesta se perdió—, la respuesta es `201` con **esa** sala y reservas nuevas, una por participante; no
+se abre otra. Dos pedidos simultáneos del mismo `matchId` los ordena un candado en Redis
+(`match_opening:<matchId>`, `SET NX` de 30 s): el que lo toma abre la sala y los demás esperan a que
+aparezca en el registro (hasta 5 s) y reservan en ella. Una partida cuya sala ya se cerró **no** tiene
+sala viva: un `POST` con ese `matchId` abre una nueva (el orquestador no debe repetir una partida
+terminada).
 
 **`POST /internal/players/:userId/seat`** devuelve el asiento de quien sigue jugando (sin cuerpo).
 
@@ -396,18 +410,30 @@ pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `PO
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló), o su sala ya no figura en el matchmaker: la entrada se borra |
 
-**`GET /internal/matches/:matchId/existence`** dice si una partida existe, y **nada más**: si su mesa sigue
-viva en el clúster (el registro compartido, la misma prueba que `.../seat`: su sala anotada por `matchId` y la
-config de esa sala presente) y si quedó registro de ella (el archivo de partidas, sin leer el documento). El
-orquestador lo pregunta antes de dar por perdida una mesa de torneo que nunca le contestó. El documento sigue
-siendo del panel (`GET /internal/matches/:matchId`, con `ADMIN_API_KEY`); esta ruta no lo devuelve.
+**`GET /internal/matches/:matchId/existence`** dice si una partida existe y en qué está su desenlace, y
+**nada más**:
+
+- **`live`**: su mesa sigue viva en el clúster (el registro compartido, la misma prueba que `.../seat`: su
+  sala anotada por `matchId` y la config de esa sala presente).
+- **`recorded`**: quedó registro de ella (el archivo de partidas, sin leer el documento).
+- **`outcome`**: su desenlace en el outbox de resultados (`match_result_outbox`, claves
+  `<matchId>:finished` y `<matchId>:aborted`):
+  - `"none"`: no hay ninguno;
+  - `"pending"`: hay uno que todavía no salió (`PENDING`, o `PARKED` esperando que alguien lo reproduzca);
+  - `"published"`: el broker lo confirmó (`SENT`). Lo enviado no se borra nunca (a los 7 días pierde el
+    cuerpo y queda la lápida), así que una partida publicada sigue contestando `published`.
+
+El orquestador aborta el ledger de una mesa casual paga —reembolsa las entradas— **sólo** con
+`live: false && outcome: "none"` pasada la duración máxima de una partida; también lo pregunta antes de dar
+por perdida una mesa de torneo. El documento sigue siendo del panel (`GET /internal/matches/:matchId`, con
+`ADMIN_API_KEY`); esta ruta no lo devuelve.
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status: "success", data: { live, recorded } }` | Siempre que el registro y la base contestan |
+| `200` | `{ status: "success", data: { live, recorded, outcome } }` | Siempre que el registro, la base y el outbox contestan |
 | `400` | `{ code: "MALFORMED", detail }` | El `matchId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `503` | `{ code: "UNAVAILABLE" }` | El registro compartido o la base no contestaron: **nunca** un `false` por una falla |
+| `503` | `{ code: "UNAVAILABLE" }` | El registro compartido, la base o el outbox no contestaron: **nunca** un `false` ni un `"none"` por una falla |
 
 El registro de una partida se escribe al **arrancar** el juego (el primer reparto, `MatchHistory.open`), y cada
 lote del juego lo crea si falta; las escrituras son de mejor esfuerzo. Una sala creada que nadie llegó a jugar
@@ -519,18 +545,26 @@ gameMode: {
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
 
 - **Con la mesa completa** (solo una casual; la de torneo arranca directo), la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
-  (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
+  (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`, `x-charge-deadline: <epoch ms>`) y espera. Con `200` arranca; con cualquier otra
   cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
   `CHARGE_REJECTED`. El plazo del cliente HTTP cubre la respuesta entera, cabeceras y cuerpo, y al
   vencer corta la conexión: un orquestador que manda las cabeceras y se cuelga en el cuerpo también es
   un plazo vencido, y la mesa no queda esperando el cobro.
 - **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
   anula (`MULTIPLIER_REVOKED`).
+- **`x-charge-deadline`** va en los dos cobros: el instante (epoch ms) en que el dominó deja de esperar,
+  ahora + su plazo —**10 s** la entrada, **15 s** el aumento—. Es exactamente el plazo con que el cliente
+  HTTP aborta la llamada (y el del `withTimeout` del aumento): pasado ese instante, el dominó ya dio el
+  cobro por no hecho (mesa cerrada `CHARGE_REJECTED`, aumento anulado), así que el orquestador no debe
+  completar después un cobro que no alcanzó a contestar.
 - **El resultado** sale por un outbox durable al exchange `tablea_gaming` (broker y vhost de
   `TABLEA_GAMING_RABBITMQ_URL`), con `mandatory` y publisher confirm: `domino.match.finished` al
   dictaminarse (participantes, apuesta de la mesa y los premios en `payouts`, ya con el aumento) y
   `domino.match.aborted` al cerrarse sin veredicto (sin montos: el orquestador devuelve lo que cobró).
-  `messageId = <matchId>:finished|aborted`.
+  `messageId = <matchId>:finished|aborted`. **Una partida publica uno solo de los dos, nunca ambos**: el
+  outbox tiene un índice único parcial sobre `exclusiveKey` (= `matchId`), y el segundo desenlace lo
+  rechaza la base. Una partida que murió con su proceso (OOM, `kill -9`) sale `aborted` con motivo
+  `INTERRUPTED` por la recuperación de partidas interrumpidas (`docs/operacion.md`).
 
 `domino.match.finished` (`MatchFinishedPayload`, en `network/match-results.ts`):
 
@@ -593,11 +627,11 @@ antes de mirar la forma.
 | `GET /internal/players/:userId/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
 | `GET`/`PATCH`/`DELETE /internal/settings/:section` | `404 SETTINGS_SECTION_NOT_FOUND` |
 | `GET /internal/settings` | — |
-| `POST /internal/matches` (orquestador) | `422 SEAT_COUNT_MISMATCH` |
+| `POST /internal/matches` (orquestador) | `409 MATCH_OPENING`, `422 SEAT_COUNT_MISMATCH` |
 | `POST /internal/players/:userId/seat` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/players/:userId/match` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/census` (orquestador) | — |
-| `GET /internal/matches/:matchId/existence` (orquestador) | — |
+| `GET /internal/matches/:matchId/existence` (orquestador) | `503 UNAVAILABLE` |
 
 Los `404` no llevan `detail`.
 

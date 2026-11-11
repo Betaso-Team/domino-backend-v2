@@ -142,6 +142,30 @@ pieza del dominó.
   registra el arnés de los E2E (`enableFourSeats()` en `features/match/tests/e2e-harness.ts`); producción
   no lo registra nunca. `replayConfigOf` sigue aceptando cuatro asientos (rebobina historia).
 
+- **Ningún resultado se pierde ni se duplica (2026-11-11, `fix/revision-recuperacion`).**
+  - **Un desenlace por partida**: el outbox lleva `exclusiveKey = matchId` con un índice único parcial
+    (`exclusiveKey_1`); `finished` y `aborted` de una partida no conviven, el segundo insert lo rechaza
+    Mongo. Es la garantía; las demás piezas eligen bien cuál gana.
+  - **Partidas interrumpidas** (`network/interrupted-matches.ts`): al arrancar y cada 2 min, bajo el lease
+    `interrupted-matches`, se publica `domino.match.aborted` `INTERRUPTED` (`<matchId>:aborted`) por cada
+    `match_history` abierto, sin escribir hace 10 min, sin mesa viva, sin `match_result_pending:<matchId>` y
+    sin desenlace en el outbox; el registro queda `aborted` con `recovery`. Sólo con Mongo.
+  - **El drenado de resultados** (`MatchResultRecorder.drain`) espera el bucle entero de cada resultado,
+    reintenta cada 250 ms hasta 20 s y al rendirse escribe el cuerpo entero a nivel `error`. No hay
+    transacción con el cierre del registro: el Mongo es un nodo solo (sin replica set).
+  - **El outbox no se traba**: `next()` por `(attempts, _id)`; una entrada que falla 5 veces con el broker
+    sano pasa a `PARKED` (nunca se borra; `/ready` → `gauges.match_results_parked`). Lo enviado no vence: a
+    los 7 días pierde el cuerpo (compactación) y queda la lápida.
+  - **`GET /internal/matches/:matchId/existence`** contesta `{ live, recorded, outcome }`, con `outcome`
+    `none | pending | published` (PENDING y PARKED son `pending`).
+  - **Cada cobro manda `x-charge-deadline`** (epoch ms = ahora + 10 s la entrada, 15 s el aumento), el mismo
+    plazo con que el cliente HTTP aborta.
+  - **Una sala por `matchId`** en `POST /internal/matches` (candado `match_opening:<matchId>` en Redis;
+    `409 MATCH_OPENING` si el otro no termina en 5 s). `MatchRegistry.release` es un Lua compare-and-delete.
+  - **25 mensajes por segundo por conexión** (`MAX_MESSAGES_PER_SECOND`) y log de rechazos muestreado.
+  - **Apagado**: `kill_timeout` 40 s, `stop_grace_period` 45 s. Cada deploy cancela las partidas en curso
+    con reembolso. Ver `docs/operacion.md`, «Resultados de partida» y «Apagado ordenado».
+
 ### Antes de habilitar dominó de 4
 
 Lo que se sabe roto o sin decidir en la mesa de cuatro, y que hay que resolver ANTES de agregar el 4 a
