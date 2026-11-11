@@ -73,8 +73,13 @@ export function describePlayerLogContract(
       const [u2] = (await log.pageOf("u2", 1, 10)).items.filter((row) => row.id === "m-finished");
 
       // LA SALA ES LO QUE EL JUGADOR VE Y DICTA A SOPORTE: viaja aunque la base proyecte la fila.
-      expect(u1).toMatchObject({ roomId: "room-1", result: "win", prize: 18, score: 104 });
-      expect(u2).toMatchObject({ result: "abandoned", prize: 0, score: 40 });
+      expect(u1).toMatchObject({
+        roomId: "room-1",
+        result: "win",
+        prize: { uc: "18.0000" },
+        score: 104,
+      });
+      expect(u2).toMatchObject({ result: "abandoned", prize: { uc: "0.0000" }, score: 40 });
     });
 
     it("pagina con la forma de truco", async () => {

@@ -215,7 +215,6 @@ describe("canProposeBet", () => {
         proposerId: "u2",
         level: 1,
         extra: 1,
-        additionalEntryFee: 10,
         additionalPoints: 0,
       },
     });
@@ -238,7 +237,7 @@ describe("canRespondBet", () => {
   const offered: ViewSetup = {
     ...base,
     roundPhase: "NEGOTIATING_BET",
-    betOffer: { proposerId: "u1", level: 1, extra: 1, additionalEntryFee: 10, additionalPoints: 0 },
+    betOffer: { proposerId: "u1", level: 1, extra: 1, additionalPoints: 0 },
   };
 
   it("contesta el que no propuso, le toque o no", () => {

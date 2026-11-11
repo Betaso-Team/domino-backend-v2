@@ -1,4 +1,5 @@
 import { type KeyValueStore, MemoryKeyValueStore } from "@/shared/kv";
+import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GLOBAL_CONFIG } from "../core/config";
 import { replayConfigOf } from "./match-contract";
@@ -15,6 +16,9 @@ import {
 // ni siquiera aceptaría. Va por `replayConfigOf` —la entrada del snapshot ya congelado— y no por
 // `configOf`, que desde la Tarea 10 pide además el `GameMode` resuelto: el registro indexa mesas
 // que ya nacieron, no las hace nacer.
+// Las llaves que llevan plata en el mensaje `config`, para `findBareAmounts`.
+const MONEY_KEYS = ["entryFee", "prize", "entry"];
+
 const seat = (userId: string, index: number, currency = "VES") => ({
   userId,
   displayName: `Jugador ${userId}`,
@@ -69,8 +73,8 @@ describe("MatchRegistry", () => {
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
-      entryFee: 125,
-      prize: 250,
+      entryFee: { uc: "125.0000" },
+      prize: { uc: "250.0000" },
       betLevels: [],
       isFreeRoom: false,
       enableBots: false,
@@ -149,10 +153,69 @@ describe("MatchRegistry", () => {
       timeouts,
     );
 
+    // EN LA CONVENCIÓN DE MONTOS: la moneda como llave y el `uc` de la mesa al lado (subir a x2 cobra
+    // 125 × 1 y paga 250 × 2), sin la `currency` hermana. Sin `decimals`, los textos salen como vinieron.
     const published = await registry.publicConfigOf("room-1");
-    expect(published?.seatPrices).toEqual({ "seat-1": price });
+    expect(published?.seatPrices).toEqual({
+      "seat-1": {
+        rate: "200",
+        entry: { ves: "25000.00", uc: "125.0000" },
+        prize: { ves: "50000.00", uc: "250.0000" },
+        levels: [
+          {
+            level: 2,
+            entry: { ves: "25000.00", uc: "125.0000" },
+            prize: { ves: "100000.00", uc: "500.0000" },
+          },
+        ],
+      },
+    });
+    expect(findBareAmounts(published, MONEY_KEYS)).toEqual([]);
     expect(JSON.stringify(published?.seatPrices)).not.toContain("u1");
     expect(await registry.publicConfigOf("room-404")).toBeUndefined();
+  });
+
+  // CON LOS DECIMALES DE LA MONEDA (aditivo del orquestador) el texto se rellena; nunca se recorta.
+  it("rellena cada monto con los decimales de la moneda, si el precio los trae", () => {
+    const price = {
+      currency: "USD",
+      rate: "1",
+      entry: "125",
+      prize: "250.5",
+      levels: [{ level: 3, entry: "250", prize: "751.555" }],
+      decimals: 2,
+    };
+    const published = publicConfigOf(
+      replayConfigOf({
+        ...roomOptions,
+        seats: [{ ...seat("u1", 0, "USD"), price }, seat("u2", 1)],
+      }),
+      timeouts,
+    );
+    expect(published.seatPrices?.["seat-1"]).toEqual({
+      rate: "1",
+      entry: { usd: "125.00", uc: "125.0000" },
+      prize: { usd: "250.50", uc: "250.0000" },
+      levels: [
+        {
+          level: 3,
+          entry: { usd: "250.00", uc: "250.0000" },
+          prize: { usd: "751.555", uc: "750.0000" },
+        },
+      ],
+    });
+    expect(JSON.stringify(published)).not.toContain("decimals");
+  });
+
+  // NINGÚN MONTO SUELTO: todo lo que el mensaje `config` lleva de plata es un objeto por moneda. Los
+  // `betLevels[].extra` no son plata (suman al multiplicador de puntos) y siguen siendo números.
+  it("no publica ningún monto suelto", () => {
+    const published = publicConfigOf(
+      { ...config, betLevels: [{ level: 2, extra: 1, additionalPoints: 10 }] },
+      timeouts,
+    );
+    expect(findBareAmounts(published, MONEY_KEYS)).toEqual([]);
+    expect(published.betLevels).toEqual([{ level: 2, extra: 1, additionalPoints: 10 }]);
   });
 
   it("sin precio en ningún asiento no publica `seatPrices`", () => {
@@ -243,8 +306,8 @@ describe("MatchRegistry", () => {
       gameModeId: "clasica-2p",
       seats: ["seat-1", "seat-2"],
       pointsToWin: 100,
-      entryFee: 125,
-      prize: 250,
+      entryFee: { uc: "125.0000" },
+      prize: { uc: "250.0000" },
       betLevels: [],
       isFreeRoom: false,
       enableBots: false,
@@ -329,7 +392,10 @@ describe("MatchRegistry", () => {
     for (const secret of ["u1", "u2", "VES", "USD", privateConfig.rateId]) {
       expect(raw).not.toContain(secret);
     }
-    expect(JSON.parse(raw ?? "{}")).toMatchObject({ entryFee: 125, prize: 250 });
+    expect(JSON.parse(raw ?? "{}")).toMatchObject({
+      entryFee: { uc: "125.0000" },
+      prize: { uc: "250.0000" },
+    });
   });
 
   // Entre que un jugador dejó esta sala y que esta sala se entera, el jugador puede haberse

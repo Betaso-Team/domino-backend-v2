@@ -159,6 +159,15 @@ describe("requestOf: el precio de cada asiento", () => {
     expect(requestOf(input).participants[0]?.price?.levels).toEqual([]);
   });
 
+  it("acepta los decimales de la moneda (aditivo) y los deja en el precio", () => {
+    expect(configFrom(withPrice({ decimals: 2 })).seats[0]?.price).toEqual({
+      ...price,
+      decimals: 2,
+    });
+    expect(configFrom(withPrice({ decimals: 0 })).seats[0]?.price?.decimals).toBe(0);
+    expect(configFrom(withPrice()).seats[0]?.price).not.toHaveProperty("decimals");
+  });
+
   it("sin precio en nadie el pedido es el de siempre", () => {
     expect(requestOf(request).participants.every((seat) => seat.price === undefined)).toBe(true);
   });
@@ -188,6 +197,11 @@ describe("requestOf: el precio de cada asiento", () => {
       { levels: Array.from({ length: 17 }, (_, i) => ({ level: i + 2, entry: "1", prize: "1" })) },
     ],
     ["una clave de más", { extra: "1" }],
+    ["una clave de más junto a los decimales", { decimals: 2, extra: "1" }],
+    ["decimales negativos", { decimals: -1 }],
+    ["decimales no enteros", { decimals: 2.5 }],
+    ["más de 8 decimales", { decimals: 9 }],
+    ["decimales como texto", { decimals: "2" }],
     ["un nivel con una clave de más", { levels: [{ level: 2, entry: "1", prize: "1", x: 1 }] }],
   ])("rechaza %s", (_name, overrides) => {
     expect(() => requestOf(withPrice(overrides))).toThrow();

@@ -5,6 +5,7 @@ import { validated } from "@/shared/http/validated";
 import { Router } from "express";
 import { z } from "zod";
 import type { HistoryReader } from "../../network/history";
+import { entryView } from "../../network/record-view";
 
 // En una const para que el aviso de arranque y el `app.get` no puedan divergir: el warn
 // existe para que el operador encuentre ESTA ruta, no una parecida.
@@ -101,7 +102,8 @@ export function historyRoutes({
       }
       // El `matchId` que sale es el PARSEADO, no `request.params`: lo que se refleja al
       // cliente pasó por el schema, que es la mitad de la razón para validarlo acá.
-      response.json({ matchId: params.matchId, entries });
+      // El único monto de la timeline (`MULTIPLIER_AGREED`) sale en la convención (`entryView`).
+      response.json({ matchId: params.matchId, entries: entries.map(entryView) });
     }),
   );
   return router;

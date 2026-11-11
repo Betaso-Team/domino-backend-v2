@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
 import { mintAdminToken } from "@/tests/billing-auth-keys";
 import { fakeOrchestrator } from "@/tests/fake-orchestrator";
 import { CASUAL_2P } from "@/tests/table-modes";
@@ -62,8 +63,9 @@ describe("el registro de una partida jugada", () => {
       table: {
         gameModeId: CASUAL_2P.uuid,
         name: CASUAL_2P.gameMode.name,
-        entryFeeInUC: 125,
-        prizeInUC: 250,
+        // EN LA CONVENCIÓN DE MONTOS: Mongo guarda `entryFeeInUC`, el panel lee `{ uc }`.
+        entryFee: { uc: "125.0000" },
+        prize: { uc: "250.0000" },
         isFree: false,
       },
       matchConfig: {
@@ -84,10 +86,13 @@ describe("el registro de una partida jugada", () => {
     expect(players.map((player) => player.userId)).toEqual(["rec1", "rec2"]);
     for (const player of players) {
       expect(player).toMatchObject({
-        chargedInUC: 125,
-        prizePaidInUC: player.teamId === winnerTeamId ? 250 : 0,
+        charged: { uc: "125.0000" },
+        prizePaid: { uc: player.teamId === winnerTeamId ? "250.0000" : "0.0000" },
       });
     }
+    expect(findBareAmounts(record, ["entryFee", "prize", "entry", "charged", "prizePaid"])).toEqual(
+      [],
+    );
     expect(record?.winnerIds).toEqual(
       players.filter((player) => player.teamId === winnerTeamId).map((player) => player.id),
     );
@@ -168,7 +173,10 @@ describe("el registro de las partidas que no terminan jugando", () => {
         matchConfig: { seed: match.config.seed },
       });
       expect(record).not.toHaveProperty("matchStartedAt");
-      expect((record?.players as Doc[]).map((player) => player.chargedInUC)).toEqual([0, 0]);
+      expect((record?.players as Doc[]).map((player) => player.charged)).toEqual([
+        { uc: "0.0000" },
+        { uc: "0.0000" },
+      ]);
     } finally {
       fakeOrchestrator.failEntryWith(undefined);
     }
@@ -183,8 +191,12 @@ describe("el registro de las partidas que no terminan jugando", () => {
     const record = await recordOf(match.config.matchId);
     expect(record).toMatchObject({ status: "finished", matchEndReason: "ABANDONMENT" });
     const [left, stayed] = record?.players as Doc[];
-    expect(left).toMatchObject({ userId: "rec5", exit: { reason: "LEFT" }, prizePaidInUC: 0 });
-    expect(stayed).toMatchObject({ userId: "rec6", prizePaidInUC: 250 });
+    expect(left).toMatchObject({
+      userId: "rec5",
+      exit: { reason: "LEFT" },
+      prizePaid: { uc: "0.0000" },
+    });
+    expect(stayed).toMatchObject({ userId: "rec6", prizePaid: { uc: "250.0000" } });
     expect(stayed).not.toHaveProperty("exit");
     expect((record?.rounds as Doc[]).at(-1)).toMatchObject({ endReason: "MATCH_ABANDONED" });
   });
@@ -212,16 +224,28 @@ describe("el registro y el historial en la moneda del jugador", () => {
 
     const record = await recordOf(match.config.matchId);
     const [priced, plain] = record?.players as Doc[];
+    // EL PANEL LO LEE EN LA CONVENCIÓN: lo que Mongo guarda en dos campos (`chargedInUC` y
+    // `chargedInPlayerCurrency`) sale en un objeto, con la moneda como llave y el `uc` de la mesa.
     expect(priced).toMatchObject({
       userId: "rec7",
-      price,
-      chargedInUC: 125,
-      prizePaidInUC: 250,
-      chargedInPlayerCurrency: "25000.00",
-      prizePaidInPlayerCurrency: "50000.00",
+      price: {
+        rate: "200",
+        entry: { ves: "25000.00", uc: "125.0000" },
+        prize: { ves: "50000.00", uc: "250.0000" },
+        levels: [
+          {
+            level: 2,
+            entry: { ves: "25000.00", uc: "125.0000" },
+            prize: { ves: "100000.00", uc: "500.0000" },
+          },
+        ],
+      },
+      charged: { ves: "25000.00", uc: "125.0000" },
+      prizePaid: { ves: "50000.00", uc: "250.0000" },
     });
+    expect(priced).not.toHaveProperty("chargedInPlayerCurrency");
     expect(plain).not.toHaveProperty("price");
-    expect(plain).not.toHaveProperty("chargedInPlayerCurrency");
+    expect(plain).toMatchObject({ charged: { uc: "125.0000" }, prizePaid: { uc: "0.0000" } });
 
     const rowOf = async (userId: string) => {
       const response = await fetch(`${base}/me/matches`, {
@@ -230,16 +254,18 @@ describe("el registro y el historial en la moneda del jugador", () => {
       const page = (await response.json()) as { items: Doc[] };
       return page.items.find((item) => item.id === match.config.matchId);
     };
+    // LA FILA EN LA CONVENCIÓN DE MONTOS: la moneda del jugador como llave, con su `uc`.
     expect(await rowOf("rec7")).toMatchObject({
       result: "win",
-      bet: 125,
-      prize: 250,
-      currency: "VES",
-      betInPlayerCurrency: "25000.00",
-      prizeInPlayerCurrency: "50000.00",
+      bet: { ves: "25000.00", uc: "125.0000" },
+      prize: { ves: "50000.00", uc: "250.0000" },
     });
     const other = await rowOf("rec8");
-    expect(other).toMatchObject({ result: "abandoned", bet: 125, prize: 0 });
+    expect(other).toMatchObject({
+      result: "abandoned",
+      bet: { uc: "125.0000" },
+      prize: { uc: "0.0000" },
+    });
     expect(other).not.toHaveProperty("currency");
   });
 });
@@ -304,10 +330,19 @@ describe("el registro de una mesa con el modo en línea", () => {
     const record = await recordOf(match.config.matchId);
     expect(record).toMatchObject({
       status: "finished",
-      table: { gameModeId, name: "Modo del orquestador", entryFeeInUC: 3, prizeInUC: 5 },
+      table: {
+        gameModeId,
+        name: "Modo del orquestador",
+        entryFee: { uc: "3.0000" },
+        prize: { uc: "5.0000" },
+      },
       matchConfig: { pointsToWin: 60 },
     });
     const [, stayed] = record?.players as Doc[];
-    expect(stayed).toMatchObject({ userId: "rec12", chargedInUC: 3, prizePaidInUC: 5 });
+    expect(stayed).toMatchObject({
+      userId: "rec12",
+      charged: { uc: "3.0000" },
+      prizePaid: { uc: "5.0000" },
+    });
   });
 });

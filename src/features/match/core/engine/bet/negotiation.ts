@@ -1,3 +1,4 @@
+import { UC_KEY, readAmount, ucOnly } from "@/shared/money";
 import type { BetLevel } from "../../config";
 import type { PlayerId } from "../../ids";
 import type { MatchState } from "../../state";
@@ -44,7 +45,10 @@ export class BetNegotiation {
     offer.level = option.level;
     offer.extra = option.extra;
     offer.additionalPoints = option.additionalPoints;
-    offer.additionalEntryFee = additionalEntryFee;
+    // EN LA CONVENCIÓN DE MONTOS, porque el estado ES el wire: `{ uc: "10.0000" }`. Su forma decimal
+    // más corta y sin redondear, así que `settle` lo vuelve a leer como el MISMO número.
+    const { uc } = ucOnly(readAmount(additionalEntryFee, UC_KEY));
+    if (uc !== undefined) offer.additionalEntryFee.set(UC_KEY, uc);
     offer.turnRemainingMs = turnRemainingMs;
     currentRoundOf(this.match).betOffer = offer;
   }
@@ -74,7 +78,9 @@ export class BetNegotiation {
       this.match.acceptedBetExtra = offer.extra;
       this.match.acceptedBetLevel = offer.level;
     }
-    const { turnRemainingMs, level, extra, additionalEntryFee } = offer;
+    const { turnRemainingMs, level, extra } = offer;
+    // El texto que `open` escribió es la forma más corta del número, así que vuelve idéntico.
+    const additionalEntryFee = Number(offer.additionalEntryFee.get(UC_KEY) ?? "0");
     round.betOffer = undefined;
     return {
       accepted,

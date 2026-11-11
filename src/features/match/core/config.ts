@@ -66,6 +66,11 @@ export interface SeatPrice {
     readonly entry: string;
     readonly prize: string;
   }[];
+  /**
+   * Los decimales de la moneda, para rellenar los montos al emitirlos (`"200"` → `"200.00"`). Opcional:
+   * un orquestador viejo y una partida grabada antes no lo traen, y sin él el texto sale como vino.
+   */
+  readonly decimals?: number;
 }
 
 /** De qué clase es la mesa: casual (con dinero, con su modo) o de un torneo (gratis, sin modo). */
