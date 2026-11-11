@@ -186,6 +186,10 @@ const playerKey = (userId: string) => `player_match:${userId}`;
 // conocer su sala. Con el mismo TTL y el mismo latido que la config.
 const matchKey = (matchId: string) => `match_room:${matchId}`;
 const CENSUS_KEY = "live_seats";
+// UN RESULTADO QUE UN PROCESO VIVO TIENE EN MEMORIA Y NO PUDO ENCOLAR (Mongo caído): la recuperación de
+// partidas interrumpidas no la toca. Con plazo, renovado en cada reintento: si el proceso muere, vence.
+const pendingResultKey = (matchId: string) => `match_result_pending:${matchId}`;
+export const PENDING_RESULT_TTL_SECONDS = 180;
 
 // EL PLAZO DE TODAS ELLAS, y el latido que lo renueva. Son una sola decisión y no dos:
 //
@@ -441,6 +445,20 @@ export class MatchRegistry {
     }
   }
 
+  /** La marca de `PendingResultMarks` (`network/match-results.ts`). */
+  async holdResult(matchId: string): Promise<void> {
+    await this.store.setex(pendingResultKey(matchId), "1", PENDING_RESULT_TTL_SECONDS);
+  }
+
+  async releaseResult(matchId: string): Promise<void> {
+    this.store.del(pendingResultKey(matchId));
+  }
+
+  /** Si algún proceso vivo tiene el resultado de esa partida en memoria. Rechaza si Redis no contesta. */
+  async resultHeld(matchId: string): Promise<boolean> {
+    return (await this.store.get(pendingResultKey(matchId))) !== undefined;
+  }
+
   // LA ENTRADA QUE DEJÓ UN PROCESO MUERTO (truco `53d1030`). Un `kill -9` o un OOM no corre `onDispose`,
   // así que `player_match` sigue apuntando a una sala que ya no existe hasta que vence su plazo
   // (`TTL_SECONDS`), y mientras tanto el orquestador no puede volver a sentar al jugador. La borra
@@ -453,12 +471,10 @@ export class MatchRegistry {
   // Soltar a un jugador es borrar SU clave, y SOLO SI sigue apuntando acá: entre que dejó esta
   // sala y que esta sala se entera, el jugador puede haberse sentado en otra mesa —en este
   // proceso o en otro—, y borrar a ciegas lo dejaría sin partida justo cuando acaba de empezar
-  // una. El chequeo no es atómico y no hace falta que lo sea: la ventana que queda es la de una
-  // clave que caduca sola en dos minutos.
+  // una. ATÓMICO (`delIfEquals`, un Lua en Redis): con un `get` y un `del` separados, la mesa nueva
+  // que escribe la clave entre los dos perdía al jugador, y el orquestador le abría una tercera.
   private async release(userId: string, roomId: string): Promise<void> {
-    if ((await this.store.get(playerKey(userId))) === roomId) {
-      this.store.del(playerKey(userId));
-    }
+    await this.store.delIfEquals(playerKey(userId), roomId);
   }
 }
 

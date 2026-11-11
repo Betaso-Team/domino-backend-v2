@@ -66,7 +66,8 @@ import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
 import { MongoOutboxStore } from "@/shared/mongo-outbox";
 import { MemoryOutboxStore, type OutboxStore, TopicOutboxDispatcher } from "@/shared/outbox";
-import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
+import { DominoRedisPresence } from "@/shared/redis-presence";
+import { type MatchMakerDriver, type Presence, RedisDriver } from "colyseus";
 import { container } from "tsyringe";
 import { env, isTestingEnvironment } from "./env";
 import { type Logger, logger } from "./logger";
@@ -120,9 +121,9 @@ rootContainer.register<AdminTokenCheck>("AdminTokenCheck", {
 // Se EXPORTAN en vez de registrarse contra un token, por el mismo motivo que `mongo` de más
 // abajo: no son colaboradores que alguien resuelva, son piezas del proceso que el otro
 // composition root necesita nombrar.
-export const presence: Presence | undefined = env.redisUrl
-  ? new RedisPresence(env.redisUrl)
-  : undefined;
+// `DominoRedisPresence` es el `RedisPresence` de Colyseus más el compare-and-delete del registro.
+const redisPresence = env.redisUrl ? new DominoRedisPresence(env.redisUrl) : undefined;
+export const presence: Presence | undefined = redisPresence;
 export const driver: MatchMakerDriver | undefined = env.redisUrl
   ? new RedisDriver(env.redisUrl)
   : undefined;
@@ -135,7 +136,9 @@ export const driver: MatchMakerDriver | undefined = env.redisUrl
 //
 // Sin Redis queda el de memoria, que NO es un doble: es la implementación del proceso único,
 // igual que `MemoryHistory` más abajo.
-const store: KeyValueStore = presence ?? new MemoryKeyValueStore();
+const store: KeyValueStore =
+  (redisPresence as (Presence & Pick<KeyValueStore, "delIfEquals">) | undefined) ??
+  new MemoryKeyValueStore();
 
 // EL REGISTRO DE PARTIDAS VIVAS, que ya no es del proceso sino del CLÚSTER: sus dos respuestas
 // —el config público del endpoint HTTP y en qué sala está sentado un jugador— salen del almacén
@@ -233,6 +236,12 @@ const matchResultRecorder = new MatchResultRecorder({
   wake: () => matchResultDispatcher?.wake(),
   now: () => clock.now(),
   log: logger,
+  // LA MARCA COMPARTIDA del resultado que este proceso tiene en memoria sin poder encolarlo: la
+  // recuperación de partidas interrumpidas no la toca (ver `interrupted-matches.ts`).
+  marks: {
+    hold: (matchId) => matchRegistry.holdResult(matchId),
+    release: (matchId) => matchRegistry.releaseResult(matchId),
+  },
 });
 rootContainer.register(MatchResultRecorder, { useValue: matchResultRecorder });
 // Para la suite: lo encolado, sin broker.

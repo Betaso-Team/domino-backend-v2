@@ -349,6 +349,7 @@ describe("MatchResultRecorder", () => {
       "orq-1:aborted",
       "domino.match.aborted",
       expect.objectContaining({ reason: "INTERRUPTED" }),
+      { exclusiveKey: "orq-1" },
     );
   });
 
@@ -397,6 +398,7 @@ describe("MatchResultRecorder", () => {
       expect.any(String),
       expect.any(String),
       expect.objectContaining({ reason: "CHARGE_REJECTED" }),
+      expect.anything(),
     );
   });
 
@@ -473,6 +475,108 @@ describe("MatchResultRecorder", () => {
     settle();
     await draining;
     expect(enqueued).toBe(true);
+  });
+});
+
+// MONGO CAÍDO EN EL APAGADO: el drenado sigue reintentando hasta su plazo; si se rinde, el resultado
+// queda ENTERO en el log. Y la marca compartida dice que el resultado está en memoria mientras falla.
+describe("MatchResultRecorder: el apagado con Mongo caído", () => {
+  const aborted = [{ type: "MATCH_ABORTED", reason: "INTERRUPTED" } as const];
+
+  it("drain sigue reintentando, no sólo el primer intento, hasta que entra", async () => {
+    let up = false;
+    const enqueue = vi.fn(async () => {
+      if (!up) throw new Error("mongo caído");
+      return true;
+    });
+    const recorder = new MatchResultRecorder({
+      outbox: { enqueue },
+      wake: vi.fn(),
+      now: () => AT.getTime(),
+      log: silentLogger(),
+      // Sin el drenado, el próximo intento sería en una hora.
+      retryBaseMs: 3_600_000,
+    });
+    recorder.sinkFor(config, createMatchState(config), "room-9")(aborted);
+    await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
+
+    const draining = recorder.drain(5_000);
+    setTimeout(() => {
+      up = true;
+    }, 600);
+    await draining;
+
+    expect(enqueue.mock.calls.length).toBeGreaterThan(2);
+    expect(enqueue.mock.results.at(-1)?.type).toBe("return");
+  });
+
+  it("al vencer el plazo se rinde y escribe el cuerpo entero a nivel error", async () => {
+    const log = silentLogger();
+    const recorder = new MatchResultRecorder({
+      outbox: {
+        enqueue: async () => {
+          throw new Error("mongo caído");
+        },
+      },
+      wake: vi.fn(),
+      now: () => AT.getTime(),
+      log,
+      retryBaseMs: 1,
+    });
+    recorder.sinkFor(config, createMatchState(config), "room-9")(aborted);
+
+    await recorder.drain(300);
+
+    expect(log.error).toHaveBeenCalledWith(
+      "resultado de partida SIN ENCOLAR: el apagado se rindió; reproducir a mano",
+      {
+        key: "orq-1:aborted",
+        routingKey: "domino.match.aborted",
+        payload: expect.objectContaining({ matchId: "orq-1", reason: "INTERRUPTED" }),
+      },
+    );
+  });
+
+  it("si la partida ya tenía el OTRO desenlace, lo dice con el cuerpo entero", async () => {
+    const log = silentLogger();
+    const recorder = new MatchResultRecorder({
+      outbox: { enqueue: async () => false, present: async () => new Set(["orq-1:finished"]) },
+      wake: vi.fn(),
+      now: () => AT.getTime(),
+      log,
+    });
+    recorder.sinkFor(config, createMatchState(config), "room-9")(aborted);
+    await recorder.drain(1_000);
+
+    expect(log.error).toHaveBeenCalledWith(
+      "la partida ya tenía el OTRO desenlace en el outbox; éste no se publica",
+      expect.objectContaining({ key: "orq-1:aborted" }),
+    );
+  });
+
+  it("marca el resultado mientras falla y lo desmarca al entrar", async () => {
+    let calls = 0;
+    const marks = { hold: vi.fn(async () => {}), release: vi.fn(async () => {}) };
+    const recorder = new MatchResultRecorder({
+      outbox: {
+        enqueue: async () => {
+          calls += 1;
+          if (calls < 3) throw new Error("mongo caído");
+          return true;
+        },
+      },
+      wake: vi.fn(),
+      now: () => AT.getTime(),
+      log: silentLogger(),
+      marks,
+      retryBaseMs: 1,
+    });
+    recorder.sinkFor(config, createMatchState(config), "room-9")(aborted);
+    await recorder.drain(2_000);
+
+    expect(marks.hold).toHaveBeenCalledTimes(2);
+    expect(marks.hold).toHaveBeenCalledWith("orq-1");
+    expect(marks.release).toHaveBeenCalledOnce();
   });
 });
 

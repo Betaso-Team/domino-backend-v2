@@ -27,6 +27,10 @@ export interface KeyValueStore {
   // `record` y `of`: borrar pasa por el camino de una sala que se está muriendo, y ahí no hay a
   // quién devolverle el error.
   del(key: string): void;
+  // BORRA SÓLO SI LA CLAVE TODAVÍA TIENE ESE VALOR, en UNA operación del servidor (en Redis, un script
+  // Lua: `src/shared/redis-presence.ts`). Un `get` seguido de un `del` deja una ventana en la que otro
+  // escribe un valor nuevo y el `del` se lo lleva. @returns si borró.
+  delIfEquals(key: string, value: string): Promise<boolean>;
   sadd(key: string, value: string): Promise<unknown>;
   srem(key: string, value: string): Promise<unknown>;
   smembers(key: string): Promise<string[]>;
@@ -73,6 +77,13 @@ export class MemoryKeyValueStore implements KeyValueStore {
 
   del(key: string): void {
     this.entries.delete(key);
+  }
+
+  // Atómico por construcción: el event loop no intercala nada entre la lectura y el borrado.
+  async delIfEquals(key: string, value: string): Promise<boolean> {
+    if (this.live(key)?.value !== value) return false;
+    this.entries.delete(key);
+    return true;
   }
 
   async sadd(key: string, value: string): Promise<unknown> {

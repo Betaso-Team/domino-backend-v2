@@ -905,6 +905,7 @@ function countingStore() {
       calls.push(`del:${key}`);
       inner.del(key);
     },
+    delIfEquals: track("delIfEquals", (key, value) => inner.delIfEquals(key, value)),
     sadd: track("sadd", (key, value) => inner.sadd(key, value)),
     srem: track("srem", (key, value) => inner.srem(key, value)),
     smembers: track("smembers", (key) => inner.smembers(key)),
@@ -946,11 +947,7 @@ describe("MatchRegistry: el latido por hecho no escribe de más", () => {
 
     await registry.settle("room-1", ["u2"]);
 
-    expect(counting.calls).toEqual([
-      "get:player_match:u1",
-      "del:player_match:u1",
-      "hset:live_seats",
-    ]);
+    expect(counting.calls).toEqual(["delIfEquals:player_match:u1", "hset:live_seats"]);
     expect(await registry.matchOf("u1")).toBeUndefined();
     expect(await registry.matchOf("u2")).toBe("room-1");
     expect(await registry.census()).toMatchObject({ playersInMatch: 1 });
@@ -1008,17 +1005,16 @@ describe("MatchRegistry: el latido por hecho no escribe de más", () => {
 
     await registry.keepAlive("room-1", ["u2"]);
 
-    // config + la sala de la partida + el `setex` de u2 + el `get` del release de u1, los cuatro a la vez.
+    // config + la sala de la partida + el `setex` de u2 + el compare-and-delete de u1, a la vez.
     expect(counting.maxInFlight()).toBe(4);
     expect(counting.calls.at(-1)).toBe("hset:live_seats");
-    expect(counting.calls).toHaveLength(6);
+    expect(counting.calls).toHaveLength(5);
     expect(counting.calls).toEqual(
       expect.arrayContaining([
         "setex:match_config:room-1",
         "setex:match_room:m1",
         "setex:player_match:u2",
-        "get:player_match:u1",
-        "del:player_match:u1",
+        "delIfEquals:player_match:u1",
       ]),
     );
   });
