@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import type { Logger } from "@/logger";
 import type { Admin, AdminTokenCheck } from "@/shared/http/api-key";
 import { httpErrorHandler } from "@/shared/http/error-handler";
-import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
+import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { routesOf } from "@/tests/routes";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -184,17 +184,19 @@ describe("recordRoutes: lo que contestan", () => {
       roomId: "room-m-3",
       game: "domino",
       status: "started",
-      // LOS MONTOS EN LA CONVENCIÓN (`recordView`): Mongo guarda `entryFeeInUC`, el panel lee `{ uc }`.
+      // LOS MONTOS EN LA CONVENCIÓN (`recordView`): Mongo guarda `entryFeeInUC`, el panel lee la mesa
+      // como entidad en UC.
       table: {
         gameModeId: SETUP.table.gameModeId,
         name: SETUP.table.name,
-        entryFee: { uc: "10.0000" },
-        prize: { uc: "18.0000" },
+        currency: "UC",
+        entryFee: "10.0000",
+        prize: "18.0000",
         isFree: SETUP.table.isFree,
       },
       matchStartedAt: new Date(1_000).toISOString(),
     });
-    expect(findBareAmounts(body.data.items, RECORD_MONEY_KEYS)).toEqual([]);
+    expect(findBadAmounts(body.data.items, RECORD_MONEY_KEYS)).toEqual([]);
     // UN RESUMEN: ni la secuencia ni las manos, que son lo grande del documento.
     for (const item of body.data.items) {
       expect(item).not.toHaveProperty("timeline");
@@ -384,12 +386,14 @@ describe("recordRoutes: lo que contestan", () => {
     });
     expect(body.data._id).toMatch(/^[0-9a-f]{24}$/);
     expect(Object.keys(body.data).slice(-2)).toEqual(["rounds", "timeline"]);
-    // NINGÚN MONTO SUELTO: la cabecera, los asientos, la plata de cada uno y el aumento, en la convención.
-    expect(findBareAmounts(body.data, RECORD_MONEY_KEYS)).toEqual([]);
-    expect(JSON.stringify(body.data)).not.toMatch(/InUC|InPlayerCurrency/);
+    // NINGÚN MONTO FUERA DE LA CONVENCIÓN: la cabecera, los asientos, la plata de cada uno y el
+    // aumento, cada entidad con su `currency`.
+    expect(findBadAmounts(body.data, RECORD_MONEY_KEYS)).toEqual([]);
+    expect(JSON.stringify(body.data)).not.toMatch(/InUC|InPlayerCurrency|"uc"/);
     expect(body.data.table).toMatchObject({
-      entryFee: { uc: "10.0000" },
-      prize: { uc: "18.0000" },
+      currency: "UC",
+      entryFee: "10.0000",
+      prize: "18.0000",
     });
   });
 
@@ -414,8 +418,8 @@ describe("recordRoutes: lo que contestan", () => {
     expect(body).not.toHaveProperty("_id");
     expect(body).not.toHaveProperty("status", "success");
     expect((body.timeline as unknown[]).length).toBe(1);
-    expect(findBareAmounts(body, RECORD_MONEY_KEYS)).toEqual([]);
-    expect(body.table).toMatchObject({ entryFee: { uc: "10.0000" } });
+    expect(findBadAmounts(body, RECORD_MONEY_KEYS)).toEqual([]);
+    expect(body.table).toMatchObject({ currency: "UC", entryFee: "10.0000" });
   });
 
   it("`/game-data` de una partida que no está guardada es 404 `MATCH_NOT_FOUND`", async () => {

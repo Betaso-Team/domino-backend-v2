@@ -1,8 +1,8 @@
 import type { Logger } from "@/shared/logger";
-import type { Money } from "@/shared/money";
+import { UC } from "@/shared/money";
 import { type DominoMatchConfig, type MatchMode, modeOf } from "../core/config";
 import type { MatchState } from "../core/state";
-import { ucOf } from "./amounts";
+import { ucText } from "./amounts";
 import type { AbortReason, NetworkMatchEvent } from "./events";
 import type { MatchEventSink } from "./listeners";
 import { payoutOf } from "./payout";
@@ -63,14 +63,17 @@ export interface MatchFinishedPayload {
   /** aditivo: el marcador final por equipo. */
   readonly finalScore: { readonly A: number; readonly B: number };
   /**
-   * LOS MONTOS EN LA CONVENCIÓN (`network/amounts.ts`), desde 2026-11: `{ uc: "2.0000" }` donde antes iba
-   * el número en UC. Solo `uc`: la mesa es de todos sus asientos, y el orquestador tiene la cotización de
-   * cada uno en su planilla. `multiplier` y `bet.extra` NO son plata —pesos de los puntos del ranking— y
-   * siguen siendo números. El orquestador lee las dos formas (su lector tolerante, unidad 1a).
+   * LOS MONTOS EN LA CONVENCIÓN v2 (`network/amounts.ts`): una entidad en UC, `currency: "UC"` y cada
+   * monto como texto con 4 decimales (`"2.0000"`), donde antes iba el número en UC (y en v1, el objeto
+   * `{ uc }`). Está en UC porque la mesa es de todos sus asientos, y el orquestador tiene la cotización de
+   * cada uno en su planilla, con el `rateId` de arriba. `multiplier` y `bet.extra` NO son plata —pesos
+   * de los puntos del ranking— y siguen siendo números. El orquestador lee las tres formas (su lector
+   * tolerante, unidad 1a).
    */
   readonly stakes: {
-    readonly entryFee: Money;
-    readonly prize: Money;
+    readonly currency: typeof UC;
+    readonly entryFee: string;
+    readonly prize: string;
     readonly multiplier: number;
     readonly isFreeRoom: boolean;
     readonly bet: { readonly level: number; readonly extra: number } | null;
@@ -82,8 +85,15 @@ export interface MatchFinishedPayload {
     /** aditivo */
     readonly abandon: ParticipantAbandon;
   }[];
-  /** Desde 2026-11, `amount: { uc }` en vez de `amountUc: number`; el orquestador lee los dos. */
-  readonly payouts: readonly { readonly userId: string; readonly amount: Money }[];
+  /**
+   * Cada premio es una entidad en UC: `{ userId, currency: "UC", amount: "36.0000" }`. Antes fue
+   * `amountUc: number` y, en v1, `amount: { uc }`; el orquestador lee las tres.
+   */
+  readonly payouts: readonly {
+    readonly userId: string;
+    readonly currency: typeof UC;
+    readonly amount: string;
+  }[];
 }
 
 export interface MatchAbortedPayload {
@@ -163,8 +173,9 @@ export function matchResultOf(
       roundsPlayed: match.pastRounds.length,
       finalScore: { A: match.scoreboard?.teamA ?? 0, B: match.scoreboard?.teamB ?? 0 },
       stakes: {
-        entryFee: ucOf(config.entryFee),
-        prize: ucOf(config.prize),
+        currency: UC,
+        entryFee: ucText(config.entryFee),
+        prize: ucText(config.prize),
         multiplier: config.multiplier,
         isFreeRoom: config.isFreeRoom,
         bet:
@@ -185,11 +196,12 @@ export function matchResultOf(
               : "lost",
         abandon: abandonOf(player),
       })),
-      // `ucOf` no redondea: el orquestador compara `Number(amount.uc)` contra su planilla, y el texto
+      // `ucText` no redondea: el orquestador compara `Number(amount)` contra su planilla, y el texto
       // vuelve al mismo número que `payoutOf` calculó.
       payouts: (reward?.entries ?? []).map(({ userId, amount }) => ({
         userId,
-        amount: ucOf(amount),
+        currency: UC,
+        amount: ucText(amount),
       })),
     },
   };

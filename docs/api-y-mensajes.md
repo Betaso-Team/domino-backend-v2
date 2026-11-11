@@ -74,8 +74,9 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
   gameModeId: string;           // en una de torneo, "tournament:<tournamentId>"
   seats: string[];              // ids opacos: "seat-1", "seat-2"…
   pointsToWin: number;
-  entryFee: Money;              // { uc: "125.0000" } (ver «Montos», abajo)
-  prize: Money;                 // { uc: "250.0000" }
+  currency: "UC";               // la moneda de la mesa: siempre UC (ver «Montos», abajo)
+  entryFee: string;             // "125.0000"
+  prize: string;                // "250.0000"
   // `extra` y `additionalPoints` NO son plata: pesos de los puntos del ranking. Siguen siendo números.
   betLevels: { level: number; extra: number; additionalPoints: number }[]; // [] = no ofrece aumentar
   isFreeRoom: boolean;
@@ -85,10 +86,12 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
   // asientos que trajeron `price` en el pedido; ausente si ninguno (mesa gratis, orquestador viejo).
   seatPrices?: {
     [playerId: string]: {
-      rate: string;             // la tasa que billing congeló, como texto
-      entry: Money;             // lo que costó sentarse: { ves: "25000.00", uc: "125.0000" }
-      prize: Money;             // lo que cobra cada ganador sin aumento
-      levels: { level: number; entry: Money; prize: Money }[]; // subir a ese nivel cobra `entry`
+      currency: string;         // la moneda del asiento, el código de billing tal cual: "VES"
+      rateId: string;           // la tasa de la mesa, con la que billing cotizó estos montos
+      rate: string;             // lo que vale 1 UC en `currency`, como lo congeló billing
+      entry: string;            // lo que costó sentarse: "25000.00"
+      prize: string;            // lo que cobra cada ganador sin aumento
+      levels: { level: number; entry: string; prize: string }[]; // subir a ese nivel cobra `entry`
     };
   };
   serverNow: number;            // epoch ms del servidor al mandarlo, para el desfase de reloj
@@ -96,15 +99,16 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
 ```
 
 El front toma `seatPrices[<su playerId>]` (el `playerId` de su asiento en el estado) y pinta entrada,
-premio y cada aumento en la moneda del jugador: la llave que no es `uc` (la moneda ya no viaja en un
-`currency` aparte). Sin entrada para su asiento, sigue en UC. Los montos en su moneda son los que cotizó
-billing: no se convierten ni se redondean, y se rellenan con los decimales de la moneda solo si el
-orquestador los mandó (`price.decimals`). El `uc` de cada uno es el de la mesa: `entryFee`, `prize`, y
-para el nivel N `entryFee × (N − 1)` y `prize × N`. `entryFee` y `prize` de arriba son lo que billing
+premio y cada aumento en la moneda del jugador, la de su `currency`. Sin entrada para su asiento, sigue
+en UC con los montos de la mesa. Los montos en su moneda son los que cotizó billing: no se convierten ni
+se redondean, y se rellenan con los decimales de la moneda solo si el orquestador los mandó
+(`price.decimals`). Lo que eso vale en UC es lo de la mesa: `entryFee`, `prize`, y para el nivel N
+`entryFee × (N − 1)` y `prize × N`; quien quiera la conversión exacta consulta la tasa `rateId`
+(`GET /v1/rates/:rateId` de billing, por el gateway). `entryFee` y `prize` de arriba son lo que billing
 cobra.
 
-Nunca lleva el `seed`, ni identidad, ni el `rateId` de la mesa; moneda y tasa salen sólo dentro de
-`seatPrices` (el precio del rival es visible: no es secreto). Lo que la sala manda en `onJoin` Colyseus lo
+Nunca lleva el `seed` ni identidad. La moneda, la tasa y el `rateId` de cada asiento salen sólo dentro
+de `seatPrices` (el precio del rival es visible: no es secreto). Lo que la sala manda en `onJoin` Colyseus lo
 encola hasta que el cliente confirma la entrada, así que llega apenas resuelve el `join` y antes de
 cualquier `events` posterior. El handler se registra **justo después del `join`, sin un `await` en
 el medio** (por ejemplo, no después de `waitForInitialState()`): si no, el mensaje llega antes que el
@@ -122,9 +126,9 @@ handler. Un cliente que no lo escucha solo ve un aviso del SDK.
   `PlayerState`.
 - La moneda no es del estado: vive en el `seat` de la config del servidor y no viaja por wire.
 - La oferta de aumento en curso (`currentRound.betOffer`) lleva `additionalEntryFee`, lo que le cuesta
-  aceptar a cada asiento, como un mapa en la convención de montos con solo `uc`
-  (`MapSchema<string>`: `{ uc: "125.0000" }`). Es de toda la mesa: lo mismo en la moneda de cada uno
-  está en `seatPrices[seat].levels`.
+  aceptar a cada asiento, como texto decimal en UC (`"125.0000"`): la moneda es la de la mesa, el
+  `currency: "UC"` del mensaje `config`. Es de toda la mesa: lo mismo en la moneda de cada uno está en
+  `seatPrices[seat].levels`.
 - Las fichas colocadas, el turno, puntajes, fases y deadlines son públicos.
 
 ## HTTP público
@@ -135,7 +139,7 @@ handler. Un cliente que no lo escucha solo ve un aviso del SDK.
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
 | `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts` y, opcional, `seatPrices` por `seat-N`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
-| `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `score`, `playedAt`; y `bet` y `prize` en la convención de montos: `{ ves: "400.00", uc: "4.0000" }` si su asiento se sentó con `price` —la moneda congelada al cerrar—, y `{ uc }` si no). Página de 1 a 50, 10 por defecto |
+| `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `score`, `playedAt`; y `currency`, `bet` y `prize` en la convención de montos: `{ currency: "VES", bet: "400.00", prize: "720.00" }` si su asiento se sentó con `price` —la moneda congelada al cerrar—, y en `UC` si no). Página de 1 a 50, 10 por defecto |
 | `GET /reactions` | La lista de gestos de `SEND_REACTION`, sin credencial (ver abajo) |
 
 **`GET /reactions`** responde con `Cache-Control: public, max-age=300` la lista fija del dominó (vive
@@ -242,7 +246,7 @@ un rango vacío, no un error.
         "roomId": "ZYIVoz6TQ",
         "game": "domino",
         "status": "finished",
-        "table": { "gameModeId": "…", "name": "Clásica 1v1", "entryFee": { "uc": "10.0000" }, "prize": { "uc": "18.0000" }, "isFree": false },
+        "table": { "gameModeId": "…", "name": "Clásica 1v1", "currency": "UC", "entryFee": "10.0000", "prize": "18.0000", "isFree": false },
         "createdAt": "2026-10-22T14:00:00.000Z",
         "updatedAt": "2026-10-22T14:09:31.000Z",
         "matchStartedAt": "2026-10-22T14:00:03.000Z",
@@ -289,20 +293,21 @@ mirar la forma. El `POST /internal/matches` del orquestador es otra ruta, con su
 
 **El registro en la convención de montos.** Mongo guarda los montos como siempre, y el listado, el
 detalle, `/game-data` y `GET /internal/matches/:matchId/history` los traducen al salir
-(`network/record-view.ts`). Lo que no reconocen lo dejan como está: un documento de antes de la v2.1
-sale igual, y un campo que falta no se inventa.
+(`network/record-view.ts`): **la mesa en UC y cada asiento en su moneda**, cada uno con su `currency`.
+Lo que no reconocen lo dejan como está: un documento de antes de la v2.1 sale igual, y un campo que
+falta no se inventa.
 
 | En Mongo | En la respuesta |
 |---|---|
-| `table.entryFeeInUC: 10`, `table.prizeInUC: 18` | `table.entryFee: { "uc": "10.0000" }`, `table.prize: { "uc": "18.0000" }` |
-| `seats[].price`, `players[].price`: `{ currency, rate, entry, prize, levels, decimals? }` con textos | `{ rate, entry, prize, levels }` con cada monto `{ "ves": "…", "uc": "…" }` (el `uc` de la mesa, como en `seatPrices`) |
-| `players[].chargedInUC: 20` + `chargedInPlayerCurrency: "4000.00"` | `players[].charged: { "ves": "4000.00", "uc": "20.0000" }` (`{ uc }` solo si el asiento no tiene precio) |
-| `players[].prizePaidInUC` + `prizePaidInPlayerCurrency` | `players[].prizePaid: { "ves": "…", "uc": "…" }` |
-| `betMultiplier.resultingEntryFeeInUC`, `resultingPrizeInUC` | `betMultiplier.resultingEntryFee`, `resultingPrize`: `{ uc }` |
-| `timeline[]` `MULTIPLIER_AGREED`: `payload.additionalEntryFee: 125` | `payload.additionalEntryFee: { "uc": "125.0000" }` |
+| `table.entryFeeInUC: 10`, `table.prizeInUC: 18` | `table: { currency: "UC", entryFee: "10.0000", prize: "18.0000", … }` |
+| `seats[].price`, `players[].price`: `{ currency, rate, entry, prize, levels, decimals? }` | `{ currency: "VES", rateId, rate, entry: "4000.00", prize, levels }`: rellenado con `decimals`, con el `rateId` de la partida (sin él mientras la partida sigue abierta, porque el documento todavía no lo tiene) |
+| `players[]`: `chargedInUC: 20`, `prizePaidInUC: 36`, `chargedInPlayerCurrency: "4000.00"`, `prizePaidInPlayerCurrency: "7200.00"` | `players[]: { currency: "VES", rateId, …, charged: "4000.00", prizePaid: "7200.00" }`; sin montos en su moneda (sin precio, o un aumento que el precio no cotizó), `{ currency: "UC", rateId, …, charged: "20.0000", prizePaid: "36.0000" }` |
+| `betMultiplier.resultingEntryFeeInUC`, `resultingPrizeInUC` | `betMultiplier: { currency: "UC", resultingEntryFee, resultingPrize, … }` |
+| `timeline[]` `MULTIPLIER_AGREED`: `payload.additionalEntryFee: 125` | `payload: { currency: "UC", additionalEntryFee: "125.0000", … }` |
 
-`seats[].currency` (la moneda del jugador) se queda: es del asiento, no de un monto. `rankingMultiplier`
-y `betMultiplier.offeredValues`/`finalValue` no son plata.
+En `players[]`, `currency` es la moneda de los montos del asiento y va primero, con el `rateId` de la
+partida. En `seats[]` (el armado, sin montos propios) `currency` sigue siendo la moneda de la billetera
+que congeló el asiento. `rankingMultiplier` y `betMultiplier.offeredValues`/`finalValue` no son plata.
 
 **Config en caliente.** Una edición llega a las mesas que nacen DESPUÉS; una mesa ya abierta conserva
 los plazos con los que nació. El proceso que atiende el `PATCH` se refresca en el acto y el resto
@@ -503,9 +508,9 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
 | `endReason` | Más fino: `SCORE_DOMINO` o `SCORE_BLOCKED` (cómo cerró la última mano), `ABANDONMENT_VOLUNTARY` (alguien del equipo perdedor se rindió con `ABANDON`) o `ABANDONMENT_TIMEOUT` (al equipo perdedor lo retiró el reloj) |
 | `roundsPlayed` | Manos cerradas; la que se cortó por un abandono no cuenta |
 | `finalScore` | `{ A, B }`: el marcador final por equipo |
-| `stakes` | `{ entryFee, prize, multiplier, isFreeRoom, bet: { level, extra } \| null }`. `entryFee` y `prize` en la convención de montos, `{ "uc": "10.0000" }`; `multiplier` y `bet.extra` son pesos del ranking y van como número. En una de torneo, `{ uc: "0.0000" }`, `{ uc: "0.0000" }`, `1`, `true`, `null` |
+| `stakes` | `{ currency: "UC", entryFee, prize, multiplier, isFreeRoom, bet: { level, extra } \| null }`. Una entidad en UC: `entryFee` y `prize` como texto con 4 decimales (`"10.0000"`); `multiplier` y `bet.extra` son pesos del ranking y van como número. En una de torneo, `"UC"`, `"0.0000"`, `"0.0000"`, `1`, `true`, `null` |
 | `participants` | `[{ userId, teamId, result, abandon }]`; `result` es `won`, `lost` o `abandoned` (el asiento que juega la máquina cuenta como `abandoned`); `abandon` es `voluntary` (dijo `ABANDON`), `timeout` (lo retiró el reloj, en la ventana de reparto o en su turno) o `null` (terminó sentado) |
-| `payouts` | `[{ userId, amount: { uc } }]`: los premios que se deben, calculados por `payoutOf` (bots y retirados no cobran; el aumento aceptado va adentro). Solo créditos: el juego no dice qué se cobró |
+| `payouts` | `[{ userId, currency: "UC", amount: "18.0000" }]`: los premios que se deben, calculados por `payoutOf` (bots y retirados no cobran; el aumento aceptado va adentro). Solo créditos: el juego no dice qué se cobró |
 
 Los campos `mode`, `tournamentId`, `startedAt`, `endReason`, `roundsPlayed`, `finalScore` y
 `participants[].abandon` llegaron con los torneos (2026-11) y son **aditivos**: los consumidores parsean
@@ -586,44 +591,61 @@ ya está en el historial como comando; no se duplica como evento salvo que exist
 
 El único evento con plata es `MULTIPLIER_AGREED` (`{ level, extra, additionalEntryFee, playerIds }`).
 Adentro `additionalEntryFee` es un número en UC: lo lee el cobro del aumento y así lo graba la timeline.
-Al salir a la mesa (`events`) y en las lecturas del historial va en la convención de montos,
-`{ "uc": "125.0000" }` (`wireEventOf`, en `network/amounts.ts`).
+Al salir a la mesa (`events`) y en las lecturas del historial va en la convención de montos, como
+entidad en UC: `currency: "UC"` y `additionalEntryFee: "125.0000"` (`wireEventOf`, en
+`network/amounts.ts`).
 
 ## Montos
 
-Todo monto que el dominó **emite** sigue la convención de Tablea Gaming
-(`docs/convenciones/montos.md` del monorepo del orquestador): un objeto con una llave por moneda, en
-minúsculas, y el monto en texto decimal, `{ "ves": "25000.00", "uc": "125.0000" }`, sin un `currency`
-al lado. El código es `src/shared/money.ts`, copia tal cual de `packages/money/src/money.ts` del
-orquestador (commit `8e9732e`), con sus vectores (`money.vectors.json`, que corre `money.test.ts`).
+Todo monto que el dominó **emite** sigue la convención de Tablea Gaming (`docs/convenciones/montos.md`
+del monorepo del orquestador, v2): cada **entidad** lleva un `currency`, y todos sus montos están en
+esa moneda como **texto decimal plano**, rellenado con los decimales de la moneda y nunca redondeado:
+`{ "currency": "UC", "entryFee": "125.0000", "prize": "250.0000" }`. El código es
+`src/shared/money.ts`, copia de `packages/money/src/money.ts` del orquestador (commit `c9222ea`, sin lo
+que el dominó no usa), con sus vectores (`money.vectors.json`, que corre `money.test.ts`).
 
-- **`uc`** es el número en UC de la mesa (el catálogo del orquestador, congelado en el snapshot), con 4
-  decimales y **sin redondear**: el texto vuelve al mismo `number` con `Number(texto)`, que es lo que el
-  orquestador compara contra su planilla.
-- **La moneda del jugador** va solo si el asiento trajo `price`: es el texto que cotizó billing,
-  rellenado con `price.decimals` si vino. Un monto sin precio sale `{ "uc": "…" }` solo: el dominó no
-  sabe cuánto fue en la otra moneda y no lo inventa.
+- **La mesa está en UC** (`currency: "UC"`): el mensaje `config`, `stakes` y `payouts` del resultado,
+  la oferta de aumento del estado, `MULTIPLIER_AGREED` y la cabecera del registro. Sus montos son los
+  números del catálogo del orquestador, congelados en el snapshot, con 4 decimales y **sin redondear**:
+  el texto vuelve al mismo `number` con `Number(texto)`, que es lo que el orquestador compara contra su
+  planilla.
+- **Cada asiento con precio está en su moneda**: `seatPrices[seat]`, la fila de `GET /me/matches` y el
+  asiento del registro llevan el `currency` del precio (el código de billing tal cual, `VES`) y los
+  textos que billing cotizó, rellenados con `price.decimals` si vino. El precio y el asiento cerrado
+  llevan además el **`rateId`** de la mesa: la tasa con la que billing cotizó.
+- **Sin `uc`.** Ningún monto trae su equivalente en UC al lado: quien quiera la conversión consulta la
+  tasa `rateId` (`GET /v1/rates/:rateId` de billing, por el gateway).
+- **Un asiento sin precio está en UC** (las gratis, las de torneo, las de un orquestador viejo): el
+  dominó no sabe cuánto fue en la otra moneda y no lo inventa.
 - **Lo que no es plata sigue siendo número**: `betLevels[].extra`, `additionalPoints`, `multiplier`,
-  `stakes.bet.extra` y `rankingMultiplier` son pesos de los puntos del ranking.
+  `stakes.bet.extra` y `rankingMultiplier` son pesos de los puntos del ranking. `rate` es una tasa, no
+  un monto, y va como el texto que congeló billing.
 - **Las entradas no cambian**: el `CreateMatchRequest` del orquestador (`gameMode.entryFee`,
-  `participants[].price`) conserva su forma, con `price.decimals` como único agregado.
+  `participants[].price`, con `price.decimals`) conserva su forma.
 - **Lo que se guarda tampoco**: Mongo y el snapshot conservan sus números y textos; la forma es de la
-  frontera.
+  frontera (`network/amounts.ts`, `network/record-view.ts`).
 
-Qué cambió (2026-11), salida por salida:
+Salida por salida:
 
-| Dónde | Antes | Ahora |
-|---|---|---|
-| Mensaje `config` y `GET /config/:roomId`, `GET /matches/:roomId` | `entryFee: 125`, `prize: 250` | `entryFee: { uc: "125.0000" }`, `prize: { uc: "250.0000" }` |
-| Ídem, `seatPrices[seat]` | `{ currency: "VES", rate, entry: "25000.00", prize: "50000.00", levels: [{ level, entry: "…", prize: "…" }] }` | `{ rate, entry: { ves, uc }, prize: { ves, uc }, levels: [{ level, entry: { ves, uc }, prize: { ves, uc } }] }` |
-| Estado: `currentRound.betOffer.additionalEntryFee` | `number` (UC) | `MapSchema<string>`: `{ uc: "125.0000" }` |
-| Evento `MULTIPLIER_AGREED` (mensaje `events`) | `additionalEntryFee: 125` | `additionalEntryFee: { uc: "125.0000" }` |
-| `GET /me/matches`, `GET /internal/players/:userId/matches` | `bet: 20`, `prize: 36` y, con precio, `currency`, `betInPlayerCurrency`, `prizeInPlayerCurrency` | `bet: { ves: "4000.00", uc: "20.0000" }`, `prize: { ves: "7200.00", uc: "36.0000" }` (o `{ uc }` sin precio) |
-| `domino.match.finished` | `stakes.entryFee: 10`, `stakes.prize: 18`, `payouts[].amountUc: 18` | `stakes.entryFee: { uc: "10.0000" }`, `stakes.prize: { uc: "18.0000" }`, `payouts[].amount: { uc: "18.0000" }` |
-| `GET /internal/matches[/:matchId]`, `GET /game-data/:roomId`, `GET /internal/matches/:matchId/history` | `*InUC` y `*InPlayerCurrency` por separado, `price` con `currency` | Un objeto por monto (tabla en «El registro en la convención de montos») |
+| Dónde | Forma |
+|---|---|
+| Mensaje `config`, `GET /config/:roomId`, `GET /matches/:roomId` | `currency: "UC"`, `entryFee: "125.0000"`, `prize: "250.0000"` |
+| Ídem, `seatPrices[seat]` | `{ currency: "VES", rateId, rate: "200", entry: "25000.00", prize: "50000.00", levels: [{ level, entry, prize }] }` |
+| Estado: `currentRound.betOffer.additionalEntryFee` | `string` en UC, la moneda de la mesa: `"125.0000"` |
+| Evento `MULTIPLIER_AGREED` (mensaje `events`) | `currency: "UC"`, `additionalEntryFee: "125.0000"` |
+| `GET /me/matches`, `GET /internal/players/:userId/matches` | `{ currency: "VES", bet: "4000.00", prize: "7200.00" }` (o `currency: "UC"` sin precio) |
+| `domino.match.finished` | `stakes: { currency: "UC", entryFee: "10.0000", prize: "18.0000", … }`, `payouts: [{ userId, currency: "UC", amount: "18.0000" }]`, y el `rateId` de la mesa |
+| `GET /internal/matches[/:matchId]`, `GET /game-data/:roomId`, `GET /internal/matches/:matchId/history` | La mesa en UC y cada asiento en su moneda (tabla en «El registro en la convención de montos») |
 
-Los consumidores: el orquestador ya lee las dos formas de `domino.match.finished` (su lector tolerante,
-unidad 1a del plan de montos), así que el cambio de emisor es seguro aun con mensajes viejos en el
+> **Antes (v1, 2026-11-11).** Cada monto era un objeto con una llave por moneda en minúsculas y su `uc`
+> al lado, sin `currency`: `entryFee: { uc: "125.0000" }`, `seatPrices[seat].entry: { ves:
+> "25000.00", uc: "125.0000" }`, `betOffer.additionalEntryFee` un `MapSchema<string>` con solo `uc`,
+> `bet: { ves: "4000.00", uc: "20.0000" }` y `payouts[].amount: { uc: "18.0000" }`. Y antes de eso, los
+> montos de la mesa eran números en UC (`entryFee: 125`, `payouts[].amountUc: 18`) y el precio del
+> asiento traía `currency` sin `rateId`.
+
+Los consumidores: el orquestador lee las tres formas de `domino.match.finished` (su lector tolerante,
+unidad 1a del plan de montos v2), así que el cambio de emisor es seguro aun con mensajes viejos en el
 outbox. El front de dominó (mensaje `config`, estado, `events`, `/me/matches`), el panel (listado,
 detalle e historial de partidas) y el backend principal de Betaso (`/game-data`, que muestra el
 documento) se adaptan aparte.

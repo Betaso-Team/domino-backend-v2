@@ -1,6 +1,6 @@
 import { rootContainer } from "@/di-container";
 import { env } from "@/env";
-import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
+import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { bootTestServer, casualTable, mintToken, waitUntil } from "@/tests/e2e";
 import { CASUAL_4P } from "@/tests/table-modes";
 import { matchMaker } from "@colyseus/core";
@@ -204,20 +204,16 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
       seatPrices?: unknown;
     };
     expect(config.seats).toEqual(["seat-1", "seat-2"]);
-    // EN LA CONVENCIÓN DE MONTOS: la moneda como llave y el `uc` de la mesa (125 de entrada, 250 de
-    // premio; subir a x2 cobra 125 más y paga 500), sin la `currency` hermana.
+    // EN LA CONVENCIÓN DE MONTOS v2: una entidad en su moneda, con la tasa de la mesa con la que billing
+    // cotizó, y sin `uc`.
     const published = {
       "seat-1": {
+        currency: "VES",
+        rateId: table.rateId,
         rate: "200",
-        entry: { ves: "25000.00", uc: "125.0000" },
-        prize: { ves: "50000.00", uc: "250.0000" },
-        levels: [
-          {
-            level: 2,
-            entry: { ves: "25000.00", uc: "125.0000" },
-            prize: { ves: "100000.00", uc: "500.0000" },
-          },
-        ],
+        entry: "25000.00",
+        prize: "50000.00",
+        levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
       },
     };
     expect(config.seatPrices).toEqual(published);
@@ -233,7 +229,7 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     await waitUntil(() => received.length === 2);
     for (const message of received) {
       expect(message.seatPrices).toEqual(published);
-      expect(findBareAmounts(message, ["entryFee", "prize", "entry"])).toEqual([]);
+      expect(findBadAmounts(message, ["entryFee", "prize", "entry"])).toEqual([]);
     }
   });
 

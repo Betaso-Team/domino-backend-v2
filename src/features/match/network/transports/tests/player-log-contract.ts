@@ -76,10 +76,11 @@ export function describePlayerLogContract(
       expect(u1).toMatchObject({
         roomId: "room-1",
         result: "win",
-        prize: { uc: "18.0000" },
+        currency: "UC",
+        prize: "18.0000",
         score: 104,
       });
-      expect(u2).toMatchObject({ result: "abandoned", prize: { uc: "0.0000" }, score: 40 });
+      expect(u2).toMatchObject({ result: "abandoned", currency: "UC", prize: "0.0000", score: 40 });
     });
 
     it("pagina con la forma de truco", async () => {

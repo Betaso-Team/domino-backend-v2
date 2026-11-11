@@ -1,6 +1,6 @@
-import { type Money, UC_KEY, readAmount } from "@/shared/money";
+import { UC } from "@/shared/money";
 import type { SeatPrice } from "../core/config";
-import { seatMoneyOf, ucOf } from "./amounts";
+import { seatText, ucText } from "./amounts";
 import type { StoredMatchRecord } from "./history";
 import { zeroLike } from "./player-currency";
 
@@ -24,15 +24,19 @@ export interface MatchRow {
    */
   readonly playedAt: string;
   /**
-   * LO QUE PAGÓ Y LO QUE COBRÓ, con el aumento ya aplicado, en la convención de montos
-   * (`network/amounts.ts`): `{ ves: "400.00", uc: "4.0000" }`. La moneda del jugador sale de lo que el
-   * registro congeló al cerrar (`SeatMoney.*InPlayerCurrency`), así que una tasa nueva no cambia lo que
-   * dice una partida vieja; `uc` es lo que cobró la mesa. Sin precio en el asiento (`MatchSeat.price`:
-   * las gratis y las de antes), `{ uc }` solo. Reemplazan a `bet`/`prize` en UC y a
-   * `currency`/`betInPlayerCurrency`/`prizeInPlayerCurrency` (2026-11).
+   * LA MONEDA DE `bet` Y `prize` (convención de montos v2, `network/amounts.ts`): la del precio del
+   * asiento (`VES`, el código tal cual), o `UC` si el asiento no tuvo precio (las gratis y las de antes)
+   * o el cierre no lo dejó en su moneda.
    */
-  readonly bet: Money;
-  readonly prize: Money;
+  readonly currency: string;
+  /**
+   * LO QUE PAGÓ Y LO QUE COBRÓ, con el aumento ya aplicado, como texto decimal en `currency`
+   * (`"400.00"`), rellenado con sus decimales. En su moneda sale de lo que el registro congeló al cerrar
+   * (`SeatMoney.*InPlayerCurrency`), así que una tasa nueva no cambia lo que dice una partida vieja; en
+   * UC, de lo que cobró la mesa. Sin `uc` al lado.
+   */
+  readonly bet: string;
+  readonly prize: string;
   /** Los puntos con que cerró su equipo. */
   readonly score: number;
   readonly result: MatchResult;
@@ -140,20 +144,23 @@ export function rowOf(userId: string, document: StoredMatchRecord): MatchRow {
 //     mostrar la entrada sería mostrar un cobro que se devolvió.
 //   · Y el premio es sólo del que ganó: el resto se llevó nada, que es lo que el campo tiene que decir.
 // Lo cobrado y lo pagado en su moneda salen del cierre, que ya eligió el nivel del aumento; sin cierre
-// en el asiento —o sin precio— no se adivina y la fila queda en `{ uc }`.
+// en el asiento —o sin precio— no se adivina y la fila queda en UC.
 function amountsFor(
   seat: StoredSeat | undefined,
   table: { readonly entryFeeInUC?: number },
   result: MatchResult,
-): Pick<MatchRow, "bet" | "prize"> {
+): Pick<MatchRow, "currency" | "bet" | "prize"> {
   const betUc = result === "canceled" ? 0 : (seat?.chargedInUC ?? table.entryFeeInUC ?? 0);
   const prizeUc = result === "win" ? (seat?.prizePaidInUC ?? 0) : 0;
   const local = inPlayerCurrency(seat, result);
   const price = seat?.price;
-  if (price === undefined || local === undefined) return { bet: ucOf(betUc), prize: ucOf(prizeUc) };
+  if (price === undefined || local === undefined) {
+    return { currency: UC, bet: ucText(betUc), prize: ucText(prizeUc) };
+  }
   return {
-    bet: seatMoneyOf(price, local.bet, readAmount(betUc, UC_KEY)),
-    prize: seatMoneyOf(price, local.prize, readAmount(prizeUc, UC_KEY)),
+    currency: price.currency,
+    bet: seatText(price, local.bet),
+    prize: seatText(price, local.prize),
   };
 }
 

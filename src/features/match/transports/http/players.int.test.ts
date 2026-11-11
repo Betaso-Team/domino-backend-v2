@@ -95,8 +95,9 @@ describe("GET /internal/players/:userId/matches: el historial de un jugador, par
           {
             id: "m-1",
             result: "win",
-            bet: { uc: "10.0000" },
-            prize: { uc: "18.0000" },
+            currency: "UC",
+            bet: "10.0000",
+            prize: "18.0000",
             score: 104,
           },
         ],

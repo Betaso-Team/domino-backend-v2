@@ -51,17 +51,18 @@ export type Turn = SchemaType<typeof Turn>;
 // no sabe cuánto cuesta esta mesa. Se guarda igual —y no se deriva en el cliente— porque es el
 // número sobre el que el jugador consiente, y derivarlo allá es la fórmula escrita dos veces.
 //
-// `additionalEntryFee` VA EN LA CONVENCIÓN DE MONTOS (`docs/convenciones/montos.md` del orquestador):
-// un mapa moneda → texto decimal, porque el schema no guarda objetos sueltos. Lleva solo `uc`
-// (`{ uc: "10.0000" }`): el estado es de toda la mesa y cada asiento paga en su moneda; lo que le cuesta
-// a cada uno en la suya está en `seatPrices[seat].levels` del mensaje `config`. Mismo índice que el
-// número de antes: el cliente decodifica con la reflexión que manda el servidor.
+// `additionalEntryFee` VA EN LA CONVENCIÓN DE MONTOS (`docs/convenciones/montos.md` del orquestador,
+// v2): texto decimal plano con los 4 decimales de UC (`"10.0000"`), sin redondear. Está en UC porque el
+// estado es de toda la mesa, y la moneda de la mesa es la del mensaje `config` (`currency: "UC"`); lo
+// que le cuesta a cada asiento en la suya está en `seatPrices[seat].levels`. Mismo índice que el
+// número de antes y que el mapa de v1 (`t.map("string")`, 2026-11-11): el cliente decodifica con la
+// reflexión que manda el servidor, y correrlo cambiaría el de los campos de abajo.
 export const BetOffer = schema(
   {
     proposerId: t.string(),
     level: t.number(),
     extra: t.number(),
-    additionalEntryFee: t.map("string"),
+    additionalEntryFee: t.string(),
     // EL RELOJ DEL TURNO, CONGELADO. Único campo de acá que no es para el front: mientras se
     // negocia, `activeDeadline` lo ocupan los 10 s de la respuesta, así que lo que le quedaba
     // al que estaba jugando no tiene dónde esperar.

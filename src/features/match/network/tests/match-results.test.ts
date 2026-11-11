@@ -1,5 +1,5 @@
 import type { Logger } from "@/shared/logger";
-import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
+import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { describe, expect, it, vi } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
 import { RoundSummary } from "../../core/state";
@@ -58,8 +58,9 @@ describe("matchResultOf", () => {
         roundsPlayed: 0,
         finalScore: { A: 0, B: 0 },
         stakes: {
-          entryFee: { uc: "10.0000" },
-          prize: { uc: "18.0000" },
+          currency: "UC",
+          entryFee: "10.0000",
+          prize: "18.0000",
           multiplier: 2,
           isFreeRoom: false,
           bet: null,
@@ -68,7 +69,7 @@ describe("matchResultOf", () => {
           { userId: "p-ana", teamId: winnerTeamId, result: "won", abandon: null },
           { userId: "p-beto", teamId: teamOf(match, 1), result: "lost", abandon: null },
         ],
-        payouts: [{ userId: "p-ana", amount: { uc: "18.0000" } }],
+        payouts: [{ userId: "p-ana", currency: "UC", amount: "18.0000" }],
       },
     });
   });
@@ -88,13 +89,14 @@ describe("matchResultOf", () => {
 
     expect(result?.payload).toMatchObject({
       stakes: { bet: { level: 2, extra: 1 } },
-      payouts: [{ userId: "p-ana", amount: { uc: "36.0000" } }],
+      payouts: [{ userId: "p-ana", currency: "UC", amount: "36.0000" }],
     });
   });
 
-  // LA CONVENCIÓN DE MONTOS: ningún monto suelto en el resultado. `multiplier` y `bet.extra` son pesos
-  // del ranking, no plata, y siguen siendo números.
-  it("no lleva ningún monto suelto; el premio vuelve al mismo número que calculó `payoutOf`", () => {
+  // LA CONVENCIÓN DE MONTOS v2: ningún número ni objeto por moneda en el resultado; `stakes` y cada
+  // premio son entidades en UC. `multiplier` y `bet.extra` son pesos del ranking, no plata, y siguen
+  // siendo números.
+  it("no lleva ningún monto fuera de la convención; el premio vuelve al mismo número que calculó `payoutOf`", () => {
     const fractional = { ...config, entryFee: 0.1, prize: 0.1 };
     const match = createMatchState(fractional);
     match.acceptedBetLevel = 3;
@@ -108,15 +110,18 @@ describe("matchResultOf", () => {
       AT,
     );
     const payload = result?.payload as MatchFinishedPayload;
-    expect(findBareAmounts(payload, ["entryFee", "prize", "amount", "amountUc"])).toEqual([]);
+    expect(findBadAmounts(payload, ["entryFee", "prize", "amount", "amountUc"])).toEqual([]);
     expect(payload).not.toHaveProperty("payouts.0.amountUc");
-    // SIN REDONDEAR: el orquestador compara `Number(amount.uc)` contra su planilla, y el ruido de coma
+    expect(JSON.stringify(payload)).not.toContain('"uc"');
+    expect(payload.payouts[0]?.currency).toBe("UC");
+    // SIN REDONDEAR: el orquestador compara `Number(amount)` contra su planilla, y el ruido de coma
     // flotante del producto (0.1 + 0.1 × 2) tiene que volver idéntico.
-    const amount = payload.payouts[0]?.amount.uc;
+    const amount = payload.payouts[0]?.amount;
     expect(Number(amount)).toBe(0.1 + 0.1 * 2);
     expect(payload.stakes).toMatchObject({
-      entryFee: { uc: "0.1000" },
-      prize: { uc: "0.1000" },
+      currency: "UC",
+      entryFee: "0.1000",
+      prize: "0.1000",
       bet: { level: 3, extra: 2 },
     });
   });
@@ -275,7 +280,13 @@ describe("matchResultOf", () => {
     expect(finished?.payload).toMatchObject({
       mode: "TOURNAMENT",
       tournamentId: "t-7",
-      stakes: { entryFee: { uc: "0.0000" }, prize: { uc: "0.0000" }, isFreeRoom: true, bet: null },
+      stakes: {
+        currency: "UC",
+        entryFee: "0.0000",
+        prize: "0.0000",
+        isFreeRoom: true,
+        bet: null,
+      },
     });
     const aborted = matchResultOf(
       { type: "MATCH_ABORTED", reason: "NEVER_STARTED" },
@@ -410,7 +421,7 @@ describe("MatchResultRecorder", () => {
     await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
     expect(enqueue.mock.calls[0]?.[2]).toMatchObject({
       stakes: { bet: null },
-      payouts: [{ userId: "p-ana", amount: { uc: "18.0000" } }],
+      payouts: [{ userId: "p-ana", currency: "UC", amount: "18.0000" }],
     });
   });
 
