@@ -91,7 +91,8 @@ sequenceDiagram
 
   Player->>Room: conectar con la reserva y el JWT
   Room->>Room: cruzar el userId del token con el asiento
-  Room-->>Player: estado filtrado por StateView
+  Room-->>Player: mensaje config de SU asiento (mesa, seat.playerId, su precio, serverNow)
+  Room-->>Player: estado filtrado por StateView, sin userId ni nada privado de un asiento
   Room->>Orch: con la mesa completa, cobrar la entrada
   Orch-->>Room: 200: la partida arranca
 
@@ -130,8 +131,26 @@ jugador desconectado, pero conserva su asiento y su reloj durante la ventana de 
 cliente perdió la reserva, el orquestador le pide una nueva (`POST /internal/players/:userId/seat`).
 Para saber si un jugador ya tiene mesa, sin reservarle nada, el orquestador pregunta
 `GET /internal/players/:userId/match`. Al entrar y al volver, la sala le manda al cliente el mensaje
-`config` con la configuración pública de la mesa y `serverNow`.
-El censo (`GET /internal/census`) cuenta asientos vivos, no sockets momentáneamente conectados.
+`config`, uno por asiento: la configuración pública de la mesa, su asiento (`seat.playerId`, y su precio
+en su moneda si lo tiene) y `serverNow`. No hay ruta HTTP de la config.
+El censo (`GET /internal/census`) cuenta asientos vivos, no sockets momentáneamente conectados, por
+proveedor, moneda y mesa (modo o torneo).
+
+### Audiencias
+
+Lo que sale hacia un proveedor o un jugador lo arma el dominó campo por campo, con una lista de
+permitidos, y nada privado de un asiento vive en algo compartido:
+
+| Qué sale | A quién | Qué lleva de un asiento |
+|---|---|---|
+| Estado sincronizado (`PlayerState`) | Toda la mesa | Presentación (nombre, usuario, foto), equipo, conexión, salida, bot. Nunca `userId`, proveedor, moneda ni precio |
+| Mensaje `config` | Sólo ese asiento | Su `playerId` y su precio en su moneda (`seatConfigOf`) |
+| `GET /internal/matches[/:matchId]` | Admin de Tablea / de un proveedor | Tablea: todo. Un proveedor: sus asientos enteros, el ajeno recortado (`recordView`) |
+| `/game-data`, historial de soporte | Sólo Tablea | Todo |
+| `GET /internal/census` | El orquestador | Proveedor, moneda y mesa por grupo; sin identidad |
+
+Lo pinean `core/state/state.test.ts` (los campos que viajan), `match-registry.test.ts` (`seatConfigOf`),
+`records.int.test.ts` y el canario de dos proveedores `src/tests/audiencias.e2e.test.ts`.
 
 ### Comandos
 
