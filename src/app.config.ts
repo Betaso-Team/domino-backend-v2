@@ -210,6 +210,7 @@ const registerHttp = (app: Application) => {
       adminApiKey: env.adminApiKey,
       adminTokens: rootContainer.resolve<AdminTokenCheck>("AdminTokenCheck"),
       tables: rootContainer.resolve(ColyseusMatchGateway),
+      results: matchResults,
       orchestratorApiKey: env.orchestratorApiKey,
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
     }),

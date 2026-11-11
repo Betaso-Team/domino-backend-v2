@@ -73,6 +73,16 @@ const deps = ({ tables, registry, ...over }: Over = {}): TablesDeps => ({
     ...registry,
   },
   archive: { hasRecord: async (matchId) => matchId === "m-live" || matchId === "m-stored" },
+  results: {
+    statuses: async (keys) => {
+      const known: Record<string, string> = {
+        "m-stored:finished": "SENT",
+        "m-pending:aborted": "PENDING",
+        "m-parked:finished": "PARKED",
+      };
+      return new Map(keys.flatMap((key) => (known[key] ? [[key, known[key]] as const] : [])));
+    },
+  },
   logger: fakeLogger(),
   orchestratorApiKey: KEY,
   ...over,
@@ -132,9 +142,11 @@ describe("tablesRoutes", () => {
     it("dice solo si la mesa sigue viva y si quedó registro, nunca el registro", async () => {
       const base = await serve();
       for (const [matchId, data] of [
-        ["m-live", { live: true, recorded: true }],
-        ["m-stored", { live: false, recorded: true }],
-        ["m-never", { live: false, recorded: false }],
+        ["m-live", { live: true, recorded: true, outcome: "none" }],
+        ["m-stored", { live: false, recorded: true, outcome: "published" }],
+        ["m-pending", { live: false, recorded: false, outcome: "pending" }],
+        ["m-parked", { live: false, recorded: false, outcome: "pending" }],
+        ["m-never", { live: false, recorded: false, outcome: "none" }],
       ] as const) {
         const res = await ask(base, matchId);
         expect(res.status).toBe(200);
@@ -164,6 +176,14 @@ describe("tablesRoutes", () => {
       const res = await ask(archiveDown, "m-never");
       expect(res.status).toBe(503);
       expect(await res.json()).toEqual({ code: "UNAVAILABLE" });
+      const outboxDown = await serve({
+        results: {
+          statuses: async () => {
+            throw new Error("mongo caído");
+          },
+        },
+      });
+      expect((await ask(outboxDown, "m-never")).status).toBe(503);
     });
 
     it("solo con la llave del orquestador", async () => {

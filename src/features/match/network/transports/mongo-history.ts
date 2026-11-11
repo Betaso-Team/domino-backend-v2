@@ -25,6 +25,7 @@ import {
   type MatchOpening,
   type StoredMatchRecord,
 } from "../history";
+import type { OpenMatch, OpenMatchBacklog } from "../interrupted-matches";
 import {
   ENDED_STATUSES,
   type MatchRow,
@@ -375,7 +376,7 @@ const stampsAt = (now: Date) => ({
 });
 
 export class MongoHistory
-  implements HistoryPort, HistoryReader, MatchArchive, PlayerLog, StatsBacklog
+  implements HistoryPort, HistoryReader, MatchArchive, PlayerLog, StatsBacklog, OpenMatchBacklog
 {
   // UNA ESCRITURA A LA VEZ POR PARTIDA. Cada verbo es fire-and-forget, así que sin esto llegan a la
   // base a la vez — y dos upserts que no encuentran el documento INSERTAN uno cada uno, partiendo la
@@ -632,6 +633,64 @@ export class MongoHistory
   async hasRecord(matchId: string): Promise<boolean> {
     const found = await (await this.collection()).findOne({ matchId }, { projection: { _id: 1 } });
     return found !== null;
+  }
+
+  // ── LA RECUPERACIÓN DE PARTIDAS INTERRUMPIDAS (`network/interrupted-matches.ts`) ──────────────────
+  //
+  // Las abiertas son pocas (las vivas más las huérfanas), así que el filtro por `status` del índice del
+  // listado alcanza; `updatedAt` y la marca filtran sobre ese puñado.
+  async staleOpen(updatedBefore: Date, limit: number): Promise<OpenMatch[]> {
+    const found = await (await this.collection())
+      .find(
+        { status: "started", updatedAt: { $lt: updatedBefore }, recovery: { $exists: false } },
+        {
+          projection: { matchId: 1, roomId: 1, table: 1, seats: 1 },
+          sort: { updatedAt: 1 },
+          limit,
+          maxTimeMS: LIST_MAX_TIME_MS,
+        },
+      )
+      .toArray();
+    return found.map((document) => {
+      const table = (document.table ?? {}) as {
+        mode?: string;
+        tournamentId?: string;
+        gameModeId?: string;
+      };
+      const tournament = table.mode === "TOURNAMENT";
+      return {
+        matchId: document.matchId,
+        roomId: document.roomId ?? "",
+        mode: tournament ? "TOURNAMENT" : "CASUAL",
+        ...(tournament && table.tournamentId !== undefined
+          ? { tournamentId: table.tournamentId }
+          : {}),
+        gameModeId: table.gameModeId ?? "",
+        userIds: (document.seats ?? []).map((seat) => seat.userId),
+      };
+    });
+  }
+
+  // SÓLO SI SIGUE ABIERTA: un cierre de verdad que llegó antes gana, como en `close`.
+  async closeInterrupted(matchId: string, at: Date): Promise<boolean> {
+    const result = await (await this.collection()).updateOne({ matchId, status: "started" }, {
+      $set: {
+        status: "aborted",
+        matchEndReason: "INTERRUPTED",
+        matchEndedAt: at,
+        updatedAt: at,
+        recovery: { at, outcome: "aborted" },
+      },
+    } as Document);
+    return result.modifiedCount === 1;
+  }
+
+  // ABIERTA PERO CON SU DESENLACE YA EN EL OUTBOX: el cierre del registro se perdió (Mongo cayó justo
+  // ahí) y el resultado sí salió. Sólo se marca, para no volver a mirarla en cada pasada.
+  async markResolved(matchId: string, at: Date, outcome: "finished" | "aborted"): Promise<void> {
+    await (await this.collection()).updateOne({ matchId, status: "started" }, {
+      $set: { recovery: { at, outcome, recordOnly: true } },
+    } as Document);
   }
 
   async recordOf(matchId: string): Promise<StoredMatchRecord | undefined> {

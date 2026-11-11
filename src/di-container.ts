@@ -23,6 +23,7 @@ import {
 } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
 import type { HistoryPort, HistoryReader, MatchArchive } from "@/features/match/network/history";
+import { InterruptedMatchRecovery } from "@/features/match/network/interrupted-matches";
 import {
   MATCH_RESULT_EXCHANGE,
   type MatchResultKey,
@@ -172,7 +173,8 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 // escritura no, exactamente como el comentario de `history.ts` había previsto. Los dos
 // `register` van TIPADOS: sin el parámetro de tipo, tsyringe acepta cualquier valor contra
 // el token y el error aparece recién en el `resolve`, es decir en runtime.
-const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
+const mongoHistory = mongo ? new MongoHistory(mongo, logger) : undefined;
+const history = mongoHistory ?? new MemoryHistory();
 // EL LEASE DE LOS TRABAJOS DE FONDO (barrido de estadísticas y despachador de resultados): la misma
 // base, así que el mismo adaptador. Con Mongo excluye procesos; sin Mongo no hay a quién excluir.
 const jobsLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
@@ -208,9 +210,11 @@ rootContainer.register<PlayerLog>("PlayerLog", { useValue: history });
 export const tableaGamingAmqp = env.tableaGamingRabbitmqUrl
   ? new AmqpPublisher(env.tableaGamingRabbitmqUrl, logger)
   : undefined;
-const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
-  ? new MongoOutboxStore(mongo, "match_result_outbox", clock)
-  : new MemoryOutboxStore(clock);
+const mongoResultOutbox = mongo
+  ? new MongoOutboxStore<MatchResultKey, MatchResultPayload>(mongo, "match_result_outbox", clock)
+  : undefined;
+const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> =
+  mongoResultOutbox ?? new MemoryOutboxStore(clock);
 export const matchResultDispatcher = tableaGamingAmqp
   ? new TopicOutboxDispatcher({
       exchange: MATCH_RESULT_EXCHANGE,
@@ -244,6 +248,29 @@ const matchResultRecorder = new MatchResultRecorder({
   },
 });
 rootContainer.register(MatchResultRecorder, { useValue: matchResultRecorder });
+
+// LAS PARTIDAS QUE MURIERON CON SU PROCESO (`network/interrupted-matches.ts`): al arrancar y cada dos
+// minutos, bajo un lease, se publican abortadas `INTERRUPTED`. Sólo con Mongo: sin Mongo no hay
+// registro de lo abierto, y lo que el proceso tenía en memoria murió con él.
+//
+// EN LA MISMA PASADA, LA COMPACTACIÓN DEL OUTBOX: lo enviado hace más de siete días pierde el cuerpo y
+// queda la lápida que `GET .../existence` necesita para contestar `published`.
+const SENT_BODY_RETENTION_MS = 7 * 24 * 3600_000;
+const interruptedMatches =
+  mongoHistory && mongoResultOutbox
+    ? new InterruptedMatchRecovery({
+        backlog: mongoHistory,
+        liveness: matchRegistry,
+        outbox: mongoResultOutbox,
+        wake: () => matchResultDispatcher?.wake(),
+        lease: jobsLease,
+        now: () => clock.now(),
+        log: logger,
+        maintenance: async () => {
+          await mongoResultOutbox.compactSent(SENT_BODY_RETENTION_MS);
+        },
+      })
+    : undefined;
 // Para la suite: lo encolado, sin broker.
 export const matchResults = matchResultOutbox;
 
@@ -373,6 +400,7 @@ if (env.logLevel === "debug") {
 export function startServices(): void {
   settingsSignal.start();
   statsRecorder.start();
+  interruptedMatches?.start();
 }
 
 export function stopAcceptingMatches(): void {
@@ -415,6 +443,7 @@ export async function shutdown(): Promise<void> {
   await matchResultDispatcher?.close();
   // El barrido de estadísticas se para antes de drenar: un tick nuevo escribiría en una base que se cierra.
   statsRecorder.stop();
+  await interruptedMatches?.stop();
   await historyPort.drain();
   // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
   //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`
