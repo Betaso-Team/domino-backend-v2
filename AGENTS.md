@@ -83,6 +83,11 @@ pieza del dominó.
   re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
   (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
   escribe de más».
+- **El censo cuenta por proveedor y moneda.** Cada entrada de `live_seats` trae `groups`
+  (`[{ providerId, currency, seats }]`, sobre los asientos activos, casuales y de torneo juntos; sin
+  proveedor = `null`) y `GET /internal/census` los suma en `groups`. Una entrada de una versión
+  anterior no trae grupos y cuenta como sin atribuir (`playersInMatch − Σ groups`). Ver
+  `docs/api-y-mensajes.md`.
 - **El historial manda un `$push` por trabajo de la cola, no uno por lote**: los lotes de una partida
   se juntan hasta que su trabajo arranca, y `open`/`round`/`close`/`settled` sellan el pendiente para
   conservar el orden. Ver «Incremento completo — el historial, un `$push` por lote pendiente».

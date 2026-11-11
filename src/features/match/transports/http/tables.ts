@@ -176,7 +176,7 @@ export function tablesRoutes(deps: TablesDeps): Router {
   );
   // Del CLÚSTER, no de este proceso: el censo es el hash que escriben todas las salas.
   router.get(CENSUS_ROUTE, guard, async (_request, response) => {
-    const { playersInMatch, byGameMode, byTournament } = await deps.registry.census();
+    const { playersInMatch, byGameMode, byTournament, groups } = await deps.registry.census();
     response.json({
       status: "success",
       data: {
@@ -188,6 +188,13 @@ export function tablesRoutes(deps: TablesDeps): Router {
         byTournament: [...byTournament].map(([tournamentId, players]) => ({
           tournamentId,
           playersInMatch: players,
+        })),
+        // Por (proveedor, moneda), casuales y de torneo juntas. Lo que falta para `playersInMatch` son
+        // asientos sin atribuir (salas de una versión anterior).
+        groups: groups.map(({ providerId, currency, seats }) => ({
+          providerId,
+          currency,
+          playersInMatch: seats,
         })),
       },
     });

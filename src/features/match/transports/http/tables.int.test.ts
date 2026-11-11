@@ -67,6 +67,10 @@ const deps = ({ tables, registry, ...over }: Over = {}): TablesDeps => ({
         ["mode-4p", 2],
       ]),
       byTournament: new Map([["t-1", 2]]),
+      groups: [
+        { providerId: "betaso", currency: "VES", seats: 3 },
+        { providerId: null, currency: "USD", seats: 1 },
+      ],
     }),
     forget: async () => undefined,
     isLive: async (matchId) => matchId === "m-live",
@@ -173,7 +177,7 @@ describe("tablesRoutes", () => {
     });
   });
 
-  it("cuenta quién juega, en total y por modo, solo con la llave", async () => {
+  it("cuenta quién juega, en total, por modo y por proveedor y moneda, solo con la llave", async () => {
     const base = await serve();
     const res = await fetch(`${base}/internal/census`, { headers: { "x-internal-api-key": KEY } });
     expect(res.status).toBe(200);
@@ -186,6 +190,10 @@ describe("tablesRoutes", () => {
           { gameModeId: "mode-4p", playersInMatch: 2 },
         ],
         byTournament: [{ tournamentId: "t-1", playersInMatch: 2 }],
+        groups: [
+          { providerId: "betaso", currency: "VES", playersInMatch: 3 },
+          { providerId: null, currency: "USD", playersInMatch: 1 },
+        ],
       },
     });
     expect((await fetch(`${base}/internal/census`)).status).toBe(401);

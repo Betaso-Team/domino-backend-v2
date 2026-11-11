@@ -355,13 +355,30 @@ El registro de una partida se escribe al **arrancar** el juego (el primer repart
 lote del juego lo crea si falta; las escrituras son de mejor esfuerzo. Una sala creada que nadie llegó a jugar
 no tiene registro (sale `aborted` por el outbox de resultados igual).
 
-**`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total, por modo y por
-torneo. El orquestador lo muestra en los números de su lobby. `playersInMatch` cuenta todas las mesas;
-`byGameMode` solo las casuales y `byTournament` solo las de torneo.
+**`GET /internal/census`** cuenta quién está jugando, en todo el clúster: el total, por modo, por
+torneo y por proveedor y moneda. El orquestador lo muestra en los números de su lobby y, con `groups`,
+sabe a cuántos jugadores puede enfrentar cada proveedor. `playersInMatch` cuenta todas las mesas;
+`byGameMode` solo las casuales y `byTournament` solo las de torneo. `groups` cuenta todas, casuales y de
+torneo en los mismos grupos, por el `providerId` y la `currency` del asiento; un asiento que llegó sin
+`providerId` va con `providerId: null`.
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }], byTournament: [{ tournamentId, playersInMatch }] } }` | Siempre; un modo o torneo sin nadie jugando no aparece |
+| `200` | `{ status, data: { playersInMatch, byGameMode: [{ gameModeId, playersInMatch }], byTournament: [{ tournamentId, playersInMatch }], groups: [{ providerId, currency, playersInMatch }] } }` | Siempre; un modo, torneo o grupo sin nadie jugando no aparece |
+
+Todos los números cuentan los asientos que siguen jugando (el que se retiró o terminó sale en el acto) de
+las salas que latieron en el último minuto. `groups` se agregó después: una sala de una versión anterior
+escribe su entrada sin grupos, y sus asientos cuentan en `playersInMatch` pero en ningún grupo. Así,
+`playersInMatch − Σ groups[].playersInMatch` son los asientos **sin atribuir**, y es cero cuando todo el
+clúster corre esta versión. Un orquestador que no lee `groups` no cambia.
+
+| Caso | Qué pasa |
+|---|---|
+| Asientos en varios procesos | Cada sala escribe su entrada en el hash compartido; el censo las suma |
+| Un jugador se retira o la mesa termina | `settle` o `keepAlive` reescribe la entrada con los activos; sale de su grupo y no vuelve |
+| Una sala dejó de latir (proceso muerto) | A los 60 s deja de contar, en el total y en los grupos; a los 120 s se borra |
+| Versiones del dominó mezcladas | La entrada sin `groups` cuenta como sin atribuir |
+| Una entrada corrupta (grupos incluidos) | No cuenta y se borra |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 
 ⚠ **El dominó no verifica el modo ni el proveedor al abrir una mesa.** `POST /internal/matches` juega el

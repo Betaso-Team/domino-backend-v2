@@ -524,6 +524,168 @@ describe("MatchRegistry: censo del lobby", () => {
   });
 });
 
+// EL CENSO POR (PROVEEDOR, MONEDA): el orquestador lo usa para saber, por proveedor, a cuántos
+// jugadores puede enfrentar. Cuenta los mismos asientos activos que `playersInMatch`.
+describe("MatchRegistry: censo por proveedor y moneda", () => {
+  const withProvider = (userId: string, index: number, currency: string, providerId?: string) => ({
+    ...seat(userId, index, currency),
+    ...(providerId === undefined ? {} : { providerId }),
+  });
+  const mixed = replayConfigOf({
+    ...roomOptions,
+    seats: [withProvider("u1", 0, "VES", "betaso"), withProvider("u2", 1, "USD", "parley")],
+  });
+
+  it("suma los grupos de todos los procesos, y el asiento sin proveedor va con null", async () => {
+    const store = new MemoryKeyValueStore();
+    const processA = new MatchRegistry(store);
+    const processB = new MatchRegistry(store);
+    await processA.register("room-1", mixed, timeouts);
+    await processB.register(
+      "room-2",
+      replayConfigOf({
+        ...roomOptions,
+        matchId: "m2",
+        seats: [withProvider("u3", 0, "VES", "betaso"), withProvider("u4", 1, "VES")],
+      }),
+      timeouts,
+    );
+
+    const census = await processB.census();
+    expect(census.playersInMatch).toBe(4);
+    expect(census.groups).toEqual([
+      { providerId: "betaso", currency: "VES", seats: 2 },
+      { providerId: "parley", currency: "USD", seats: 1 },
+      { providerId: null, currency: "VES", seats: 1 },
+    ]);
+  });
+
+  it("las mesas de torneo cuentan en los mismos grupos que las casuales", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", mixed, timeouts);
+    await registry.register(
+      "room-3",
+      replayConfigOf({
+        ...roomOptions,
+        mode: "TOURNAMENT",
+        tournamentId: "t-1",
+        matchId: "m3",
+        gameModeId: "tournament:t-1",
+        seats: [withProvider("u5", 0, "VES", "betaso"), withProvider("u6", 1, "USD", "parley")],
+      }),
+      timeouts,
+    );
+
+    expect((await registry.census()).groups).toEqual([
+      { providerId: "betaso", currency: "VES", seats: 2 },
+      { providerId: "parley", currency: "USD", seats: 2 },
+    ]);
+  });
+
+  it("settle y keepAlive sacan de su grupo al que dejó de jugar", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register("room-1", mixed, timeouts);
+
+    await registry.settle("room-1", ["u2"]);
+    expect((await registry.census()).groups).toEqual([
+      { providerId: "parley", currency: "USD", seats: 1 },
+    ]);
+
+    // Un latido completo después no lo revive en su grupo.
+    await registry.keepAlive("room-1", ["u1", "u2"]);
+    expect((await registry.census()).groups).toEqual([
+      { providerId: "parley", currency: "USD", seats: 1 },
+    ]);
+
+    await registry.keepAlive("room-1", []);
+    expect(await registry.census()).toMatchObject({ playersInMatch: 0, groups: [] });
+  });
+
+  it("una entrada vieja, sin grupos, cuenta en el total y en ningún grupo", async () => {
+    const clock = fakeClock();
+    const store = new MemoryKeyValueStore(clock.now);
+    const registry = new MatchRegistry(store, clock.now);
+    await registry.register("room-1", mixed, timeouts);
+    await store.hset(
+      "live_seats",
+      "room-old",
+      JSON.stringify({ seats: 2, gameModeId: "clasica-2p", at: clock.now() }),
+    );
+
+    const census = await registry.census();
+    expect(census.playersInMatch).toBe(4);
+    expect(census.groups).toEqual([
+      { providerId: "betaso", currency: "VES", seats: 1 },
+      { providerId: "parley", currency: "USD", seats: 1 },
+    ]);
+    expect(await store.hgetall("live_seats")).toHaveProperty("room-old");
+  });
+
+  it("una entrada con grupos rotos es una entrada rota: no cuenta y se barre", async () => {
+    const clock = fakeClock();
+    const store = new MemoryKeyValueStore(clock.now);
+    const registry = new MatchRegistry(store, clock.now);
+    await registry.register("room-1", mixed, timeouts);
+    const at = clock.now();
+    const broken = {
+      "not-array": { seats: 1, gameModeId: "x", groups: "betaso", at },
+      "no-currency": { seats: 1, gameModeId: "x", groups: [{ providerId: "p", seats: 1 }], at },
+      "bad-provider": {
+        seats: 1,
+        gameModeId: "x",
+        groups: [{ providerId: 7, currency: "VES", seats: 1 }],
+        at,
+      },
+      "bad-seats": {
+        seats: 1,
+        gameModeId: "x",
+        groups: [{ providerId: null, currency: "VES", seats: "1" }],
+        at,
+      },
+    };
+    for (const [roomId, entry] of Object.entries(broken)) {
+      await store.hset("live_seats", roomId, JSON.stringify(entry));
+    }
+
+    const census = await registry.census();
+    expect(census.playersInMatch).toBe(2);
+    expect(census.groups).toHaveLength(2);
+    expect(Object.keys(await store.hgetall("live_seats"))).toEqual(["room-1"]);
+  });
+
+  it("una sala que dejó de latir sale de los grupos antes de barrerse", async () => {
+    const clock = fakeClock();
+    const store = new MemoryKeyValueStore(clock.now);
+    const registry = new MatchRegistry(store, clock.now);
+    await registry.register("room-1", mixed, timeouts);
+
+    clock.advance(2 * HEARTBEAT_MS + 1);
+    expect(await registry.census()).toMatchObject({ playersInMatch: 0, groups: [] });
+    expect(await store.hgetall("live_seats")).toHaveProperty("room-1");
+
+    clock.advance(2 * HEARTBEAT_MS);
+    expect(await registry.census()).toMatchObject({ groups: [] });
+    expect(await store.hgetall("live_seats")).toEqual({});
+  });
+
+  it("el proveedor y la moneda no se confunden aunque se parezcan", async () => {
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register(
+      "room-1",
+      replayConfigOf({
+        ...roomOptions,
+        seats: [withProvider("u1", 0, "VES", "null"), withProvider("u2", 1, "VES")],
+      }),
+      timeouts,
+    );
+
+    expect((await registry.census()).groups).toEqual([
+      { providerId: "null", currency: "VES", seats: 1 },
+      { providerId: null, currency: "VES", seats: 1 },
+    ]);
+  });
+});
+
 // UN ALMACÉN QUE CUENTA: envuelve al de memoria y anota cada llamada, para medir cuánto I/O cuesta
 // cada latido. Las lecturas cuentan igual que las escrituras: un `get` también es un viaje a Redis.
 function countingStore() {

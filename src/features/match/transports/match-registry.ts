@@ -184,11 +184,37 @@ export const HEARTBEAT_MS = 30_000;
 const STALE_MS = 2 * HEARTBEAT_MS;
 const DEAD_MS = 4 * HEARTBEAT_MS;
 
+/**
+ * LO QUE EL REGISTRO RECUERDA DE CADA ASIENTO: la clave del índice invertido (`userId`) y a quién
+ * atribuírselo en el censo (proveedor y moneda). Nada de montos ni de tasa: la moneda es la del
+ * asiento (`MatchSeat.currency`), la que ya se cobró.
+ */
+interface SeatRef {
+  readonly userId: string;
+  /** Ausente si el orquestador no lo mandó: el censo lo cuenta con `providerId: null`. */
+  readonly providerId?: string;
+  readonly currency: string;
+}
+
+/**
+ * UN GRUPO DEL CENSO: cuántos asientos activos tiene un (proveedor, moneda). `providerId: null` es el
+ * asiento que llegó sin proveedor. Las mesas de torneo cuentan en los MISMOS grupos que las casuales:
+ * su jugador está tan ocupado como el de una casual, y así la suma de los grupos es el mismo total que
+ * `playersInMatch` (salvo las entradas viejas, que no traen grupos; ver `MatchCensusCount.groups`).
+ */
+export interface CensusGroup {
+  readonly providerId: string | null;
+  readonly currency: string;
+  readonly seats: number;
+}
+
 interface CensusEntry {
   readonly seats: number;
   readonly gameModeId: string;
   /** Solo en una mesa de torneo. Las entradas escritas antes de los torneos no lo tienen. */
   readonly tournamentId?: string;
+  /** Los `seats` por (proveedor, moneda). Las entradas escritas antes del censo por proveedor no lo tienen. */
+  readonly groups?: readonly CensusGroup[];
   readonly at: number;
 }
 
@@ -199,6 +225,13 @@ export interface MatchCensusCount {
   readonly byGameMode: ReadonlyMap<string, number>;
   /** Las mesas de torneo, por torneo. */
   readonly byTournament: ReadonlyMap<string, number>;
+  /**
+   * Todos los asientos que siguen jugando, casuales y de torneo, por (proveedor, moneda), en el orden
+   * en que aparecen. Solo suma las entradas que traen grupos: las que escribió una sala de una versión
+   * anterior cuentan en `playersInMatch` y en ningún grupo, así que `playersInMatch − Σ groups` son los
+   * asientos SIN ATRIBUIR.
+   */
+  readonly groups: readonly CensusGroup[];
 }
 
 // EL REGISTRO DE PARTIDAS VIVAS DEL CLÚSTER. La `DominoRoom` se anota al nacer, late mientras
@@ -227,7 +260,9 @@ export class MatchRegistry {
   // ids OPACOS —`seat-1`, `seat-2`—, así que reconstruir de ahí la clave del índice invertido
   // es imposible; y guardar el `DominoMatchConfig` entero para tenerla metería moneda, tasa y
   // montos en la memoria del registro, que es justo lo que la allowlist de arriba evita.
-  private readonly seatsByRoomId = new Map<string, readonly string[]>();
+  // Cada asiento lleva además su proveedor y su moneda, que el censo necesita para agrupar: son ids y
+  // un código de moneda, no montos ni tasa.
+  private readonly seatsByRoomId = new Map<string, readonly SeatRef[]>();
 
   // El reloj solo decide cuándo un campo del censo dejó de latir. Las demás claves conservan el
   // plazo del almacén, que es lo que Redis aplica en producción.
@@ -250,7 +285,9 @@ export class MatchRegistry {
     this.byRoomId.set(roomId, publicConfigOf(config, timeouts));
     this.seatsByRoomId.set(
       roomId,
-      config.seats.map(({ userId }) => userId),
+      config.seats.map(({ userId, providerId, currency }) =>
+        providerId === undefined ? { userId, currency } : { userId, providerId, currency },
+      ),
     );
     await this.keepAlive(roomId);
   }
@@ -276,14 +313,16 @@ export class MatchRegistry {
     const config = this.byRoomId.get(roomId);
     const seats = this.seatsByRoomId.get(roomId);
     if (!config || !seats) return;
-    const active = activeUserIds ? seats.filter((userId) => activeUserIds.includes(userId)) : seats;
-    const released = seats.filter((userId) => !active.includes(userId));
+    const active = activeUserIds
+      ? seats.filter(({ userId }) => activeUserIds.includes(userId))
+      : seats;
+    const released = seats.filter((seat) => !active.includes(seat));
 
     await Promise.all([
       this.store.setex(configKey(roomId), JSON.stringify(config), TTL_SECONDS),
       this.store.setex(matchKey(config.matchId), roomId, TTL_SECONDS),
-      ...active.map((userId) => this.store.setex(playerKey(userId), roomId, TTL_SECONDS)),
-      ...released.map((userId) => this.release(userId, roomId)),
+      ...active.map(({ userId }) => this.store.setex(playerKey(userId), roomId, TTL_SECONDS)),
+      ...released.map(({ userId }) => this.release(userId, roomId)),
     ]);
     this.seatsByRoomId.set(roomId, active);
     await this.writeCensus(roomId, config, active);
@@ -301,21 +340,22 @@ export class MatchRegistry {
     const config = this.byRoomId.get(roomId);
     const seats = this.seatsByRoomId.get(roomId);
     if (!config || !seats) return;
-    const active = seats.filter((userId) => activeUserIds.includes(userId));
+    const active = seats.filter(({ userId }) => activeUserIds.includes(userId));
     if (active.length === seats.length) return;
-    const released = seats.filter((userId) => !active.includes(userId));
+    const released = seats.filter((seat) => !active.includes(seat));
 
-    await Promise.all(released.map((userId) => this.release(userId, roomId)));
+    await Promise.all(released.map(({ userId }) => this.release(userId, roomId)));
     this.seatsByRoomId.set(roomId, active);
     await this.writeCensus(roomId, config, active);
   }
 
   // El censo cuenta ASIENTOS QUE SIGUEN JUGANDO, como truco: el que perdió la señal sigue
-  // contando —su reloj corre—, el que se retiró o terminó ya no está en ninguna partida.
+  // contando —su reloj corre—, el que se retiró o terminó ya no está en ninguna partida. Los `groups`
+  // salen de la MISMA lista `active`, así que suman exactamente `seats`.
   private async writeCensus(
     roomId: string,
     config: PublicMatchConfig,
-    active: readonly string[],
+    active: readonly SeatRef[],
   ): Promise<void> {
     await this.store.hset(
       CENSUS_KEY,
@@ -324,6 +364,7 @@ export class MatchRegistry {
         seats: active.length,
         gameModeId: config.gameModeId,
         ...(config.tournamentId === undefined ? {} : { tournamentId: config.tournamentId }),
+        groups: groupSeats(active),
         at: this.now(),
       }),
     );
@@ -354,6 +395,7 @@ export class MatchRegistry {
     let playersInMatch = 0;
     const byGameMode = new Map<string, number>();
     const byTournament = new Map<string, number>();
+    const groups = new GroupTally();
 
     for (const [roomId, raw] of Object.entries(await this.store.hgetall(CENSUS_KEY))) {
       const entry = parseCensus(raw);
@@ -363,6 +405,8 @@ export class MatchRegistry {
       }
       if (now - entry.at >= STALE_MS) continue;
       playersInMatch += entry.seats;
+      for (const group of entry.groups ?? [])
+        groups.add(group.providerId, group.currency, group.seats);
       if (entry.tournamentId !== undefined) {
         byTournament.set(
           entry.tournamentId,
@@ -373,7 +417,7 @@ export class MatchRegistry {
       byGameMode.set(entry.gameModeId, (byGameMode.get(entry.gameModeId) ?? 0) + entry.seats);
     }
 
-    return { playersInMatch, byGameMode, byTournament };
+    return { playersInMatch, byGameMode, byTournament, groups: groups.list() };
   }
 
   async remove(roomId: string): Promise<void> {
@@ -386,7 +430,7 @@ export class MatchRegistry {
     this.store.del(configKey(roomId));
     this.store.del(matchKey(config.matchId));
     await this.store.hdel(CENSUS_KEY, roomId);
-    for (const userId of seats) {
+    for (const { userId } of seats) {
       await this.release(userId, roomId);
     }
   }
@@ -412,12 +456,49 @@ export class MatchRegistry {
   }
 }
 
+// LA SUMA POR (PROVEEDOR, MONEDA). La clave es la pareja serializada con `JSON.stringify` y no
+// concatenada: un `a|b` no dice dónde termina el proveedor, y `null` tiene que seguir distinto de "null".
+class GroupTally {
+  private readonly byKey = new Map<string, CensusGroup>();
+
+  add(providerId: string | null, currency: string, seats: number): void {
+    const key = JSON.stringify([providerId, currency]);
+    const seen = this.byKey.get(key);
+    this.byKey.set(key, { providerId, currency, seats: (seen?.seats ?? 0) + seats });
+  }
+
+  list(): readonly CensusGroup[] {
+    return [...this.byKey.values()];
+  }
+}
+
+function groupSeats(seats: readonly SeatRef[]): readonly CensusGroup[] {
+  const tally = new GroupTally();
+  for (const { providerId, currency } of seats) tally.add(providerId ?? null, currency, 1);
+  return tally.list();
+}
+
+function isCensusGroup(value: unknown): value is CensusGroup {
+  if (typeof value !== "object" || value === null) return false;
+  const group = value as Partial<CensusGroup>;
+  return (
+    (group.providerId === null || typeof group.providerId === "string") &&
+    typeof group.currency === "string" &&
+    typeof group.seats === "number"
+  );
+}
+
+// `groups` es OPCIONAL —las salas de una versión anterior no lo escriben y cuentan como sin
+// atribuir—, pero si viene tiene que estar bien: una entrada con grupos rotos es una entrada rota, y
+// se barre como las demás.
 function parseCensus(raw: string): CensusEntry | undefined {
   try {
     const entry = JSON.parse(raw) as Partial<CensusEntry>;
     return typeof entry.seats === "number" &&
       typeof entry.gameModeId === "string" &&
       (entry.tournamentId === undefined || typeof entry.tournamentId === "string") &&
+      (entry.groups === undefined ||
+        (Array.isArray(entry.groups) && entry.groups.every(isCensusGroup))) &&
       typeof entry.at === "number"
       ? (entry as CensusEntry)
       : undefined;
