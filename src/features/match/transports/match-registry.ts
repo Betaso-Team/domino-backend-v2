@@ -59,7 +59,7 @@ export interface PublicMatchConfig {
    * LOS NIVELES DE AUMENTO QUE LA MESA OFRECE (truco `58ce78f`), para que el front pinte el aumento
    * ANTES de proponer. Con el `extra` del catálogo: el front lo muestra junto al nivel, y no es
    * secreto —lo publica el catálogo de modos—. Vacío = esta mesa no ofrece aumentar. El precio de
-   * cada uno lo deriva el cliente con `betAmountsOf`, o lo lee de `seat.price.levels` de su mensaje `config`.
+   * cada uno es `entryFee × (nivel − 1)` (`betDifference`), o lo lee de `seat.price.levels` de su mensaje `config`.
    *
    * `extra` NO ES PLATA, y por eso sigue siendo un número: es lo que el nivel le SUMA al multiplicador
    * de puntos del ranking (`multiplier + extra`, `core/rules/config.ts`). Ni `additionalPoints`.

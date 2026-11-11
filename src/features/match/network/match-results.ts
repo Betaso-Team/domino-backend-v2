@@ -196,8 +196,8 @@ export function matchResultOf(
               : "lost",
         abandon: abandonOf(player),
       })),
-      // `ucText` no redondea: el orquestador compara `Number(amount)` contra su planilla, y el texto
-      // vuelve al mismo número que `payoutOf` calculó.
+      // `ucText` no redondea: el orquestador lee `amount` como decimal y lo compara EXACTO con
+      // `stakeAt(prize, nivel)`, la misma fórmula y el mismo `Decimal` con que `payoutOf` lo calculó.
       payouts: (reward?.entries ?? []).map(({ userId, amount }) => ({
         userId,
         currency: UC,

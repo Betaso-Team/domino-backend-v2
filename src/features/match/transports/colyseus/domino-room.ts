@@ -43,7 +43,13 @@ import {
   type OrchestratorCharges,
   OrchestratorUnavailableError,
 } from "../../network/orchestrator-charges";
-import { type SeatCredentials, configOf, requestOf } from "../match-contract";
+import {
+  ENABLED_SEATS,
+  ENABLED_SEATS_TOKEN,
+  type SeatCredentials,
+  configOf,
+  requestOf,
+} from "../match-contract";
 
 // El nombre de la mesa en el registro cuando no hay modo detrás: la de torneo.
 const TOURNAMENT_TABLE_NAME = "Torneo";
@@ -183,7 +189,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // con los que cobró. Lo que queda en `config` es una COPIA: editar el modo mientras hay una
     // partida en curso no puede cambiarle el premio a una mesa ya cobrada, y `replay` rebobina con lo
     // grabado y sin base.
-    const request = requestOf(options);
+    //
+    // LAS MESAS QUE SE PUEDEN ABRIR son `ENABLED_SEATS` (sólo de dos). Nadie en producción registra
+    // `EnabledSeats`: lo registra sólo el arnés de los E2E de cuatro, que todavía miden el motor de
+    // cuatro de punta a punta. Ni variable de entorno ni opción del pedido: el orquestador no puede
+    // pedir una mesa de cuatro.
+    const enabledSeats = rootContainer.isRegistered(ENABLED_SEATS_TOKEN)
+      ? rootContainer.resolve<readonly number[]>(ENABLED_SEATS_TOKEN)
+      : ENABLED_SEATS;
+    const request = requestOf(options, enabledSeats);
     const betLevels = request.mode === "CASUAL" ? (request.betLevels ?? []) : [];
     // Acá adentro se rechaza la cantidad que no coincide con el modo (`SEAT_COUNT_MISMATCH`), ANTES
     // de la génesis: el árbol de la partida nace unas líneas más abajo, en el
@@ -191,7 +205,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     //
     // LOS NIVELES DE AUMENTO LOS TRAE EL REQUEST: el que cobra el aumento es el orquestador, y es él
     // quien decide cuáles se ofrecen. Sin `betLevels` la mesa no ofrece aumentar.
-    const config = configOf(request, betLevels);
+    const config = configOf(request, betLevels, enabledSeats);
     this.config = config;
     this.seats = playerIdsOf(config);
     // SIN `maxClients`, A PROPÓSITO (portado de truco `b90840b`). La puerta es el chequeo del asiento

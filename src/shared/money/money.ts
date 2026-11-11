@@ -1,10 +1,13 @@
-// COPIA de `packages/money/src/money.ts` de tablea-gaming-orchestrator, commit c9222ea (la convención
-// v2). Se copia TAL CUAL (docs/convenciones/montos.md, «Fuera del monorepo»), salvo dos cosas: el
-// formato que pide biome, y que queda afuera lo que el dominó no usa —`isReservedCode` (el catálogo de
-// monedas es de billing) y lo `@deprecated` de v1 (`money`, `ucOnly`, `toUc`, `Money`, `UC_KEY`)—. Un
-// cambio a la regla se hace allá primero y se vuelve a copiar, junto con `money.vectors.json` (sin los
-// grupos de lo que no se copió), que corre `money.test.ts`.
-//
+// COPIA de `packages/money/src/money.ts` de tablea-gaming-orchestrator, commit 85cd1a4 (la convención
+// v2 sobre el `Decimal`). Se copia TAL CUAL (docs/convenciones/montos.md, «Fuera del monorepo»), salvo
+// dos cosas: el formato que pide biome, y que queda afuera lo que el dominó no usa —`isReservedCode` (el
+// catálogo de monedas es de billing) y lo `@deprecated` de v1 (`money`, `ucOnly`, `toUc`, `Money`,
+// `UC_KEY`, y `currencyKey`, que sólo lo usaba `money`)—. Un cambio a la regla se hace allá primero y se
+// vuelve a copiar, junto con `money.vectors.json` (sin los grupos de lo que no se copió), que corre
+// `tests/money.test.ts`.
+
+import { Decimal } from "./decimal";
+
 // THE AMOUNTS A SERVICE EMITS (v2): every entity carries one `currency` and all of its amounts are in
 // it, each one a plain decimal string padded to that currency's decimals and never rounded:
 // `{ currency: 'VES', entryFee: '10.00', guaranteedPrize: '0.00' }`. No `uc` key: a record charged
@@ -12,9 +15,9 @@
 // code is billing's, as is (`VES`), and `UC` is reserved. The full rule is
 // `docs/convenciones/montos.md` in the tablea-gaming-orchestrator monorepo.
 //
-// This file has no dependencies and is copied verbatim into repos outside the monorepo
-// (domino-backend-v2, `src/shared/money.ts`, with the source commit in its header). The arithmetic is
-// exact: `bigint` over the decimal text; a JS `number` never carries an amount.
+// This file is copied verbatim into repos outside the monorepo (domino-backend-v2,
+// `src/shared/money/money.ts`, with the source commit in its header), together with `decimal.ts`. The
+// arithmetic is billing's `Decimal` (big.js): a JS `number` never carries an amount.
 
 /** The unit of account of the network, exactly as it travels in a `currency` field. */
 export const UC = "UC";
@@ -83,18 +86,9 @@ function currencyCode(currency: unknown): string {
   return currency;
 }
 
-/** The amount as a scaled integer: `'-1.5'` at scale 2 is `-150n`. The scale never drops digits. */
-function scaled(value: Parsed, scale: number): bigint {
-  const digits = BigInt(value.whole + value.fraction.padEnd(scale, "0"));
-  return value.negative ? -digits : digits;
-}
-
-/** The scaled integer as text with exactly `scale` decimals; zero never carries a sign. */
-function format(value: bigint, scale: number): string {
-  const negative = value < 0n;
-  const digits = (negative ? -value : value).toString().padStart(scale + 1, "0");
-  const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
-  return negative ? `-${text}` : text;
+/** The decimal of a text the convention accepts (sign included). */
+function signed(text: string): Decimal {
+  return new Decimal(text);
 }
 
 /**
@@ -106,15 +100,15 @@ function format(value: bigint, scale: number): string {
 export function fixed(text: string, decimals: number): string {
   const value = parse(text);
   const scale = Math.max(places(decimals), value.fraction.length);
-  return format(scaled(value, scale), scale);
+  // big.js never prints a sign on zero, and `toFixed` at a scale ≥ the text's never drops a digit.
+  return signed(text).toFixed(scale);
 }
 
 /** Whether two decimal strings are worth the same (`'10'` and `'10.0000'` are). */
 export function sameAmount(left: string, right: string): boolean {
-  const a = parse(left);
-  const b = parse(right);
-  const scale = Math.max(a.fraction.length, b.fraction.length);
-  return scaled(a, scale) === scaled(b, scale);
+  parse(left);
+  parse(right);
+  return signed(left).eq(signed(right));
 }
 
 /** A finite `number` in its shortest decimal form, without exponent: `1.5e-7` → `'0.00000015'`. */

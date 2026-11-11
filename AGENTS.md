@@ -117,11 +117,46 @@ pieza del dominó.
   a la mesa, `domino.match.finished` (`stakes`, `payouts[]`) y la cabecera del registro. **Cada asiento
   con precio está en su moneda** (el código de billing tal cual): `seat.price` del mensaje `config` y el asiento del
   registro, con el `rateId` de la mesa, y la fila de `GET /me/matches`; sin precio, en UC.
-  `src/shared/money.ts` es copia de `packages/money` del orquestador (commit en la cabecera, sin lo que
-  el dominó no usa) y corre sus vectores; se cambia allá primero. El motor, el snapshot y Mongo siguen
-  con números en UC y textos: la forma es de la frontera (`network/amounts.ts`,
-  `network/record-view.ts`). El texto en UC nunca se redondea (el orquestador compara `Number(texto)`
-  con su planilla). `betLevels[].extra` no es plata y sigue siendo número. Antes (v1, 2026-11-11) cada
+  `src/shared/money/` es copia de `packages/money` del orquestador (commit `85cd1a4` en cada cabecera:
+  `decimal.ts` y `pricing.ts` enteros, `money.ts` sin lo que el dominó no usa) y corre sus dos archivos
+  de vectores; se cambia allá primero. `betLevels[].extra` no es plata y sigue siendo número.
+- **La plata nunca es un `number` (2026-11-11).** Adentro todo monto en UC es el `Decimal` de billing
+  (big.js 7.0.1 estricto): `DominoMatchConfig.entryFee`/`prize`, la oferta y `MULTIPLIER_AGREED`, las
+  entradas de `payoutOf`. Las fórmulas son las del orquestador, escritas una vez: el premio y la entrada
+  al nivel L son `stakeAt(base, L)` (`stakesOf` en `network/payout.ts`, que usa también el registro) y
+  aceptar un aumento cobra `betDifference(entryFee, L)` (el juez, `engine/bet/referee.ts`); se borró
+  `betAmountsOf` de `rules/` (en `number`, y `rules/` no puede importar `@/shared`). El texto sale de un
+  `Decimal` con `ucText` = `fixed(x.toString(), 4)`; `payouts[].amount` es exactamente
+  `fixed(stakeAt(prize, L).toString(), 4)`, lo que el orquestador compara con igualdad decimal. Antes el
+  x6 de 0.02 era `0.12000000000000001` y el resultado iba a la DLQ. `POST /internal/matches` acepta
+  `gameMode.entryFee`/`prize` como texto decimal (el orquestador nuevo) o, durante UNA versión, como
+  número (el viejo, `fromNumber`). Mongo guarda los `*InUC` y el `additionalEntryFee` de la timeline como
+  texto con 4 decimales; los documentos de antes tienen números y se leen igual (`storedUcOf`), sin
+  migrar. Las respuestas públicas no cambiaron de forma. `src/tests/no-number-money.test.ts` falla si un
+  campo con nombre de plata se tipa `number`. Ver `docs/api-y-mensajes.md`, «Montos».
+- **Sólo dominó de dos (2026-11-11).** Una mesa de cuatro no se puede crear, ni por error: `ENABLED_SEATS
+  = [2]` en `transports/match-contract.ts`, constante del código y no variable de entorno. La ruta del
+  orquestador contesta 400 a `gameMode.playersQuantity: 4` o a más de dos `participants` (casual y
+  torneo), la sala lo vuelve a rechazar y `configOf` lanza `SeatsNotEnabledError`. El motor de cuatro se
+  sigue midiendo: la sala lee los asientos habilitados del token `EnabledSeats` del container, que sólo
+  registra el arnés de los E2E (`enableFourSeats()` en `features/match/tests/e2e-harness.ts`); producción
+  no lo registra nunca. `replayConfigOf` sigue aceptando cuatro asientos (rebobina historia).
+
+### Antes de habilitar dominó de 4
+
+Lo que se sabe roto o sin decidir en la mesa de cuatro, y que hay que resolver ANTES de agregar el 4 a
+`ENABLED_SEATS` (no se arregla ahora):
+
+1. **El asiento del bot en el equipo ganador.** El dueño decidió que sólo cobra el humano: `payoutOf`
+   ya no le paga al asiento que juega la máquina, así que el orquestador y billing tienen que aceptar
+   un resultado con menos cobradores que asientos ganadores.
+2. **El aumento lo tiene que aceptar el equipo rival**, no la pareja del que lo propuso:
+   `canRespondBet` en `core/rules/legality.ts` hoy deja contestar a cualquiera que no sea el que propuso.
+3. **El que abandona sigue viendo la mano** que la máquina juega por él: su vista no se cierra al
+   sentarse el bot.
+4. **Rehabilitar el 4P en la frontera**: agregar el 4 a `ENABLED_SEATS`, devolverle al contrato el
+   techo de cuatro participantes y revisar los tests que hoy fijan el rechazo (`match-contract.test.ts`,
+   `tables.int.test.ts`, `domino-room.e2e.test.ts`, `orchestrator-tables.e2e.test.ts`). Antes (v1, 2026-11-11) cada
   monto era un objeto por moneda (`{ ves, uc }`). Ver `docs/api-y-mensajes.md`, «Montos».
 
 ## El plan es la autoridad

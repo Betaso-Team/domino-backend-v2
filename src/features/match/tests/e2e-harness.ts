@@ -21,8 +21,9 @@ import type { MatchState } from "../core/state";
 import type { BoardSide } from "../core/state/tile";
 import type { HistoryEntry, HistoryReader } from "../network/history";
 import {
-  type CasualMatchRequest,
-  type CreateMatchRequest,
+  type CasualMatchRequestInput,
+  type CreateMatchRequestInput,
+  ENABLED_SEATS_TOKEN,
   configOf,
   requestOf,
 } from "../transports/match-contract";
@@ -61,8 +62,8 @@ export function signatureOf(state: MatchState): string {
 
 export interface SeatedMatch {
   readonly roomId: string;
-  /** CON QUÉ SE CREÓ LA SALA: el `CreateMatchRequest` del orquestador. */
-  readonly options: CreateMatchRequest;
+  /** CON QUÉ SE CREÓ LA SALA: el `CreateMatchRequest` del orquestador, como lo manda él. */
+  readonly options: CreateMatchRequestInput;
   /**
    * El MISMO snapshot que la sala normalizó: es lo único que traduce entre el `userId`
    * con el que el test nombra a un jugador y el `seat-N` con el que el servidor lo nombra.
@@ -72,6 +73,19 @@ export interface SeatedMatch {
   readonly serverState: MatchState;
   /** Indexado por el id OPACO del asiento, que es el que el servidor usa. */
   readonly clients: Record<string, Awaited<ReturnType<ColyseusTestServer["connectTo"]>>>;
+}
+
+/** Las mesas que el arnés le habilita a la sala para medir el motor de cuatro. */
+export const FOUR_SEATS: readonly number[] = [2, 4];
+
+/**
+ * LA SALA ABRE MESAS DE CUATRO, sólo en el proceso de este test. El dominó de cuatro no sale
+ * (`ENABLED_SEATS` es sólo 2) y la sala no abre una mesa de cuatro en producción; el motor sí la sabe
+ * jugar, y estos E2E lo siguen midiendo de punta a punta. Se le habilita por el container, que es de
+ * este archivo de test: cada E2E corre en su propio hilo aislado, con su propio container.
+ */
+export function enableFourSeats(): void {
+  rootContainer.register(ENABLED_SEATS_TOKEN, { useValue: FOUR_SEATS });
 }
 
 /**
@@ -88,8 +102,9 @@ export async function seatFour(
   seats: readonly [ParticipantInput, ParticipantInput, ParticipantInput, ParticipantInput],
   seed?: string,
 ): Promise<SeatedMatch> {
+  enableFourSeats();
   const options = casualTable(seats, seed, CASUAL_4P);
-  const config = configOf(requestOf(options));
+  const config = configOf(requestOf(options, FOUR_SEATS), [], FOUR_SEATS);
   const room = await server.createRoom("domino", options);
   const clients: SeatedMatch["clients"] = {};
   for (const seat of config.seats) {
@@ -105,7 +120,7 @@ export async function seatPair(
   seed?: string,
   // LO QUE EL ORQUESTADOR PUEDE AGREGARLE O CAMBIARLE AL PEDIDO: los niveles de aumento y otro modo
   // en línea.
-  extra: Partial<Pick<CasualMatchRequest, "betLevels" | "gameMode" | "gameModeId">> = {},
+  extra: Partial<Pick<CasualMatchRequestInput, "betLevels" | "gameMode" | "gameModeId">> = {},
 ): Promise<SeatedMatch> {
   const options = { ...casualTable(seats, seed), ...extra };
   // EL MISMO CONFIG QUE LA SALA: sale del request validado. Si acá se armara el config a

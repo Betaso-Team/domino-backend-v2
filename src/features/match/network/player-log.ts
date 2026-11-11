@@ -1,6 +1,6 @@
-import { UC } from "@/shared/money";
+import { UC, ZERO } from "@/shared/money";
 import type { SeatPrice } from "../core/config";
-import { seatText, ucText } from "./amounts";
+import { type StoredUcAmount, seatText, storedUcOf, ucText } from "./amounts";
 import type { StoredMatchRecord } from "./history";
 import { zeroLike } from "./player-currency";
 
@@ -79,8 +79,8 @@ interface StoredSeat {
   readonly id?: string;
   readonly userId?: string;
   readonly finalScore?: number;
-  readonly chargedInUC?: number;
-  readonly prizePaidInUC?: number;
+  readonly chargedInUC?: StoredUcAmount;
+  readonly prizePaidInUC?: StoredUcAmount;
   readonly chargedInPlayerCurrency?: string;
   readonly prizePaidInPlayerCurrency?: string;
   readonly price?: SeatPrice;
@@ -119,7 +119,7 @@ export function rowOf(userId: string, document: StoredMatchRecord): MatchRow {
   const table = (document.table ?? {}) as {
     name?: string;
     isFree?: boolean;
-    entryFeeInUC?: number;
+    entryFeeInUC?: StoredUcAmount;
   };
   const config = (document.matchConfig ?? {}) as { playersQuantity?: number };
   return {
@@ -147,11 +147,15 @@ export function rowOf(userId: string, document: StoredMatchRecord): MatchRow {
 // en el asiento —o sin precio— no se adivina y la fila queda en UC.
 function amountsFor(
   seat: StoredSeat | undefined,
-  table: { readonly entryFeeInUC?: number },
+  table: { readonly entryFeeInUC?: StoredUcAmount },
   result: MatchResult,
 ): Pick<MatchRow, "currency" | "bet" | "prize"> {
-  const betUc = result === "canceled" ? 0 : (seat?.chargedInUC ?? table.entryFeeInUC ?? 0);
-  const prizeUc = result === "win" ? (seat?.prizePaidInUC ?? 0) : 0;
+  // Los montos en UC de cualquier época: número en un documento de antes, texto en uno nuevo.
+  const betUc =
+    result === "canceled"
+      ? ZERO
+      : (storedUcOf(seat?.chargedInUC) ?? storedUcOf(table.entryFeeInUC) ?? ZERO);
+  const prizeUc = result === "win" ? (storedUcOf(seat?.prizePaidInUC) ?? ZERO) : ZERO;
   const local = inPlayerCurrency(seat, result);
   const price = seat?.price;
   if (price === undefined || local === undefined) {

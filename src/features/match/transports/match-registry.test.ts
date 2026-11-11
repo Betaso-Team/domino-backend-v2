@@ -109,7 +109,7 @@ describe("MatchRegistry", () => {
 
   // LOS NIVELES QUE LA MESA OFRECE, para pintar el aumento ANTES de proponer (truco `58ce78f`). Sale
   // el `level`, los puntos y el `extra` del catálogo, que el front muestra junto al nivel. El precio
-  // lo deriva el cliente con `betAmountsOf`.
+  // es `entryFee × (nivel − 1)` (`betDifference`).
   it("publica los niveles de aumento con el extra", async () => {
     const registry = new MatchRegistry(new MemoryKeyValueStore());
     await registry.register(

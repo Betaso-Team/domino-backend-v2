@@ -1,5 +1,6 @@
 import { withTimeout } from "@/shared/deadline";
 import type { Logger } from "@/shared/logger";
+import { ZERO } from "@/shared/money";
 import type { NetworkMatchEvent } from "./events";
 import type { MatchEventSink } from "./listeners";
 
@@ -76,7 +77,7 @@ export class OrchestratorBetCharger {
     const sink: MatchEventSink = (events) => {
       for (const event of events) {
         if (event.type !== "MULTIPLIER_AGREED") continue;
-        if (event.additionalEntryFee <= 0) continue;
+        if (event.additionalEntryFee.lte(ZERO)) continue;
         const current = step;
         step += 1;
         inFlight = this.collect(matchId, current, event.level, emit, revoke);

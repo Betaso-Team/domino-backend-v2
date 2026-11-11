@@ -1,4 +1,12 @@
-import { UC, UC_DECIMALS, fixed, readAmount } from "@/shared/money";
+import {
+  DECIMAL_TEXT,
+  type Decimal,
+  UC,
+  UC_DECIMALS,
+  decimal,
+  fixed,
+  fromNumber,
+} from "@/shared/money";
 import type { SeatPrice } from "../core/config";
 import type { NetworkMatchEvent } from "./events";
 
@@ -6,9 +14,10 @@ import type { NetworkMatchEvent } from "./events";
 // orquestador, v2): cada ENTIDAD lleva un `currency`, y todos sus montos están en esa moneda como texto
 // decimal plano, rellenado con los decimales de la moneda y nunca redondeado —`{ currency: "UC",
 // entryFee: "2.0000" }`—. Sin `uc` al lado: un registro cobrado con una tasa expone su `rateId`, y quien
-// quiera el UC consulta esa tasa. Adentro nada cambia: el motor, el snapshot y el registro en Mongo
-// siguen guardando los números en UC y los textos en la moneda del jugador; la forma es de la FRONTERA
-// (el mensaje `config`, el estado y los eventos de la sala, el resultado por
+// quiera el UC consulta esa tasa. ADENTRO, todo monto en UC es el `Decimal` de billing (`@/shared/money`):
+// el snapshot, el motor y los eventos; el registro en Mongo los guarda como texto en UC (los documentos de
+// antes, como número: `storedUcOf` lee los dos) y los de la moneda del jugador como texto. La forma de la
+// convención es de la FRONTERA (el mensaje `config`, el estado y los eventos de la sala, el resultado por
 // RabbitMQ y las lecturas del historial).
 //
 // DE DÓNDE SALE CADA ENTIDAD:
@@ -21,13 +30,33 @@ import type { NetworkMatchEvent } from "./events";
 // sabe cuánto fue en la otra moneda, y no lo inventa.
 
 /**
- * UN NÚMERO EN UC COMO TEXTO, con su forma decimal más corta y los 4 decimales de UC rellenados. NUNCA
- * REDONDEA, ni siquiera el ruido de coma flotante de un producto (`0.1 × 3`): el texto vuelve al MISMO
- * `number` con `Number(texto)`, que es lo que el orquestador compara contra su planilla al leer el
- * resultado (`payouts[].amount`). Redondear acá podía dar un premio que no coincide y un mensaje en la DLQ.
+ * UN MONTO EN UC COMO TEXTO, con los 4 decimales de UC rellenados y NUNCA redondeado: el `Decimal` tal
+ * cual (`fixed(monto.toString(), UC_DECIMALS)`). Es la forma de todo monto en UC que sale del dominó —el
+ * resultado por RabbitMQ, el mensaje `config`, los eventos, las lecturas del registro— y la que se
+ * guarda en Mongo. El orquestador lee `payouts[].amount` como decimal y lo compara EXACTO con
+ * `stakeAt(prize, nivel)`, la misma fórmula que calculó este monto.
  */
-export function ucText(amount: number): string {
-  return fixed(readAmount(amount, UC), UC_DECIMALS);
+export function ucText(amount: Decimal): string {
+  return fixed(amount.toString(), UC_DECIMALS);
+}
+
+/**
+ * UN MONTO EN UC COMO LO GUARDA MONGO, de cualquier época: un documento escrito antes lo tiene como
+ * `number` (`125`, o el ruido de coma flotante que se haya guardado: se lee en su forma decimal más
+ * corta, sin redondear), y uno nuevo como texto (`"125.0000"`). No se migra nada: se lee tolerante.
+ */
+export type StoredUcAmount = string | number;
+
+/**
+ * EL LECTOR TOLERANTE de un monto en UC del registro (`StoredUcAmount`), o `undefined` si el campo no
+ * es un monto —falta, o vino con otra forma—: el que lee no inventa una cifra.
+ */
+export function storedUcOf(value: unknown): Decimal | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? fromNumber(value) : undefined;
+  }
+  if (typeof value === "string" && DECIMAL_TEXT.test(value)) return decimal(value);
+  return undefined;
 }
 
 /**
@@ -92,8 +121,8 @@ export type WireMatchEvent =
  * LOS EVENTOS EN LA CONVENCIÓN. El único con plata es `MULTIPLIER_AGREED`, cuyo `additionalEntryFee` (lo
  * que le cuesta aceptar a cada asiento) está en UC: el evento va a toda la mesa, así que sale como
  * entidad en UC (`currency: "UC"`, `additionalEntryFee: "125.0000"`), y la misma cifra en la moneda de
- * cada uno está en su `seatPrices[seat].levels`. Adentro el evento sigue siendo un número: lo lee el
- * cobro del aumento (`OrchestratorBetCharger`) y lo graba la timeline.
+ * cada uno está en su `seat.price.levels`. Adentro el evento lleva el `Decimal`: lo lee el cobro del
+ * aumento (`OrchestratorBetCharger`), y la timeline lo graba como texto en UC.
  */
 export function wireEventOf(event: NetworkMatchEvent): WireMatchEvent {
   if (event.type !== "MULTIPLIER_AGREED") return event;

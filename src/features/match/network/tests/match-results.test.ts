@@ -1,4 +1,5 @@
 import type { Logger } from "@/shared/logger";
+import { decimal, fixed, stakeAt } from "@/shared/money";
 import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { describe, expect, it, vi } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
@@ -108,8 +109,8 @@ describe("matchResultOf", () => {
   // LA CONVENCIÓN DE MONTOS v2: ningún número ni objeto por moneda en el resultado; `stakes` y cada
   // premio son entidades en UC. `multiplier` y `bet.extra` son pesos del ranking, no plata, y siguen
   // siendo números.
-  it("no lleva ningún monto fuera de la convención; el premio vuelve al mismo número que calculó `payoutOf`", () => {
-    const fractional = { ...config, entryFee: 0.1, prize: 0.1 };
+  it("no lleva ningún monto fuera de la convención; el premio es el decimal que calculó `payoutOf`", () => {
+    const fractional = { ...config, entryFee: decimal("0.1"), prize: decimal("0.1") };
     const match = createMatchState(fractional);
     match.acceptedBetLevel = 3;
     match.acceptedBetExtra = 2;
@@ -126,10 +127,9 @@ describe("matchResultOf", () => {
     expect(payload).not.toHaveProperty("payouts.0.amountUc");
     expect(JSON.stringify(payload)).not.toContain('"uc"');
     expect(payload.payouts[0]?.currency).toBe("UC");
-    // SIN REDONDEAR: el orquestador compara `Number(amount)` contra su planilla, y el ruido de coma
-    // flotante del producto (0.1 + 0.1 × 2) tiene que volver idéntico.
-    const amount = payload.payouts[0]?.amount;
-    expect(Number(amount)).toBe(0.1 + 0.1 * 2);
+    // EXACTO: el orquestador compara `amount` como decimal con `stakeAt(prize, nivel)`. En `number`
+    // era `0.1 + 0.1 × 2` = 0.30000000000000004, y el premio no coincidía.
+    expect(payload.payouts[0]?.amount).toBe("0.3000");
     expect(payload.stakes).toMatchObject({
       currency: "UC",
       entryFee: "0.1000",
@@ -473,5 +473,55 @@ describe("MatchResultRecorder", () => {
     settle();
     await draining;
     expect(enqueued).toBe(true);
+  });
+});
+
+// EL PREMIO QUE PUBLICA EL DOMINÓ ES EL QUE CALCULA EL ORQUESTADOR, al dígito. El orquestador parsea
+// `payouts[].amount` como `Decimal` y lo compara EXACTO con `stakeAt(roster.prize, nivel)`: un premio que
+// difiere en el último decimal va a la DLQ y el ganador no cobra. Con `number`, el x6 de 0.02 era
+// `0.02 + 0.1` = 0.12000000000000001.
+describe("el premio publicado es `stakeAt(prize, nivel)` del orquestador", () => {
+  const payoutAt = (prize: string, level: number): string | undefined => {
+    const table = { ...config, prize: decimal(prize) };
+    const match = createMatchState(table);
+    if (level > 1) {
+      match.acceptedBetLevel = level;
+      match.acceptedBetExtra = 1;
+    }
+    const result = matchResultOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" },
+      match,
+      table,
+      "room-9",
+      AT,
+    );
+    return (result?.payload as MatchFinishedPayload).payouts[0]?.amount;
+  };
+  const expected = (prize: string, level: number) =>
+    fixed(stakeAt(decimal(prize), level).toString(), 4);
+
+  it("con premio 0.02, en todo nivel de 2 a 100", () => {
+    for (let level = 2; level <= 100; level += 1) {
+      expect(payoutAt("0.02", level), `nivel ${level}`).toBe(expected("0.02", level));
+    }
+    expect(payoutAt("0.02", 6)).toBe("0.1200");
+  });
+
+  it.each([
+    "0.01",
+    "0.03",
+    "0.07",
+    "0.1",
+    "0.15",
+    "0.3",
+    "1.5",
+    "2.75",
+    "18",
+    "33.3333",
+    "1000.0001",
+  ])("con premio %s, en una muestra de niveles", (prize) => {
+    for (const level of [1, 2, 3, 5, 6, 7, 10, 64, 99, 100]) {
+      expect(payoutAt(prize, level), `nivel ${level}`).toBe(expected(prize, level));
+    }
   });
 });

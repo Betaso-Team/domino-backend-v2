@@ -1,3 +1,4 @@
+import { decimal } from "@/shared/money";
 import { describe, expect, it } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
 import { replayConfigOf } from "../../transports/match-contract";
@@ -63,8 +64,8 @@ const refundOfMoney1 = {
   rateId: options.rateId,
   kind: "REFUND",
   entries: [
-    { userId: "ada", currency: "VES", amount: 125, idempotencyKey: refundKeys[0] },
-    { userId: "lin", currency: "USD", amount: 125, idempotencyKey: refundKeys[1] },
+    { userId: "ada", currency: "VES", amount: decimal("125"), idempotencyKey: refundKeys[0] },
+    { userId: "lin", currency: "USD", amount: decimal("125"), idempotencyKey: refundKeys[1] },
   ],
 };
 
@@ -85,7 +86,9 @@ describe("payoutOf", () => {
       matchId: "money-1",
       rateId: options.rateId,
       kind: "REWARD",
-      entries: [{ userId: "ada", currency: "VES", amount: 250, idempotencyKey: rewardKey }],
+      entries: [
+        { userId: "ada", currency: "VES", amount: decimal("250"), idempotencyKey: rewardKey },
+      ],
     });
   });
 
@@ -139,25 +142,25 @@ describe("payoutOf", () => {
         {
           userId: "u1",
           currency: "VES",
-          amount: 125,
+          amount: decimal("125"),
           idempotencyKey: '["money-4p","REFUND","u1"]',
         },
         {
           userId: "u2",
           currency: "VES",
-          amount: 125,
+          amount: decimal("125"),
           idempotencyKey: '["money-4p","REFUND","u2"]',
         },
         {
           userId: "u3",
           currency: "USD",
-          amount: 125,
+          amount: decimal("125"),
           idempotencyKey: '["money-4p","REFUND","u3"]',
         },
         {
           userId: "u4",
           currency: "COP",
-          amount: 125,
+          amount: decimal("125"),
           idempotencyKey: '["money-4p","REFUND","u4"]',
         },
       ],
@@ -188,7 +191,7 @@ describe("payoutOf", () => {
 // ganador, que era lo que mantenía inerte la falta de una regla de reparto. La regla existía y
 // estaba en v1.
 describe("payoutOf — el aumento de apuesta aceptado", () => {
-  // EL AUMENTO MULTIPLICA LA MESA ENTERA (`betAmountsOf`, la regla de v1): aceptado el nivel N, la
+  // EL AUMENTO MULTIPLICA LA MESA ENTERA (`stakeAt`, la regla de v1): aceptado el nivel N, la
   // entrada vale `entryFee × N` y el premio `prize × N`. La config está CONGELADA al nacer, así que
   // el nivel se lee del ESTADO; sin eso, el que ganó una mesa a x3 cobraba el premio de x1.
   const withBet = (level: number) => {
@@ -203,7 +206,9 @@ describe("payoutOf — el aumento de apuesta aceptado", () => {
     const winnerTeamId = match.players[0]?.teamId as "A" | "B";
     expect(
       payoutOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, config)?.entries,
-    ).toEqual([{ userId: "ada", currency: "VES", amount: 750, idempotencyKey: rewardKey }]);
+    ).toEqual([
+      { userId: "ada", currency: "VES", amount: decimal("750"), idempotencyKey: rewardKey },
+    ]);
   });
 
   it("reembolsa la entrada con el nivel aceptado", () => {
@@ -211,7 +216,7 @@ describe("payoutOf — el aumento de apuesta aceptado", () => {
       payoutOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, withBet(2), config)?.entries.map(
         ({ amount }) => amount,
       ),
-    ).toEqual([250, 250]);
+    ).toEqual([decimal("250"), decimal("250")]);
   });
 });
 
@@ -235,13 +240,13 @@ describe("payoutOf — el premio de la pareja", () => {
         {
           userId: "u1",
           currency: "VES",
-          amount: 250,
+          amount: decimal("250"),
           idempotencyKey: '["money-4p","REWARD","u1"]',
         },
         {
           userId: "u3",
           currency: "USD",
-          amount: 250,
+          amount: decimal("250"),
           idempotencyKey: '["money-4p","REWARD","u3"]',
         },
       ],
@@ -258,7 +263,12 @@ describe("payoutOf — el premio de la pareja", () => {
     if (quitter) quitter.hasAbandoned = true;
 
     expect(resolve(match)?.entries).toEqual([
-      { userId: "u1", currency: "VES", amount: 250, idempotencyKey: '["money-4p","REWARD","u1"]' },
+      {
+        userId: "u1",
+        currency: "VES",
+        amount: decimal("250"),
+        idempotencyKey: '["money-4p","REWARD","u1"]',
+      },
     ]);
   });
 
@@ -271,7 +281,12 @@ describe("payoutOf — el premio de la pareja", () => {
     if (bot) bot.isBot = true;
 
     expect(resolve(match)?.entries).toEqual([
-      { userId: "u1", currency: "VES", amount: 250, idempotencyKey: '["money-4p","REWARD","u1"]' },
+      {
+        userId: "u1",
+        currency: "VES",
+        amount: decimal("250"),
+        idempotencyKey: '["money-4p","REWARD","u1"]',
+      },
     ]);
   });
 
@@ -356,13 +371,13 @@ describe("payoutOf — el resto", () => {
     ).toMatchObject({
       kind: "REFUND",
       entries: [
-        { userId: "u1", currency: "VES", amount: 1.5 },
-        { userId: "u2", currency: "USD", amount: 1.5 },
+        { userId: "u1", currency: "VES", amount: decimal("1.5") },
+        { userId: "u2", currency: "USD", amount: decimal("1.5") },
       ],
     });
     expect(
       payoutOf({ type: "MATCH_RESOLVED", winnerTeamId, reason: "SCORE" }, match, decimalTable),
-    ).toMatchObject({ kind: "REWARD", entries: [{ amount: 2.75 }] });
+    ).toMatchObject({ kind: "REWARD", entries: [{ amount: decimal("2.75") }] });
   });
 
   // La mesa GRATIS emite igual, con sus entradas en cero: es la decisión escrita en
@@ -375,6 +390,6 @@ describe("payoutOf — el resto", () => {
       free,
     );
     expect(result?.kind).toBe("REFUND");
-    expect(result?.entries.map(({ amount }) => amount)).toEqual([0, 0]);
+    expect(result?.entries.map(({ amount }) => amount.toString())).toEqual(["0", "0"]);
   });
 });

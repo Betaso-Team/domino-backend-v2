@@ -1,3 +1,4 @@
+import type { Decimal } from "@/shared/money";
 import type { PlayerId, TeamId } from "./ids";
 
 // A qué ventana sirve el único plazo del juego. Un solo campo en el estado
@@ -93,7 +94,8 @@ export type MatchEvent =
       type: "MULTIPLIER_AGREED";
       level: number;
       extra: number;
-      additionalEntryFee: number;
+      /** En UC, el `Decimal` de la mesa: sale como texto sólo en la frontera (`wireEventOf`). */
+      additionalEntryFee: Decimal;
       playerIds: readonly PlayerId[];
     }
   // EL AUMENTO DESHECHO, y es el ÚNICO evento del catálogo que existe para revertir algo.

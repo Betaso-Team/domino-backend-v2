@@ -47,7 +47,7 @@ export type Turn = SchemaType<typeof Turn>;
 //
 // ⚠ `additionalEntryFee` ES CALCULADO Y NO VIENE DEL CATÁLOGO, que es donde el modelo estuvo
 // mal: el catálogo del backend principal devuelve `{ level, extra, additionalPoints }` y nada
-// más. La plata sale de multiplicar la mesa (`betAmountsOf`), porque el que publica los niveles
+// más. La plata sale de multiplicar la mesa (`stakeAt`/`betDifference` de `@/shared/money`), porque el que publica los niveles
 // no sabe cuánto cuesta esta mesa. Se guarda igual —y no se deriva en el cliente— porque es el
 // número sobre el que el jugador consiente, y derivarlo allá es la fórmula escrita dos veces.
 //

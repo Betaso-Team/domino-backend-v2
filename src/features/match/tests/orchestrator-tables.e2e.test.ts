@@ -310,10 +310,18 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect((await post("/internal/players/nadie/seat")).status).toBe(404);
   });
 
-  it("contesta 422 a una mesa cuyos asientos no son los del modo", async () => {
+  // SÓLO DOMINÓ DE DOS: el modo de cuatro es un 400 en la ruta, antes de llegar a la sala. Con sólo
+  // mesas de dos, «los asientos no son los del modo» (`422 SEAT_COUNT_MISMATCH`) ya no se puede pedir
+  // por la ruta: un modo de dos con dos participantes siempre coincide.
+  it("contesta 400 a una mesa de cuatro", async () => {
     const res = await post("/internal/matches", casualTable(["o-e", "o-f"], "seed", CASUAL_4P));
-    expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ code: "SEAT_COUNT_MISMATCH" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "MALFORMED" });
+    const four = await post(
+      "/internal/matches",
+      casualTable(["o-e", "o-f", "o-e3", "o-f3"], "seed", CASUAL_4P),
+    );
+    expect(four.status).toBe(400);
   });
 
   it("contesta 400 a una mesa casual sin su modo en línea", async () => {

@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type GlobalDominoConfig, globalConfigWith } from "../../core/config";
 import type { MatchState } from "../../core/state";
 import type { HistoryReader } from "../../network/history";
-import type { MatchParticipant } from "../match-contract";
+import { ENABLED_SEATS, ENABLED_SEATS_TOKEN, type MatchParticipant } from "../match-contract";
 import { MatchRegistry } from "../match-registry";
 import type { DominoRoom } from "./domino-room";
 
@@ -223,53 +223,73 @@ describe("DominoRoom", () => {
     );
   });
 
-  // LA MESA DE CUATRO NACE, y hasta este incremento se rechazaba antes de génesis: `payoutOf`
-  // exigía exactamente un ganador, así que el final de una mesa de cuatro lanzaba DESPUÉS del
-  // veredicto —sin premio y sin reembolso, plata trabada—. La abrió la regla de reparto de v1.
-  it("crea la sala de cuatro y reparte los cuatro asientos", async () => {
+  const fourParticipants = (): MatchParticipant[] => [
+    ...defaultParticipants,
+    { userId: "c", displayName: "C", currency: "VES", providerId: "betaso" },
+    { userId: "d", displayName: "D", currency: "VES", providerId: "betaso" },
+  ];
+
+  // SÓLO DOMINÓ DE DOS (`ENABLED_SEATS`): la sala no abre una mesa de cuatro, ni por el modo ni por los
+  // participantes, aunque el pedido le llegue sin pasar por la ruta del orquestador.
+  it.each([
+    ["un modo de cuatro", { gameModeId: CASUAL_4P.uuid, gameMode: CASUAL_4P.gameMode }],
+    ["cuatro participantes", {}],
+  ])("no crea una sala de cuatro: %s", async (_case, mode) => {
     const testServer = requiredServer();
-
-    const room = await testServer.createRoom<DominoRoom>("domino", {
-      ...options("match-4p", [
-        ...defaultParticipants,
-        { userId: "c", displayName: "C", currency: "VES", providerId: "betaso" },
-        { userId: "d", displayName: "D", currency: "VES", providerId: "betaso" },
-      ]),
-      gameModeId: CASUAL_4P.uuid,
-      gameMode: CASUAL_4P.gameMode,
-    });
-
-    const state = room.state as MatchState;
-    expect(state.players.map(({ playerId }) => playerId)).toEqual([
-      "seat-1",
-      "seat-2",
-      "seat-3",
-      "seat-4",
-    ]);
-    // Las parejas, que es lo que distingue esta mesa de dos partidas de a dos.
-    expect(state.players.map(({ teamId }) => teamId).filter((team) => team === "A")).toHaveLength(
-      2,
-    );
-    // ⚠ SIN POZO: cuatro manos de siete agotan las 28 fichas, así que la rama nula no se instancia
-    // y «no hay de dónde robar» deja de ser un estado y pasa a ser la forma del modo.
-    expect(state.currentRound?.boneyard).toBeUndefined();
+    await expect(
+      testServer.createRoom<DominoRoom>("domino", {
+        ...options("match-4p-refused", fourParticipants()),
+        ...mode,
+      }),
+    ).rejects.toThrow();
   });
 
-  // LA CANTIDAD LA DECIDE EL MODO. Cuatro participantes sobre un modo de dos serían cuatro
-  // asientos en una mesa cuyo premio se configuró para dos.
-  it("no crea la sala si los participantes no son los del modo", async () => {
-    const testServer = requiredServer();
+  // EL MOTOR SÍ SABE JUGAR DE CUATRO, y se sigue midiendo: con las mesas de cuatro habilitadas por el
+  // container —lo que hace sólo el arnés de los E2E—, la sala la abre.
+  describe("con las mesas de cuatro habilitadas (sólo los tests)", () => {
+    beforeAll(() => rootContainer.register(ENABLED_SEATS_TOKEN, { useValue: [2, 4] }));
+    afterAll(() => rootContainer.register(ENABLED_SEATS_TOKEN, { useValue: ENABLED_SEATS }));
 
-    await expect(
-      testServer.createRoom<DominoRoom>(
-        "domino",
-        options("match-seat-mismatch", [
-          ...defaultParticipants,
-          { userId: "c", displayName: "C", currency: "VES", providerId: "betaso" },
-          { userId: "d", displayName: "D", currency: "VES", providerId: "betaso" },
-        ]),
-      ),
-    ).rejects.toThrow(/SEAT_COUNT_MISMATCH/);
+    // LA MESA DE CUATRO NACE, y hasta este incremento se rechazaba antes de génesis: `payoutOf`
+    // exigía exactamente un ganador, así que el final de una mesa de cuatro lanzaba DESPUÉS del
+    // veredicto —sin premio y sin reembolso, plata trabada—. La abrió la regla de reparto de v1.
+    it("crea la sala de cuatro y reparte los cuatro asientos", async () => {
+      const testServer = requiredServer();
+
+      const room = await testServer.createRoom<DominoRoom>("domino", {
+        ...options("match-4p", fourParticipants()),
+        gameModeId: CASUAL_4P.uuid,
+        gameMode: CASUAL_4P.gameMode,
+      });
+
+      const state = room.state as MatchState;
+      expect(state.players.map(({ playerId }) => playerId)).toEqual([
+        "seat-1",
+        "seat-2",
+        "seat-3",
+        "seat-4",
+      ]);
+      // Las parejas, que es lo que distingue esta mesa de dos partidas de a dos.
+      expect(state.players.map(({ teamId }) => teamId).filter((team) => team === "A")).toHaveLength(
+        2,
+      );
+      // ⚠ SIN POZO: cuatro manos de siete agotan las 28 fichas, así que la rama nula no se instancia
+      // y «no hay de dónde robar» deja de ser un estado y pasa a ser la forma del modo.
+      expect(state.currentRound?.boneyard).toBeUndefined();
+    });
+
+    // LA CANTIDAD LA DECIDE EL MODO. Cuatro participantes sobre un modo de dos serían cuatro
+    // asientos en una mesa cuyo premio se configuró para dos.
+    it("no crea la sala si los participantes no son los del modo", async () => {
+      const testServer = requiredServer();
+
+      await expect(
+        testServer.createRoom<DominoRoom>(
+          "domino",
+          options("match-seat-mismatch", fourParticipants()),
+        ),
+      ).rejects.toThrow(/SEAT_COUNT_MISMATCH/);
+    });
   });
 
   // CADA MESA ES SU MODO EN LÍNEA, aunque dos nombren el mismo `gameModeId`: el orquestador edita el

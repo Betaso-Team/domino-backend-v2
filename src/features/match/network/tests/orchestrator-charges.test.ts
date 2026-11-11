@@ -2,6 +2,7 @@ import { type Server, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { HttpClient } from "@/shared/http";
 import type { Logger } from "@/shared/logger";
+import { decimal } from "@/shared/money";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { NetworkMatchEvent } from "../events";
 import {
@@ -23,7 +24,7 @@ function silentLogger(): Logger {
   return self;
 }
 
-const agreed = (level: number, additionalEntryFee = 10): NetworkMatchEvent => ({
+const agreed = (level: number, additionalEntryFee = decimal("10")): NetworkMatchEvent => ({
   type: "MULTIPLIER_AGREED",
   level,
   extra: 1,
@@ -113,7 +114,7 @@ describe("OrchestratorBetCharger", () => {
     const chargeBet = vi.fn(async () => undefined);
     const { sink } = charger(chargeBet);
 
-    sink([agreed(2, 0)]);
+    sink([agreed(2, decimal("0"))]);
     await new Promise((resume) => setTimeout(resume, 0));
 
     expect(chargeBet).not.toHaveBeenCalled();

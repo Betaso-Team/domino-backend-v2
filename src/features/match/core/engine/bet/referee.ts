@@ -1,7 +1,7 @@
+import { type Decimal, betDifference } from "@/shared/money";
 import type { DominoMatchConfig } from "../../config";
 import type { PlayerId } from "../../ids";
 import type { BetLevel } from "../../rules/config";
-import { betAmountsOf } from "../../rules/config";
 import { betLevelOf, canProposeBet, canRespondBet } from "../../rules/legality";
 import type { MatchView } from "../../rules/view";
 import type { MatchState } from "../../state";
@@ -14,7 +14,8 @@ import { RuleViolationError, assertLegal } from "../errors";
 /** El nivel juzgado MÁS lo que cuesta, que son dos cosas y se buscan una sola vez. */
 export interface ProposableBet {
   readonly option: BetLevel;
-  readonly additionalEntryFee: number;
+  /** Lo que le cobra a cada asiento aceptarlo, en UC: `entryFee × (nivel − 1)` (`betDifference`). */
+  readonly additionalEntryFee: Decimal;
 }
 
 export class BetReferee {
@@ -41,8 +42,7 @@ export class BetReferee {
     // LOS MONTOS SE CALCULAN ACÁ, y es el único lugar donde se pueden: el nivel no los trae
     // —el catálogo del backend principal no sabe cuánto cuesta esta mesa— y este juez es el
     // único actor del aumento que tiene la config congelada de la partida.
-    const { additionalEntryFee } = betAmountsOf(level, this.config.entryFee, this.config.prize);
-    return { option, additionalEntryFee };
+    return { option, additionalEntryFee: betDifference(this.config.entryFee, level) };
   }
 
   assertCanRespond(playerId: PlayerId): void {
