@@ -33,6 +33,7 @@ import {
   type MatchHistory,
   PROBE_INTERVAL_MS,
 } from "../../network";
+import { wireEventOf } from "../../network/amounts";
 import { droppedByServer } from "../../network/connection";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
 import { recordEndingSink } from "../../network/match-record";
@@ -295,7 +296,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     ];
     this.notifier = new MatchEventNotifier(
       pieces.listeners,
-      (events) => this.broadcast("events", events),
+      // LOS MONTOS SALEN EN LA CONVENCIÓN (`wireEventOf`); los sinks de abajo reciben el evento interno.
+      (events) => this.broadcast("events", events.map(wireEventOf)),
       [
         ...pieces.sinks,
         ...orchestratorSinks,

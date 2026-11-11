@@ -1,9 +1,10 @@
 import type { Logger } from "@/shared/logger";
+import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
 import { describe, expect, it, vi } from "vitest";
 import { createMatchState } from "../../core/engine/genesis";
 import { RoundSummary } from "../../core/state";
 import { configOf, replayConfigOf, requestOf } from "../../transports/match-contract";
-import { MatchResultRecorder, matchResultOf } from "../match-results";
+import { type MatchFinishedPayload, MatchResultRecorder, matchResultOf } from "../match-results";
 
 const config = replayConfigOf({
   matchId: "orq-1",
@@ -56,12 +57,18 @@ describe("matchResultOf", () => {
         endReason: "SCORE_DOMINO",
         roundsPlayed: 0,
         finalScore: { A: 0, B: 0 },
-        stakes: { entryFee: 10, prize: 18, multiplier: 2, isFreeRoom: false, bet: null },
+        stakes: {
+          entryFee: { uc: "10.0000" },
+          prize: { uc: "18.0000" },
+          multiplier: 2,
+          isFreeRoom: false,
+          bet: null,
+        },
         participants: [
           { userId: "p-ana", teamId: winnerTeamId, result: "won", abandon: null },
           { userId: "p-beto", teamId: teamOf(match, 1), result: "lost", abandon: null },
         ],
-        payouts: [{ userId: "p-ana", amountUc: 18 }],
+        payouts: [{ userId: "p-ana", amount: { uc: "18.0000" } }],
       },
     });
   });
@@ -81,7 +88,36 @@ describe("matchResultOf", () => {
 
     expect(result?.payload).toMatchObject({
       stakes: { bet: { level: 2, extra: 1 } },
-      payouts: [{ userId: "p-ana", amountUc: 36 }],
+      payouts: [{ userId: "p-ana", amount: { uc: "36.0000" } }],
+    });
+  });
+
+  // LA CONVENCIÓN DE MONTOS: ningún monto suelto en el resultado. `multiplier` y `bet.extra` son pesos
+  // del ranking, no plata, y siguen siendo números.
+  it("no lleva ningún monto suelto; el premio vuelve al mismo número que calculó `payoutOf`", () => {
+    const fractional = { ...config, entryFee: 0.1, prize: 0.1 };
+    const match = createMatchState(fractional);
+    match.acceptedBetLevel = 3;
+    match.acceptedBetExtra = 2;
+
+    const result = matchResultOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" },
+      match,
+      fractional,
+      "room-9",
+      AT,
+    );
+    const payload = result?.payload as MatchFinishedPayload;
+    expect(findBareAmounts(payload, ["entryFee", "prize", "amount", "amountUc"])).toEqual([]);
+    expect(payload).not.toHaveProperty("payouts.0.amountUc");
+    // SIN REDONDEAR: el orquestador compara `Number(amount.uc)` contra su planilla, y el ruido de coma
+    // flotante del producto (0.1 + 0.1 × 2) tiene que volver idéntico.
+    const amount = payload.payouts[0]?.amount.uc;
+    expect(Number(amount)).toBe(0.1 + 0.1 * 2);
+    expect(payload.stakes).toMatchObject({
+      entryFee: { uc: "0.1000" },
+      prize: { uc: "0.1000" },
+      bet: { level: 3, extra: 2 },
     });
   });
 
@@ -239,7 +275,7 @@ describe("matchResultOf", () => {
     expect(finished?.payload).toMatchObject({
       mode: "TOURNAMENT",
       tournamentId: "t-7",
-      stakes: { entryFee: 0, prize: 0, isFreeRoom: true, bet: null },
+      stakes: { entryFee: { uc: "0.0000" }, prize: { uc: "0.0000" }, isFreeRoom: true, bet: null },
     });
     const aborted = matchResultOf(
       { type: "MATCH_ABORTED", reason: "NEVER_STARTED" },
@@ -374,7 +410,7 @@ describe("MatchResultRecorder", () => {
     await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
     expect(enqueue.mock.calls[0]?.[2]).toMatchObject({
       stakes: { bet: null },
-      payouts: [{ userId: "p-ana", amountUc: 18 }],
+      payouts: [{ userId: "p-ana", amount: { uc: "18.0000" } }],
     });
   });
 

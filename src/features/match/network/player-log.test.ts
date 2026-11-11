@@ -1,3 +1,4 @@
+import { findBareAmounts } from "@/shared/tests/find-bare-amounts";
 import { describe, expect, it } from "vitest";
 import { paginated, resultFor, rowOf } from "./player-log";
 import { CLOSING } from "./transports/tests/history-contract";
@@ -49,8 +50,8 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
       id: "m-1",
       roomId: "room-1",
       playedAt: "2026-10-26T20:00:00.000Z",
-      bet: 10,
-      prize: 18,
+      bet: { uc: "10.0000" },
+      prize: { uc: "18.0000" },
       score: 104,
       result: "win",
       freeRoom: false,
@@ -61,8 +62,8 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
 
   it("el que no ganó no ve premio", () => {
     expect(rowOf("u2", finished)).toMatchObject({
-      bet: 10,
-      prize: 0,
+      bet: { uc: "10.0000" },
+      prize: { uc: "0.0000" },
       score: 40,
       result: "abandoned",
     });
@@ -71,7 +72,11 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
   // UNA PARTIDA ABORTADA NO MOVIÓ PLATA PARA ÉL, diga lo que diga el asiento: el reembolso lo decide el
   // orquestador, y mostrar la entrada sería mostrar un cobro que se devolvió.
   it("la cancelada va sin entrada ni premio", () => {
-    expect(rowOf("u1", aborted)).toMatchObject({ bet: 0, prize: 0, result: "canceled" });
+    expect(rowOf("u1", aborted)).toMatchObject({
+      bet: { uc: "0.0000" },
+      prize: { uc: "0.0000" },
+      result: "canceled",
+    });
   });
 
   // UNA ABORTADA ANTES DE ABRIR NO TIENE `players` NI `matchEndedAt`: se lee de los asientos y de la fila.
@@ -86,8 +91,8 @@ describe("rowOf: la fila desde el asiento del que pregunta", () => {
   });
 });
 
-// LA FILA EN SU MONEDA: lo que el cierre congeló, con las mismas dos reglas que la de UC. Los tres campos
-// van juntos, y sólo si el asiento se sentó con precio.
+// LA FILA EN SU MONEDA: lo que el cierre congeló, con las mismas dos reglas que la de UC, en la llave de
+// su moneda junto a `uc`. Sólo si el asiento se sentó con precio.
 describe("rowOf: en la moneda del jugador", () => {
   const price = {
     currency: "VES",
@@ -124,28 +129,25 @@ describe("rowOf: en la moneda del jugador", () => {
   it("el que ganó con un aumento ve la entrada más el aumento y el premio del nivel", () => {
     expect(rowOf("u1", priced)).toMatchObject({
       result: "win",
-      bet: 20,
-      prize: 36,
-      currency: "VES",
-      betInPlayerCurrency: "4000.00",
-      prizeInPlayerCurrency: "7200.00",
+      bet: { ves: "4000.00", uc: "20.0000" },
+      prize: { ves: "7200.00", uc: "36.0000" },
     });
   });
 
   it("el que no ganó ve lo que pagó y ningún premio", () => {
     expect(rowOf("u2", priced)).toMatchObject({
       result: "abandoned",
-      bet: 20,
-      prize: 0,
-      currency: "VES",
-      betInPlayerCurrency: "4000.00",
-      prizeInPlayerCurrency: "0.00",
+      bet: { ves: "4000.00", uc: "20.0000" },
+      prize: { ves: "0.00", uc: "0.0000" },
     });
     const lost = {
       ...priced,
       players: [priced.players[0], { ...priced.players[1], exit: undefined }],
     };
-    expect(rowOf("u2", lost)).toMatchObject({ result: "lose", betInPlayerCurrency: "4000.00" });
+    expect(rowOf("u2", lost)).toMatchObject({
+      result: "lose",
+      bet: { ves: "4000.00", uc: "20.0000" },
+    });
   });
 
   // LA CANCELADA NO MOVIÓ PLATA, tampoco en su moneda, diga lo que diga el asiento.
@@ -153,24 +155,46 @@ describe("rowOf: en la moneda del jugador", () => {
     const canceled = { ...priced, status: "aborted", winnerIds: [] };
     expect(rowOf("u1", canceled)).toMatchObject({
       result: "canceled",
-      bet: 0,
-      prize: 0,
-      currency: "VES",
-      betInPlayerCurrency: "0.00",
-      prizeInPlayerCurrency: "0.00",
+      bet: { ves: "0.00", uc: "0.0000" },
+      prize: { ves: "0.00", uc: "0.0000" },
     });
     // Y LA QUE SE ABORTÓ ANTES DE ABRIR, que sólo tiene los asientos del armado.
     const { players, ...bare } = canceled;
-    expect(rowOf("u1", bare)).toMatchObject({ result: "canceled", betInPlayerCurrency: "0.00" });
+    expect(rowOf("u1", bare)).toMatchObject({
+      result: "canceled",
+      bet: { ves: "0.00", uc: "0.0000" },
+    });
   });
 
-  // SIN PRECIO, LA FILA ES LA DE SIEMPRE: ni un campo nuevo, ni vacío.
-  it("un asiento sin precio no trae ningún campo nuevo", () => {
+  // SIN PRECIO, `{ uc }` SOLO: el dominó no sabe cuánto fue en la otra moneda y no lo inventa. Y nunca
+  // los campos de antes (`currency`, `*InPlayerCurrency`) ni un monto suelto.
+  it("un asiento sin precio sale en `{ uc }`, y ninguna fila lleva los campos de antes", () => {
     for (const row of [rowOf("u1", finished), rowOf("u2", finished), rowOf("u1", aborted)]) {
+      expect(Object.keys(row.bet)).toEqual(["uc"]);
+      expect(Object.keys(row.prize)).toEqual(["uc"]);
+    }
+    const rows = [rowOf("u1", priced), rowOf("u2", priced), rowOf("u1", finished)];
+    expect(findBareAmounts(rows, ["bet", "prize"])).toEqual([]);
+    for (const row of rows) {
       expect(row).not.toHaveProperty("currency");
       expect(row).not.toHaveProperty("betInPlayerCurrency");
       expect(row).not.toHaveProperty("prizeInPlayerCurrency");
     }
+  });
+
+  // CON LOS DECIMALES DE LA MONEDA en el precio, el texto congelado se rellena (nunca se recorta).
+  it("rellena con los decimales de la moneda si el precio los trae", () => {
+    const padded = {
+      ...priced,
+      players: priced.players.map((player) => ({
+        ...player,
+        price: { ...price, decimals: 3 },
+      })),
+    };
+    expect(rowOf("u1", padded)).toMatchObject({
+      bet: { ves: "4000.000", uc: "20.0000" },
+      prize: { ves: "7200.000", uc: "36.0000" },
+    });
   });
 });
 

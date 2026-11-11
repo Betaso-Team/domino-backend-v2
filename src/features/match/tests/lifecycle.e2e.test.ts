@@ -248,8 +248,9 @@ describe("ciclo de vida de una partida", () => {
       // LOS TRES NÚMEROS SALEN DEL MODO EN LÍNEA: van como literal para que este endpoint quede
       // pineado contra el modo y no contra sí mismo.
       pointsToWin: 100,
-      entryFee: 125,
-      prize: 250,
+      // EN LA CONVENCIÓN DE MONTOS: `{ uc }`, porque la mesa es de todos sus asientos.
+      entryFee: { uc: "125.0000" },
+      prize: { uc: "250.0000" },
       betLevels: [],
       // LAS DOS REGLAS DE LA MESA QUE EL FRONT DIBUJA, del modo en línea.
       isFreeRoom: false,

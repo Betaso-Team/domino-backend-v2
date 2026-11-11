@@ -109,11 +109,12 @@ export interface TurnView {
 
 // Sin `turnRemainingMs`: es el reloj congelado del turno, que solo le sirve al conductor para
 // devolverlo al descongelar. Una regla no decide nada con él.
+// Sin `additionalEntryFee`: es plata en la forma del wire (un mapa por moneda), y ninguna regla decide
+// con ella.
 export interface BetOfferView {
   readonly proposerId: PlayerId;
   readonly level: number;
   readonly extra: number;
-  readonly additionalEntryFee: number;
   readonly additionalPoints: number;
 }
 

@@ -97,7 +97,7 @@ Resuelto el 2026-11-10: la API del catálogo se borró con el catálogo.
   - el modo en línea (`gameMode`, `src/features/match/transports/match-contract.ts`)
   - `src/features/match/core/config.ts`
   - `src/features/match/network/payout.ts`
-  - el campo `amountUc` del resultado (`match-results.ts`)
+  - la llave `uc` de cada monto que el dominó emite (`network/amounts.ts`), por ejemplo `payouts[].amount` del resultado (`match-results.ts`)
 - **`rateId`.** El contrato lo trata como opaco, pero los comentarios y los tests lo explican como el
   `_id` de Mongo del documento de tasas de Betaso (`match-contract.ts`, `match-contract.test.ts:186`,
   `docs/api-y-mensajes.md`).

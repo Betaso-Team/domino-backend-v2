@@ -5,6 +5,7 @@ import { fakeOrchestrator } from "@/tests/fake-orchestrator";
 import { CASUAL_2P } from "@/tests/table-modes";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DominoMatchConfig } from "../core/config";
+import { ucOf } from "../network/amounts";
 import {
   ChargeRejectedError,
   OrchestratorBetCharger,
@@ -101,6 +102,36 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     expect(match.serverState.acceptedBetLevel).toBe(2);
   });
 
+  // LO QUE CUESTA ACEPTAR, EN LA CONVENCIÓN DE MONTOS, decodificado del lado del CLIENTE: en el estado
+  // (un mapa con solo `uc`) y en el evento `MULTIPLIER_AGREED` que difunde la sala. Adentro sigue siendo
+  // un número, que es lo que mira el cobro.
+  it("el aumento viaja como `{ uc }` en el estado y en el evento", async () => {
+    const match = await seatPair(server, ["v1", "v2"], undefined, { betLevels: [...LEVELS] });
+    await revealHands(match);
+    const fee = ucOf(configOfRoom(match.roomId).entryFee);
+    const responder = clientOf(match, "v2");
+    const batches: unknown[][] = [];
+    responder.onMessage("events", (batch: unknown[]) => batches.push(batch));
+    const offerOf = () =>
+      (
+        responder.state as unknown as {
+          currentRound?: { betOffer?: { additionalEntryFee: { toJSON(): unknown } } };
+        }
+      ).currentRound?.betOffer;
+
+    clientOf(match, "v1").send("PROPOSE_BET_MULTIPLIER", { level: 2 });
+    await waitUntil(() => offerOf() !== undefined);
+    await waitUntil(() => JSON.stringify(offerOf()?.additionalEntryFee.toJSON()) !== "{}");
+    expect(offerOf()?.additionalEntryFee.toJSON()).toEqual(fee);
+
+    responder.send("RESPOND_BET_MULTIPLIER", { accept: true });
+    const agreedOf = () =>
+      batches.flat().find((event) => (event as { type?: string }).type === "MULTIPLIER_AGREED");
+    await waitUntil(() => agreedOf() !== undefined);
+    expect(agreedOf()).toMatchObject({ level: 2, additionalEntryFee: fee });
+    await waitUntil(() => chargeBet.mock.calls.length === 1);
+  });
+
   it("la partida que termina con el cobro del aumento en vuelo publica el premio recién con el cobro resuelto", async () => {
     let refuse = () => {};
     chargeBet.mockImplementation(
@@ -128,7 +159,7 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     const payload = enqueue.mock.calls.find((call) => call[0] === key)?.[2];
     expect(payload).toMatchObject({
       stakes: { bet: null },
-      payouts: [{ amountUc: configOfRoom(match.roomId).prize }],
+      payouts: [{ amount: ucOf(configOfRoom(match.roomId).prize) }],
     });
   });
 
@@ -296,7 +327,7 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
       tournamentId: "t-1",
       reason: "ABANDONMENT",
       endReason: "ABANDONMENT_VOLUNTARY",
-      stakes: { entryFee: 0, prize: 0, isFreeRoom: true, bet: null },
+      stakes: { entryFee: { uc: "0.0000" }, prize: { uc: "0.0000" }, isFreeRoom: true, bet: null },
       participants: [
         { userId: "t1", result: "won", abandon: null },
         { userId: "t2", result: "abandoned", abandon: "voluntary" },
