@@ -144,8 +144,9 @@ services:
       - PORT=2567
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Por encima del `kill_timeout` de pm2: el drenado de las salas.
-    stop_grace_period: 20s
+    # EL MISMO PRESUPUESTO QUE EL `kill_timeout` DE pm2 (40 s, ver `ecosystem.config.cjs`): los
+    # resultados en vuelo (hasta 20 s), el despachador (5 s) y el historial (5 s), con margen.
+    stop_grace_period: 45s
     logging:
       driver: json-file
       options:

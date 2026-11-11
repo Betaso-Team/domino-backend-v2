@@ -126,14 +126,18 @@ eligió no tener (sin `MONGO_URI`, sin `REDIS_URL`) no cuenta como faltante.
 
 ### El apagado
 
-`pm2 reload` manda un **mensaje** `shutdown` —no una señal— y da `kill_timeout` (5 s) para drenar.
+`pm2 reload` manda un **mensaje** `shutdown` —no una señal— y da `kill_timeout` (40 s) para drenar: los resultados en vuelo (hasta 20 s), el despachador y el historial.
 En ese rato el servidor deja de releer la configuración en caliente, cierra las salas, espera a que el historial en
 vuelo termine de escribirse y recién ahí cierra Mongo. Redis lo cierra Colyseus dentro del mismo
 paso.
 
-Lo que **no** hay es migración de salas: la instancia que se apaga se lleva sus partidas, igual
-que en v1. Y un `kill -9` no drena nada — las claves del registro quedan hasta que vence su TTL
-de 120 s, que es para lo que el TTL existe.
+Lo que **no** hay es migración de salas ni un drenado que deje terminar las partidas vivas: **cada
+deploy cancela las partidas en curso de la instancia que se apaga**, que salen abortadas
+(`INTERRUPTED`, o `NEVER_STARTED`/`TILES_NOT_SEEN`/`NEVER_PLAYED` según dónde estaban) y el orquestador
+reembolsa lo cobrado. Esperar a que terminen pediría un tope de decenas de minutos por instancia y que
+el orquestador deje de mandarle mesas nuevas; hoy no se hace. Y un `kill -9` no drena nada: las claves
+del registro quedan hasta que vence su TTL de 120 s, y la recuperación de partidas interrumpidas
+publica abortadas las que quedaron abiertas (ver `docs/operacion.md`).
 
 ## Cómo se despliega
 
