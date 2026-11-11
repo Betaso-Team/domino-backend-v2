@@ -80,12 +80,20 @@ import {
   UnknownCommandError,
   ValidationError,
 } from "./errors";
+import { LogSampler } from "./log-sampler";
 import type { MessageRouter } from "./messages";
 import { RoomTimeoutScheduler } from "./timeout-scheduler";
 import { StateViewVisibilityController } from "./visibility";
 
+// EL TOPE DE MENSAJES POR SEGUNDO DE CADA CONEXIÓN si el container no registró otro
+// (`MAX_MESSAGES_PER_SECOND`, `src/env.ts`). Colyseus trae `Infinity`.
+export const MAX_MESSAGES_PER_SECOND = 25;
+export const MAX_MESSAGES_PER_SECOND_TOKEN = "MaxMessagesPerSecond";
+
 export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   private seats: readonly PlayerId[] = [];
+  // LOS RECHAZOS DE CADA ASIENTO EN EL LOG, muestreados (`log-sampler.ts`).
+  private rejections!: LogSampler;
   // EL SNAPSHOT DE LA MESA, y es lo que la puerta consulta: resolver la pareja autenticada
   // al asiento opaco necesita la identidad externa, que el estado no sincroniza y el
   // registro no guarda. Se asigna en `onCreate`, antes de que la sala pueda recibir a nadie.
@@ -178,6 +186,13 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // ventana, y caen acá con el logger ya puesto.
     const rootLogger = rootContainer.resolve<Logger>("Logger");
     this.log = rootLogger.child({ roomId: this.roomId });
+    // EL TOPE DE MENSAJES: pasado, Colyseus cierra la conexión (1011) antes de que el mensaje llegue
+    // al router. Es por conexión y por segundo.
+    this.maxMessagesPerSecond = rootContainer.isRegistered(MAX_MESSAGES_PER_SECOND_TOKEN)
+      ? rootContainer.resolve<number>(MAX_MESSAGES_PER_SECOND_TOKEN)
+      : MAX_MESSAGES_PER_SECOND;
+    // `this.log` se lee en cada llamada: el de arriba se enriquece con la partida más abajo.
+    this.rejections = new LogSampler({ warn: (message, detail) => this.log.warn(message, detail) });
 
     // SE PREGUNTA UNA VEZ, y ese valor es de la mesa mientras viva: va a su container de abajo y de
     // ahí al motor, así que una edición que llegue a mitad de partida no le mueve los números a los
@@ -760,18 +775,27 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // exactamente acá: dos políticas de error para la misma puerta es cómo se consiguen dos
   // comportamientos distintos para el mismo rechazo.
   private rejectMessage(error: unknown, client: Client, type: string, playerId: PlayerId): void {
+    // EL LOG VA MUESTREADO POR ASIENTO (`LogSampler`); la respuesta al cliente, siempre.
     if (error instanceof RuleViolationError) {
-      this.log.warn("comando ilegal", { playerId, type, code: error.code });
+      this.rejections.warn(playerId, "illegal", "comando ilegal", {
+        playerId,
+        type,
+        code: error.code,
+      });
       client.send("illegal", { code: error.code });
       return;
     }
     if (error instanceof ValidationError) {
-      this.log.warn("payload malformado", { playerId, type, detail: error.detail });
+      this.rejections.warn(playerId, "malformed", "payload malformado", {
+        playerId,
+        type,
+        detail: error.detail,
+      });
       client.send("illegal", { code: "MALFORMED", detail: error.detail });
       return;
     }
     if (error instanceof UnknownCommandError) {
-      this.log.warn("comando desconocido", { playerId, type });
+      this.rejections.warn(playerId, "unknown", "comando desconocido", { playerId, type });
       client.send("illegal", { code: "UNKNOWN_COMMAND" });
       return;
     }

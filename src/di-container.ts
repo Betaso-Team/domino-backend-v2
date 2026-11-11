@@ -385,6 +385,8 @@ if (isTestingEnvironment(env.appEnv)) {
     },
   });
 }
+// EL TOPE DE MENSAJES POR SEGUNDO de cada conexión a una sala (`DominoRoom.maxMessagesPerSecond`).
+rootContainer.register<number>("MaxMessagesPerSecond", { useValue: env.maxMessagesPerSecond });
 // LA API INTERNA DEL ORQUESTADOR abre las mesas con este gateway: es la única puerta de entrada a
 // una partida.
 rootContainer.register(ColyseusMatchGateway, {

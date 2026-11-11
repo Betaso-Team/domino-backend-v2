@@ -37,4 +37,14 @@ describe.skipIf(!REDIS_INT_URL)("DominoRedisPresence contra Redis", () => {
       expect(await redis.get(key)).toBe("room-new");
     }
   });
+
+  it("setIfAbsent: de diez a la vez desde dos conexiones, uno solo toma el candado", async () => {
+    await redis.del("cad:lock");
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        (i % 2 === 0 ? redis : other).setIfAbsent("cad:lock", `t-${i}`, 30),
+      ),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
 });

@@ -340,6 +340,24 @@ describe("DominoRoom", () => {
   // registra SIN `await` en el medio después del join: lo que la sala manda en `onJoin` llega apenas
   // el cliente confirma la entrada, y el comodín de `src/tests/e2e.ts` se tragaría lo que nadie
   // escucha todavía.
+  // EL TOPE DE MENSAJES POR SEGUNDO (Colyseus trae `Infinity`): una ráfaga corta la conexión antes de
+  // llegar al motor, y el log de rechazos de ese asiento sale muestreado.
+  it("corta la conexión que pasa el tope de mensajes por segundo", async () => {
+    const testServer = requiredServer();
+    const room = await testServer.createRoom<DominoRoom>("domino", options("match-flood"));
+    expect(room.maxMessagesPerSecond).toBe(25);
+    const a = await connect(testServer, room, "a");
+    let closed: number | undefined;
+    a.onLeave((code) => {
+      closed = code;
+    });
+    a.reconnection.enabled = false;
+    for (let i = 0; i < 100; i += 1) a.send("NOT_A_COMMAND", {});
+    await waitUntil(() => closed !== undefined, 3_000);
+    expect(room.clients).toHaveLength(0);
+    await room.disconnect();
+  });
+
   it("manda la config pública con serverNow al entrar y al volver", async () => {
     const testServer = requiredServer();
     const room = await testServer.createRoom<DominoRoom>("domino", options("match-config-msg"));
