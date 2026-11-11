@@ -14,6 +14,7 @@ export const matchSeat = (playerId: string): MatchSeat => ({
   userId: playerId,
   displayName: `Jugador ${playerId}`,
   currency: "VES",
+  providerId: "betaso",
 });
 
 export const matchConfig = (

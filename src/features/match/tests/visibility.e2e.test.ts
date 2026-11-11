@@ -111,10 +111,11 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     }
   });
 
-  // EL WIRE LLEVA EL `userId` Y NO LA MONEDA. `displayName` y el resto del perfil son
-  // presentación y viajan; el `userId` (el `sub` del token) también, porque es como el cliente
-  // encuentra su asiento. La moneda es de infraestructura: vive en el `seat` de la config y no en el estado.
-  it("sincroniza presentación y userId, pero no la moneda", async () => {
+  // EL WIRE LLEVA LA PRESENTACIÓN Y NADA PRIVADO DEL ASIENTO. `displayName` y el resto del perfil son
+  // presentación y viajan. El `userId` (el `sub` del token), el proveedor y la moneda no: el estado es de
+  // toda la mesa, y en una cruzada la mesa tiene jugadores de dos proveedores. El cliente encuentra su
+  // asiento por el `seat.playerId` de su mensaje `config`.
+  it("sincroniza la presentación, pero no el userId, el proveedor ni la moneda", async () => {
     const match = await seatPair(server, [
       {
         userId: "private-a",
@@ -124,8 +125,9 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
         username: "ada99",
         profilePicture: "https://img.test/ada.png",
         currency: "VES",
+        providerId: "prov-a",
       },
-      { userId: "private-b", displayName: "Lin", currency: "USD" },
+      { userId: "private-b", displayName: "Lin", currency: "USD", providerId: "prov-b" },
     ]);
     await waitUntil(() => clientState(match, "private-a").players.length === 2);
 
@@ -134,26 +136,15 @@ describe("visibilidad — el rival no ve fichas ajenas", () => {
     expect(wire).toContain("Lin");
     expect(wire).toContain("ada99");
     expect(wire).toContain("https://img.test/ada.png");
-    // Cada cliente ve el `userId` de TODOS los asientos, cada uno en el suyo.
     for (const viewer of ["private-a", "private-b"]) {
-      const seats = clientState(match, viewer).players.map((p) => [p.userId, p.displayName]);
-      expect(seats).toEqual([
-        ["private-a", "Ada"],
-        ["private-b", "Lin"],
+      const viewed = JSON.stringify(clientState(match, viewer).toJSON());
+      for (const privateValue of ["private-a", "private-b", "prov-a", "prov-b", "VES", "USD"]) {
+        expect(viewed).not.toContain(privateValue);
+      }
+      expect(clientState(match, viewer).players.map((p) => p.userId)).toEqual([
+        undefined,
+        undefined,
       ]);
-    }
-    for (const privateValue of ["VES", "USD"]) expect(wire).not.toContain(privateValue);
-  });
-
-  // El requisito del front: reconocer el propio asiento por el `userId`, también ANTES de que
-  // nadie levante sus fichas (la mano llega tapada incluso para su dueño hasta `REVEAL_TILES`).
-  it("cada cliente reconoce su asiento por userId desde antes de revelar las fichas", async () => {
-    const match = await seatPair(server, ["own-a", "own-b"]);
-    for (const viewer of ["own-a", "own-b"]) {
-      await waitUntil(() => clientState(match, viewer).players.length === 2);
-      const mine = clientState(match, viewer).players.find((p) => p.userId === viewer);
-      expect(mine?.playerId).toBe(playerIdOf(match, viewer));
-      expect(mine?.hasSeenTiles).toBe(false);
     }
   });
 

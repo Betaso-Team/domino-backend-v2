@@ -47,12 +47,10 @@ export type Hand = SchemaType<typeof Hand>;
 // el `seat` de la config congelada (`config.seats`), que es de donde los lee la liquidación.
 // `displayName`/`username`/`profilePicture` son lo que el front dibuja.
 //
-// `userId` viaja a propósito: es el `sub` del token (el `players.id` de billing-auth,
-// estable entre lanzamientos), y es como el cliente encuentra SU asiento: el `playerId` es
-// posicional (`seat-N`) y no hay otra forma de saber cuál es el suyo, ni siquiera antes de
-// `REVEAL_TILES`. Es el mismo modelo de truco, donde `playerId` es el `userId`. No es identidad
-// de plataforma ni una credencial: el jugador ya conoce el suyo, y el `sid` (que sí lo es) no
-// entra al estado.
+// EL ESTADO ES DE TODA LA MESA, y en una mesa cruzada la mesa tiene jugadores de dos proveedores: lo que
+// se sincroniza acá lo ve el jugador de cada uno. Por eso los campos que viajan son una lista cerrada
+// —la fija `state.test.ts`— y ninguno es privado de un asiento: ni su `userId`, ni su proveedor, ni su
+// moneda, ni su precio. El cliente encuentra SU asiento por el `seat.playerId` de su mensaje `config`.
 export const PlayerState = schema(
   {
     playerId: t.string(),
@@ -81,9 +79,17 @@ export const PlayerState = schema(
     // los dos dicen "acá no hay nadie" pero uno deja la mesa andando y el otro la cierra. Y
     // separa además quién COBRA — el bot no, ver `network/payout.ts`.
     isBot: t.boolean().default(false),
-    // ⚠ VA AL FINAL por lo mismo que `isBot`: antes era `noSync()` y no ocupaba índice, así que
-    // sincronizarlo en su lugar habría corrido `teamId` y todo lo que sigue. Ver arriba por qué viaja.
-    userId: t.string(),
+    // EL `sub` DEL TOKEN DE ESTE ASIENTO, y NO VIAJA (`noSync()`: no ocupa índice ni entra en
+    // `toJSON()`). Viajó un tiempo para que el cliente reconociera su asiento, y así el jugador de un
+    // proveedor veía el `userId` del rival de otro; hoy el asiento propio llega en el mensaje `config`
+    // (`seat.playerId`). Era el último campo sincronizado, así que dejar de sincronizarlo no corre ningún
+    // índice.
+    //
+    // SIGUE EN EL ÁRBOL, del lado del servidor, porque es la identidad con la que el cierre comprueba
+    // que el estado y el snapshot son de la misma mesa antes de pagar (`assertSameTable`, en
+    // `network/payout.ts`): dos mesas de dos tienen los mismos `seat-N`, y sin esto un cruce le pagaría
+    // el premio a otra persona sin hacer ruido.
+    userId: t.string().noSync(),
     // CÓMO SE FUE DEL ASIENTO: `voluntary` (el verbo `ABANDON`) o `timeout` (lo retiró el reloj, en la
     // ventana de reparto o en su turno). Vacío mientras sigue jugando. Lo escribe el mismo que escribe
     // `hasAbandoned` e `isBot` (`MatchPlayer`), y lo lee el resultado que se publica (un torneo trata

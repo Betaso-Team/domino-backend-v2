@@ -5,6 +5,7 @@ import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GlobalDominoConfig, globalConfigWith } from "../core/config";
 import type { MatchState } from "../core/state";
+import { MatchRegistry } from "../transports/match-registry";
 import {
   type SeatedMatch,
   act,
@@ -185,12 +186,14 @@ describe("ciclo de vida de una partida", () => {
     const match = await seatPair(server, ["d1", "d2"]);
     server.sdk.auth.token = mintToken(participantOf("d1"));
     const displacer = await server.sdk.joinById<MatchState>(match.roomId);
+    // La conexión que desplaza también recibe su asiento en el mensaje `config`.
+    const seats: string[] = [];
+    displacer.onMessage("config", (message: { seat: { playerId: string } }) => {
+      seats.push(message.seat.playerId);
+    });
     await waitUntil(() => server.getRoomById(match.roomId).clients.length === 2);
-    // La conexión que desplaza también se reconoce por `userId`, en su asiento.
-    await displacer.waitForInitialState();
-    expect(displacer.state.players.find((p) => p.userId === "d1")?.playerId).toBe(
-      playerIdOf(match, "d1"),
-    );
+    await waitUntil(() => seats.length === 1);
+    expect(seats).toEqual([playerIdOf(match, "d1")]);
 
     // Ni caída ni regreso: para el rival, d1 nunca se fue (truco `b90840b`).
     expect(
@@ -232,21 +235,23 @@ describe("ciclo de vida de una partida", () => {
     await expect(server.connectTo(room)).rejects.toThrow();
   });
 
-  it("el endpoint de config responde el DTO sin seed", async () => {
+  // LA CONFIG PÚBLICA QUE ESTAMPA EL REGISTRO, y es la base del mensaje `config` de cada asiento: la
+  // mesa entera, sin seed y sin nada de ningún asiento.
+  it("la config pública de la mesa es la del modo, sin seed ni nada de un asiento", async () => {
     const match = await seatPair(server, ["c1", "c2"], "seed-secretisimo");
-    const response = await fetch(`http://localhost:2585/config/${match.roomId}`);
-    const body = await response.text();
+    const published = await rootContainer.resolve(MatchRegistry).publicConfigOf(match.roomId);
 
-    expect(response.status).toBe(200);
-    expect(body).not.toContain("seed-secretisimo");
-    expect(JSON.parse(body)).toEqual({
+    expect(JSON.stringify(published)).not.toContain("seed-secretisimo");
+    // El `matchId` lo eligió el orquestador (acá, con los usuarios adentro): fuera de él, nada de nadie.
+    expect(JSON.stringify({ ...published, matchId: "" })).not.toMatch(/"c1"|"c2"|VES|betaso/);
+    expect(published).toEqual({
       mode: "CASUAL",
       matchId: "m-c1-c2",
       // EL UUID DEL MODO que el pedido nombró.
       gameModeId: CASUAL_2P.uuid,
       seats: ["seat-1", "seat-2"],
-      // LOS TRES NÚMEROS SALEN DEL MODO EN LÍNEA: van como literal para que este endpoint quede
-      // pineado contra el modo y no contra sí mismo.
+      // LOS TRES NÚMEROS SALEN DEL MODO EN LÍNEA: van como literal para que quede pineado contra el
+      // modo y no contra sí mismo.
       pointsToWin: 100,
       // EN LA CONVENCIÓN DE MONTOS: la mesa en UC, porque es de todos sus asientos.
       currency: "UC",
@@ -263,37 +268,20 @@ describe("ciclo de vida de una partida", () => {
         dealingMs: env.dealingTimeoutMs,
         betResponseMs: originalGlobalConfig.betResponseTimeoutMs,
       },
-      serverNow: expect.any(Number),
     });
   });
 
-  it("el config trae una muestra actual del reloj del servidor", async () => {
-    const match = await seatPair(server, ["t1", "t2"]);
-    const before = Date.now();
-    const body = (await (await fetch(`http://localhost:2585/config/${match.roomId}`)).json()) as {
-      serverNow: number;
-    };
-    const after = Date.now();
-
-    expect(body.serverNow).toBeGreaterThanOrEqual(before);
-    expect(body.serverNow).toBeLessThanOrEqual(after);
-  });
-
-  // EL PAR es lo que prueba que el schema hace el trabajo, no una de las dos mitades sola.
-  // 400 y 404 dicen cosas distintas y el cliente las trata distinto: uno es "pediste mal",
-  // el otro "eso no existe". Sin schema las dos formas caían en el mismo 404 —el id iba
-  // derecho al `Map.get` del registry—, y el cliente no tenía cómo distinguir un id que
-  // escribió mal de una mesa que ya murió.
-  it("un roomId inexistente es 404 y uno de forma imposible es 400", async () => {
-    const inexistente = await fetch("http://localhost:2585/config/no-existe");
-    const conPuntos = await fetch("http://localhost:2585/config/tiene.puntos");
-    const larguisimo = await fetch(`http://localhost:2585/config/${"x".repeat(65)}`);
-
-    expect(inexistente.status).toBe(404);
-    expect(await inexistente.json()).toEqual({ code: "ROOM_NOT_FOUND" });
-    expect(conPuntos.status).toBe(400);
-    expect(await conPuntos.json()).toMatchObject({ code: "MALFORMED" });
-    expect(larguisimo.status).toBe(400);
+  // UN SOLO CORTE: la config llega sólo por el mensaje `config` de la sala. Las dos rutas HTTP que la
+  // servían ya no existen y caen en el 404 por defecto de Express.
+  it("GET /config/:roomId y GET /matches/:roomId ya no existen", async () => {
+    const match = await seatPair(server, ["g1", "g2"]);
+    for (const path of [`/config/${match.roomId}`, `/matches/${match.roomId}`]) {
+      const response = await fetch(`http://localhost:2585${path}`, {
+        headers: { authorization: `Bearer ${mintToken(participantOf("g1"))}` },
+      });
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain("m-g1-g2");
+    }
   });
 
   // El matchId entra del cliente y SALE en la respuesta (`{ matchId, entries }`): sin

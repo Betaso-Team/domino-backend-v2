@@ -180,10 +180,9 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect((await get("/internal/players/nadie/match")).status).toBe(404);
   });
 
-  // EL PRECIO EN LA MONEDA DE CADA UNO, de punta a punta: entra por el pedido del orquestador y sale por
-  // las dos puertas de la config pública —`GET /config/:roomId` y el mensaje `config` al sentarse—, por
-  // el id opaco de cada asiento.
-  it("publica en la config el precio de cada asiento que lo trajo", async () => {
+  // EL PRECIO EN LA MONEDA DE CADA UNO, de punta a punta: entra por el pedido del orquestador y sale
+  // sólo en el mensaje `config` de SU asiento, con su `playerId`. El otro asiento no lo ve.
+  it("manda a cada asiento su precio y su playerId, y nada del otro", async () => {
     const price = {
       currency: "VES",
       rate: "200",
@@ -192,22 +191,30 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
       levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
     };
     const table = casualTable([
-      { userId: "o-p1", displayName: "P1", currency: "VES", price },
-      { userId: "o-p2", displayName: "P2", currency: "USD" },
+      { userId: "o-p1", displayName: "P1", currency: "VES", providerId: "betaso", price },
+      { userId: "o-p2", displayName: "P2", currency: "USD", providerId: "parley" },
     ]);
     const res = await post("/internal/matches", table);
     expect(res.status).toBe(201);
     const opened = (await res.json()) as Opened;
 
-    const config = (await (await fetch(`${base}/config/${opened.data.roomId}`)).json()) as {
-      seats: string[];
-      seatPrices?: unknown;
-    };
-    expect(config.seats).toEqual(["seat-1", "seat-2"]);
+    const received = new Map<string, { seats: string[]; seat: Record<string, unknown> }>();
+    for (const seat of opened.data.seats) {
+      server.sdk.auth.token = mintToken(seat.userId);
+      const room = await server.sdk.consumeSeatReservation(seat.reservation as never);
+      room.onMessage("config", (message: { seats: string[]; seat: Record<string, unknown> }) => {
+        received.set(seat.userId, message);
+      });
+    }
+    await waitUntil(() => received.size === 2);
+
+    const mine = received.get("o-p1");
+    expect(mine?.seats).toEqual(["seat-1", "seat-2"]);
     // EN LA CONVENCIÓN DE MONTOS v2: una entidad en su moneda, con la tasa de la mesa con la que billing
     // cotizó, y sin `uc`.
-    const published = {
-      "seat-1": {
+    expect(mine?.seat).toEqual({
+      playerId: "seat-1",
+      price: {
         currency: "VES",
         rateId: table.rateId,
         rate: "200",
@@ -215,28 +222,20 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
         prize: "50000.00",
         levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
       },
-    };
-    expect(config.seatPrices).toEqual(published);
-
-    const received: { seatPrices?: unknown }[] = [];
-    for (const seat of opened.data.seats) {
-      server.sdk.auth.token = mintToken(seat.userId);
-      const room = await server.sdk.consumeSeatReservation(seat.reservation as never);
-      room.onMessage("config", (message: { seatPrices?: unknown }) => {
-        received.push(message);
-      });
-    }
-    await waitUntil(() => received.length === 2);
-    for (const message of received) {
-      expect(message.seatPrices).toEqual(published);
-      expect(findBadAmounts(message, ["entryFee", "prize", "entry"])).toEqual([]);
-    }
+    });
+    expect(findBadAmounts(mine, ["entryFee", "prize", "entry"])).toEqual([]);
+    // EL OTRO ASIENTO, SIN PRECIO: sólo su `playerId`, y nada del de P1.
+    const theirs = received.get("o-p2");
+    expect(theirs?.seat).toEqual({ playerId: "seat-2" });
+    // El `matchId` lo eligió el orquestador (acá, con los usuarios adentro): fuera de él, nada del otro.
+    expect(JSON.stringify({ ...theirs, matchId: "" })).not.toMatch(/25000|VES|o-p1|betaso/);
+    expect(JSON.stringify({ ...mine, matchId: "" })).not.toMatch(/USD|o-p2|parley/);
   });
 
   it("rechaza con 400 un precio malformado, sin abrir nada", async () => {
     const table = casualTable([
-      { userId: "o-q1", displayName: "Q1", currency: "VES" },
-      { userId: "o-q2", displayName: "Q2", currency: "VES" },
+      { userId: "o-q1", displayName: "Q1", currency: "VES", providerId: "betaso" },
+      { userId: "o-q2", displayName: "Q2", currency: "VES", providerId: "betaso" },
     ]);
     const participants = table.participants.map((participant) => ({
       ...participant,
@@ -260,6 +259,7 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
       userId,
       displayName: userId,
       currency: "VES",
+      providerId: "betaso",
       playerId: `seat-${index + 1}`,
     });
     await registry.register(

@@ -13,6 +13,7 @@ import {
   type MatchListPage,
   type MatchListQuery,
   MatchListTimeoutError,
+  type MatchSetup,
 } from "../../network/history";
 import { MemoryHistory } from "../../network/transports/memory-history";
 import { CLOSING, SETUP, entry } from "../../network/transports/tests/history-contract";
@@ -90,7 +91,6 @@ describe("recordRoutes: el registro de las rutas", () => {
     const routes = routesOf(matchHttp(deps));
 
     expect(routes).toEqual([
-      "GET /config/:roomId",
       "GET /internal/matches/:matchId/history",
       "GET /internal/matches",
       "GET /internal/matches/:matchId",
@@ -503,10 +503,12 @@ describe("recordRoutes: el ámbito de un proveedor", () => {
   // proveedor para ése, y la que no tiene el campo para ninguno.
   async function provided(): Promise<MemoryHistory> {
     const history = new MemoryHistory();
+    // Un asiento sin proveedor es el de un documento grabado antes de que el orquestador lo mandara.
     const seats = (providers: readonly (string | undefined)[]) =>
       SETUP.seats.map((seat, index) => {
         const providerId = providers[index];
-        return providerId === undefined ? seat : { ...seat, providerId };
+        const { providerId: _old, ...anonymous } = seat;
+        return (providerId === undefined ? anonymous : { ...seat, providerId }) as typeof seat;
       });
     const rows: [string, (string | undefined)[]][] = [
       ["m-betaso", ["betaso", "betaso"]],
@@ -550,14 +552,128 @@ describe("recordRoutes: el ámbito de un proveedor", () => {
       expect(response.status).toBe(404);
       expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
     }
-    // LA CRUZADA LA VEN LOS DOS, entera: el asiento del otro proveedor incluido.
-    for (const who of ["betaso", "betasoSupport", "parley", "games"] as const) {
+    // LA CRUZADA LA VEN LOS DOS, cada uno desde su lado: su asiento entero, el del otro recortado.
+    // Tablea la ve entera.
+    const providersSeen = async (who: keyof typeof ADMINS) => {
       const response = await getAs(`${base}/internal/matches/m-cruzada`, who);
       expect(response.status).toBe(200);
       const body = (await response.json()) as { data: { seats: { providerId?: string }[] } };
-      expect(body.data.seats.map((seat) => seat.providerId)).toEqual(["betaso", "parley"]);
-    }
+      return body.data.seats.map((seat) => seat.providerId);
+    };
+    expect(await providersSeen("betaso")).toEqual(["betaso", undefined]);
+    expect(await providersSeen("betasoSupport")).toEqual(["betaso", undefined]);
+    expect(await providersSeen("parley")).toEqual([undefined, "parley"]);
+    expect(await providersSeen("games")).toEqual(["betaso", "parley"]);
     expect((await getAs(`${base}/internal/matches/m-sin`, "games")).status).toBe(200);
+  });
+
+  // UNA CASUAL CRUZADA Y CERRADA, con plata y precio en los dos asientos. Todo lo de B lleva marcas
+  // únicas (`canario-b`, `987654`, la moneda `XCB`); su nombre visible y su usuario son la excepción
+  // aceptada y no llevan marca. Lo que alcanza un admin de A —listado y detalle— no trae ninguna; A ve lo
+  // suyo entero, y Tablea ve todo.
+  async function crossedAndClosed(): Promise<MemoryHistory> {
+    const history = new MemoryHistory();
+    const priceA = { currency: "VES", rate: "200", entry: "2000.00", prize: "3600.00", levels: [] };
+    const priceB = {
+      currency: "XCB",
+      rate: "98765.432",
+      entry: "987654.32",
+      prize: "1975308.64",
+      levels: [{ level: 2, entry: "987654.32", prize: "3950617.28" }],
+    };
+    const [baseA, baseB] = SETUP.seats as [
+      MatchSetup["seats"][number],
+      MatchSetup["seats"][number],
+    ];
+    const seatA = { ...baseA, userId: "ana-a", providerId: "betaso", price: priceA };
+    const seatB = {
+      ...baseB,
+      userId: "canario-b-user",
+      displayName: "Rival",
+      username: "rival",
+      currency: "XCB",
+      providerId: "canario-b-prov",
+      price: priceB,
+    };
+    const setup = { ...SETUP, roomId: "room-x", seats: [seatA, seatB] };
+    history.open("m-x", { ...setup, matchStartedAt: 1_000 });
+    history.record([entry(1, { matchId: "m-x" })]);
+    history.close("m-x", {
+      ...CLOSING,
+      ...setup,
+      rateId: "rate-x",
+      players: [
+        {
+          ...seatA,
+          finalScore: 104,
+          chargedInUC: 10,
+          prizePaidInUC: 18,
+          chargedInPlayerCurrency: "2000.00",
+          prizePaidInPlayerCurrency: "3600.00",
+        },
+        {
+          ...seatB,
+          finalScore: 40,
+          chargedInUC: 10,
+          prizePaidInUC: 0,
+          chargedInPlayerCurrency: "987654.32",
+          prizePaidInPlayerCurrency: "0.00",
+          exit: { reason: "TIMEOUT", at: 30_000, roundNumber: 2 },
+        },
+      ],
+    });
+    return history;
+  }
+
+  it("el admin de un proveedor no recibe nada privado del asiento del otro (canario)", async () => {
+    const base = await serve(await crossedAndClosed());
+    const CANARY = /canario-b|987654|XCB/;
+
+    const list = await getAs(`${base}/internal/matches`, "betaso");
+    expect(list.status).toBe(200);
+    const listed = await list.text();
+    expect(listed).toContain("m-x");
+    expect(listed).not.toMatch(CANARY);
+
+    const detail = await getAs(`${base}/internal/matches/m-x`, "betaso");
+    expect(detail.status).toBe(200);
+    const text = await detail.text();
+    expect(text).not.toMatch(CANARY);
+    const { data } = JSON.parse(text) as {
+      data: { seats: Record<string, unknown>[]; players: Record<string, unknown>[] };
+    };
+    // EL ASIENTO PROPIO, ENTERO: identidad, proveedor, precio y plata en su moneda.
+    expect(data.seats[0]).toMatchObject({ userId: "ana-a", providerId: "betaso", currency: "VES" });
+    expect(data.players[0]).toMatchObject({
+      userId: "ana-a",
+      currency: "VES",
+      charged: "2000.00",
+      prizePaid: "3600.00",
+    });
+    // EL DEL OTRO, CERRADO: sólo lo que el jugador vio en la mesa.
+    expect(data.seats[1]).toEqual({
+      id: "seat-2",
+      teamId: "B",
+      seat: 1,
+      displayName: "Rival",
+      username: "rival",
+    });
+    expect(data.players[1]).toEqual({
+      id: "seat-2",
+      teamId: "B",
+      seat: 1,
+      displayName: "Rival",
+      username: "rival",
+      finalScore: 40,
+      exit: { reason: "TIMEOUT", at: "1970-01-01T00:00:30.000Z", roundNumber: 2 },
+    });
+
+    // TABLEA LO VE TODO, y el otro proveedor ve su asiento entero.
+    const all = await (await getAs(`${base}/internal/matches/m-x`, "games")).text();
+    expect(all).toContain("canario-b-user");
+    expect(all).toContain("987654.32");
+    const canarySide = await getAs(`${base}/internal/matches/m-x`, "parley");
+    expect(canarySide.status).toBe(404);
   });
 
   it("`/game-data` sigue cerrado a un proveedor", async () => {

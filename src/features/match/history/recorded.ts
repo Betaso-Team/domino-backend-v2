@@ -35,6 +35,9 @@ export function recordedReplayOf(
       displayName: seat.displayName,
       ...(seat.username === undefined ? {} : { username: seat.username }),
       currency: seat.currency,
+      // UN REGISTRO DE ANTES DE LOS PROVEEDORES no lo tiene, y el motor no lo lee: va la marca del CLI,
+      // que grita de dónde salió, y la partida se rebobina igual.
+      providerId: (seat as Partial<typeof seat>).providerId ?? "REPLAY",
       playerId: seat.id,
     })),
     seed: config.seed,

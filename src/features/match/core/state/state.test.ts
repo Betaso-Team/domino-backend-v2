@@ -1,6 +1,6 @@
 import { Encoder, StateView } from "@colyseus/schema";
 import { describe, expect, it } from "vitest";
-import { Hand, MatchState, RoundState, Tile } from "./index";
+import { Hand, MatchState, PlayerState, RoundState, Tile } from "./index";
 
 describe("árbol de estado", () => {
   it("una ficha lleva sus dos números", () => {
@@ -65,4 +65,46 @@ describe("árbol de estado", () => {
   // en runtime, así que una violación real revienta al importar el módulo, antes de que
   // corra un solo `it()` de este archivo — no hay nada útil que este describe pudiera
   // asertar. Detalle completo en el comentario de cabecera de `state/index.ts`.
+});
+
+// LA LISTA CERRADA DE LO QUE UN ASIENTO SINCRONIZA A TODA LA MESA (`docs/convenciones/audiencias.md` del
+// orquestador). El estado es de todos los que la juegan, y en una mesa cruzada son de dos proveedores:
+// un campo nuevo en `PlayerState` que viaje sin `view` lo ve el jugador del otro proveedor, así que
+// agregarlo pone esto en rojo y obliga a decidirlo. Lo privado de un asiento —`userId`, proveedor,
+// moneda, precio— no está: va en el mensaje `config` de ese asiento solo, o no sale.
+describe("PlayerState: lo que viaja a toda la mesa", () => {
+  type Field = { readonly name: string; readonly tag?: number };
+  const fieldsOf = (schemaClass: object): Field[] => {
+    const metadata = (schemaClass as Record<symbol, Record<string, Field>>)[Symbol.metadata] ?? {};
+    return Object.keys(metadata)
+      .filter((key) => /^\d+$/.test(key))
+      .map((key) => metadata[key] as Field);
+  };
+
+  it("sincroniza sin vista exactamente estos campos, en este orden", () => {
+    const synced = fieldsOf(PlayerState);
+    expect(synced.filter((field) => field.tag === undefined).map((field) => field.name)).toEqual([
+      "playerId",
+      "displayName",
+      "username",
+      "profilePicture",
+      "teamId",
+      "seatIndex",
+      "connected",
+      "hasAbandoned",
+      "hasSeenTiles",
+      "extraTimeRemainingMs",
+      "hand",
+      "isBot",
+    ]);
+    // Y ninguno con vista: lo que es de un solo asiento (las fichas) vive en `Hand.tiles`.
+    expect(synced.filter((field) => field.tag !== undefined)).toEqual([]);
+  });
+
+  it("el userId queda del lado del servidor: ni índice ni `toJSON()`", () => {
+    const player = new PlayerState();
+    player.userId = "u-privado";
+    expect(fieldsOf(PlayerState).map((field) => field.name)).not.toContain("userId");
+    expect(JSON.stringify(player.toJSON())).not.toContain("u-privado");
+  });
 });

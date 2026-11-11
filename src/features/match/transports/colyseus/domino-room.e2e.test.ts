@@ -191,8 +191,8 @@ describe("DominoRoom", () => {
   it("usa el sub como identidad y no la plataforma del token", async () => {
     const testServer = requiredServer();
     const participants = [
-      { userId: "a", displayName: "Ada", currency: "VES" },
-      { userId: "b", displayName: "Lin", currency: "USD" },
+      { userId: "a", displayName: "Ada", currency: "VES", providerId: "betaso" },
+      { userId: "b", displayName: "Lin", currency: "USD", providerId: "betaso" },
     ] as const;
     const room = await testServer.createRoom<DominoRoom>(
       "domino",
@@ -232,8 +232,8 @@ describe("DominoRoom", () => {
     const room = await testServer.createRoom<DominoRoom>("domino", {
       ...options("match-4p", [
         ...defaultParticipants,
-        { userId: "c", displayName: "C", currency: "VES" },
-        { userId: "d", displayName: "D", currency: "VES" },
+        { userId: "c", displayName: "C", currency: "VES", providerId: "betaso" },
+        { userId: "d", displayName: "D", currency: "VES", providerId: "betaso" },
       ]),
       gameModeId: CASUAL_4P.uuid,
       gameMode: CASUAL_4P.gameMode,
@@ -265,8 +265,8 @@ describe("DominoRoom", () => {
         "domino",
         options("match-seat-mismatch", [
           ...defaultParticipants,
-          { userId: "c", displayName: "C", currency: "VES" },
-          { userId: "d", displayName: "D", currency: "VES" },
+          { userId: "c", displayName: "C", currency: "VES", providerId: "betaso" },
+          { userId: "d", displayName: "D", currency: "VES", providerId: "betaso" },
         ]),
       ),
     ).rejects.toThrow(/SEAT_COUNT_MISMATCH/);
@@ -315,8 +315,8 @@ describe("DominoRoom", () => {
     await Promise.all([room.disconnect(), nueva.disconnect()]);
   });
 
-  // EL MENSAJE `config`: la sala manda su configuración pública con `serverNow` a cada uno que entra
-  // y a cada uno que vuelve, para que el front no tenga que ir a buscarla por HTTP. El handler se
+  // EL MENSAJE `config`: la sala manda su configuración pública, el asiento de quien lo recibe y
+  // `serverNow` a cada uno que entra y a cada uno que vuelve. Es la única vía: no hay ruta HTTP. El handler se
   // registra SIN `await` en el medio después del join: lo que la sala manda en `onJoin` llega apenas
   // el cliente confirma la entrada, y el comodín de `src/tests/e2e.ts` se tragaría lo que nadie
   // escucha todavía.
@@ -333,9 +333,10 @@ describe("DominoRoom", () => {
     });
     await waitUntil(() => received.length === 1);
 
-    // EL MISMO DTO QUE EL REGISTRO ESTAMPA y que `GET /config/:roomId` sirve, más el reloj.
+    // EL MISMO DTO QUE EL REGISTRO ESTAMPA, más el asiento propio y el reloj.
     const stamped = await rootContainer.resolve(MatchRegistry).publicConfigOf(room.roomId);
-    expect(received[0]).toEqual({ ...stamped, serverNow: expect.any(Number) });
+    const seat = { playerId: "seat-1" };
+    expect(received[0]).toEqual({ ...stamped, seat, serverNow: expect.any(Number) });
     expect(received[0]?.serverNow).toBeGreaterThanOrEqual(before);
     expect(received[0]).toMatchObject({ isFreeRoom: false, enableBots: false, betLevels: [] });
     expect(JSON.stringify(received[0])).not.toContain("seed");
@@ -350,26 +351,16 @@ describe("DominoRoom", () => {
     void a.leave(false);
     await waitUntil(() => reconnected, 5_000);
     await waitUntil(() => received.length === 2, 3_000);
-    expect(received[1]).toEqual({ ...stamped, serverNow: expect.any(Number) });
+    expect(received[1]).toEqual({ ...stamped, seat, serverNow: expect.any(Number) });
     expect(received[1]?.serverNow).toBeGreaterThanOrEqual(received[0]?.serverNow as number);
 
-    await room.disconnect();
-  });
-
-  it("marca la configuración pública como no cacheable", async () => {
-    const testServer = requiredServer();
-    const room = await testServer.createRoom<DominoRoom>("domino", options("match-cache"));
-
-    const response = await fetch(`http://127.0.0.1:${portOf(testServer)}/config/${room.roomId}`);
-
-    expect(response.headers.get("cache-control")).toBe("no-store");
     await room.disconnect();
   });
 });
 
 const defaultParticipants = [
-  { userId: "a", displayName: "A", currency: "VES" },
-  { userId: "b", displayName: "B", currency: "VES" },
+  { userId: "a", displayName: "A", currency: "VES", providerId: "betaso" },
+  { userId: "b", displayName: "B", currency: "VES", providerId: "betaso" },
 ] as const;
 
 // El dinero y los puntos los trae el modo en línea de `src/tests/table-modes.ts` (`CASUAL_2P`).
@@ -384,15 +375,11 @@ function options(
   };
 }
 
-async function configOfRoom(testServer: ColyseusTestServer, roomId: string) {
-  const response = await fetch(`http://127.0.0.1:${portOf(testServer)}/config/${roomId}`);
-  return (await response.json()) as {
-    gameModeId: string;
-    pointsToWin: number;
-    currency: string;
-    entryFee: string;
-    prize: string;
-  };
+// LA CONFIG PÚBLICA QUE EL REGISTRO ESTAMPÓ: la base del mensaje `config` (no hay ruta HTTP).
+async function configOfRoom(_testServer: ColyseusTestServer, roomId: string) {
+  const config = await rootContainer.resolve(MatchRegistry).publicConfigOf(roomId);
+  if (!config) throw new Error(`la sala ${roomId} no está en el registro`);
+  return config;
 }
 
 // Un string es azúcar para "de la plataforma de siempre": los tests que no miden

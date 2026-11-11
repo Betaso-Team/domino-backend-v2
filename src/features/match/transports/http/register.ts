@@ -2,14 +2,12 @@ import type { TokenVerifier } from "@/features/auth";
 import type { Logger } from "@/logger";
 import type { AdminTokenCheck } from "@/shared/http/api-key";
 import { Router } from "express";
-import type { Clock } from "../../core/engine/clock";
 import type { HistoryReader, MatchArchive } from "../../network/history";
 import type { PlayerLog } from "../../network/player-log";
 import type { PlayerStatsStore } from "../../network/player-stats";
 import type { ColyseusMatchGateway } from "../colyseus/gateway";
 import type { MatchRegistry } from "../match-registry";
 import { historyRoutes } from "./history";
-import { matchRoutes } from "./match";
 import { meRoutes } from "./me";
 import { playerRoutes } from "./players";
 import { recordRoutes } from "./records";
@@ -21,7 +19,7 @@ import { tablesRoutes } from "./tables";
 // "no hay llave" queda irrepresentable— y vale igual para las otras cuatro: un default es
 // una dependencia que el llamador cree haber elegido.
 //
-// UN OBJETO y no cinco posicionales. Con posicionales, `(app, registry, clock, logger,
+// UN OBJETO y no cinco posicionales. Con posicionales, `(app, registry, logger,
 // history, key)` deja tres parámetros de tipos estructuralmente compatibles seguidos
 // —`Clock`, `Logger` y `HistoryReader` son interfaces de un puñado de métodos—, así que
 // dos argumentos cambiados de orden pueden compilar. Nombrados, un cruce es un error en la
@@ -29,7 +27,6 @@ import { tablesRoutes } from "./tables";
 // que es donde importa que se vea la decisión de fail-closed.
 export interface MatchHttpDeps {
   readonly registry: MatchRegistry;
-  readonly clock: Clock;
   readonly logger: Logger;
   readonly history: HistoryReader;
   /** El documento de cada partida, para el panel y `/game-data`. Ver `recordRoutes`. */
@@ -48,8 +45,8 @@ export interface MatchHttpDeps {
   readonly verifier?: TokenVerifier;
 }
 
-// EL HTTP DE LA PARTIDA, en seis responsabilidades y un solo router: UNA partida (`match.ts`), lo que
-// jugó el dueño del token (`me.ts`) y lo que jugó cualquier cuenta, para el panel (`players.ts`), el historial de soporte (`history.ts`), el registro de cada partida para el panel y el backend
+// EL HTTP DE LA PARTIDA, en cinco responsabilidades y un solo router: lo que jugó el dueño del token
+// (`me.ts`) y lo que jugó cualquier cuenta, para el panel (`players.ts`), el historial de soporte (`history.ts`), el registro de cada partida para el panel y el backend
 // principal (`records.ts`) y la API interna del orquestador (`tables.ts`). Los paths son absolutos,
 // así que se monta en la raíz; las guardas van por ruta. Portado de truco (`0b0a467`).
 //
@@ -66,7 +63,6 @@ export interface MatchHttpDeps {
 // armar un container—. Lo que un transporte no puede saber es que el container existe.
 export function matchHttp(deps: MatchHttpDeps): Router {
   return Router()
-    .use(matchRoutes(deps))
     .use(meRoutes(deps))
     .use(historyRoutes(deps))
     .use(recordRoutes(deps))

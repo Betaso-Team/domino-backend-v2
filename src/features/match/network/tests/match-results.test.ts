@@ -10,8 +10,20 @@ const config = replayConfigOf({
   matchId: "orq-1",
   gameModeId: "mode-1v1",
   seats: [
-    { playerId: "seat-1", userId: "p-ana", displayName: "Ana", currency: "VES" },
-    { playerId: "seat-2", userId: "p-beto", displayName: "Beto", currency: "USDT" },
+    {
+      playerId: "seat-1",
+      userId: "p-ana",
+      displayName: "Ana",
+      currency: "VES",
+      providerId: "betaso",
+    },
+    {
+      playerId: "seat-2",
+      userId: "p-beto",
+      displayName: "Beto",
+      currency: "USDT",
+      providerId: "betaso",
+    },
   ],
   seed: "seed",
   pointsToWin: 100,
@@ -258,10 +270,11 @@ describe("matchResultOf", () => {
         mode: "TOURNAMENT",
         matchId: "orq-t",
         tournamentId: "t-7",
-        participants: config.seats.map(({ userId, displayName, currency }) => ({
+        participants: config.seats.map(({ userId, displayName, currency, providerId }) => ({
           userId,
           displayName,
           currency,
+          providerId,
         })),
         seed: "seed",
         teamAssignment: "SEAT_ORDER",

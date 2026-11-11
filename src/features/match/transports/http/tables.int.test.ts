@@ -30,8 +30,8 @@ const request = {
     enableBots: false,
   },
   participants: [
-    { userId: "p-a", displayName: "ana", currency: "VES" },
-    { userId: "p-b", displayName: "beto", currency: "VES" },
+    { userId: "p-a", displayName: "ana", currency: "VES", providerId: "betaso" },
+    { userId: "p-b", displayName: "beto", currency: "VES", providerId: "betaso" },
   ],
   seed: "seed-1",
   teamAssignment: "SEAT_ORDER",
@@ -62,14 +62,10 @@ const deps = ({ tables, registry, ...over }: Over = {}): TablesDeps => ({
     publicConfigOf: async () => ({ matchId: "m-1" }) as PublicConfig,
     census: async () => ({
       playersInMatch: 6,
-      byGameMode: new Map([
-        ["mode-2p", 4],
-        ["mode-4p", 2],
-      ]),
-      byTournament: new Map([["t-1", 2]]),
       groups: [
-        { providerId: "betaso", currency: "VES", seats: 3 },
-        { providerId: null, currency: "USD", seats: 1 },
+        { providerId: "betaso", currency: "VES", gameModeId: "mode-2p", seats: 3 },
+        { providerId: "parley", currency: "USD", gameModeId: "mode-2p", seats: 1 },
+        { providerId: "parley", currency: "USD", tournamentId: "t-1", seats: 2 },
       ],
     }),
     forget: async () => undefined,
@@ -177,7 +173,9 @@ describe("tablesRoutes", () => {
     });
   });
 
-  it("cuenta quién juega, en total, por modo y por proveedor y moneda, solo con la llave", async () => {
+  // CADA GRUPO CON EXACTAMENTE UNA MESA: el modo de una casual o el torneo de una de torneo. Ni
+  // `byGameMode` ni `byTournament`: el orquestador agrupa como necesita.
+  it("cuenta quién juega, en total y por proveedor, moneda y mesa, solo con la llave", async () => {
     const base = await serve();
     const res = await fetch(`${base}/internal/census`, { headers: { "x-internal-api-key": KEY } });
     expect(res.status).toBe(200);
@@ -185,14 +183,10 @@ describe("tablesRoutes", () => {
       status: "success",
       data: {
         playersInMatch: 6,
-        byGameMode: [
-          { gameModeId: "mode-2p", playersInMatch: 4 },
-          { gameModeId: "mode-4p", playersInMatch: 2 },
-        ],
-        byTournament: [{ tournamentId: "t-1", playersInMatch: 2 }],
         groups: [
-          { providerId: "betaso", currency: "VES", playersInMatch: 3 },
-          { providerId: null, currency: "USD", playersInMatch: 1 },
+          { providerId: "betaso", currency: "VES", gameModeId: "mode-2p", playersInMatch: 3 },
+          { providerId: "parley", currency: "USD", gameModeId: "mode-2p", playersInMatch: 1 },
+          { providerId: "parley", currency: "USD", tournamentId: "t-1", playersInMatch: 2 },
         ],
       },
     });

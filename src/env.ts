@@ -218,7 +218,7 @@ const schema = z.object({
    * La URL de Redis (`redis://host:puerto/db`), que es lo que convierte a varios procesos en UN
    * clúster. Del otro lado viven tres cosas: el registro de salas de Colyseus (para que
    * `joinById` encuentre una sala de otro nodo), el presence (para que cada proceso sepa de los
-   * otros) y el registro de partidas vivas del dominó (para que `GET /config/:roomId` conteste
+   * otros) y el registro de partidas vivas del dominó (para que la API del orquestador conteste
    * por una sala que abrió otra instancia).
    *
    * OPCIONAL, Y SU PRESENCIA ES LA QUE ELIGE, igual que `MONGO_URI` y por la misma razón: sin

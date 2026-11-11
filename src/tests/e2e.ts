@@ -67,6 +67,7 @@ export const participantOf = (input: ParticipantInput): MatchParticipant =>
         userId: input,
         displayName: `Jugador ${input}`,
         currency: "VES",
+        providerId: "betaso",
       }
     : input;
 
