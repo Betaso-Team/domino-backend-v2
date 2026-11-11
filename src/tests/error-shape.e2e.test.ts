@@ -128,7 +128,6 @@ describe("la forma de los errores HTTP, en todas las rutas", () => {
       "FORBIDDEN",
       "MALFORMED",
       "MATCH_NOT_FOUND",
-      "ROOM_NOT_FOUND",
       "NO_LIVE_MATCH",
     ]) {
       expect(codes).toContain(code);

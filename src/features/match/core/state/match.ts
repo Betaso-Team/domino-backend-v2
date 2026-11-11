@@ -23,7 +23,7 @@ export type Scoreboard = SchemaType<typeof Scoreboard>;
 //   · El servidor no lo re-emite nunca: se estampa una vez por transición. Ahí muere el
 //     patch por segundo del v1.
 //   · El front tiene que restarle "ahora", y su propio reloj puede estar corrido. Por eso
-//     `GET /config/:roomId` devuelve `serverNow`: con eso calcula el offset una vez.
+//     el mensaje `config` de la sala trae `serverNow`: con eso calcula el offset una vez.
 // Es epoch y no la timeline de la sala a propósito — ver spec §7.4.
 //
 // `scoreboard` y `currentRound` llevan `.optional()`. Verificado contra el código fuente

@@ -91,10 +91,11 @@ export interface SeatSetup {
    */
   readonly price?: SeatPrice;
   /**
-   * EL PROVEEDOR DEL JUGADOR (`MatchSeat.providerId`), si el orquestador lo mandó. Es lo que acota el
-   * listado y el detalle del panel para un admin de proveedor; sin él, la partida sólo la ve Tablea.
+   * EL PROVEEDOR DEL JUGADOR (`MatchSeat.providerId`). Es lo que acota el listado y el detalle del panel
+   * para un admin de proveedor, y lo que decide qué ve cada uno de este asiento (`recordView`). Un
+   * documento grabado antes de que el orquestador lo mandara no lo tiene: esa partida sólo la ve Tablea.
    */
-  readonly providerId?: string;
+  readonly providerId: string;
 }
 
 /**

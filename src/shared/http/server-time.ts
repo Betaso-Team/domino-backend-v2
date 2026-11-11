@@ -11,11 +11,11 @@ import type { RequestHandler } from "express";
 // acabó antes de tiempo", que es un reporte carísimo de depurar y que no tiene nada que ver
 // con el servidor.
 //
-// NO REEMPLAZA AL `serverNow` DE `/config/:roomId`, que sigue siendo la fuente para el
+// NO REEMPLAZA AL `serverNow` DEL MENSAJE `config` de la sala, que sigue siendo la fuente para el
 // offset inicial: lo que agrega es que el desfase se pueda volver a medir contra CUALQUIER
 // respuesta que el cliente ya esté pidiendo —el health, el catálogo de modos— sin un viaje
 // extra ni un endpoint nuevo. Una partida larga con un reloj que deriva no tiene que esperar
-// al próximo `/config` para corregirse.
+// a volver a entrar a la sala para corregirse.
 //
 // Va como middleware propio y no pegado a una ruta porque no es de ninguna: es de la costura
 // HTTP entera.

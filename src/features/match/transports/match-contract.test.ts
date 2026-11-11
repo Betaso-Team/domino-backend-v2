@@ -17,11 +17,13 @@ const participants = [
     username: "ada",
     profilePicture: "https://img.test/ada.png",
     currency: "VES",
+    providerId: "betaso",
   },
   {
     userId: "lin",
     displayName: "Lin",
     currency: "USD",
+    providerId: "parley",
   },
 ] as const;
 
@@ -64,6 +66,7 @@ const extra = (n: number) => ({
   userId: `extra-${n}`,
   displayName: `Extra ${n}`,
   currency: "VES",
+  providerId: "betaso",
 });
 
 describe("requestOf", () => {
@@ -352,7 +355,7 @@ describe("el modo en línea (`gameMode`)", () => {
 // EL SNAPSHOT GRABADO, que es la otra mitad de la tarea: una partida tiene que poder rebobinarse
 // sin catálogo. `replayConfigOf` valida la mesa ENTERA —asientos numerados, puntos y dinero
 // adentro— y no consulta nada; es lo que permite que editar un modo no cambie una partida vieja.
-// EL PROVEEDOR DE CADA ASIENTO (el `prv` de la sesión), para el ámbito del panel. Opcional en las dos
+// EL PROVEEDOR DE CADA ASIENTO (el `prv` de la sesión): la audiencia del asiento. OBLIGATORIO en las dos
 // entradas —casual y torneo— y en el snapshot; una LLAVE como el `userId`: se normaliza igual.
 describe("requestOf: el proveedor de cada asiento", () => {
   const { gameModeId: _mode, gameMode: _gameMode, rateId: _rate, ...shared } = request;
@@ -371,7 +374,15 @@ describe("requestOf: el proveedor de cada asiento", () => {
     for (const base of [request, tournament]) {
       const config = configFrom(provided(base, " betaso "));
       expect(config.seats[0]?.providerId).toBe("betaso");
-      expect(config.seats[1]).not.toHaveProperty("providerId");
+      expect(config.seats[1]?.providerId).toBe("parley");
+    }
+  });
+
+  // NO HAY ASIENTOS SIN ATRIBUIR: un participante sin proveedor es un pedido mal formado, en las dos.
+  it("rechaza un participante sin proveedor", () => {
+    for (const base of [request, tournament]) {
+      const { providerId: _none, ...anonymous } = participants[0];
+      expect(() => requestOf({ ...base, participants: [anonymous, participants[1]] })).toThrow();
     }
   });
 
@@ -473,14 +484,15 @@ describe("replayConfigOf", () => {
     expect(() => replayConfigOf(foreign)).toThrow();
   });
 
-  // UNA PARTIDA GRABADA ANTES DEL PROVEEDOR SE REBOBINA SIN ÉL, y una que lo trajo lo conserva.
-  it("rebobina con y sin el proveedor del asiento", () => {
-    expect(replayConfigOf(snapshot).seats.some((seat) => "providerId" in seat)).toBe(false);
-    const provided = {
-      ...snapshot,
-      seats: [{ ...snapshot.seats[0], providerId: "betaso" }, snapshot.seats[1]],
-    };
-    expect(replayConfigOf(provided).seats[0]?.providerId).toBe("betaso");
+  // EL SNAPSHOT LLEVA EL PROVEEDOR DE CADA ASIENTO, como la mesa que nace. El replay de un registro de
+  // antes de los proveedores completa la marca `REPLAY` (`history/recorded.ts`), igual que el CLI.
+  it("conserva el proveedor de cada asiento, y sin él no es un snapshot", () => {
+    expect(replayConfigOf(snapshot).seats.map((seat) => seat.providerId)).toEqual([
+      "betaso",
+      "parley",
+    ]);
+    const { providerId: _none, ...anonymous } = { ...participants[0], playerId: "seat-1" };
+    expect(() => replayConfigOf({ ...snapshot, seats: [anonymous, snapshot.seats[1]] })).toThrow();
   });
 
   // EL DECIMAL ES UN MONTO VÁLIDO, y este test es el que separa la convención de v1 de la que
@@ -564,8 +576,8 @@ describe("mesa de torneo", () => {
   it("sienta cuatro, por parejas", () => {
     const four = [
       ...participants,
-      { userId: "max", displayName: "Max", currency: "VES" },
-      { userId: "zoe", displayName: "Zoe", currency: "VES" },
+      { userId: "max", displayName: "Max", currency: "VES", providerId: "betaso" },
+      { userId: "zoe", displayName: "Zoe", currency: "VES", providerId: "betaso" },
     ];
     expect(configOf(requestOf({ ...tournament, participants: four })).seats).toHaveLength(4);
   });

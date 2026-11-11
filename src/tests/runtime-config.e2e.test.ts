@@ -1,4 +1,6 @@
+import { rootContainer } from "@/di-container";
 import { env } from "@/env";
+import { MatchRegistry } from "@/features/match";
 import { SETTINGS_ROUTE } from "@/features/settings";
 import { bootTestServer, casualTable, joinAs, waitUntil } from "@/tests/e2e";
 import type { ColyseusTestServer } from "@colyseus/testing";
@@ -10,8 +12,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // creada DESPUÉS, y que NO llega a una que ya estaba abierta. Portado de truco (`3cab0f8`).
 //
 // Se mira por las dos caras que ve el cliente: el `activeDeadline` de la ventana de reparto, que se
-// estampa cuando los dos se sientan, y los `timeouts` de `GET /config/:roomId`, que es de donde el
-// front saca el largo entero del plazo para dibujar el anillo.
+// estampa cuando los dos se sientan, y los `timeouts` de la config pública de la mesa (la base del
+// mensaje `config`), que es de donde el front saca el largo entero del plazo para dibujar el anillo.
 const PORT = 2610;
 const admin = {
   "Content-Type": "application/json",
@@ -34,9 +36,9 @@ describe("La configuración editada en caliente (integración)", () => {
   });
 
   const timeoutsOf = async (roomId: string) => {
-    const res = await fetch(`http://127.0.0.1:${PORT}/config/${roomId}`);
-    expect(res.status).toBe(200);
-    return ((await res.json()) as { timeouts: { turnMs: number; dealingMs: number } }).timeouts;
+    const published = await rootContainer.resolve(MatchRegistry).publicConfigOf(roomId);
+    expect(published).toBeDefined();
+    return (published as { timeouts: { turnMs: number; dealingMs: number } }).timeouts;
   };
 
   // Cuánto le queda a la ventana de reparto apenas se sentaron los dos. La suite corre con 800 ms.

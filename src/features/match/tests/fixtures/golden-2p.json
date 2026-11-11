@@ -7,12 +7,14 @@
         "userId": "g1",
         "displayName": "Jugador g1",
         "currency": "VES",
+        "providerId": "betaso",
         "playerId": "seat-1"
       },
       {
         "userId": "g2",
         "displayName": "Jugador g2",
         "currency": "VES",
+        "providerId": "betaso",
         "playerId": "seat-2"
       }
     ],
@@ -3319,8 +3321,7 @@
             }
           ]
         },
-        "isBot": false,
-        "userId": "g1"
+        "isBot": false
       },
       {
         "playerId": "seat-2",
@@ -3349,8 +3350,7 @@
             }
           ]
         },
-        "isBot": false,
-        "userId": "g2"
+        "isBot": false
       }
     ],
     "currentRound": {

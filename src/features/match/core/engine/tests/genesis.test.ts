@@ -97,13 +97,18 @@ describe("createMatchState", () => {
 
   // LA OTRA MITAD DEL SNAPSHOT: lo de infraestructura no entra al árbol. La moneda vive en el
   // `seat` de la config, no en el estado, así que no puede llegar al wire ni al fixture golden.
-  // El `userId` sí entra: es como el cliente encuentra su asiento.
-  it("el userId entra al árbol serializado y la moneda no", () => {
+  // El `userId` queda en el árbol del servidor (lo usa la guarda del pago) pero es `noSync()`: no entra
+  // al serializado ni viaja. El cliente encuentra su asiento por el mensaje `config`.
+  it("el userId queda del lado del servidor y ni él ni la moneda entran al serializado", () => {
     const match = createMatchState(config(["u1", "u2"]));
     const wire = JSON.stringify(match.toJSON());
 
     expect(wire).toContain("Jugador u1");
-    expect(match.toJSON().players.map((p: { userId: string }) => p.userId)).toEqual(["u1", "u2"]);
+    expect(match.players.map((p) => p.userId)).toEqual(["u1", "u2"]);
+    expect(match.toJSON().players.map((p: { userId?: string }) => p.userId)).toEqual([
+      undefined,
+      undefined,
+    ]);
     expect(wire).not.toContain("VES");
   });
 });

@@ -222,8 +222,8 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
       gameModeId: CASUAL_2P.uuid,
       gameMode: CASUAL_2P.gameMode,
       participants: [
-        { userId: "s1", displayName: "s1", currency: "VES" },
-        { userId: "s2", displayName: "s2", currency: "VES" },
+        { userId: "s1", displayName: "s1", currency: "VES", providerId: "betaso" },
+        { userId: "s2", displayName: "s2", currency: "VES", providerId: "betaso" },
       ],
       seed: "seed",
       teamAssignment: "SEAT_ORDER",
@@ -246,8 +246,8 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
       gameModeId: CASUAL_2P.uuid,
       gameMode: CASUAL_2P.gameMode,
       participants: [
-        { userId: "t1", displayName: "t1", currency: "VES" },
-        { userId: "t2", displayName: "t2", currency: "VES" },
+        { userId: "t1", displayName: "t1", currency: "VES", providerId: "betaso" },
+        { userId: "t2", displayName: "t2", currency: "VES", providerId: "betaso" },
       ],
       seed: "seed",
       teamAssignment: "SEAT_ORDER",
@@ -292,8 +292,8 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
       matchId: "m-torneo",
       tournamentId: "t-1",
       participants: [
-        { userId: "t1", displayName: "t1", currency: "VES" },
-        { userId: "t2", displayName: "t2", currency: "VES" },
+        { userId: "t1", displayName: "t1", currency: "VES", providerId: "betaso" },
+        { userId: "t2", displayName: "t2", currency: "VES", providerId: "betaso" },
       ],
       seed: "seed",
       teamAssignment: "SEAT_ORDER",

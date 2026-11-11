@@ -39,8 +39,11 @@ export interface MatchSeat {
   readonly profilePicture?: string;
   readonly currency: string;
   readonly price?: SeatPrice;
-  /** El proveedor del jugador, si el orquestador lo mandó: el ámbito del panel por proveedor. */
-  readonly providerId?: string;
+  /**
+   * EL PROVEEDOR DEL JUGADOR (el `prv` de su sesión): de quién es este asiento. Decide qué ve cada
+   * proveedor del registro y en qué grupo lo cuenta el censo. Obligatorio: no hay asientos sin atribuir.
+   */
+  readonly providerId: string;
 }
 
 /**

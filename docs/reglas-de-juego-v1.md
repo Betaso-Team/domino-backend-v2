@@ -469,7 +469,7 @@ dibujar el reloj y que no se derivan del `activeDeadline` a secas:
    este campo el cliente muestra una cuenta atrás sin saber si son los 60 s del turno o lo que queda de
    la reserva. Es un campo del estado porque un jugador que reconecta a mitad de un tramo extendido
    tiene que poder saberlo.
-2. **`serverNow`, del `GET /config/:roomId`** — el `activeDeadline` es un instante en epoch del
+2. **`serverNow`, del mensaje `config` de la sala** — el `activeDeadline` es un instante en epoch del
    servidor, así que el front tiene que restarle "ahora"; con el reloj del dispositivo corrido, la
    cuenta atrás miente. El cliente calcula el offset una vez contra esa muestra. No es una regla del
    dominó, pero sin eso ninguna de las reglas de plazo de esta sección se ve bien en pantalla. Ver

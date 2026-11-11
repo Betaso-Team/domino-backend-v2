@@ -18,6 +18,9 @@ import type { StoredMatchRecord } from "./history";
 //   betMultiplier.resulting*InUC                → betMultiplier: { currency: "UC", resulting* }
 //   timeline[] MULTIPLIER_AGREED.payload        → { currency: "UC", additionalEntryFee }
 //
+// Y POR AUDIENCIA (`RecordAudience`): Tablea lo ve entero; un proveedor, sus asientos enteros y los del
+// otro proveedor recortados a una lista cerrada (`RIVAL_SEAT_FIELDS`).
+//
 // LA MESA ESTÁ EN UC y CADA ASIENTO EN SU MONEDA: un asiento cerrado lleva el `rateId` de la partida, la
 // tasa con la que billing cotizó su precio. El `currency` de un asiento cerrado es la moneda de SUS
 // montos; un asiento sin precio (gratis, de antes) está en UC, y ahí el `currency` de la billetera que
@@ -137,15 +140,57 @@ export function entryView<T>(entry: T): T {
   } as T;
 }
 
-/** El documento entero (el detalle y `/game-data`), o una fila del listado. */
-export function recordView(stored: object): StoredMatchRecord {
+/**
+ * QUIÉN MIRA EL REGISTRO. Tablea Gaming (la llave, o un admin sin proveedor) lo ve entero; un proveedor
+ * ve entero lo SUYO —los asientos con su `providerId`— y del asiento de otro proveedor sólo lo que el
+ * jugador vio en la mesa (`RIVAL_SEAT_FIELDS`).
+ */
+export type RecordAudience =
+  | { readonly kind: "tablea" }
+  | { readonly kind: "provider"; readonly providerId: string };
+
+// LO QUE UN PROVEEDOR VE DEL ASIENTO DE OTRO, y es una LISTA CERRADA: el asiento, su equipo y su lugar, el
+// nombre que la mesa le mostraba, cómo terminó y su conexión. Nada de identidad de plataforma
+// (`userId`), de proveedor, de moneda, de precio, de tasa ni de plata. Un campo que el registro agregue
+// mañana NO sale al rival hasta que alguien lo agregue acá: el default es no mostrarlo.
+const RIVAL_SEAT_FIELDS = [
+  "id",
+  "teamId",
+  "seat",
+  "displayName",
+  "username",
+  "finalScore",
+  "exit",
+  "connection",
+] as const;
+
+/** El asiento de otro proveedor, campo por campo. Algo que no es un asiento no sale. */
+function rivalSeatView(seat: unknown): unknown {
+  if (!isDoc(seat)) return null;
+  const out: Record<string, unknown> = {};
+  for (const field of RIVAL_SEAT_FIELDS) if (field in seat) out[field] = seat[field];
+  return out;
+}
+
+const isOwnSeat = (seat: unknown, audience: RecordAudience): boolean =>
+  audience.kind === "tablea" || (isDoc(seat) && seat.providerId === audience.providerId);
+
+/**
+ * El documento entero (el detalle y `/game-data`), o una fila del listado, para una audiencia. Lo que es
+ * de la mesa (la cabecera, la timeline, las manos) es de todos los que la jugaron; lo de cada asiento,
+ * de su proveedor y de Tablea.
+ */
+export function recordView(stored: object, audience: RecordAudience): StoredMatchRecord {
   const record = stored as StoredMatchRecord;
   const rateId = typeof record.rateId === "string" ? record.rateId : undefined;
   const out: Record<string, unknown> = { ...record };
   if ("table" in record) out.table = tableView(record.table);
   for (const field of ["seats", "players"] as const) {
     const seats = record[field];
-    if (Array.isArray(seats)) out[field] = seats.map((seat) => seatView(seat, rateId));
+    if (Array.isArray(seats))
+      out[field] = seats.map((seat) =>
+        isOwnSeat(seat, audience) ? seatView(seat, rateId) : rivalSeatView(seat),
+      );
   }
   if ("betMultiplier" in record) out.betMultiplier = betMultiplierView(record.betMultiplier);
   // `entries` es la timeline de los documentos de la forma vieja.

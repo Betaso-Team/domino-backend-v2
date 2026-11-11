@@ -130,7 +130,7 @@ function fromArgs(id: string): Omit<ReplayInput, "entries"> {
   // LOS ASIENTOS SON SINTÉTICOS Y NO LO DISIMULAN. Los argumentos posicionales siguen
   // siendo IDS DE ASIENTO —el vocabulario con el que el historial grabó la partida—, y un
   // documento de la forma vieja no guarda la cabecera de la mesa. `currency: "REPLAY"` es
-  // una etiqueta que grita de dónde salió, y los montos van en cero con la tasa nula.
+  // una etiqueta que grita de dónde salió (y `providerId: "REPLAY"`, por lo mismo), y los montos van en cero con la tasa nula.
   //
   // ⛔ NADA DE ESTO SIRVE PARA LIQUIDAR. Estos campos completan un `DominoMatchConfig` que el
   // motor necesita entero pero cuyo dinero NO consume: la reconstrucción del árbol no lee
@@ -148,6 +148,7 @@ function fromArgs(id: string): Omit<ReplayInput, "entries"> {
       userId,
       displayName: userId,
       currency: "REPLAY",
+      providerId: "REPLAY",
       playerId: `seat-${index + 1}`,
     })),
     seed,

@@ -67,6 +67,6 @@ export {
 } from "./transports/match-contract";
 export {
   MatchRegistry,
-  type MatchConfigResponse,
   type PublicMatchConfig,
+  type SeatConfigMessage,
 } from "./transports/match-registry";

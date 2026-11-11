@@ -9,8 +9,21 @@ const config = replayConfigOf({
   matchId: "orq-1",
   gameModeId: "mode-1v1",
   seats: [
-    { playerId: "seat-1", userId: "p-ana", displayName: "Ana", username: "ana", currency: "VES" },
-    { playerId: "seat-2", userId: "p-beto", displayName: "Beto", currency: "USDT" },
+    {
+      playerId: "seat-1",
+      userId: "p-ana",
+      displayName: "Ana",
+      username: "ana",
+      currency: "VES",
+      providerId: "betaso",
+    },
+    {
+      playerId: "seat-2",
+      userId: "p-beto",
+      displayName: "Beto",
+      currency: "USDT",
+      providerId: "betaso",
+    },
   ],
   seed: "seed",
   pointsToWin: 100,
@@ -79,10 +92,13 @@ describe("matchSetupOf", () => {
 
   // EL PROVEEDOR DE CADA ASIENTO, el ámbito del panel: se copia si vino, y el que no lo trajo no lo
   // inventa (una partida de antes, o un orquestador que todavía no lo manda).
-  it("copia el proveedor del asiento que lo trajo, y el que no lo trajo queda sin él", () => {
+  it("copia el proveedor de cada asiento", () => {
     const provided = replayConfigOf({
       ...config,
-      seats: [{ ...config.seats[0], providerId: "betaso" }, config.seats[1]],
+      seats: [
+        { ...config.seats[0], providerId: "betaso" },
+        { ...config.seats[1], providerId: "parley" },
+      ],
     });
 
     const { seats } = matchSetupOf(provided, DEFAULT_GLOBAL_CONFIG, createMatchState(provided), {
@@ -91,7 +107,7 @@ describe("matchSetupOf", () => {
     });
 
     expect(seats[0]?.providerId).toBe("betaso");
-    expect(seats[1]).not.toHaveProperty("providerId");
+    expect(seats[1]?.providerId).toBe("parley");
   });
 
   // TODOS LOS PLAZOS, EN UNA SOLA UNIDAD. La reconexión es el único en segundos y se guarda en ms; lo

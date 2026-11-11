@@ -64,7 +64,7 @@ export interface TablesDeps {
 
 /**
  * LA API QUE USA EL ORQUESTADOR: abrir una mesa, devolverle su asiento a quien sigue jugando y
- * contar quién está jugando, por modo, para los números de su lobby.
+ * contar quién está jugando, por proveedor, moneda y mesa, para los números de su lobby.
  * Primero la llave, después la forma: al revés un anónimo aprendería el contrato gratis.
  */
 export function tablesRoutes(deps: TablesDeps): Router {
@@ -174,27 +174,22 @@ export function tablesRoutes(deps: TablesDeps): Router {
       response.json({ status: "success", data: { live, recorded } });
     }),
   );
-  // Del CLÚSTER, no de este proceso: el censo es el hash que escriben todas las salas.
+  // Del CLÚSTER, no de este proceso: el censo es el hash que escriben todas las salas. CAMPO POR CAMPO:
+  // cada grupo con su proveedor, su moneda, exactamente una mesa (el modo de una casual o el torneo de
+  // una de torneo) y sus jugadores. Es del orquestador, que decide qué grupos ve cada proveedor.
   router.get(CENSUS_ROUTE, guard, async (_request, response) => {
-    const { playersInMatch, byGameMode, byTournament, groups } = await deps.registry.census();
+    const { playersInMatch, groups } = await deps.registry.census();
     response.json({
       status: "success",
       data: {
         playersInMatch,
-        byGameMode: [...byGameMode].map(([gameModeId, players]) => ({
-          gameModeId,
-          playersInMatch: players,
-        })),
-        byTournament: [...byTournament].map(([tournamentId, players]) => ({
-          tournamentId,
-          playersInMatch: players,
-        })),
-        // Por (proveedor, moneda), casuales y de torneo juntas. Lo que falta para `playersInMatch` son
-        // asientos sin atribuir (salas de una versión anterior).
-        groups: groups.map(({ providerId, currency, seats }) => ({
-          providerId,
-          currency,
-          playersInMatch: seats,
+        groups: groups.map((group) => ({
+          providerId: group.providerId,
+          currency: group.currency,
+          ...(group.tournamentId === undefined
+            ? { gameModeId: group.gameModeId }
+            : { tournamentId: group.tournamentId }),
+          playersInMatch: group.seats,
         })),
       },
     });

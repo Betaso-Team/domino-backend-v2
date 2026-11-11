@@ -8,6 +8,10 @@ estar en cómo lo resolvió truco.
 
 El resto de este archivo es el registro de los incrementos, en orden; esta sección es la foto de hoy.
 
+**Audiencias.** Lo que sale hacia un proveedor o un jugador se arma en el servicio dueño, campo por campo
+(lista de permitidos), y lo privado de un asiento nunca vive en una estructura compartida (el estado de la
+mesa, la config pública). Ver «Incremento completo — audiencias por proveedor».
+
 **Vocabulario.** Un **proveedor** es la plataforma que ofrece el dominó a sus jugadores (Betaso,
 Parley): `providerId` en el código, `prv` en el token. **Operador** es una persona que opera el
 sistema (soporte, quien despliega, un usuario del panel), nunca una plataforma. Una **ficha** es una
@@ -83,32 +87,35 @@ pieza del dominó.
   re-estampa todo (`keepAlive`, en paralelo); cada hecho del juego solo suelta a quien dejó de jugar
   (`settle`) y, si nadie lo hizo, no escribe nada. Ver «Incremento completo — el latido por hecho no
   escribe de más».
-- **El censo cuenta por proveedor y moneda.** Cada entrada de `live_seats` trae `groups`
-  (`[{ providerId, currency, seats }]`, sobre los asientos activos, casuales y de torneo juntos; sin
-  proveedor = `null`) y `GET /internal/census` los suma en `groups`. Una entrada de una versión
-  anterior no trae grupos y cuenta como sin atribuir (`playersInMatch − Σ groups`). Ver
+- **El censo cuenta por proveedor, moneda y mesa.** Cada entrada de `live_seats` es
+  `{ seats, groups: [{ providerId, currency, gameModeId | tournamentId, seats }], at }` (exactamente una
+  mesa por grupo) y `GET /internal/census` responde `{ playersInMatch, groups: [{ providerId, currency,
+  gameModeId? | tournamentId?, playersInMatch }] }`. Sin `byGameMode`/`byTournament` ni `providerId:
+  null`: los grupos suman el total. Una entrada de la forma anterior no cuenta y se barre. Ver
   `docs/api-y-mensajes.md`.
 - **El historial manda un `$push` por trabajo de la cola, no uno por lote**: los lotes de una partida
   se juntan hasta que su trabajo arranca, y `open`/`round`/`close`/`settled` sellan el pendiente para
   conservar el orden. Ver «Incremento completo — el historial, un `$push` por lote pendiente».
-- **La sala manda su config pública al que entra o vuelve** (mensaje `config`, con `serverNow`), y
-  `PublicMatchConfig` trae `isFreeRoom`, `enableBots` y `betLevels[].extra`. El orquestador pregunta
+- **La sala manda a cada asiento SU mensaje `config`** al entrar o volver: la config pública de la mesa
+  (`PublicMatchConfig`, con `isFreeRoom`, `enableBots` y `betLevels[].extra`), `seat: { playerId, price? }`
+  y `serverNow`. No hay `GET /config/:roomId` ni `GET /matches/:roomId`, ni `seatPrices`, y el estado no
+  lleva `userId` (es `noSync()`). El orquestador pregunta
   la mesa de un jugador sin reservar con `GET /internal/players/:userId/match`. Ver «Incremento
   completo — la mesa completa y el asiento sin reserva».
 - **Reacciones en la mesa**: `SEND_REACTION` `{ reactionId }` → `REACTION_SENT` a toda la mesa, con una
   lista fija de 24 emojis en el código que sirve `GET /reactions`. Ver «Incremento completo — las
   reacciones».
 - **El precio en la moneda del jugador**: el orquestador puede mandar `participants[].price` (texto
-  decimal de billing); el asiento lo congela, la config pública lo publica en `seatPrices` y el cierre
+  decimal de billing); el asiento lo congela, la sala se lo manda sólo a ese asiento (`seat.price` de su `config`) y el cierre
   elige lo cobrado y lo pagado en su moneda para `GET /me/matches`. Los montos en UC no cambian. Ver
   «Incremento completo — el precio en la moneda del jugador».
 - **Todo monto que el dominó emite va en la convención de montos v2** de Tablea Gaming (2026-11): cada
   entidad lleva un `currency` y sus montos son texto decimal plano en esa moneda, rellenado y sin
-  redondear, sin `uc` al lado. **La mesa está en UC** (`currency: "UC"`): el mensaje `config` y
-  `GET /config/:roomId` (`entryFee`, `prize`), el estado (`betOffer.additionalEntryFee`, un
+  redondear, sin `uc` al lado. **La mesa está en UC** (`currency: "UC"`): el mensaje `config`
+  (`entryFee`, `prize`), el estado (`betOffer.additionalEntryFee`, un
   `t.string()` en UC en el mismo índice que el número de antes), el evento `MULTIPLIER_AGREED` al salir
   a la mesa, `domino.match.finished` (`stakes`, `payouts[]`) y la cabecera del registro. **Cada asiento
-  con precio está en su moneda** (el código de billing tal cual): `seatPrices[seat]` y el asiento del
+  con precio está en su moneda** (el código de billing tal cual): `seat.price` del mensaje `config` y el asiento del
   registro, con el `rateId` de la mesa, y la fila de `GET /me/matches`; sin precio, en UC.
   `src/shared/money.ts` es copia de `packages/money` del orquestador (commit en la cabecera, sin lo que
   el dominó no usa) y corre sus vectores; se cambia allá primero. El motor, el snapshot y Mongo siguen
@@ -3351,3 +3358,33 @@ PARCIAL sobre las mesas de torneo).
 - ⚠ **Una casual cruzada la ven los dos proveedores ENTERA**, el asiento del rival incluido (`userId`,
   nombre, su mano en la timeline). Aceptado: recortarla dejaría un registro que no se rebobina.
 - Sin verificar: el `explain` del índice nuevo (`mongo-history.int.test.ts`, pide `MONGO_INT_URI`).
+
+## Incremento completo — audiencias por proveedor (rama `feat/audiencias-por-proveedor`)
+
+Plan `en-cuanto-a-lo-glowing-rose` (U0, U1, U2 y la parte del dominó de U4). Un solo corte: el orquestador y
+el front se adaptan aparte (guías en `~/Downloads`).
+
+- **La sala, por asiento (U1).** `PublicMatchConfig` perdió `seatPrices` (y se borró `seatPricesOf`): es sólo
+  la mesa. `DominoRoom.sendConfig` manda `seatConfigOf(publicConfig, config, playerId, now)` =
+  `{ ...mesa, seat: { playerId, price? }, serverNow }`, con el `playerId` del `userData` de esa conexión.
+  Se borraron `GET /config/:roomId` y `GET /matches/:roomId` (`transports/http/match.ts`, `matchRoutes`,
+  `ROOM_NOT_FOUND`) y la dependencia `clock` de `matchHttp`. `registry.publicConfigOf` sigue para la API
+  del orquestador.
+- **`PlayerState.userId` es `noSync()`** y no se borró del árbol: es la identidad con la que
+  `assertSameTable` (`network/payout.ts`) comprueba que el estado y el snapshot son de la misma mesa antes
+  de pagar, y sin él esa guarda pierde su ancla. No viaja, no ocupa índice ni entra en `toJSON()`; era el
+  último campo sincronizado, así que no corre ninguno. El golden perdió el `userId` de su árbol final.
+- **El registro por audiencia (U2).** `recordView(stored, audience)` con
+  `audience = { kind: "tablea" } | { kind: "provider", providerId }`: Tablea todo; un proveedor, sus asientos
+  enteros y el ajeno con `RIVAL_SEAT_FIELDS` (`id`, `teamId`, `seat`, `displayName`, `username`,
+  `finalScore`, `exit`, `connection`). Listado y detalle toman la audiencia de `adminOf(response).provider`;
+  `/game-data` e historial siguen de Tablea.
+- **`providerId` obligatorio (U4)** en `participantShape`, `MatchSeat`, `SeatSetup`, `SeatRef`. El replay
+  completa `"REPLAY"` (como la moneda del CLI) para un registro de antes de los proveedores.
+- **El censo por mesa (U4)**: cada grupo con `gameModeId` o `tournamentId`; la llave de `GroupTally` es
+  `[providerId, currency, gameModeId, tournamentId]`; `parseCensus` descarta (y barre) la forma anterior.
+- **Guardas (U0)**: `core/state/state.test.ts` fija los campos que `PlayerState` sincroniza; el canario
+  `src/tests/audiencias.e2e.test.ts` (mesa cruzada A/B con dos clientes reales y las rutas
+  `/internal/matches*` con un admin de A) y el de `records.int.test.ts`.
+- ⚠ **La foto del rival viaja tal cual** en `profilePicture`: el dominó no la toca; en una mesa cruzada el
+  orquestador la manda ya sellada por su proxy (U6). El canario la trata como la excepción aceptada.

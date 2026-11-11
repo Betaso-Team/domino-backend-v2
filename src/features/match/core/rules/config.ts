@@ -63,7 +63,7 @@ export function betAmountsOf(
  * que las reglas publicadas no se podían consumir sin un cast. Éste es el tipo que sí se puede.
  *
  * Lo satisfacen por estructura los dos lados, sin adaptador: el `DominoMatchConfig` del servidor
- * y el `PublicMatchConfig` que el front ya recibe de `GET /config/:roomId` traen los dos campos.
+ * y el `PublicMatchConfig` que el front ya recibe en el mensaje `config` de la sala traen los dos campos.
  * Es la misma idea que `MatchView`: un tipo angosto que lo ancho satisface tal cual.
  *
  * `pointsToWin` NO está acá aunque sea config de la mesa: vive en el ÁRBOL
