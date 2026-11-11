@@ -74,6 +74,12 @@ const seatPrice = z
     entry: decimalText,
     prize: decimalText,
     levels: z.array(levelPrice).max(16).default([]),
+    // LOS DECIMALES DE LA MONEDA (los del catálogo de monedas de billing), para emitir los montos de
+    // arriba en la convención con su relleno (`"200"` → `"200.00"`). Aditivo y opcional: el orquestador
+    // lo manda recién después de que este campo exista acá (el `strictObject` lo rechazaría), y una
+    // partida grabada antes no lo tiene. Sin él no se rellena nada: el texto sale con los decimales que
+    // trajo (`fixed(texto, 0)` nunca quita un dígito), que es lo que el front mostraba hasta hoy.
+    decimals: z.number().int().min(0).max(8).optional(),
   })
   .superRefine(({ levels }, context) => {
     // DOS PRECIOS PARA EL MISMO NIVEL es elegir uno a ciegas al cerrar.

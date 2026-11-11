@@ -1,11 +1,12 @@
 import type { KeyValueStore } from "@/shared/kv";
+import type { Money } from "@/shared/money";
 import {
   type DominoMatchConfig,
   type GlobalDominoConfig,
   type MatchMode,
-  type SeatPrice,
   modeOf,
 } from "../core/config";
+import { type SeatPriceView, seatPriceView, ucOf } from "../network/amounts";
 
 /**
  * LOS PLAZOS CON LOS QUE NACIÓ LA MESA, para que el front dibuje el anillo con el largo de verdad.
@@ -42,14 +43,21 @@ export interface PublicMatchConfig {
   readonly gameModeId: string;
   readonly seats: readonly string[];
   readonly pointsToWin: number;
-  /** UC completas, tal como las guarda el catálogo: `125` son 125 UC, y `1.5` es válido. */
-  readonly entryFee: number;
-  readonly prize: number;
+  /**
+   * LO QUE LA MESA COBRA Y PAGA, en la convención de montos (`network/amounts.ts`): `{ uc: "125.0000" }`.
+   * Solo `uc`, porque la mesa es de todos sus asientos y cada uno paga en su moneda: la cifra en la
+   * moneda de cada asiento está en `seatPrices`.
+   */
+  readonly entryFee: Money;
+  readonly prize: Money;
   /**
    * LOS NIVELES DE AUMENTO QUE LA MESA OFRECE (truco `58ce78f`), para que el front pinte el aumento
    * ANTES de proponer. Con el `extra` del catálogo: el front lo muestra junto al nivel, y no es
    * secreto —lo publica el catálogo de modos—. Vacío = esta mesa no ofrece aumentar. El precio de
-   * cada uno lo deriva el cliente con `betAmountsOf`.
+   * cada uno lo deriva el cliente con `betAmountsOf`, o lo lee de `seatPrices[seat].levels`.
+   *
+   * `extra` NO ES PLATA, y por eso sigue siendo un número: es lo que el nivel le SUMA al multiplicador
+   * de puntos del ranking (`multiplier + extra`, `core/rules/config.ts`). Ni `additionalPoints`.
    */
   readonly betLevels: readonly {
     readonly level: number;
@@ -64,11 +72,12 @@ export interface PublicMatchConfig {
   /**
    * LO QUE LA MESA CUESTA Y PAGA EN LA MONEDA DE CADA ASIENTO, por su id opaco (`seat-1` → precio). El
    * front toma el de su asiento y pinta la entrada, el premio y cada aumento en Bs. o en lo que pague
-   * el jugador; los números en UC de arriba siguen siendo los que cobra billing. Sólo los asientos que
+   * el jugador. Cada monto en la convención, con su moneda como llave y su `uc` al lado
+   * (`{ ves: "200.00", uc: "2.0000" }`): la `currency` hermana ya no viaja. Sólo los asientos que
    * trajeron precio, y AUSENTE si ninguno lo trajo (mesa gratis, orquestador viejo): el front sigue en
    * UC. No es secreto —el rival ve cuánto paga el otro—, pero no lleva nada más del asiento.
    */
-  readonly seatPrices?: Readonly<Record<string, SeatPrice>>;
+  readonly seatPrices?: Readonly<Record<string, SeatPriceView>>;
 }
 
 // LA CONFIGURACIÓN PÚBLICA DE UNA MESA, pura: la usan el registro (lo que estampa en el almacén) y la
@@ -90,10 +99,10 @@ export function publicConfigOf(
     gameModeId: config.gameModeId,
     seats: config.seats.map(({ playerId }) => playerId),
     pointsToWin: config.pointsToWin,
-    // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot:
-    // el DTO público publica el mismo número que la mesa cobró, en UC completas.
-    entryFee: config.entryFee,
-    prize: config.prize,
+    // LOS NOMBRES DEL WIRE SON LOS DE DOMINÓ Y TRUCO, y ahora también los del snapshot: el DTO
+    // público publica el mismo monto que la mesa cobró, en UC, con la forma de la convención.
+    entryFee: ucOf(config.entryFee),
+    prize: ucOf(config.prize),
     betLevels: config.betLevels.map(({ level, extra, additionalPoints }) => ({
       level,
       extra,
@@ -112,24 +121,12 @@ export function publicConfigOf(
   };
 }
 
-// CAMPO POR CAMPO, como el resto: el precio del snapshot es el que validó el contrato, y un campo que
-// se le sume mañana no tiene por qué salir solo.
+// CAMPO POR CAMPO, como el resto (`seatPriceView`): el precio del snapshot es el que validó el
+// contrato, y un campo que se le sume mañana no tiene por qué salir solo. Los `decimals` tampoco salen:
+// ya están en el relleno de cada monto.
 function seatPricesOf(config: DominoMatchConfig): Pick<PublicMatchConfig, "seatPrices"> {
   const priced = config.seats.flatMap(({ playerId, price }) =>
-    price === undefined
-      ? []
-      : [
-          [
-            playerId,
-            {
-              currency: price.currency,
-              rate: price.rate,
-              entry: price.entry,
-              prize: price.prize,
-              levels: price.levels.map(({ level, entry, prize }) => ({ level, entry, prize })),
-            },
-          ] as const,
-        ],
+    price === undefined ? [] : [[playerId, seatPriceView(price, config)] as const],
   );
   return priced.length === 0 ? {} : { seatPrices: Object.fromEntries(priced) };
 }

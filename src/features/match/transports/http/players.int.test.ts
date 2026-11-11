@@ -91,7 +91,15 @@ describe("GET /internal/players/:userId/matches: el historial de un jugador, par
     expect(await response.json()).toMatchObject({
       status: "success",
       data: {
-        items: [{ id: "m-1", result: "win", bet: 10, prize: 18, score: 104 }],
+        items: [
+          {
+            id: "m-1",
+            result: "win",
+            bet: { uc: "10.0000" },
+            prize: { uc: "18.0000" },
+            score: 104,
+          },
+        ],
         page: 1,
         perPage: 10,
         totalItems: 1,

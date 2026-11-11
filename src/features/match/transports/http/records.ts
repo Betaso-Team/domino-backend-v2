@@ -11,6 +11,7 @@ import {
   type MatchCursor,
   MatchListTimeoutError,
 } from "../../network/history";
+import { recordView } from "../../network/record-view";
 
 // En consts para que el aviso de arranque y el registro no puedan divergir.
 export const MATCHES_ROUTE = "/internal/matches";
@@ -212,7 +213,8 @@ export function recordRoutes({
           ...(providerId === null ? {} : { providerId }),
         });
         sendData(response, {
-          items: page.items,
+          // LOS MONTOS EN LA CONVENCIÓN (`recordView`): Mongo guarda `*InUC`, el panel lee `{ uc }`.
+          items: page.items.map(recordView),
           pageSize,
           nextCursor: page.next ? encodeCursor(page.next) : null,
           total: page.total,
@@ -244,7 +246,7 @@ export function recordRoutes({
         sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }
-      sendData(response, record);
+      sendData(response, recordView(record));
     }),
   );
 
@@ -260,7 +262,7 @@ export function recordRoutes({
         sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }
-      response.json(snapshot);
+      response.json(recordView(snapshot));
     }),
   );
   return router;

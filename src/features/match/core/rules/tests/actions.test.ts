@@ -96,7 +96,6 @@ describe("availableActionsFor", () => {
         proposerId: "u1",
         level: 1,
         extra: 1,
-        additionalEntryFee: 10,
         additionalPoints: 0,
       },
     };

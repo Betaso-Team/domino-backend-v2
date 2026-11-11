@@ -1,4 +1,6 @@
+import { type Money, UC_KEY, readAmount } from "@/shared/money";
 import type { SeatPrice } from "../core/config";
+import { seatMoneyOf, ucOf } from "./amounts";
 import type { StoredMatchRecord } from "./history";
 import { zeroLike } from "./player-currency";
 
@@ -21,18 +23,16 @@ export interface MatchRow {
    * horaria del servidor, y la noche que importa es la del jugador.
    */
   readonly playedAt: string;
-  /** Lo que pagó y lo que cobró, en UC completas, con el aumento ya aplicado. */
-  readonly bet: number;
-  readonly prize: number;
   /**
-   * LOS MISMOS DOS EN SU MONEDA, como texto decimal y con la tasa de la mesa: los congeló el registro al
-   * cerrar (`SeatMoney.*InPlayerCurrency`), así que una tasa nueva no cambia lo que dice una partida
-   * vieja. Los tres juntos o ninguno: sólo si el asiento se sentó con precio (`MatchSeat.price`); las
-   * gratis y las de antes quedan en UC.
+   * LO QUE PAGÓ Y LO QUE COBRÓ, con el aumento ya aplicado, en la convención de montos
+   * (`network/amounts.ts`): `{ ves: "400.00", uc: "4.0000" }`. La moneda del jugador sale de lo que el
+   * registro congeló al cerrar (`SeatMoney.*InPlayerCurrency`), así que una tasa nueva no cambia lo que
+   * dice una partida vieja; `uc` es lo que cobró la mesa. Sin precio en el asiento (`MatchSeat.price`:
+   * las gratis y las de antes), `{ uc }` solo. Reemplazan a `bet`/`prize` en UC y a
+   * `currency`/`betInPlayerCurrency`/`prizeInPlayerCurrency` (2026-11).
    */
-  readonly currency?: string;
-  readonly betInPlayerCurrency?: string;
-  readonly prizeInPlayerCurrency?: string;
+  readonly bet: Money;
+  readonly prize: Money;
   /** Los puntos con que cerró su equipo. */
   readonly score: number;
   readonly result: MatchResult;
@@ -126,12 +126,7 @@ export function rowOf(userId: string, document: StoredMatchRecord): MatchRow {
       isoOf(document.updatedAt) ??
       isoOf(document.createdAt) ??
       new Date(0).toISOString(),
-    // UNA CANCELADA NO MOVIÓ PLATA PARA ÉL: el reembolso lo decide el orquestador por su ficha, y
-    // mostrar la entrada sería mostrar un cobro que se devolvió.
-    bet: result === "canceled" ? 0 : (seat?.chargedInUC ?? table.entryFeeInUC ?? 0),
-    // Y el premio es sólo del que ganó: el resto se llevó nada, que es lo que el campo tiene que decir.
-    prize: result === "win" ? (seat?.prizePaidInUC ?? 0) : 0,
-    ...inPlayerCurrency(seat, result),
+    ...amountsFor(seat, table, result),
     score: seat?.finalScore ?? 0,
     result,
     freeRoom: table.isFree ?? false,
@@ -140,30 +135,39 @@ export function rowOf(userId: string, document: StoredMatchRecord): MatchRow {
   };
 }
 
-// `bet` y `prize` EN SU MONEDA, con las MISMAS dos reglas que los de UC de arriba: la cancelada no movió
-// plata y el premio es sólo del que ganó. Lo cobrado y lo pagado salen del cierre, que ya eligió el
-// nivel del aumento; sin cierre en el asiento —o sin precio— no se adivina y la fila queda en UC.
+// `bet` Y `prize`, con las MISMAS dos reglas en las dos monedas:
+//   · UNA CANCELADA NO MOVIÓ PLATA PARA ÉL: el reembolso lo decide el orquestador por su ficha, y
+//     mostrar la entrada sería mostrar un cobro que se devolvió.
+//   · Y el premio es sólo del que ganó: el resto se llevó nada, que es lo que el campo tiene que decir.
+// Lo cobrado y lo pagado en su moneda salen del cierre, que ya eligió el nivel del aumento; sin cierre
+// en el asiento —o sin precio— no se adivina y la fila queda en `{ uc }`.
+function amountsFor(
+  seat: StoredSeat | undefined,
+  table: { readonly entryFeeInUC?: number },
+  result: MatchResult,
+): Pick<MatchRow, "bet" | "prize"> {
+  const betUc = result === "canceled" ? 0 : (seat?.chargedInUC ?? table.entryFeeInUC ?? 0);
+  const prizeUc = result === "win" ? (seat?.prizePaidInUC ?? 0) : 0;
+  const local = inPlayerCurrency(seat, result);
+  const price = seat?.price;
+  if (price === undefined || local === undefined) return { bet: ucOf(betUc), prize: ucOf(prizeUc) };
+  return {
+    bet: seatMoneyOf(price, local.bet, readAmount(betUc, UC_KEY)),
+    prize: seatMoneyOf(price, local.prize, readAmount(prizeUc, UC_KEY)),
+  };
+}
+
 function inPlayerCurrency(
   seat: StoredSeat | undefined,
   result: MatchResult,
-): Pick<MatchRow, "currency" | "betInPlayerCurrency" | "prizeInPlayerCurrency"> {
+): { readonly bet: string; readonly prize: string } | undefined {
   const price = seat?.price;
-  if (price === undefined) return {};
-  if (result === "canceled") {
-    return {
-      currency: price.currency,
-      betInPlayerCurrency: zeroLike(price.entry),
-      prizeInPlayerCurrency: zeroLike(price.prize),
-    };
-  }
+  if (price === undefined) return undefined;
+  if (result === "canceled") return { bet: zeroLike(price.entry), prize: zeroLike(price.prize) };
   const charged = seat?.chargedInPlayerCurrency;
   const paid = seat?.prizePaidInPlayerCurrency;
-  if (charged === undefined || paid === undefined) return {};
-  return {
-    currency: price.currency,
-    betInPlayerCurrency: charged,
-    prizeInPlayerCurrency: result === "win" ? paid : zeroLike(price.prize),
-  };
+  if (charged === undefined || paid === undefined) return undefined;
+  return { bet: charged, prize: result === "win" ? paid : zeroLike(price.prize) };
 }
 
 export function paginated<T>(
