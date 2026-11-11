@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { mintAdminToken } from "@/tests/billing-auth-keys";
 import { fakeOrchestrator } from "@/tests/fake-orchestrator";
 import { CASUAL_2P } from "@/tests/table-modes";
 import type { ColyseusTestServer } from "@colyseus/testing";
@@ -8,6 +9,7 @@ import {
   type SeatedMatch,
   act,
   bootServer,
+  mintToken,
   playUntilDecided,
   revealHands,
   seatPair,
@@ -188,12 +190,101 @@ describe("el registro de las partidas que no terminan jugando", () => {
   });
 });
 
+// EL PRECIO EN LA MONEDA DE CADA UNO, de la mesa al historial del jugador: la sala lo congela en el
+// asiento, el cierre elige lo cobrado y lo pagado, y `GET /me/matches` lo devuelve tal cual quedó.
+describe("el registro y el historial en la moneda del jugador", () => {
+  const price = {
+    currency: "VES",
+    rate: "200",
+    entry: "25000.00",
+    prize: "50000.00",
+    levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
+  };
+
+  it("el asiento con precio lo guarda, y su fila lo devuelve; el que no lo trajo queda en UC", async () => {
+    const match = await seatPair(server, [
+      { userId: "rec7", displayName: "Siete", currency: "VES", price },
+      { userId: "rec8", displayName: "Ocho", currency: "VES" },
+    ]);
+    await revealHands(match);
+    await act(match, "rec8", "ABANDON");
+    await waitUntil(async () => closed(await recordOf(match.config.matchId)), 3_000);
+
+    const record = await recordOf(match.config.matchId);
+    const [priced, plain] = record?.players as Doc[];
+    expect(priced).toMatchObject({
+      userId: "rec7",
+      price,
+      chargedInUC: 125,
+      prizePaidInUC: 250,
+      chargedInPlayerCurrency: "25000.00",
+      prizePaidInPlayerCurrency: "50000.00",
+    });
+    expect(plain).not.toHaveProperty("price");
+    expect(plain).not.toHaveProperty("chargedInPlayerCurrency");
+
+    const rowOf = async (userId: string) => {
+      const response = await fetch(`${base}/me/matches`, {
+        headers: { authorization: `Bearer ${mintToken(userId)}` },
+      });
+      const page = (await response.json()) as { items: Doc[] };
+      return page.items.find((item) => item.id === match.config.matchId);
+    };
+    expect(await rowOf("rec7")).toMatchObject({
+      result: "win",
+      bet: 125,
+      prize: 250,
+      currency: "VES",
+      betInPlayerCurrency: "25000.00",
+      prizeInPlayerCurrency: "50000.00",
+    });
+    const other = await rowOf("rec8");
+    expect(other).toMatchObject({ result: "abandoned", bet: 125, prize: 0 });
+    expect(other).not.toHaveProperty("currency");
+  });
+});
+
+// EL PROVEEDOR DE CADA ASIENTO, del pedido del orquestador al registro y al panel: la sala lo congela en
+// el asiento, el registro lo guarda en `seats[]` y en `players[]`, y un admin de ese proveedor ve la
+// partida en el listado y en el detalle.
+describe("el registro por proveedor", () => {
+  it("el asiento guarda su proveedor, y el admin de ese proveedor ve la partida", async () => {
+    const match = await seatPair(server, [
+      { userId: "rec9", displayName: "Nueve", currency: "VES", providerId: "betaso" },
+      { userId: "rec10", displayName: "Diez", currency: "VES" },
+    ]);
+    await revealHands(match);
+    await act(match, "rec10", "ABANDON");
+    await waitUntil(async () => closed(await recordOf(match.config.matchId)), 3_000);
+
+    const record = await recordOf(match.config.matchId);
+    for (const field of ["seats", "players"] as const) {
+      const [provided, plain] = record?.[field] as Doc[];
+      expect(provided).toMatchObject({ userId: "rec9", providerId: "betaso" });
+      expect(plain).not.toHaveProperty("providerId");
+    }
+
+    const as = (prv: string) => ({
+      authorization: `Bearer ${mintAdminToken("pia", { prv, role: "support" })}`,
+    });
+    const listed = async (prv: string) => {
+      const response = await get("/internal/matches?pageSize=100", as(prv));
+      const body = (await response.json()) as { data: { items: Doc[] } };
+      return body.data.items.map((item) => item.matchId);
+    };
+    expect(await listed("betaso")).toEqual([match.config.matchId]);
+    expect(await listed("parley")).toEqual([]);
+    expect((await get(`/internal/matches/${match.config.matchId}`, as("betaso"))).status).toBe(200);
+    expect((await get(`/internal/matches/${match.config.matchId}`, as("parley"))).status).toBe(404);
+  });
+});
+
 // EL MODO EN LÍNEA: el orquestador manda el modo con el que cobró, y el registro nombra la mesa con
 // `gameModeId` y `gameMode.name` y la cobra con sus importes, no con los del modo de la suite.
 describe("el registro de una mesa con el modo en línea", () => {
   it("lleva el nombre y los importes del modo del pedido", async () => {
     const gameModeId = "00000000-0000-4000-8000-00000000c4c4";
-    const match = await seatPair(server, ["rec7", "rec8"], "seed-en-linea", {
+    const match = await seatPair(server, ["rec11", "rec12"], "seed-en-linea", {
       gameModeId,
       gameMode: {
         name: "Modo del orquestador",
@@ -207,7 +298,7 @@ describe("el registro de una mesa con el modo en línea", () => {
       },
     });
     await revealHands(match);
-    await act(match, "rec7", "ABANDON");
+    await act(match, "rec11", "ABANDON");
     await waitUntil(async () => closed(await recordOf(match.config.matchId)), 3_000);
 
     const record = await recordOf(match.config.matchId);
@@ -217,6 +308,6 @@ describe("el registro de una mesa con el modo en línea", () => {
       matchConfig: { pointsToWin: 60 },
     });
     const [, stayed] = record?.players as Doc[];
-    expect(stayed).toMatchObject({ userId: "rec8", chargedInUC: 3, prizePaidInUC: 5 });
+    expect(stayed).toMatchObject({ userId: "rec12", chargedInUC: 3, prizePaidInUC: 5 });
   });
 });

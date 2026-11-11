@@ -3,6 +3,7 @@ import {
   type DominoMatchConfig,
   type GlobalDominoConfig,
   type MatchMode,
+  type SeatPrice,
   modeOf,
 } from "../core/config";
 
@@ -60,12 +61,21 @@ export interface PublicMatchConfig {
   /** Si la mesa sienta una máquina en el asiento del que se retira (`DominoMatchConfig.enableBots`). */
   readonly enableBots: boolean;
   readonly timeouts: PublicMatchTimeouts;
+  /**
+   * LO QUE LA MESA CUESTA Y PAGA EN LA MONEDA DE CADA ASIENTO, por su id opaco (`seat-1` → precio). El
+   * front toma el de su asiento y pinta la entrada, el premio y cada aumento en Bs. o en lo que pague
+   * el jugador; los números en UC de arriba siguen siendo los que cobra billing. Sólo los asientos que
+   * trajeron precio, y AUSENTE si ninguno lo trajo (mesa gratis, orquestador viejo): el front sigue en
+   * UC. No es secreto —el rival ve cuánto paga el otro—, pero no lleva nada más del asiento.
+   */
+  readonly seatPrices?: Readonly<Record<string, SeatPrice>>;
 }
 
 // LA CONFIGURACIÓN PÚBLICA DE UNA MESA, pura: la usan el registro (lo que estampa en el almacén) y la
 // sala (el mensaje `config` que manda al entrar), y tienen que ser la misma. Allowlist explícita:
 // restar `seed` filtraría solo lo conocido hoy y una propiedad secreta agregada mañana se filtraría
-// al wire. Tampoco se exponen campos derivados de la ventana de reparto, ni identidad, moneda o tasa.
+// al wire. Tampoco se exponen campos derivados de la ventana de reparto, ni identidad, ni la tasa de la
+// mesa (`rateId`); la moneda y la tasa de cada asiento salen sólo dentro de su `seatPrices`.
 export function publicConfigOf(
   config: DominoMatchConfig,
   timeouts: PublicMatchTimeouts,
@@ -98,7 +108,30 @@ export function publicConfigOf(
       dealingMs: timeouts.dealingMs,
       betResponseMs: timeouts.betResponseMs,
     },
+    ...seatPricesOf(config),
   };
+}
+
+// CAMPO POR CAMPO, como el resto: el precio del snapshot es el que validó el contrato, y un campo que
+// se le sume mañana no tiene por qué salir solo.
+function seatPricesOf(config: DominoMatchConfig): Pick<PublicMatchConfig, "seatPrices"> {
+  const priced = config.seats.flatMap(({ playerId, price }) =>
+    price === undefined
+      ? []
+      : [
+          [
+            playerId,
+            {
+              currency: price.currency,
+              rate: price.rate,
+              entry: price.entry,
+              prize: price.prize,
+              levels: price.levels.map(({ level, entry, prize }) => ({ level, entry, prize })),
+            },
+          ] as const,
+        ],
+  );
+  return priced.length === 0 ? {} : { seatPrices: Object.fromEntries(priced) };
 }
 
 export interface MatchConfigResponse extends PublicMatchConfig {
@@ -356,6 +389,15 @@ export class MatchRegistry {
     for (const userId of seats) {
       await this.release(userId, roomId);
     }
+  }
+
+  // LA ENTRADA QUE DEJÓ UN PROCESO MUERTO (truco `53d1030`). Un `kill -9` o un OOM no corre `onDispose`,
+  // así que `player_match` sigue apuntando a una sala que ya no existe hasta que vence su plazo
+  // (`TTL_SECONDS`), y mientras tanto el orquestador no puede volver a sentar al jugador. La borra
+  // quien CONFIRMÓ que la sala no existe —la API del orquestador, contra el matchmaker—, y es lo mismo
+  // que `release`: solo si sigue apuntando a esa sala.
+  async forget(userId: string, roomId: string): Promise<void> {
+    await this.release(userId, roomId);
   }
 
   // Soltar a un jugador es borrar SU clave, y SOLO SI sigue apuntando acá: entre que dejó esta

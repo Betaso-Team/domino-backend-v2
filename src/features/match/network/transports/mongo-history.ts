@@ -95,9 +95,11 @@ export type MatchHistoryDocument = {
   matchId: string;
   // Opcionales: la forma vieja no los guardaba. Se declaran por los filtros del listado.
   roomId?: string;
-  seats?: { userId: string }[];
+  seats?: { userId: string; providerId?: string }[];
   // Opcional: los documentos de antes de la v2.1 no la llevan.
   version?: number;
+  // Opcional: solo una mesa de torneo lo lleva. Se declara por el filtro del listado.
+  table?: { tournamentId?: string };
   createdAt: Date;
   updatedAt: Date;
   timeline?: StoredEntry[];
@@ -106,9 +108,16 @@ export type MatchHistoryDocument = {
   statsPending?: true;
   /** La forma vieja, anterior a la v2.1: sólo se lee. */
   entries?: HistoryEntry[];
+  /** A la timeline le faltan entradas: la base no las aceptó a tiempo o no entraron en espera. */
+  timelineIncomplete?: true;
+  /**
+   * Cuántas entradas le faltan, sumadas a medida que se pierden. PUEDE CONTAR DE MÁS: una escritura
+   * que vence del lado del cliente a veces igual se aplicó en el servidor.
+   */
+  lostEntries?: number;
 };
 
-// LOS SIETE ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS NUEVE ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -132,6 +141,13 @@ export type MatchHistoryDocument = {
 //   · `status` con el orden del listado detrás: el filtro por estado (abierta, terminada, abortada),
 //     por lo mismo que el del motivo: tres valores sobre millones de filas. Con el jugador o la sala
 //     no tiene compuesto propio, a propósito: Mongo usa uno y filtra el otro leyendo de más.
+//   · `table.tournamentId` PARCIAL con el orden del listado detrás: las partidas de un torneo. Solo
+//     las mesas de torneo lo llevan, así que el índice no carga los millones de casuales; la igualdad
+//     del filtro implica el `$exists` del parcial y el planificador lo usa (medido).
+//   · `seats.providerId` con el orden del listado detrás: las partidas de un proveedor, que es como
+//     ve el listado un admin de proveedor (siempre lo lleva). MULTIKEY como el del jugador, por lo
+//     mismo: el arreglo es sólo el prefijo y lo fija la igualdad. Dos asientos del mismo proveedor dan
+//     una sola clave: la partida sale una vez. No es parcial: casi toda partida nueva lo lleva.
 //
 // El filtro por `_id` no necesita uno: el de la colección ya está.
 //
@@ -159,6 +175,15 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
     {
       key: { status: 1, createdAt: -1, _id: -1 },
       name: "status_1_createdAt_-1__id_-1",
+    },
+    {
+      key: { "table.tournamentId": 1, createdAt: -1, _id: -1 },
+      name: "table.tournamentId_1_createdAt_-1__id_-1",
+      partialFilterExpression: { "table.tournamentId": { $exists: true } },
+    },
+    {
+      key: { "seats.providerId": 1, createdAt: -1, _id: -1 },
+      name: "seats.providerId_1_createdAt_-1__id_-1",
     },
     // PARCIAL: sólo lo pendiente, que es una fracción mínima de la colección y casi siempre vacía.
     {
@@ -195,6 +220,8 @@ function filterOf(query: MatchListQuery): ListFilter {
     ...(query.userId === undefined ? {} : { "seats.userId": query.userId }),
     ...(query.matchEndReason === undefined ? {} : { matchEndReason: query.matchEndReason }),
     ...(query.status === undefined ? {} : { status: query.status }),
+    ...(query.tournamentId === undefined ? {} : { "table.tournamentId": query.tournamentId }),
+    ...(query.providerId === undefined ? {} : { "seats.providerId": query.providerId }),
   };
 }
 
@@ -297,6 +324,31 @@ export function playerPageQueryOf(
 }
 
 // `MaxTimeMSExpired`: la base cortó la consulta por el plazo.
+// EL PLAZO DE CADA ESCRITURA DEL HISTORIAL, por operación y no en el `MongoClient`: la conexión es
+// la misma del catálogo, el outbox y el lease, y ellos tienen sus propios tiempos. Sin plazo, un
+// Mongo lento pero vivo deja cada escritura esperando para siempre —la conexión del pool, la
+// respuesta— y lo que se acumula detrás vive en la memoria del proceso. Vencido, es un fallo como
+// cualquier otro: se loguea, el lote se pierde y la cola de la partida pasa al siguiente. 30 s
+// aguantan un tropiezo largo (un índice que se construye, un disco saturado); lo que se junta
+// mientras tanto lo acotan los topes del pendiente, no este número.
+export const HISTORY_WRITE_TIMEOUT_MS = 30_000;
+const WRITE = { timeoutMS: HISTORY_WRITE_TIMEOUT_MS };
+// LO QUE PUEDE ESPERAR A LA BASE, en entradas de la timeline: por pendiente de una partida (el lote
+// sin sellar; el que ya viaja no cuenta, así que una partida trabada retiene un poco más) y por
+// proceso (pendientes más lotes en vuelo), que es el que de verdad acota la memoria. Una partida entera suele tener 100–300 entradas,
+// así que 2000 en espera es una partida trabada, no una larga; 100 000 son decenas de MB en el peor
+// caso. Lo que no entra se descarta, se cuenta y se marca en el documento: la partida sigue.
+export const MAX_PENDING_PER_MATCH = 2_000;
+export const MAX_PENDING_TOTAL = 100_000;
+// LAS PÉRDIDAS SE RESUMEN, no se loguean lote por lote: con Mongo caído y cientos de partidas, una
+// línea por lote tapa todo lo demás. La primera de cada partida en la ventana sí sale entera.
+export const LOSS_REPORT_EVERY_MS = 60_000;
+// EL PLAZO DEL DRENADO DEL APAGADO. pm2 mata a los 20 s (`kill_timeout`) y antes el apagado ya espera
+// hasta 15 s al cobro del aumento (`matchResultRecorder.drain()`): el historial no puede comerse ese
+// margen. Pasado el plazo, lo que sigue en vuelo se da por perdido y se dice cuánto era.
+export const DRAIN_DEADLINE_MS = 5_000;
+const UPSERT = { upsert: true, ...WRITE };
+
 const isTimeout = (error: unknown) =>
   error instanceof MongoServerError && (error.code === 50 || error.codeName === "MaxTimeMSExpired");
 
@@ -345,8 +397,22 @@ export class MongoHistory
   // LA COLECCIÓN YA PREPARADA, con los índices pedidos una vez por proceso (el criterio del catálogo).
   private prepared?: Promise<Collection<MatchHistoryDocument>>;
 
+  // LAS ENTRADAS QUE ESPERAN A LA BASE en todo el proceso: pendientes sin sellar y lotes en vuelo.
+  // Sube al aceptar un lote y baja cuando su escritura termina, bien o mal.
+  private waiting = 0;
+  // LO PERDIDO DE CADA PARTIDA que todavía no llegó a su documento, y las partidas con una marca ya
+  // encolada. Una sola marca a la vez por partida: lo que se pierde mientras espera se suma a ella.
+  private readonly lost = new Map<string, number>();
+  private readonly marking = new Set<string>();
+  // EL RESUMEN DE LA VENTANA: qué se perdió y qué partidas ya lo dijeron con su propia línea.
+  private window = { matches: new Set<string>(), entries: 0, batches: 0 };
+  private reporter?: ReturnType<typeof setInterval>;
+
   private readonly now: () => Date;
   private readonly countCap: number;
+  private readonly maxPendingPerMatch: number;
+  private readonly maxPendingTotal: number;
+  private readonly lossReportEveryMs: number;
 
   constructor(
     private readonly store: HistoryStore,
@@ -355,6 +421,9 @@ export class MongoHistory
   ) {
     this.now = options.now ?? (() => new Date());
     this.countCap = options.countCap ?? MATCH_COUNT_CAP;
+    this.maxPendingPerMatch = options.maxPendingPerMatch ?? MAX_PENDING_PER_MATCH;
+    this.maxPendingTotal = options.maxPendingTotal ?? MAX_PENDING_TOTAL;
+    this.lossReportEveryMs = options.lossReportEveryMs ?? LOSS_REPORT_EVERY_MS;
   }
 
   // EL PRIMER ARMADO GANA, campo por campo: el documento existente va DESPUÉS de la cabecera en el
@@ -380,7 +449,7 @@ export class MongoHistory
             },
           },
         ],
-        { upsert: true },
+        UPSERT,
       ),
     );
   }
@@ -407,11 +476,24 @@ export class MongoHistory
     const matchId = entries[0]?.matchId;
     if (!matchId) return;
     const open = this.unsealed.get(matchId);
+    // EL TOPE: entra lo que cabe en el pendiente de la partida y en el del proceso, en orden; lo
+    // demás se cuenta como perdido. El inicio, la mano y el cierre no pasan por acá: son pocos y
+    // llevan la cabecera y el desenlace, así que nunca se descartan.
+    const room = Math.min(
+      this.maxPendingPerMatch - (open?.length ?? 0),
+      this.maxPendingTotal - this.waiting,
+    );
+    const accepted = entries.slice(0, Math.max(0, room));
+    if (accepted.length < entries.length) {
+      this.lose(matchId, entries.length - accepted.length);
+    }
+    if (accepted.length === 0) return;
+    this.waiting += accepted.length;
     if (open) {
-      open.push(...entries);
+      open.push(...accepted);
       return;
     }
-    const batch = [...entries];
+    const batch = [...accepted];
     this.unsealed.set(matchId, batch);
     this.write(
       matchId,
@@ -433,13 +515,18 @@ export class MongoHistory
             // grabarse.
             $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
           },
-          { upsert: true },
+          UPSERT,
         );
       },
       // EL SELLO, al empezar el trabajo y antes que nada que pueda fallar (pedir la colección
       // incluido): desde acá lo que llegue abre un pendiente nuevo, y este arreglo ya no cambia
       // mientras viaja. Un trabajo que falla antes de escribir igual deja el pendiente sellado.
       () => this.seal(matchId, batch),
+      // AL TERMINAR, bien o mal, deja de esperar; si falló, sus entradas se perdieron.
+      (failed) => {
+        this.waiting -= batch.length;
+        if (failed) this.lose(matchId, batch.length, true);
+      },
     );
   }
 
@@ -454,7 +541,7 @@ export class MongoHistory
           $set: { updatedAt: now },
           $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
         },
-        { upsert: true },
+        UPSERT,
       ),
     );
   }
@@ -490,7 +577,7 @@ export class MongoHistory
             },
           },
         ],
-        { upsert: true },
+        UPSERT,
       ),
     );
   }
@@ -500,11 +587,31 @@ export class MongoHistory
   // de que la promesa resuelve—, y un drenado que espera una sola tanda dejaría justo al
   // último afuera. Termina porque durante el apagado ya no hay salas que graben: la sala se
   // dispone ANTES de que esto corra (§`src/main.ts`).
-  async drain(): Promise<void> {
-    while (this.inFlight.size > 0) {
-      // `all` y no `allSettled` porque ninguna de estas promesas puede rechazar: son las que
-      // salieron del `catch` de `write`.
-      await Promise.all([...this.inFlight]);
+  //
+  // CON PLAZO: un Mongo colgado no puede dejar al deploy esperando hasta que pm2 mate el proceso. Al
+  // vencer se loguea lo que quedó en vuelo y se resuelve igual; nunca rechaza.
+  async drain(deadlineMs = DRAIN_DEADLINE_MS): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), deadlineMs);
+    });
+    try {
+      while (this.inFlight.size > 0) {
+        // `all` y no `allSettled` porque ninguna de estas promesas puede rechazar: son las que
+        // salieron del `then` de `write` y del `finally` de `mark`.
+        const done = Promise.all([...this.inFlight]).then(() => "done" as const);
+        if ((await Promise.race([done, late])) === "late") {
+          // `writes` son todas las escrituras de la cola —lotes, inicios, manos, cierres y marcas—;
+          // `entries`, las de la timeline que esperaban.
+          this.logger.error("historial: el apagado no esperó lo que seguía en vuelo", {
+            writes: this.inFlight.size,
+            entries: this.waiting,
+          });
+          return;
+        }
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -618,7 +725,11 @@ export class MongoHistory
   settled(matchId: string): Promise<void> {
     this.seal(matchId);
     return this.queued(matchId, async () => {
-      await (await this.collection()).updateOne({ matchId }, { $unset: { statsPending: "" } });
+      await (await this.collection()).updateOne(
+        { matchId },
+        { $unset: { statsPending: "" } },
+        WRITE,
+      );
     });
   }
 
@@ -632,19 +743,111 @@ export class MongoHistory
     detail: Record<string, unknown> | (() => Record<string, unknown>),
     update: (collection: Collection<MatchHistoryDocument>) => Promise<unknown>,
     start?: () => void,
+    done?: (failed: boolean) => void,
   ): void {
     const writing = this.queued(matchId, async () => {
       start?.();
       await update(await this.collection());
-    }).catch((error) =>
-      this.logger.error(`historial: ${failure}`, {
-        matchId,
-        ...(typeof detail === "function" ? detail() : detail),
-        error: String(error),
-      }),
+    }).then(
+      () => {
+        done?.(false);
+        // MONGO VOLVIÓ para esta partida: si una marca suya había fallado, se reintenta ahora. Solo
+        // después de un éxito, así que con la base caída no hay bucle.
+        if ((this.lost.get(matchId) ?? 0) > 0) this.mark(matchId);
+      },
+      (error) => {
+        // SOLO LOS LOTES DE LA TIMELINE se resumen (los que traen `done`): la primera falla de cada
+        // partida en la ventana sale con su línea y las demás van al resumen. El inicio, la mano y
+        // el cierre se loguean siempre: son pocos por partida y el cierre lleva el desenlace.
+        const quiet = done !== undefined && this.window.matches.has(matchId);
+        // `done` antes que el log: un logger que tire no puede dejar sin bajar el contador.
+        done?.(true);
+        if (!quiet) {
+          this.logger.error(`historial: ${failure}`, {
+            matchId,
+            ...(typeof detail === "function" ? detail() : detail),
+            error: String(error),
+          });
+        }
+      },
     );
+    this.track(writing);
+  }
+
+  private track(writing: Promise<void>): void {
     this.inFlight.add(writing);
     void writing.finally(() => this.inFlight.delete(writing));
+  }
+
+  // UNA PARTIDA PERDIÓ ENTRADAS: se cuentan para el resumen y se le encola la marca. `batch` dice si
+  // es un lote que no llegó a la base (cuenta en `batches`) o entradas que no entraron en espera.
+  private lose(matchId: string, entries: number, batch = false): void {
+    this.window.matches.add(matchId);
+    this.window.entries += entries;
+    if (batch) this.window.batches += 1;
+    this.reportLater();
+    this.lost.set(matchId, (this.lost.get(matchId) ?? 0) + entries);
+    this.mark(matchId);
+  }
+
+  // LA MARCA EN EL DOCUMENTO: `timelineIncomplete` y cuántas faltan, con `$set`/`$inc` y nunca con
+  // el `$replaceWith` del cierre, así que una partida cerrada sigue cerrada. Va por la cola de la
+  // partida, detrás de lo que se perdió, y lee lo perdido AL SALIR: lo que se pierde mientras espera
+  // viaja con ella. Si falla, lo suyo vuelve a esperar y NO se encola otra: con Mongo caído, una
+  // marca que reintenta sola es un bucle. La reintenta la próxima escritura de la partida que salga
+  // bien (ver `write`) o su próxima pérdida.
+  private mark(matchId: string): void {
+    if (this.marking.has(matchId)) return;
+    this.marking.add(matchId);
+    let failed = false;
+    const writing = this.queued(matchId, async () => {
+      const n = this.lost.get(matchId) ?? 0;
+      this.lost.delete(matchId);
+      if (n === 0) return;
+      const now = this.now();
+      try {
+        await (await this.collection()).updateOne(
+          { matchId },
+          {
+            $set: { timelineIncomplete: true, updatedAt: now },
+            $inc: { lostEntries: n },
+            $setOnInsert: { matchId, version: MATCH_RECORD_VERSION, createdAt: now },
+          },
+          UPSERT,
+        );
+      } catch {
+        failed = true;
+        this.lost.set(matchId, (this.lost.get(matchId) ?? 0) + n);
+      }
+    }).finally(() => {
+      this.marking.delete(matchId);
+      // Lo que llegó después de leer, con la marca ya escrita, sale en otra; tras un fallo, no.
+      if (!failed && (this.lost.get(matchId) ?? 0) > 0) this.mark(matchId);
+    });
+    this.track(writing);
+  }
+
+  // EL RESUMEN, a lo sumo uno por ventana y solo si hubo pérdidas. El reloj nace con la primera
+  // pérdida y se apaga con la primera ventana limpia; `unref` para no sostener vivo al proceso.
+  private reportLater(): void {
+    if (this.reporter) return;
+    this.reporter = setInterval(() => {
+      const { matches, entries, batches } = this.window;
+      this.window = { matches: new Set(), entries: 0, batches: 0 };
+      if (matches.size === 0) {
+        clearInterval(this.reporter);
+        this.reporter = undefined;
+        return;
+      }
+      if (entries > 0 || batches > 0) {
+        this.logger.error("historial: se perdieron entradas", {
+          matches: matches.size,
+          entries,
+          batches,
+        });
+      }
+    }, this.lossReportEveryMs);
+    this.reporter.unref?.();
   }
 
   /**

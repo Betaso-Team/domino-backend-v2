@@ -128,6 +128,72 @@ describe("requestOf", () => {
   });
 });
 
+// EL PRECIO EN LA MONEDA DEL JUGADOR, opcional: lo manda el orquestador con la cotización de billing y
+// el dominó sólo lo muestra y lo elige. Lo que esta frontera cierra es la FORMA —texto decimal, la moneda
+// del asiento, un nivel una vez— porque de acá para adentro nadie lo vuelve a mirar.
+describe("requestOf: el precio de cada asiento", () => {
+  const price = {
+    currency: "VES",
+    rate: "200",
+    entry: "200.00",
+    prize: "300.00",
+    levels: [{ level: 2, entry: "200.00", prize: "600.00" }],
+  };
+  const withPrice = (overrides: Record<string, unknown> = {}) => ({
+    ...request,
+    participants: [{ ...participants[0], price: { ...price, ...overrides } }, participants[1]],
+  });
+
+  it("lo acepta y lo deja en el asiento tal cual; el que no lo trae sigue sin él", () => {
+    const config = configFrom(withPrice());
+    expect(config.seats[0]?.price).toEqual(price);
+    expect(config.seats[1]).not.toHaveProperty("price");
+  });
+
+  it("sin niveles es una mesa que no cotizó aumentos", () => {
+    const { levels, ...bare } = price;
+    const input = {
+      ...request,
+      participants: [{ ...participants[0], price: bare }, participants[1]],
+    };
+    expect(requestOf(input).participants[0]?.price?.levels).toEqual([]);
+  });
+
+  it("sin precio en nadie el pedido es el de siempre", () => {
+    expect(requestOf(request).participants.every((seat) => seat.price === undefined)).toBe(true);
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ["un monto numérico", { entry: 200 }],
+    ["un monto negativo", { prize: "-1.00" }],
+    ["un monto con coma", { entry: "200,00" }],
+    ["un monto con exponente", { entry: "2e2" }],
+    ["un monto vacío", { entry: "" }],
+    ["un monto larguísimo", { entry: "1".repeat(33) }],
+    ["una tasa que no es decimal", { rate: "doscientos" }],
+    ["otra moneda que la del asiento", { currency: "USD" }],
+    ["el nivel 1", { levels: [{ level: 1, entry: "0", prize: "300.00" }] }],
+    ["un nivel no entero", { levels: [{ level: 2.5, entry: "1", prize: "1" }] }],
+    [
+      "un nivel repetido",
+      {
+        levels: [
+          { level: 2, entry: "1", prize: "1" },
+          { level: 2, entry: "2", prize: "2" },
+        ],
+      },
+    ],
+    [
+      "más de 16 niveles",
+      { levels: Array.from({ length: 17 }, (_, i) => ({ level: i + 2, entry: "1", prize: "1" })) },
+    ],
+    ["una clave de más", { extra: "1" }],
+    ["un nivel con una clave de más", { levels: [{ level: 2, entry: "1", prize: "1", x: 1 }] }],
+  ])("rechaza %s", (_name, overrides) => {
+    expect(() => requestOf(withPrice(overrides))).toThrow();
+  });
+});
+
 describe("configOf", () => {
   it("normaliza identidades externas a ids opacos reproducibles", () => {
     expect(configFrom().seats).toEqual([
@@ -272,6 +338,40 @@ describe("el modo en línea (`gameMode`)", () => {
 // EL SNAPSHOT GRABADO, que es la otra mitad de la tarea: una partida tiene que poder rebobinarse
 // sin catálogo. `replayConfigOf` valida la mesa ENTERA —asientos numerados, puntos y dinero
 // adentro— y no consulta nada; es lo que permite que editar un modo no cambie una partida vieja.
+// EL PROVEEDOR DE CADA ASIENTO (el `prv` de la sesión), para el ámbito del panel. Opcional en las dos
+// entradas —casual y torneo— y en el snapshot; una LLAVE como el `userId`: se normaliza igual.
+describe("requestOf: el proveedor de cada asiento", () => {
+  const { gameModeId: _mode, gameMode: _gameMode, rateId: _rate, ...shared } = request;
+  const tournament = {
+    ...shared,
+    mode: "TOURNAMENT",
+    tournamentId: "t-1",
+    rules: { pointsToWin: 50 },
+  } as const;
+  const provided = <T extends object>(base: T, providerId: unknown) => ({
+    ...base,
+    participants: [{ ...participants[0], providerId }, participants[1]],
+  });
+
+  it("lo deja en el asiento, sin espacios, en la casual y en la de torneo", () => {
+    for (const base of [request, tournament]) {
+      const config = configFrom(provided(base, " betaso "));
+      expect(config.seats[0]?.providerId).toBe("betaso");
+      expect(config.seats[1]).not.toHaveProperty("providerId");
+    }
+  });
+
+  it.each<[string, unknown]>([
+    ["vacío", ""],
+    ["en blanco", "  "],
+    ["numérico", 7],
+    ["nulo", null],
+  ])("rechaza un proveedor %s", (_name, providerId) => {
+    expect(() => requestOf(provided(request, providerId))).toThrow();
+    expect(() => requestOf(provided(tournament, providerId))).toThrow();
+  });
+});
+
 describe("replayConfigOf", () => {
   const snapshot = {
     matchId: "match-1",
@@ -343,6 +443,30 @@ describe("replayConfigOf", () => {
     ["cantidad impar", { seats: [snapshot.seats[0]] }],
   ])("rechaza %s", (_name, override) => {
     expect(() => replayConfigOf({ ...snapshot, ...override })).toThrow();
+  });
+
+  // UNA PARTIDA GRABADA ANTES DEL PRECIO NO SE INVENTA UNO: sin default, el asiento sale sin `price`.
+  // Y una grabada CON precio lo conserva, con las mismas reglas que el pedido.
+  it("rebobina sin precio lo que se grabó sin precio, y con precio lo que lo trajo", () => {
+    expect(replayConfigOf(snapshot).seats.some((seat) => "price" in seat)).toBe(false);
+    const price = { currency: "VES", rate: "200", entry: "200.00", prize: "300.00", levels: [] };
+    const priced = { ...snapshot, seats: [{ ...snapshot.seats[0], price }, snapshot.seats[1]] };
+    expect(replayConfigOf(priced).seats[0]?.price).toEqual(price);
+    const foreign = {
+      ...snapshot,
+      seats: [{ ...snapshot.seats[0], price: { ...price, currency: "USD" } }, snapshot.seats[1]],
+    };
+    expect(() => replayConfigOf(foreign)).toThrow();
+  });
+
+  // UNA PARTIDA GRABADA ANTES DEL PROVEEDOR SE REBOBINA SIN ÉL, y una que lo trajo lo conserva.
+  it("rebobina con y sin el proveedor del asiento", () => {
+    expect(replayConfigOf(snapshot).seats.some((seat) => "providerId" in seat)).toBe(false);
+    const provided = {
+      ...snapshot,
+      seats: [{ ...snapshot.seats[0], providerId: "betaso" }, snapshot.seats[1]],
+    };
+    expect(replayConfigOf(provided).seats[0]?.providerId).toBe("betaso");
   });
 
   // EL DECIMAL ES UN MONTO VÁLIDO, y este test es el que separa la convención de v1 de la que

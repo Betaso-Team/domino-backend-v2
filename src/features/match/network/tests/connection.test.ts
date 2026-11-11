@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   type ConnectionBlame,
   type ConnectionCause,
+  type ConnectionEvent,
   type DropEvidence,
   connectionVerdictOf,
+  droppedByServer,
   isHighRtt,
 } from "../connection";
 
@@ -95,5 +97,54 @@ describe("el ping alto", () => {
   it("se mide por la mediana, y los perdidos no cuentan", () => {
     expect(isHighRtt([100, 300, 900])).toBe(true);
     expect(isHighRtt([100, null, 200, null])).toBe(false);
+  });
+});
+
+// LA CAÍDA QUE CANCELA LA PARTIDA: solo cuenta la ÚLTIMA, y solo si el jugador sigue afuera. Volver
+// la borra —el que volvió puede jugar—, y una que venció su ventana (`GONE` tras la caída) lleva el
+// veredicto de esa caída.
+describe("la última caída fue culpa del servidor", () => {
+  const ours = { blame: "OURS", cause: "SERVER_ERROR", verdictVersion: 1 } as const;
+  const network = { blame: "NETWORK", cause: "CONNECTION_LOST", verdictVersion: 1 } as const;
+  const dropped = (verdict: typeof ours | typeof network): ConnectionEvent => ({
+    kind: "DROPPED",
+    at: 1,
+    roundNumber: 1,
+    closeCode: 4002,
+    sinceLastPongMs: null,
+    recentRttMs: [],
+    server: base.server,
+    verdict,
+  });
+  const back: ConnectionEvent = { kind: "RECONNECTED", at: 2, roundNumber: 1, awayMs: 1 };
+  // Como lo arma el monitor: tras una caída no hay evidencia nueva, así que no trae veredicto propio.
+  const goneAfter: ConnectionEvent = {
+    kind: "GONE",
+    at: 3,
+    roundNumber: 1,
+    closeCode: 4002,
+    afterDrop: true,
+  };
+  const of = (...events: ConnectionEvent[]) => ({
+    rtt: { samples: 0, avgMs: 0, maxMs: 0, jitterMs: 0, lostProbes: 0 },
+    events,
+  });
+
+  it("sí, si la última es una caída nuestra", () => {
+    expect(droppedByServer(of(dropped(ours)))).toBe(true);
+    expect(droppedByServer(of(dropped(network), back, dropped(ours)))).toBe(true);
+  });
+
+  it("sí, si después de esa caída se le venció la ventana", () => {
+    expect(droppedByServer(of(dropped(ours), goneAfter))).toBe(true);
+  });
+
+  it("no, si volvió o si la caída fue de su red", () => {
+    expect(droppedByServer(of(dropped(ours), back))).toBe(false);
+    expect(droppedByServer(of(dropped(ours), back, dropped(network), goneAfter))).toBe(false);
+    expect(droppedByServer(of(dropped(network)))).toBe(false);
+    expect(droppedByServer(of(dropped(network), goneAfter))).toBe(false);
+    expect(droppedByServer(of())).toBe(false);
+    expect(droppedByServer(undefined)).toBe(false);
   });
 });

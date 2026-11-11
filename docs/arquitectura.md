@@ -229,4 +229,6 @@ La API que este backend le expone al orquestador está en `docs/api-y-mensajes.m
 4. `src/features/match/transports/colyseus/commands/`: entrada de mensajes.
 5. `src/features/match/network/`: historial y efectos hacia la plataforma. El registro de cada
    partida —cabecera, timeline, manos y desenlace— está en `history.ts` y `match-record.ts`.
-6. `src/di-container.ts` y `src/app.config.ts`: decisiones de infraestructura.
+6. `src/features/reactions/`: los gestos de la mesa (lista fija, límite por jugador); el cable está
+   en `match/transports/colyseus/reactions.ts`.
+7. `src/di-container.ts` y `src/app.config.ts`: decisiones de infraestructura.

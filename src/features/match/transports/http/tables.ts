@@ -50,8 +50,11 @@ function modeFieldsOf(config: PublicMatchConfig) {
 }
 
 export interface TablesDeps {
-  readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack">;
-  readonly registry: Pick<MatchRegistry, "matchOf" | "publicConfigOf" | "census" | "isLive">;
+  readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack" | "isGone">;
+  readonly registry: Pick<
+    MatchRegistry,
+    "matchOf" | "publicConfigOf" | "census" | "forget" | "isLive"
+  >;
   /** Si una partida tiene registro, sin leerlo: `GET .../existence`. */
   readonly archive: Pick<MatchArchive, "hasRecord">;
   readonly logger: Logger;
@@ -90,6 +93,10 @@ export function tablesRoutes(deps: TablesDeps): Router {
     }),
   );
 
+  // LA SALA QUE YA NO EXISTE NO RETIENE AL JUGADOR (truco `53d1030`, T-04). Su proceso murió sin
+  // `onDispose`, así que su entrada de `player_match` sigue ahí hasta vencer (`TTL_SECONDS`); el
+  // gateway confirma contra el matchmaker que la sala no está, y acá se borra la entrada antes de
+  // contestar 404: el orquestador lo vuelve a poner a buscar, y la próxima pregunta ya no la encuentra.
   router.post(
     SEAT_BACK_ROUTE,
     guard,
@@ -97,6 +104,9 @@ export function tablesRoutes(deps: TablesDeps): Router {
       const roomId = await deps.registry.matchOf(params.userId);
       const config = roomId ? await deps.registry.publicConfigOf(roomId) : undefined;
       const reservation = roomId && config ? await deps.tables.seatBack(roomId) : undefined;
+      if (roomId && config && reservation === undefined) {
+        await deps.registry.forget(params.userId, roomId);
+      }
       if (!config || reservation === undefined) {
         sendError(response, 404, "NO_LIVE_MATCH");
         return;
@@ -109,8 +119,13 @@ export function tablesRoutes(deps: TablesDeps): Router {
   );
   // EN QUÉ MESA ESTÁ SENTADO, SIN RESERVAR NADA. Es la pregunta del orquestador cuando solo necesita
   // saber si el jugador tiene partida viva (para no abrirle otra): dos GET al registro compartido y
-  // ninguna llamada a Colyseus. `POST .../seat` contesta lo mismo pero además reserva un asiento,
-  // que es lo caro y lo que solo hace falta para volver a entrar.
+  // una lectura del registro de salas de Colyseus, sin reservar. `POST .../seat` contesta lo mismo
+  // pero además reserva un asiento, que es lo caro y lo que solo hace falta para volver a entrar.
+  //
+  // LA SALA SE CONFIRMA (T-04): una entrada de `player_match` cuya sala ya no figura en el matchmaker
+  // es de un proceso muerto, y contestar 200 por ella dejaba al jugador trabado hasta que vencía. Se
+  // borra y se contesta 404. Si la pregunta falla o no contesta a tiempo, se contesta como hoy: «no sé»
+  // no es «no existe».
   router.get(
     PLAYER_MATCH_ROUTE,
     guard,
@@ -118,6 +133,11 @@ export function tablesRoutes(deps: TablesDeps): Router {
       const roomId = await deps.registry.matchOf(params.userId);
       const config = roomId ? await deps.registry.publicConfigOf(roomId) : undefined;
       if (!roomId || !config) {
+        sendError(response, 404, "NO_LIVE_MATCH");
+        return;
+      }
+      if (await deps.tables.isGone(roomId)) {
+        await deps.registry.forget(params.userId, roomId);
         sendError(response, 404, "NO_LIVE_MATCH");
         return;
       }

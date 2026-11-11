@@ -1,9 +1,11 @@
 import type { Logger } from "@/logger";
-import { type Collection, MongoServerError } from "mongodb";
+import { type Collection, MongoOperationTimeoutError, MongoServerError } from "mongodb";
 import { describe, expect, it, vi } from "vitest";
 import { type HistoryEntry, MatchListTimeoutError } from "../history";
 import {
+  DRAIN_DEADLINE_MS,
   HISTORY_COLLECTION,
+  HISTORY_WRITE_TIMEOUT_MS,
   type HistoryStore,
   LIST_MAX_TIME_MS,
   type MatchHistoryDocument,
@@ -70,6 +72,13 @@ function storeWith(document: MatchHistoryDocument | null = null) {
   };
 }
 
+// LAS ESCRITURAS DE LA TIMELINE, sin las marcas de pérdida: un lote fallido encola detrás la marca
+// `timelineIncomplete` de su partida, que también es un `updateOne`.
+const pushesOf = (updateOne: { mock: { calls: unknown[][] } }) =>
+  updateOne.mock.calls.filter(
+    (call) => (call[1] as { $push?: { timeline?: unknown } } | undefined)?.$push?.timeline,
+  );
+
 // Le da al `void this.append(...)` de dentro de `record` la vuelta de microtasks que
 // necesita para llegar al doble. `record` devuelve `void` por contrato, así que no hay nada
 // que esperar desde afuera: esto es el test adaptándose a la decisión, no al revés.
@@ -84,7 +93,7 @@ describe("MongoHistory: escritura", () => {
     expect(updateOne).toHaveBeenCalledTimes(1);
     const [filter, update, options] = updateOne.mock.calls[0] ?? [];
     expect(filter).toEqual({ matchId: "m-1" });
-    expect(options).toEqual({ upsert: true });
+    expect(options).toEqual({ upsert: true, timeoutMS: HISTORY_WRITE_TIMEOUT_MS });
     // `$setOnInsert` y no `$set`: la cabecera describe el nacimiento del documento, así que
     // el segundo lote no puede reescribirla. Con `$set`, `createdAt` avanzaría con cada
     // jugada y dejaría de ser el instante en que la partida empezó a grabarse.
@@ -298,8 +307,9 @@ describe("MongoHistory: un $push por lote pendiente", () => {
       expect.stringContaining("lote"),
       expect.objectContaining({ matchId: "m-1", entries: 2 }),
     );
-    expect(updateOne).toHaveBeenCalledTimes(2);
-    expect(seqsOf(updateOne.mock.calls[1])).toEqual([3]);
+    const pushes = pushesOf(updateOne);
+    expect(pushes).toHaveLength(2);
+    expect(seqsOf(pushes[1])).toEqual([3]);
   });
 
   // Y SI FALLA ANTES DE ESCRIBIR —la colección no se pudo preparar—, el pendiente también queda
@@ -314,8 +324,255 @@ describe("MongoHistory: un $push por lote pendiente", () => {
     history.record([entry(2)]);
     await history.drain();
 
-    expect(updateOne).toHaveBeenCalledTimes(1);
-    expect(seqsOf(updateOne.mock.calls[0])).toEqual([2]);
+    const pushes = pushesOf(updateOne);
+    expect(pushes).toHaveLength(1);
+    expect(seqsOf(pushes[0])).toEqual([2]);
+  });
+});
+
+// La cabecera y el cierre de una partida de prueba, para los tests que abren y cierran.
+const SETUP = {
+  roomId: "room-1",
+  table: { gameModeId: "g", name: "$peligro", entryFeeInUC: 1, prizeInUC: 2, isFree: false },
+  matchConfig: {
+    playersQuantity: 2,
+    pointsToWin: 100,
+    startingScore: { teamA: 0, teamB: 0 },
+    timeoutsInMs: {},
+    seed: "s",
+    teamAssignment: "SHUFFLED" as const,
+    isDealWindowEnabled: true,
+    tilesPerPlayer: 7,
+    betLevels: [],
+    enableBots: false,
+    isRematchEnabled: true,
+  },
+  seats: [],
+};
+const CLOSING = {
+  ...SETUP,
+  status: "finished" as const,
+  matchEndedAt: 2_000,
+  matchEndReason: "SCORE" as const,
+  winnerIds: [],
+  players: [],
+  rateId: "r",
+  betMultiplier: { offeredValues: [], finalValue: 1, proposals: [] },
+  rankingMultiplier: { base: 1, extra: 0, final: 1 },
+};
+
+// UN MONGO LENTO NO PUEDE ACUMULAR SIN TECHO. Cada escritura del historial lleva su plazo propio
+// (el `MongoClient` es compartido y no se toca): vencido, falla como cualquier otro fallo —se
+// loguea y la partida sigue— y la cola de la partida pasa a la siguiente.
+describe("MongoHistory: plazos y topes", () => {
+  const ROUND = { roundNumber: 1, endReason: "DOMINO" as const, starterId: "seat-1", hands: [] };
+
+  it("cada escritura del historial lleva su propio plazo", async () => {
+    const { store, updateOne } = storeWith();
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+    history.record([entry(1)]);
+    history.round("m-1", ROUND);
+    history.close("m-1", CLOSING);
+    await history.settled("m-1");
+    await history.drain();
+
+    expect(HISTORY_WRITE_TIMEOUT_MS).toBe(30_000);
+    expect(updateOne).toHaveBeenCalledTimes(5);
+    for (const call of updateOne.mock.calls) {
+      expect(call[2]).toMatchObject({ timeoutMS: 30_000 });
+    }
+  });
+
+  it("una escritura que vence no frena la siguiente de la misma partida", async () => {
+    const { store, updateOne } = storeWith();
+    updateOne.mockRejectedValueOnce(new MongoOperationTimeoutError("vencido"));
+    const logger = fakeLogger();
+    const history = new MongoHistory(store, logger);
+
+    history.record([entry(1)]);
+    await history.drain();
+    history.record([entry(2)]);
+    await history.drain();
+
+    const pushes = pushesOf(updateOne);
+    expect(pushes).toHaveLength(2);
+    expect(
+      (
+        pushes[1]?.[1] as { $push: { timeline: { $each: HistoryEntry[] } } }
+      ).$push.timeline.$each.map((e) => e.seq),
+    ).toEqual([2]);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  // Una promesa que el test resuelve a mano: el Mongo lento pero vivo.
+  const colgado = () => {
+    let liberar: () => void = () => {};
+    const promesa = new Promise<void>((resolve) => {
+      liberar = resolve;
+    });
+    return { promesa, liberar: () => liberar() };
+  };
+  const marcasDe = (updateOne: ReturnType<typeof storeWith>["updateOne"], matchId: string) =>
+    updateOne.mock.calls
+      .filter((call) => call[0]?.matchId === matchId && call[1]?.$set?.timelineIncomplete)
+      .map((call) => call[1].$inc.lostEntries);
+
+  it("lo que no entra en el pendiente de la partida se descarta, se cuenta y se marca", async () => {
+    const { store, updateOne } = storeWith();
+    const lento = colgado();
+    updateOne.mockImplementationOnce(() => lento.promesa);
+    const history = new MongoHistory(store, fakeLogger(), { maxPendingPerMatch: 3 });
+
+    history.record([entry(1)]);
+    await settle();
+    for (let seq = 2; seq <= 7; seq++) history.record([entry(seq)]);
+    lento.liberar();
+    await history.drain();
+
+    const pushes = updateOne.mock.calls.filter((call) => call[1]?.$push?.timeline);
+    expect(
+      pushes.map((call) => call[1].$push.timeline.$each.map((e: HistoryEntry) => e.seq)),
+    ).toEqual([[1], [2, 3, 4]]);
+    expect(marcasDe(updateOne, "m-1")).toEqual([3]);
+  });
+
+  it("el tope del proceso se reparte entre las partidas, y cada una cuenta lo suyo", async () => {
+    const { store, updateOne } = storeWith();
+    const lento = colgado();
+    updateOne.mockImplementation(() => lento.promesa);
+    const history = new MongoHistory(store, fakeLogger(), { maxPendingTotal: 10 });
+
+    history.record([1, 2, 3, 4, 5, 6, 7, 8].map((seq) => entry(seq)));
+    history.record([1, 2, 3, 4, 5, 6, 7, 8].map((seq) => entry(seq, { matchId: "m-2" })));
+    await settle();
+    lento.liberar();
+    await history.drain();
+
+    const pushDe = (matchId: string) =>
+      updateOne.mock.calls.find(
+        (call) => call[0]?.matchId === matchId && call[1]?.$push?.timeline,
+      )?.[1].$push.timeline.$each.length;
+    expect(pushDe("m-1")).toBe(8);
+    expect(pushDe("m-2")).toBe(2);
+    expect(marcasDe(updateOne, "m-1")).toEqual([]);
+    expect(marcasDe(updateOne, "m-2")).toEqual([6]);
+  });
+
+  it("un lote que falla marca su partida una vez, con lo que perdió, detrás del lote", async () => {
+    const { store, updateOne } = storeWith();
+    updateOne.mockRejectedValueOnce(new MongoOperationTimeoutError("vencido"));
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1), entry(2), entry(3)]);
+    await history.drain();
+
+    expect(updateOne).toHaveBeenCalledTimes(2);
+    const [filter, marca, options] = updateOne.mock.calls[1] ?? [];
+    expect(filter).toEqual({ matchId: "m-1" });
+    expect(marca.$set.timelineIncomplete).toBe(true);
+    expect(marca.$inc).toEqual({ lostEntries: 3 });
+    // La marca no toca el desenlace: `$set` de dos campos, nunca el `$replaceWith` del cierre.
+    expect(Object.keys(marca.$set).sort()).toEqual(["timelineIncomplete", "updatedAt"]);
+    expect(options).toEqual({ upsert: true, timeoutMS: HISTORY_WRITE_TIMEOUT_MS });
+  });
+
+  it("una marca que falla no se reintenta sola: la reintenta la próxima escritura que sale bien", async () => {
+    const { store, updateOne } = storeWith();
+    updateOne.mockRejectedValue(new Error("mongo caído"));
+    const history = new MongoHistory(store, fakeLogger());
+
+    history.record([entry(1), entry(2)]);
+    await history.drain();
+    // El lote y su marca: nada más, aunque la marca también falló. Sin bucle con Mongo caído.
+    expect(updateOne).toHaveBeenCalledTimes(2);
+
+    // Mongo vuelve: la próxima escritura de la partida que sale bien vuelve a intentar la marca.
+    updateOne.mockResolvedValue({ acknowledged: true });
+    history.record([entry(3)]);
+    await history.drain();
+    expect(marcasDe(updateOne, "m-1")).toEqual([2, 2]);
+    history.record([entry(4)]);
+    await history.drain();
+    expect(marcasDe(updateOne, "m-1")).toEqual([2, 2]);
+  });
+
+  it("un cierre que falla se loguea aunque la partida ya haya perdido un lote", async () => {
+    const { store, updateOne } = storeWith();
+    updateOne.mockRejectedValue(new Error("mongo caído"));
+    const logger = fakeLogger();
+    const history = new MongoHistory(store, logger);
+
+    history.record([entry(1)]);
+    history.close("m-1", CLOSING);
+    await history.drain();
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "historial: no se pudo grabar el cierre",
+      expect.objectContaining({ matchId: "m-1" }),
+    );
+  });
+
+  it("el tope del proceso se libera cuando los lotes terminan, bien o mal", async () => {
+    const { store, updateOne } = storeWith();
+    const lento = colgado();
+    updateOne.mockImplementationOnce(() =>
+      lento.promesa.then(() => {
+        throw new Error("vencido");
+      }),
+    );
+    const history = new MongoHistory(store, fakeLogger(), { maxPendingTotal: 4 });
+
+    history.record([1, 2, 3, 4].map((seq) => entry(seq)));
+    await settle();
+    history.record([entry(1, { matchId: "m-2" })]);
+    lento.liberar();
+    await history.drain();
+    history.record([entry(2, { matchId: "m-2" })]);
+    await history.drain();
+
+    const pushesDeM2 = pushesOf(updateOne).filter(
+      (call) => (call[0] as { matchId: string }).matchId === "m-2",
+    );
+    expect(pushesDeM2).toHaveLength(1);
+    expect(marcasDe(updateOne, "m-2")).toEqual([1]);
+  });
+
+  it("las pérdidas se resumen una vez por minuto, no una línea por lote", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, updateOne } = storeWith();
+      updateOne.mockRejectedValue(new Error("mongo caído"));
+      const logger = fakeLogger();
+      const history = new MongoHistory(store, logger);
+
+      for (let round = 0; round < 5; round++) {
+        for (let m = 1; m <= 10; m++) history.record([entry(round + 1, { matchId: `m-${m}` })]);
+        await history.drain();
+      }
+      // Una línea por partida, la primera vez que pierde algo en la ventana.
+      expect(
+        vi.mocked(logger.error).mock.calls.filter(([msg]) => msg.includes("lote")),
+      ).toHaveLength(10);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      const resumen = vi
+        .mocked(logger.error)
+        .mock.calls.filter(([msg]) => msg === "historial: se perdieron entradas");
+      expect(resumen).toEqual([
+        ["historial: se perdieron entradas", { matches: 10, entries: 50, batches: 50 }],
+      ]);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(
+        vi
+          .mocked(logger.error)
+          .mock.calls.filter(([msg]) => msg === "historial: se perdieron entradas"),
+      ).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -417,6 +674,57 @@ describe("MongoHistory: el drenado del apagado", () => {
     await expect(history.drain()).resolves.toBeUndefined();
   });
 
+  // UN MONGO COLGADO NO FRENA EL DEPLOY: el drenado espera a lo sumo `DRAIN_DEADLINE_MS` y dice lo
+  // que dejó en vuelo. Sin plazo, el apagado esperaba hasta que pm2 lo mataba (`kill_timeout`).
+  it("el drenado se rinde a los 5 s y dice lo que dejó en vuelo", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, updateOne } = storeWith();
+      updateOne.mockImplementation(() => new Promise(() => {}));
+      const logger = fakeLogger();
+      const history = new MongoHistory(store, logger);
+      history.record([entry(1), entry(2)]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      let drenado = false;
+      const drain = history.drain().then(() => {
+        drenado = true;
+      });
+      await vi.advanceTimersByTimeAsync(DRAIN_DEADLINE_MS - 1);
+      expect(drenado).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await drain;
+
+      expect(DRAIN_DEADLINE_MS).toBe(5_000);
+      expect(drenado).toBe(true);
+      expect(logger.error).toHaveBeenCalledWith(
+        "historial: el apagado no esperó lo que seguía en vuelo",
+        { writes: 1, entries: 2 },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("con la base sana, el drenado no espera el plazo", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store } = storeWith();
+      const history = new MongoHistory(store, fakeLogger());
+      history.record([entry(1)]);
+      let drenado = false;
+      const drain = history.drain().then(() => {
+        drenado = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await drain;
+      expect(drenado).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Sin nada en vuelo resuelve de una: el apagado de una instancia que no grabó nada no paga
   // ni un tick.
   it("sin lotes en vuelo resuelve de inmediato", async () => {
@@ -429,25 +737,6 @@ describe("MongoHistory: el drenado del apagado", () => {
 // LA CABECERA Y EL CIERRE VAN POR PIPELINE. Lo que la base hace con él lo mide el contrato contra un
 // Mongo de verdad (`./mongo-history.int.test.ts`); acá se miden las DECISIONES que un doble sí ve.
 describe("MongoHistory: la cabecera y el cierre", () => {
-  const SETUP = {
-    roomId: "room-1",
-    table: { gameModeId: "g", name: "$peligro", entryFeeInUC: 1, prizeInUC: 2, isFree: false },
-    matchConfig: {
-      playersQuantity: 2,
-      pointsToWin: 100,
-      startingScore: { teamA: 0, teamB: 0 },
-      timeoutsInMs: {},
-      seed: "s",
-      teamAssignment: "SHUFFLED" as const,
-      isDealWindowEnabled: true,
-      tilesPerPlayer: 7,
-      betLevels: [],
-      enableBots: false,
-      isRematchEnabled: true,
-    },
-    seats: [],
-  };
-
   it("abre con un upsert por partida, el armado como literal y el arranque como fecha", async () => {
     const { store, updateOne } = storeWith();
     new MongoHistory(store, fakeLogger()).open("m-1", { ...SETUP, matchStartedAt: 1_000 });
@@ -455,7 +744,7 @@ describe("MongoHistory: la cabecera y el cierre", () => {
 
     const [filter, pipeline, options] = updateOne.mock.calls[0] ?? [];
     expect(filter).toEqual({ matchId: "m-1" });
-    expect(options).toEqual({ upsert: true });
+    expect(options).toEqual({ upsert: true, timeoutMS: HISTORY_WRITE_TIMEOUT_MS });
     // `$literal`: un nombre de modo que empiece con `$` se leería como un campo del documento.
     const literal = pipeline[0].$replaceWith.$mergeObjects[1].$literal;
     expect(literal).toMatchObject({ status: "started", table: { name: "$peligro" } });
@@ -508,6 +797,8 @@ describe("MongoHistory: la cabecera y el cierre", () => {
       "seats.userId_1_createdAt_-1__id_-1",
       "matchEndReason_1_createdAt_-1__id_-1",
       "status_1_createdAt_-1__id_-1",
+      "table.tournamentId_1_createdAt_-1__id_-1",
+      "seats.providerId_1_createdAt_-1__id_-1",
       "matchEndedAt_1_statsPending",
     ]);
     expect(updateOne).toHaveBeenCalledTimes(2);

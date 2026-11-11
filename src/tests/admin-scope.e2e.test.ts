@@ -64,9 +64,8 @@ describe("el ámbito de los admins (integración)", () => {
   // LAS RUTAS DE TABLEA GAMING: un proveedor no entra a ninguna, ni a leer. `support` lee y no escribe.
   // Los 404 de una lectura son de la ruta (no hay tal partida), o sea que la puerta ya dejó pasar.
   const reads: Array<[string, string]> = [
-    ["GET", "/internal/matches"],
-    ["GET", "/internal/matches/m-inexistente"],
     ["GET", "/internal/matches/m-inexistente/history"],
+    ["GET", "/internal/players/u-1/matches"],
     ["GET", "/game-data/r-inexistente"],
     ["GET", "/internal/settings"],
     ["GET", "/internal/settings/match"],
@@ -84,6 +83,28 @@ describe("el ámbito de los admins (integración)", () => {
     for (const who of ["parley", "parleySupport"] as const) {
       expect(await call(who, method, path)).toEqual({ status: 403, body: { code: "FORBIDDEN" } });
     }
+  });
+
+  // EL LISTADO Y EL DETALLE DE PARTIDAS ABREN A LOS PROVEEDORES (`admin` y `support`), acotados por el
+  // proveedor de los asientos: el listado al suyo, el detalle 404 si ninguno de sus jugadores se sentó.
+  it("el listado y el detalle de partidas: un proveedor entra, acotado al suyo", async () => {
+    for (const who of ["games", "support", "key", "parley", "parleySupport"] as const) {
+      expect((await call(who, "GET", "/internal/matches")).status).toBe(200);
+      expect(await call(who, "GET", "/internal/matches/m-inexistente")).toEqual({
+        status: 404,
+        body: { code: "MATCH_NOT_FOUND" },
+      });
+    }
+    expect((await call("parley", "GET", "/internal/matches?providerId=parley")).status).toBe(200);
+    expect(await call("parley", "GET", "/internal/matches?providerId=rival")).toEqual({
+      status: 404,
+      body: { code: "UNKNOWN_PROVIDER" },
+    });
+    expect((await call("games", "GET", "/internal/matches?providerId=rival")).status).toBe(200);
+    expect(await call("legacy", "GET", "/internal/matches")).toEqual({
+      status: 401,
+      body: { code: "UNAUTHORIZED" },
+    });
   });
 
   it("escribir la configuración es sólo de un admin de Tablea Gaming", async () => {

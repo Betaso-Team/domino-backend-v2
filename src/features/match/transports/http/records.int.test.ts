@@ -1,6 +1,7 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Logger } from "@/logger";
+import type { Admin, AdminTokenCheck } from "@/shared/http/api-key";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import { routesOf } from "@/tests/routes";
 import express from "express";
@@ -95,10 +96,21 @@ describe("recordRoutes: el registro de las rutas", () => {
 // Un Express DE VERDAD sobre un puerto efímero, con el mismo parser y el mismo manejador de errores que
 // `app.config.ts`: lo que se mide son status y cuerpos, y eso lo decide Express.
 const servers: Server[] = [];
+
+// LOS ADMINS CON SESIÓN, sin firmar nada: el token ES la clave de este mapa. Lo que se mide acá es el
+// ámbito de la ruta; la verificación del token la mide su propia suite.
+const ADMINS: Record<string, Admin> = {
+  games: { name: "ana", provider: null, role: "admin" },
+  betaso: { name: "bea", provider: "betaso", role: "admin" },
+  betasoSupport: { name: "beto", provider: "betaso", role: "support" },
+  parley: { name: "pia", provider: "parley", role: "admin" },
+};
+const adminTokens: AdminTokenCheck = async (token) => ADMINS[token];
+
 async function serve(archive: MatchArchive): Promise<string> {
   const app = express()
     .use(express.json())
-    .use(recordRoutes({ logger: fakeLogger(), archive, adminApiKey: KEY }))
+    .use(recordRoutes({ logger: fakeLogger(), archive, adminApiKey: KEY, adminTokens }))
     .use(httpErrorHandler(fakeLogger()));
   const server = app.listen(0, "127.0.0.1");
   servers.push(server);
@@ -112,6 +124,9 @@ afterEach(() => {
 
 const get = (url: string, key = KEY) =>
   fetch(url, { headers: key ? { "x-internal-api-key": key } : {} });
+
+const getAs = (url: string, who: keyof typeof ADMINS) =>
+  fetch(url, { headers: { authorization: `Bearer ${who}` } });
 
 async function seeded(): Promise<MemoryHistory> {
   const history = new MemoryHistory();
@@ -222,7 +237,7 @@ describe("recordRoutes: lo que contestan", () => {
 
     const after = cursorOf({ t: Date.parse("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) });
     await get(
-      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted`,
+      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted&tournamentId=t-copa`,
     );
     expect(list).toHaveBeenLastCalledWith({
       pageSize: 5,
@@ -233,7 +248,11 @@ describe("recordRoutes: lo que contestan", () => {
       userId: "u-ana",
       matchEndReason: "CHARGE_REJECTED",
       status: "aborted",
+      tournamentId: "t-copa",
     });
+
+    await get(`${base}/internal/matches?providerId=parley`);
+    expect(list).toHaveBeenLastCalledWith({ pageSize: 20, providerId: "parley" });
   });
 
   // MÁS DE 100 NO ES UNA PÁGINA, ES LA COLECCIÓN: se rechaza en vez de recortarse en silencio. Y un
@@ -266,6 +285,16 @@ describe("recordRoutes: lo que contestan", () => {
     `userId=${"u".repeat(129)}`,
     "userId=%00",
     "userId=ana&userId=beto",
+    // EL TORNEO, con la regla de los demás ids: ni vacío, ni largo, ni con control, ni dos.
+    "tournamentId=",
+    `tournamentId=${"t".repeat(129)}`,
+    "tournamentId=%00",
+    "tournamentId=a&tournamentId=b",
+    // EL PROVEEDOR, con la misma regla.
+    "providerId=",
+    `providerId=${"p".repeat(129)}`,
+    "providerId=%00",
+    "providerId=a&providerId=b",
     // EL MOTIVO, uno de los del dominó y escrito como él: ni inventado, ni en minúscula, ni dos.
     "matchEndReason=",
     "matchEndReason=GANÓ",
@@ -390,5 +419,120 @@ describe("recordRoutes: lo que contestan", () => {
     });
 
     expect((await get(`${base}/internal/matches/m-1`)).status).toBe(500);
+  });
+});
+
+// EL ÁMBITO POR PROVEEDOR: el listado y el detalle abren a los admins de un proveedor, acotados por el
+// `providerId` de los asientos; `/game-data` sigue siendo de Tablea Gaming.
+describe("recordRoutes: el ámbito de un proveedor", () => {
+  const listing = () =>
+    vi.fn(
+      async (_query: MatchListQuery): Promise<MatchListPage> => ({
+        items: [],
+        total: 0,
+        totalExact: true,
+      }),
+    );
+
+  it("al listado de un proveedor se le fuerza el suyo, con o sin nombrarlo", async () => {
+    const list = listing();
+    const base = await serve({ ...untouched, list });
+
+    for (const who of ["betaso", "betasoSupport"] as const) {
+      expect((await getAs(`${base}/internal/matches?userId=u-1`, who)).status).toBe(200);
+      expect(list).toHaveBeenLastCalledWith({ pageSize: 20, userId: "u-1", providerId: "betaso" });
+      expect((await getAs(`${base}/internal/matches?providerId=betaso`, who)).status).toBe(200);
+      expect(list).toHaveBeenLastCalledWith({ pageSize: 20, providerId: "betaso" });
+    }
+  });
+
+  it("un `?providerId=` ajeno es 404 UNKNOWN_PROVIDER, sin leer el archivo", async () => {
+    const base = await serve(untouched);
+
+    const response = await getAs(`${base}/internal/matches?providerId=parley`, "betaso");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ code: "UNKNOWN_PROVIDER" });
+  });
+
+  it("Tablea Gaming lista todo, o filtra por el proveedor que nombre", async () => {
+    const list = listing();
+    const base = await serve({ ...untouched, list });
+
+    await getAs(`${base}/internal/matches`, "games");
+    expect(list).toHaveBeenLastCalledWith({ pageSize: 20 });
+    await getAs(`${base}/internal/matches?providerId=parley`, "games");
+    expect(list).toHaveBeenLastCalledWith({ pageSize: 20, providerId: "parley" });
+  });
+
+  // DE PUNTA A PUNTA CONTRA EL ARCHIVO DE MEMORIA: la cruzada sale para los dos, la de un solo
+  // proveedor para ése, y la que no tiene el campo para ninguno.
+  async function provided(): Promise<MemoryHistory> {
+    const history = new MemoryHistory();
+    const seats = (providers: readonly (string | undefined)[]) =>
+      SETUP.seats.map((seat, index) => {
+        const providerId = providers[index];
+        return providerId === undefined ? seat : { ...seat, providerId };
+      });
+    const rows: [string, (string | undefined)[]][] = [
+      ["m-betaso", ["betaso", "betaso"]],
+      ["m-cruzada", ["betaso", "parley"]],
+      ["m-sin", []],
+    ];
+    for (const [matchId, providers] of rows) {
+      history.open(matchId, {
+        ...SETUP,
+        roomId: `room-${matchId}`,
+        seats: seats(providers),
+        matchStartedAt: 1_000,
+      });
+      // Un milisegundo entre partidas: el orden del listado es `createdAt`, el instante real.
+      await new Promise((resolve) => setTimeout(resolve, 3));
+    }
+    return history;
+  }
+
+  it("cada proveedor lista las partidas de sus jugadores, y Tablea todas", async () => {
+    const base = await serve(await provided());
+    const ids = async (who: keyof typeof ADMINS) =>
+      (
+        (await (await getAs(`${base}/internal/matches`, who)).json()) as { data: ListBody }
+      ).data.items.map((item) => item.matchId);
+
+    expect(await ids("betaso")).toEqual(["m-cruzada", "m-betaso"]);
+    expect(await ids("parley")).toEqual(["m-cruzada"]);
+    expect(await ids("games")).toEqual(["m-sin", "m-cruzada", "m-betaso"]);
+  });
+
+  it("el detalle de una partida sin jugadores del proveedor es 404, como una que no existe", async () => {
+    const base = await serve(await provided());
+
+    for (const [who, matchId] of [
+      ["parley", "m-betaso"],
+      ["betaso", "m-sin"],
+      ["betaso", "no-existe"],
+    ] as const) {
+      const response = await getAs(`${base}/internal/matches/${matchId}`, who);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ code: "MATCH_NOT_FOUND" });
+    }
+    // LA CRUZADA LA VEN LOS DOS, entera: el asiento del otro proveedor incluido.
+    for (const who of ["betaso", "betasoSupport", "parley", "games"] as const) {
+      const response = await getAs(`${base}/internal/matches/m-cruzada`, who);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: { seats: { providerId?: string }[] } };
+      expect(body.data.seats.map((seat) => seat.providerId)).toEqual(["betaso", "parley"]);
+    }
+    expect((await getAs(`${base}/internal/matches/m-sin`, "games")).status).toBe(200);
+  });
+
+  it("`/game-data` sigue cerrado a un proveedor", async () => {
+    const base = await serve(await provided());
+
+    const response = await getAs(`${base}/game-data/room-m-betaso`, "betaso");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ code: "FORBIDDEN" });
+    expect((await getAs(`${base}/game-data/room-m-betaso`, "games")).status).toBe(200);
   });
 });

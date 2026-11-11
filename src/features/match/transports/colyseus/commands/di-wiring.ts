@@ -1,3 +1,9 @@
+import {
+  type ReactionCatalog,
+  ReactionLimiter,
+  ReactionRelay,
+  type ReactionsConfig,
+} from "@/features/reactions";
 import type { Logger } from "@/logger";
 import type { DependencyContainer } from "tsyringe";
 import type { CommandName } from "../../../core/command";
@@ -20,6 +26,12 @@ import {
 import type { NetworkMatchEvent } from "../../../network/events";
 import { matchSetupOf } from "../../../network/match-record";
 import { MessageRouter } from "../messages";
+import {
+  SEND_REACTION,
+  broadcastReaction,
+  reactionHandler,
+  sendReactionDecoder,
+} from "../reactions";
 import { CommandCatalog } from "./catalog";
 import { CommandHandler } from "./command-handler";
 import { identityDecoder } from "./decoders";
@@ -126,8 +138,8 @@ export function buildCatalog(child: DependencyContainer): CommandCatalog {
 }
 
 // ARMA LA TABLA DEL SOCKET. Los verbos del dominó entran acá como entradas del router, no
-// como su definición: mañana una reacción se registra en esta misma tabla con su propio
-// decoder y su propio handler, y no hay ninguna lista de excepciones que tocar.
+// como su definición, y la reacción se registra en esta misma tabla con su propio decoder y su
+// propio handler, sin ninguna lista de excepciones que tocar.
 //
 // Se recorre `catalog.names()` en vez de escribir los cinco a mano, y eso es lo que hace
 // que sumar un verbo al motor lo rutee solo. El tipo mapeado del catálogo ya garantizó que
@@ -136,12 +148,31 @@ export function buildRouter(
   catalog: CommandCatalog,
   history: MatchHistory,
   notify: (events: readonly MatchEvent[]) => void,
+  reactions: ReactionRelay,
 ): MessageRouter {
   const router = new MessageRouter();
   for (const name of catalog.names()) {
     registerVerb(router, catalog, name, history, notify);
   }
+  // Y lo que NO es del dominó, con la misma frontera. No pasa por `CommandHandler`, así que no
+  // graba en el historial ni notifica eventos: un gesto no es un hecho de la partida.
+  router.on(SEND_REACTION, sendReactionDecoder, reactionHandler(reactions));
   return router;
+}
+
+// EL RELAY DE LAS REACCIONES DE UNA MESA. El limitador es de la mesa —limitar el spam es pregunta de
+// esa mesa— y el catálogo es del proceso: la lista de gestos es la misma para todas.
+export function buildReactionRelay(
+  child: DependencyContainer,
+  broadcast: (type: string, payload: unknown) => void,
+  log: Logger,
+): ReactionRelay {
+  return new ReactionRelay({
+    catalog: child.resolve<ReactionCatalog>("ReactionCatalog"),
+    limiter: new ReactionLimiter(child.resolve<ReactionsConfig>("ReactionsConfig")),
+    publish: broadcastReaction(broadcast),
+    log,
+  });
 }
 
 // El genérico existe para que `N` quede FIJO entre el decoder y su handler. Sin esta

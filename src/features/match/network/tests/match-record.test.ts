@@ -77,6 +77,23 @@ describe("matchSetupOf", () => {
     expect(setup.seats[1]).not.toHaveProperty("username");
   });
 
+  // EL PROVEEDOR DE CADA ASIENTO, el ámbito del panel: se copia si vino, y el que no lo trajo no lo
+  // inventa (una partida de antes, o un orquestador que todavía no lo manda).
+  it("copia el proveedor del asiento que lo trajo, y el que no lo trajo queda sin él", () => {
+    const provided = replayConfigOf({
+      ...config,
+      seats: [{ ...config.seats[0], providerId: "betaso" }, config.seats[1]],
+    });
+
+    const { seats } = matchSetupOf(provided, DEFAULT_GLOBAL_CONFIG, createMatchState(provided), {
+      roomId: "r",
+      gameModeName: "m",
+    });
+
+    expect(seats[0]?.providerId).toBe("betaso");
+    expect(seats[1]).not.toHaveProperty("providerId");
+  });
+
   // TODOS LOS PLAZOS, EN UNA SOLA UNIDAD. La reconexión es el único en segundos y se guarda en ms; lo
   // que no es un plazo —las fichas por mano— va aparte.
   it("guarda cada plazo en ms, la reconexión incluida, y nada que no sea un plazo", () => {
@@ -179,6 +196,113 @@ describe("matchCloseOf", () => {
         entryCharged: true,
       }),
     ).toBeUndefined();
+  });
+});
+
+// LA PLATA EN LA MONEDA DEL JUGADOR, elegida del precio congelado con la MISMA regla que la de UC: lo
+// cobrado si se confirmó la entrada, el premio si `payoutOf` se lo asigna, los dos al nivel que quedó.
+describe("matchCloseOf: en la moneda del jugador", () => {
+  const anaPrice = {
+    currency: "VES",
+    rate: "200",
+    entry: "2000.00",
+    prize: "3600.00",
+    levels: [
+      { level: 2, entry: "2000.00", prize: "7200.00" },
+      { level: 3, entry: "4000.00", prize: "10800.00" },
+    ],
+  };
+  const priced = replayConfigOf({
+    ...config,
+    seats: [{ ...config.seats[0], price: anaPrice }, config.seats[1]],
+  });
+
+  it("la cabecera guarda el precio con que se sentó, y el asiento sin precio no lo inventa", () => {
+    const match = createMatchState(priced);
+    const { seats } = matchSetupOf(priced, DEFAULT_GLOBAL_CONFIG, match, {
+      roomId: "r",
+      gameModeName: "m",
+    });
+    expect(seats[0]?.price).toEqual(anaPrice);
+    expect(seats[1]).not.toHaveProperty("price");
+  });
+
+  it("gana sin aumento: la entrada y el premio de x1", () => {
+    const match = createMatchState(priced);
+    const ending = matchCloseOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" },
+      match,
+      priced,
+      { entryCharged: true },
+    );
+    expect(ending?.money["seat-1"]).toEqual({
+      chargedInUC: 10,
+      prizePaidInUC: 18,
+      chargedInPlayerCurrency: "2000.00",
+      prizePaidInPlayerCurrency: "3600.00",
+    });
+    // EL ASIENTO SIN PRECIO QUEDA EN UC, sin campos vacíos.
+    expect(ending?.money["seat-2"]).toEqual({ chargedInUC: 10, prizePaidInUC: 0 });
+  });
+
+  // EL AUMENTO: la entrada más lo que costó subir, y el premio del nivel —no el de x1 más algo—.
+  it("gana con un aumento a x3: entrada + subir, y el premio de x3", () => {
+    const match = createMatchState(priced);
+    match.acceptedBetLevel = 3;
+    const ending = matchCloseOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" },
+      match,
+      priced,
+      { entryCharged: true },
+    );
+    expect(ending?.money["seat-1"]).toMatchObject({
+      chargedInUC: 30,
+      prizePaidInUC: 54,
+      chargedInPlayerCurrency: "6000.00",
+      prizePaidInPlayerCurrency: "10800.00",
+    });
+  });
+
+  it("pierde con un aumento a x2: paga entrada + subir y no cobra", () => {
+    const match = createMatchState(priced);
+    match.acceptedBetLevel = 2;
+    const ending = matchCloseOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 1), reason: "SCORE" },
+      match,
+      priced,
+      { entryCharged: true },
+    );
+    expect(ending?.money["seat-1"]).toMatchObject({
+      chargedInUC: 20,
+      prizePaidInUC: 0,
+      chargedInPlayerCurrency: "4000.00",
+      prizePaidInPlayerCurrency: "0.00",
+    });
+  });
+
+  it("sin cobro de la entrada no pagó nada, tampoco en su moneda", () => {
+    const match = createMatchState(priced);
+    const ending = matchCloseOf({ type: "MATCH_ABORTED", reason: "NEVER_STARTED" }, match, priced, {
+      entryCharged: false,
+      abortReason: "CHARGE_REJECTED",
+    });
+    expect(ending?.money["seat-1"]).toMatchObject({
+      chargedInPlayerCurrency: "0.00",
+      prizePaidInPlayerCurrency: "0.00",
+    });
+  });
+
+  // UN NIVEL QUE EL PRECIO NO COTIZÓ no se adivina: el asiento queda en UC.
+  it("un aumento a un nivel sin precio deja el asiento en UC", () => {
+    const match = createMatchState(priced);
+    match.acceptedBetLevel = 5;
+    const ending = matchCloseOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "SCORE" },
+      match,
+      priced,
+      { entryCharged: true },
+    );
+    expect(ending?.money["seat-1"]).toEqual({ chargedInUC: 50, prizePaidInUC: 90 });
   });
 });
 

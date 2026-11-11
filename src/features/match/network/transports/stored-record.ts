@@ -128,6 +128,12 @@ export interface HistoryAdapterOptions {
   readonly now?: () => Date;
   /** Hasta cuánto se cuenta un listado filtrado. Default: `MATCH_COUNT_CAP`. */
   readonly countCap?: number;
+  /** Entradas que una partida puede tener esperando a la base. Default: `MAX_PENDING_PER_MATCH`. */
+  readonly maxPendingPerMatch?: number;
+  /** Entradas que todo el proceso puede tener esperando a la base. Default: `MAX_PENDING_TOTAL`. */
+  readonly maxPendingTotal?: number;
+  /** Cada cuánto se resumen las pérdidas en el log. Default: `LOSS_REPORT_EVERY_MS`. */
+  readonly lossReportEveryMs?: number;
 }
 
 // ── EL LISTADO, lo que los dos adaptadores deciden igual ─────────────────────────────────────────
@@ -147,7 +153,9 @@ export const isFiltered = (query: MatchListQuery): boolean =>
   query.id !== undefined ||
   query.userId !== undefined ||
   query.matchEndReason !== undefined ||
-  query.status !== undefined;
+  query.status !== undefined ||
+  query.tournamentId !== undefined ||
+  query.providerId !== undefined;
 
 const createdAtOf = (document: StoredMatchRecord): number | undefined =>
   document.createdAt instanceof Date ? document.createdAt.getTime() : undefined;

@@ -42,7 +42,7 @@ export interface MatchHttpDeps {
   readonly adminApiKey: string | undefined;
   /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
   readonly adminTokens?: AdminTokenCheck;
-  readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack">;
+  readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack" | "isGone">;
   /** `undefined` ⇒ la API del orquestador NO se registra. Ver `tablesRoutes`. */
   readonly orchestratorApiKey: string | undefined;
   readonly verifier?: TokenVerifier;

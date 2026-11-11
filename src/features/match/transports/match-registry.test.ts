@@ -132,6 +132,33 @@ describe("MatchRegistry", () => {
     });
   });
 
+  // EL PRECIO DE CADA ASIENTO EN SU MONEDA, por su id opaco: el front toma el suyo. Sólo los que lo
+  // trajeron, sin nada más del asiento (ni `userId` ni nombre), y ausente si nadie lo trajo.
+  it("publica el precio de cada asiento que lo trajo, por su id opaco y sin identidad", async () => {
+    const price = {
+      currency: "VES",
+      rate: "200",
+      entry: "25000.00",
+      prize: "50000.00",
+      levels: [{ level: 2, entry: "25000.00", prize: "100000.00" }],
+    };
+    const registry = new MatchRegistry(new MemoryKeyValueStore());
+    await registry.register(
+      "room-1",
+      replayConfigOf({ ...roomOptions, seats: [{ ...seat("u1", 0), price }, seat("u2", 1)] }),
+      timeouts,
+    );
+
+    const published = await registry.publicConfigOf("room-1");
+    expect(published?.seatPrices).toEqual({ "seat-1": price });
+    expect(JSON.stringify(published?.seatPrices)).not.toContain("u1");
+    expect(await registry.publicConfigOf("room-404")).toBeUndefined();
+  });
+
+  it("sin precio en ningún asiento no publica `seatPrices`", () => {
+    expect(publicConfigOf(config, timeouts)).not.toHaveProperty("seatPrices");
+  });
+
   // EL MISMO DTO PARA EL REGISTRO Y PARA EL MENSAJE `config` DE LA SALA: los dos salen de la función
   // pura, así que lo que estampa el almacén y lo que recibe el jugador al entrar no pueden divergir.
   it("publicConfigOf es lo que el registro estampa, y nunca lleva la semilla", async () => {
@@ -327,6 +354,27 @@ describe("MatchRegistry", () => {
 
     expect(await nueva.matchOf("u1")).toBe("room-2");
     expect(await vieja.matchOf("u2")).toBeUndefined();
+  });
+
+  // LO QUE DEJÓ UN PROCESO MUERTO, borrado por quien confirmó que su sala ya no existe (truco
+  // `53d1030`). Solo la entrada que SIGUE apuntando a esa sala: el jugador puede haberse sentado en
+  // otra mesa en el medio, y borrarla a ciegas lo dejaría sin partida.
+  it("olvida la entrada de una sala muerta, y solo si sigue apuntando a ella", async () => {
+    const compartido = new MemoryKeyValueStore();
+    const muerto = new MatchRegistry(compartido);
+    const vivo = new MatchRegistry(compartido);
+    await muerto.register("room-1", config, timeouts);
+    await vivo.register(
+      "room-2",
+      replayConfigOf({ ...roomOptions, matchId: "m2", seats: [seat("u2", 0), seat("u3", 1)] }),
+      timeouts,
+    );
+
+    await vivo.forget("u1", "room-1");
+    await vivo.forget("u2", "room-1");
+
+    expect(await vivo.matchOf("u1")).toBeUndefined();
+    expect(await vivo.matchOf("u2")).toBe("room-2");
   });
 });
 

@@ -27,9 +27,30 @@ sentó, normalizado con `trim()`.
 | `ABANDON` | `{}` | Abandono voluntario |
 | `PROPOSE_BET_MULTIPLIER` | `{ level }` | Congela el turno y abre la negociación |
 | `RESPOND_BET_MULTIPLIER` | `{ accept }` | Acepta o rechaza la propuesta vigente |
+| `SEND_REACTION` | `{ reactionId }` | Manda un gesto a la mesa (ver «Reacciones») |
 
 El cliente no envía `playerId`: el handler lo toma del asiento autenticado. Cada payload pasa por un
 decoder estricto antes de alcanzar el comando.
+
+### Reacciones
+
+`SEND_REACTION` `{ reactionId: string }` (de 1 a 64 caracteres; un campo de más, como el
+`targetPlayerId` del front viejo, se ignora) pone un gesto del catálogo en la mesa: la sala lo
+difunde a **todos**, el que lo mandó incluido, como `REACTION_SENT`. El cliente manda el id y el
+contenido lo pone el servidor, así que no es un chat.
+
+- `fromPlayerId` es el asiento que lo mandó (`seat-1`, `seat-2`…), el mismo `playerId` de
+  `state.players[]`: el cliente lo ubica con `players.find((p) => p.playerId === fromPlayerId)`.
+- Puede mandar cualquier jugador sentado en la sala, en cualquier fase mientras la sala esté
+  abierta: el reparto, la mano, entre manos y la pantalla del resultado.
+- **Límite:** 3 gestos cada 2 s por jugador, ventana deslizante, por mesa.
+- **Los rechazos son silenciosos:** un id que no está en el catálogo o un gesto por encima del límite
+  no se difunden ni devuelven nada (quedan en el log de debug). Sólo el payload malformado (sin
+  `reactionId`, o de otro tipo) contesta `illegal` con `MALFORMED`.
+- No toca la partida: no cambia el estado, no produce `events` y no entra en el historial ni en el
+  registro de la partida.
+
+La lista de gestos la sirve `GET /reactions` (ver «HTTP público»).
 
 ## Mensajes del servidor
 
@@ -40,7 +61,8 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
 | `config` | Al que entra o vuelve | La config pública de la mesa más `serverNow` (forma abajo) | Al final de cada entrada (`onJoin`) y de cada reconexión (`onReconnect`) |
 | `events` | Toda la mesa | Lista de eventos del motor y de plataforma (`ROUND_STARTED`, `MATCH_RESOLVED`, `PLAYER_RECONNECTED`…) | Cada vez que la partida produce hechos |
 | `illegal` | El que mandó el mensaje | `{ code, detail? }`: `code` es el de la regla violada, `MALFORMED` (con `detail`) o `UNKNOWN_COMMAND` | Su mensaje no prosperó; el estado no cambió |
-| `matchCancelled` | Toda la mesa | `{ reason: "CHARGE_REJECTED" }` | El orquestador no cobró la entrada; la sala se cierra sin arrancar |
+| `matchCancelled` | Toda la mesa | `{ reason: "CHARGE_REJECTED" \| "SEATING_TIMEOUT" }` | `CHARGE_REJECTED`: el orquestador no cobró la entrada. `SEATING_TIMEOUT`: venció el plazo de ocupación sin que todos entraran (sale abortada `NEVER_STARTED`, sin cobro). En los dos la sala se cierra sin arrancar, con 4000, justo después |
+| `REACTION_SENT` | Toda la mesa, el que lo mandó incluido | `{ fromPlayerId, reaction: { id, type, content } }` | Un jugador mandó un gesto válido dentro del límite (`SEND_REACTION`) |
 
 **`config`** trae lo mismo que `GET /config/:roomId`, sin pedirlo por HTTP:
 
@@ -58,11 +80,28 @@ Lo que la sala `domino` le manda al cliente, además del estado sincronizado.
   isFreeRoom: boolean;
   enableBots: boolean;
   timeouts: { turnMs: number; extraTimeMs: number; dealingMs: number; betResponseMs: number };
+  // Opcional: lo que la mesa cuesta y paga EN LA MONEDA de cada asiento, por su id opaco. Sólo los
+  // asientos que trajeron `price` en el pedido; ausente si ninguno (mesa gratis, orquestador viejo).
+  seatPrices?: {
+    [playerId: string]: {
+      currency: string;         // la del asiento
+      rate: string;             // la tasa que billing congeló, como texto
+      entry: string;            // lo que costó sentarse, texto decimal ("25000.00")
+      prize: string;            // lo que cobra cada ganador sin aumento
+      levels: { level: number; entry: string; prize: string }[]; // subir a ese nivel cobra `entry`
+    };
+  };
   serverNow: number;            // epoch ms del servidor al mandarlo, para el desfase de reloj
 }
 ```
 
-Nunca lleva el `seed`, ni identidad, moneda o tasa. Lo que la sala manda en `onJoin` Colyseus lo
+El front toma `seatPrices[<su playerId>]` (el `playerId` de su asiento en el estado) y pinta entrada,
+premio y cada aumento en la moneda del jugador; sin entrada para su asiento, sigue en UC. Los montos son
+texto decimal tal como los cotizó billing: no se convierten ni se redondean. `entryFee`, `prize` y
+`betLevels` siguen en UC y son lo que billing cobra.
+
+Nunca lleva el `seed`, ni identidad, ni el `rateId` de la mesa; moneda y tasa salen sólo dentro de
+`seatPrices` (el precio del rival es visible: no es secreto). Lo que la sala manda en `onJoin` Colyseus lo
 encola hasta que el cliente confirma la entrada, así que llega apenas resuelve el `join` y antes de
 cualquier `events` posterior. El handler se registra **justo después del `join`, sin un `await` en
 el medio** (por ejemplo, no después de `waitForInitialState()`): si no, el mensaje llega antes que el
@@ -87,9 +126,23 @@ handler. Un cliente que no lo escucha solo ve un aviso del SDK.
 |---|---|
 | `GET /health` | Liveness del proceso; nunca consulta dependencias |
 | `GET /ready` | Readiness; responde `503` y lista dependencias faltantes |
-| `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
+| `GET /config/:roomId` | Config pública de una mesa (la misma forma que el mensaje `config`: `betLevels: [{ level, extra, additionalPoints }]`, vacío si no ofrece aumentar, `isFreeRoom`, `enableBots`, `timeouts` y, opcional, `seatPrices` por `seat-N`) y `serverNow`; nunca devuelve el seed. Respaldo del mensaje `config` |
 | `GET /matches/:roomId` | La misma config pública, con `Authorization: Bearer <JWT>` |
-| `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`). Página de 1 a 50, 10 por defecto |
+| `GET /me/matches?page=&limit=` | Historial del dueño del token (`Authorization: Bearer <JWT>`): sus partidas terminadas, la más nueva primero, desde su asiento (`id` es el `matchId`, `roomId` la sala de Colyseus; `result`, `bet` y `prize` en UC, `score`, `playedAt`; y, sólo si su asiento se sentó con `price`, `currency`, `betInPlayerCurrency` y `prizeInPlayerCurrency` como texto decimal, congelados al cerrar). Página de 1 a 50, 10 por defecto |
+| `GET /reactions` | La lista de gestos de `SEND_REACTION`, sin credencial (ver abajo) |
+
+**`GET /reactions`** responde con `Cache-Control: public, max-age=300` la lista fija del dominó (vive
+en el código, `src/features/reactions/static-catalog.ts`, y es la misma para todos los proveedores):
+un solo paquete, `global`, con 24 emojis en el orden en que se dibujan.
+
+```json
+[{ "pack": "global", "items": [{ "id": "grin", "type": "emoji", "content": "😀" }, …] }]
+```
+
+Los ids, en orden: `grin` 😀, `joy` 😂, `cool` 😎, `heart-eyes` 😍, `angry` 😡, `sob` 😭,
+`thumbs-up` 👍, `thumbs-down` 👎, `pray` 🙏, `muscle` 💪, `victory` ✌️, `fire` 🔥, `zzz` 💤,
+`thinking` 🤔, `sleeping` 😴, `mind-blown` 🤯, `scream` 😱, `huffing` 😤, `devil` 😈, `skull` 💀,
+`trophy` 🏆, `dollar` 💵, `money-bag` 💰, `money-mouth` 🤑.
 
 Todas las respuestas HTTP exponen el header `Date`, que permite recalcular el desfase del reloj del
 cliente. `/config/:roomId` agrega `serverNow` para la medición inicial.
@@ -110,20 +163,22 @@ Si `ADMIN_API_KEY` no existe, no se registran y responden 404: fallan cerradas. 
 salen `{ code, detail? }` (ver [«Errores»](#errores)).
 
 **Quién entra.** El default es el cerrado: una ruta es de Tablea Gaming y de escritura salvo que diga
-lo contrario. `support` sólo lee. Un admin de **proveedor** no entra a ninguna: recibe
+lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las rutas que acotan su
+ámbito —el listado y el detalle de partidas—; en todas las demás recibe
 `403 { code: "FORBIDDEN" }`.
 
 | Rutas | Tablea Gaming `admin` (y la llave) | Tablea Gaming `support` | Proveedor `admin` | Proveedor `support` |
 |---|---|---|---|---|
-| `/internal/matches…`, `/game-data/:roomId` | sí | sí | 403 | 403 |
+| `GET /internal/matches`, `GET /internal/matches/:matchId` | todo (o el proveedor de `?providerId=`) | ídem | sólo las partidas con algún asiento suyo | ídem |
+| `GET /internal/matches/:matchId/history`, `GET /internal/players/:userId/matches`, `/game-data/:roomId` | sí | sí | 403 | 403 |
 | `GET /internal/settings…` | sí | sí | 403 | 403 |
 | `PATCH`/`DELETE /internal/settings/:section` | sí | 403 | 403 | 403 |
 
 | Método y ruta | Uso |
 |---|---|
 | `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte (lee `timeline` y, en los documentos viejos, `entries`) |
-| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=&matchEndReason=&status=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor (ver «El registro de cada partida») |
-| `GET /internal/matches/:matchId` | El documento guardado de una partida, entero |
+| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=&matchEndReason=&status=&tournamentId=&providerId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor; un proveedor ve sólo las suyas (ver «El registro de cada partida») |
+| `GET /internal/matches/:matchId` | El documento guardado de una partida, entero; a un proveedor, sólo si algún asiento es suyo |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `GET /internal/players/:userId/matches?page=&limit=` | Historial de un jugador para el panel: la misma página que `GET /me/matches` le devuelve a ese `userId` (mismos parámetros y límites), dentro de `{ status: "success", data }`. El `userId` sigue la regla de texto del filtro del listado |
 | `GET /internal/settings` | Las secciones de config en caliente (`match`; en local y dev también `deal` y `starting-score`): en vigor, overrides y editables |
@@ -138,7 +193,10 @@ abre al primer reparto (`status: "started"`, con `roomId`, `table`, `matchConfig
 incluidos—, `seats` y `matchStartedAt`), se alimenta durante la partida (`timeline`, la secuencia de
 actos y hechos; `rounds`, lo que las reglas concluyeron de cada mano) y se cierra al terminar
 (`status: "finished" | "aborted"`, `matchEndedAt`, `matchDurationInMs`, `matchEndReason`, ganadores,
-`players` con su salida y su plata, `rateId`, `betMultiplier` y `rankingMultiplier`). Una mesa que nunca
+`players` con su salida y su plata, `rateId`, `betMultiplier` y `rankingMultiplier`). Un asiento que se
+sentó con `price` lo guarda en `seats[]` y `players[]`, y su plata suma `chargedInPlayerCurrency` y
+`prizePaidInPlayerCurrency` (texto decimal, elegidos del precio con la regla de UC). Un asiento cuyo
+participante trajo `providerId` lo guarda también en `seats[]` y `players[]`. Una mesa que nunca
 arrancó nace en el cierre. Los instantes son fechas (ISO en el JSON); las duraciones, números. Los
 documentos de antes de la v2.1 (`{ matchId, entries, createdAt, updatedAt }`) se siguen leyendo en las
 cuatro rutas.
@@ -158,6 +216,8 @@ combinan con AND:
 | `userId` | Un jugador: igual al `userId` de **alguno** de los asientos (`seats[].userId`), en mesas de dos o de cuatro. Una partida en la que el mismo usuario ocupa dos asientos sale una vez. Los documentos de antes de la v2.1 no tienen asientos y no coinciden nunca | ídem `matchId`, o repetido |
 | `matchEndReason` | El motivo del cierre, exacto: `SCORE`, `ABANDONMENT`, `NEVER_STARTED`, `TILES_NOT_SEEN`, `NEVER_PLAYED`, `INTERRUPTED` o `CHARGE_REJECTED`. Una partida todavía abierta no tiene motivo y no coincide con ninguno | otro valor (en minúsculas incluido), vacío o repetido |
 | `status` | El estado del documento, exacto: `started` (abierta), `finished` o `aborted`. Sin él salen todos los estados. Los documentos de antes de la v2.1 no tienen estado y no coinciden nunca | otro valor (en mayúsculas incluido), vacío o repetido |
+| `tournamentId` | Un torneo: igual al `table.tournamentId` de la mesa. Una casual y los documentos viejos no lo llevan y no coinciden nunca | ídem `matchId`, o repetido |
+| `providerId` | Un proveedor: igual al `providerId` de **alguno** de los asientos (`seats[].providerId`). Una casual cruzada sale para los dos proveedores, y una vez aunque el proveedor ocupe dos asientos. Una partida grabada sin el campo no coincide nunca. **Un admin de proveedor siempre lo tiene puesto con el suyo**: nombrar el suyo es lo mismo, y nombrar otro responde `404 { code: "UNKNOWN_PROVIDER" }` | ídem `matchId`, o repetido |
 
 Un parámetro que no está en la tabla se ignora (`page` incluido: ya no existe). `from` igual a `to` es
 un rango vacío, no un error.
@@ -204,7 +264,12 @@ Cada fila es un resumen: sin `timeline` ni `rounds`. Un documento viejo aparece 
 (`_id`, `matchId`, `game`, `createdAt`, `updatedAt`) y sale en todo listado que no filtre por sala.
 
 **`GET /internal/matches/:matchId`** — `200 { status: "success", data: <documento> }`, con el `_id`
-como texto y `rounds`/`timeline` al final; `404 { code: "MATCH_NOT_FOUND" }`.
+como texto y `rounds`/`timeline` al final; `404 { code: "MATCH_NOT_FOUND" }`. A un admin de proveedor,
+el mismo `404` si ningún asiento lleva su `providerId` (una partida grabada sin el campo sólo la ve
+Tablea Gaming).
+
+⚠ En una casual cruzada los dos proveedores ven el documento **entero**, el asiento del rival incluido
+(su `userId`, su nombre y su mano en la timeline): es la partida que jugó su jugador.
 
 **`GET /game-data/:roomId`** — el contrato del backend principal, igual que en truco: `200` con el
 documento pelado (sin envelope y sin `_id`) y `404 { code: "MATCH_NOT_FOUND" }`. Busca por `roomId` y,
@@ -231,9 +296,9 @@ es 400), discriminado por `mode`:
 
 - **`"CASUAL"`**: `matchId`, `gameModeId` (el uuid del modo en el catálogo del orquestador; dominó no lo
   resuelve, nombra la mesa), `gameMode` (**obligatorio**: el modo en línea, abajo), `participants` (2 a
-  4, par; cada uno `userId`, `displayName`, `currency` y, opcionales, `username` y `profilePicture`),
-  `seed`, `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el `_id` de Mongo de la tasa de
-  Betaso) y `betLevels` opcional (abajo).
+  4, par; cada uno `userId`, `displayName`, `currency` y, opcionales, `username`, `profilePicture`,
+  `price` y `providerId`), `seed`, `teamAssignment` (`SHUFFLED` o `SEAT_ORDER`), `rateId` (opaco: el
+  `_id` de Mongo de la tasa de Betaso) y `betLevels` opcional (abajo).
 - **`"TOURNAMENT"`**: `matchId`, `tournamentId`, `participants` y `teamAssignment` como la casual,
   `seed` y `rules: { pointsToWin }` (entero positivo seguro; el tope lo decide `apps/tournaments`, no
   el dominó, cuyo motor solo usa `pointsToWin` como meta). **Sin** `gameModeId`, `gameMode`, `rateId` ni
@@ -259,11 +324,11 @@ es 400), discriminado por `mode`:
 | `200` | `{ status, data: { matchId, mode, tournamentId?, reservation } }` | Sigue en una mesa; el `matchId` es el del orquestador; `mode` es `CASUAL` o `TOURNAMENT` y `tournamentId` va solo en una de torneo |
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva |
-| `500` | `{ code: "INTERNAL" }` | La sala existe pero `joinById` falló igual (la sala no tiene `maxClients`, así que no debería bloquearse): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
+| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva, o su sala ya no existe (proceso muerto): la entrada del jugador se borra |
+| `500` | `{ code: "INTERNAL" }` | La reserva falló y la sala sigue en el registro de salas (o no se pudo confirmar en 2 s): el orquestador lo trata como desconocido y nunca abre una segunda mesa |
 
 **`GET /internal/players/:userId/match`** dice en qué mesa está sentado un jugador, **sin reservar
-asiento**: dos lecturas del registro compartido y ninguna llamada a Colyseus. Es lo que el orquestador
+asiento**: dos lecturas del registro compartido y una lectura del registro de salas de Colyseus (`matchMaker.query`, plazo 2 s). Es lo que el orquestador
 pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `POST .../seat`.
 
 | Estado | Cuerpo | Cuándo |
@@ -271,7 +336,7 @@ pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `PO
 | `200` | `{ status: "success", data: { matchId, roomId, mode, tournamentId? } }` | Sigue en una mesa viva; el `matchId` es el del orquestador; `mode` y `tournamentId` como en `.../seat` |
 | `400` | `{ code: "MALFORMED", detail }` | El `userId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló) |
+| `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló), o su sala ya no figura en el matchmaker: la entrada se borra |
 
 **`GET /internal/matches/:matchId/existence`** dice si una partida existe, y **nada más**: si su mesa sigue
 viva en el clúster (el registro compartido, la misma prueba que `.../seat`: su sala anotada por `matchId` y la
@@ -305,6 +370,34 @@ garantiza el orquestador.
 
 El `CreateMatchRequest` casual acepta además `betLevels` (opcional, `[{ level, extra, additionalPoints }]`):
 los niveles de aumento que ofrece la mesa los decide el orquestador, que es quien los cobra.
+
+**`participants[].providerId`** (opcional, en la casual y en la de torneo) es el proveedor del jugador
+(el `prv` de su sesión en billing-auth), con la regla de texto del `userId` (sin vacíos; se recortan los
+espacios). La mesa no lo usa para jugar: lo guarda en `seats[]` y `players[]` del registro, y es lo que
+acota el listado y el detalle de partidas para un admin de proveedor. ⚠ El orquestador lo manda recién
+**después** de que esta versión del dominó esté desplegada: una anterior lo rechaza con 400 (el cuerpo
+es estricto) y no abre la mesa.
+
+**`participants[].price`** (opcional) es lo que la mesa le cuesta y le paga a ese jugador **en su
+moneda**, con la cotización de billing:
+
+```jsonc
+"price": {
+  "currency": "VES",          // la misma que participants[].currency (si no, 400)
+  "rate": "200",              // la tasa congelada, texto
+  "entry": "200.00",          // lo que cuesta sentarse
+  "prize": "300.00",          // lo que cobra cada ganador sin aumento
+  "levels": [ { "level": 2, "entry": "200.00", "prize": "600.00" } ] // opcional, hasta 16
+}
+```
+
+Los montos y la tasa son texto decimal sin signo ni exponente (`/^\d+(\.\d+)?$/`, hasta 32 caracteres);
+`level` es un entero ≥ 2 y no se repite; `levels[].entry` es lo que cobra **subir** a ese nivel (no
+acumulado) y `levels[].prize` el premio a ese nivel. Ausente, la mesa queda en UC como siempre (las
+gratis nunca lo traen). El dominó no hace cuentas con esto: lo congela en el asiento, lo publica en
+`seatPrices` de la config y elige lo cobrado y lo pagado al cerrar (`chargedInPlayerCurrency` =
+`entry` + el `entry` del nivel aceptado; `prizePaidInPlayerCurrency` = `prize` o el del nivel, sólo
+para quien cobra premio), que es lo que devuelve `GET /me/matches`. Cobra billing, en UC.
 
 **El modo en línea (`gameMode`).** El catálogo de modos es del orquestador
 (`2026-11-10-catalogo-en-orquestador-design.md`, en su repo), y la mesa casual trae el modo entero en el
@@ -404,8 +497,9 @@ antes de mirar la forma.
 | `GET /matches/:roomId` | `401 UNAUTHORIZED`, `404 ROOM_NOT_FOUND` |
 | `GET /me/matches` | `401 UNAUTHORIZED`, `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
 | `GET /me/stats` | `401 UNAUTHORIZED`, `503 STATS_TIMEOUT` (+ `detail`) |
-| `GET /internal/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
-| `GET /internal/matches/:matchId` | `404 MATCH_NOT_FOUND` |
+| `GET /reactions` | — |
+| `GET /internal/matches` | `404 UNKNOWN_PROVIDER` (un proveedor nombra otro), `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
+| `GET /internal/matches/:matchId` | `404 MATCH_NOT_FOUND` (también a un proveedor sin asiento en ella) |
 | `GET /internal/matches/:matchId/history` | `404 MATCH_NOT_FOUND` |
 | `GET /game-data/:roomId` | `404 MATCH_NOT_FOUND` |
 | `GET /internal/players/:userId/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |

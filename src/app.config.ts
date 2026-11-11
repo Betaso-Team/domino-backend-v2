@@ -11,6 +11,7 @@ import {
   selectProcessIdToCreateRoom,
 } from "@/features/match";
 import { matchRooms } from "@/features/match/transports/colyseus/register";
+import { type ReactionCatalog, reactionsHttp } from "@/features/reactions";
 import { settingsHttp } from "@/features/settings";
 import type { AdminTokenCheck } from "@/shared/http/api-key";
 import { httpErrorHandler } from "@/shared/http/error-handler";
@@ -208,6 +209,8 @@ const registerHttp = (app: Application) => {
       verifier: rootContainer.resolve<TokenVerifier>("TokenVerifier"),
     }),
   );
+  // LA LISTA DE GESTOS, pública: no dice nada de nadie.
+  app.use(reactionsHttp({ catalog: rootContainer.resolve<ReactionCatalog>("ReactionCatalog") }));
   // LA CONFIGURACIÓN EN CALIENTE, detrás de la misma llave interna y con la misma regla: sin llave no
   // se registra. Antes del manejador de errores, como todas.
   app.use(

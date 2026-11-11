@@ -6,6 +6,7 @@ import type { MatchClose, MatchHistory, MatchSetup, SeatMoney } from "./history"
 import type { MatchEventSink } from "./listeners";
 import type { MatchAbortReason } from "./match-results";
 import { payoutOf } from "./payout";
+import { localMoneyOf } from "./player-currency";
 
 // LAS DOS PUNTAS DEL REGISTRO QUE NO SON DEL GRABADOR: con qué se armó la mesa —que la sala sabe al
 // nacer— y cómo terminó —que se cuenta con la plata, y la plata es de la sala y del orquestador—.
@@ -63,6 +64,11 @@ export function matchSetupOf(
       displayName: seat.displayName,
       ...(seat.username === undefined ? {} : { username: seat.username }),
       currency: seat.currency,
+      // EL PRECIO CONGELADO, en la cabecera: así el historial del jugador lo tiene aunque la partida no
+      // llegue a cerrar, y nadie lo vuelve a pedir con la tasa de otro día.
+      ...(seat.price === undefined ? {} : { price: seat.price }),
+      // EL PROVEEDOR, para el ámbito del panel. Lo copia también el cierre (`players[]` extiende el asiento).
+      ...(seat.providerId === undefined ? {} : { providerId: seat.providerId }),
     })),
   };
 }
@@ -109,13 +115,24 @@ export function matchCloseOf(
       prizes.set(userId, amount);
   }
   const money: Record<string, SeatMoney> = Object.fromEntries(
-    config.seats.map((seat) => [
-      seat.playerId,
-      {
-        chargedInUC: facts.entryCharged ? entryFee : 0,
-        prizePaidInUC: prizes.get(seat.userId) ?? 0,
-      },
-    ]),
+    config.seats.map((seat) => {
+      // LA MISMA REGLA EN SU MONEDA: lo cobrado si se confirmó la entrada, el premio si `payoutOf` se lo
+      // asigna, los dos al nivel del aumento que quedó. Sin precio, el asiento queda en UC.
+      const local =
+        seat.price &&
+        localMoneyOf(seat.price, level, {
+          charged: facts.entryCharged,
+          paid: prizes.has(seat.userId),
+        });
+      return [
+        seat.playerId,
+        {
+          chargedInUC: facts.entryCharged ? entryFee : 0,
+          prizePaidInUC: prizes.get(seat.userId) ?? 0,
+          ...local,
+        },
+      ];
+    }),
   );
   const common = {
     rateId: config.rateId,

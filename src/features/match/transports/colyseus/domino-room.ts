@@ -20,6 +20,7 @@ import {
   modeOf,
   playerIdsOf,
 } from "../../core/config";
+import { deadlineKindOf } from "../../core/engine/deadline-kind";
 import { RuleViolationError } from "../../core/engine/errors";
 import type { SchemaVisibilityController } from "../../core/engine/visibility";
 import type { PlayerId } from "../../core/ids";
@@ -32,6 +33,7 @@ import {
   type MatchHistory,
   PROBE_INTERVAL_MS,
 } from "../../network";
+import { droppedByServer } from "../../network/connection";
 import type { AbortReason, NetworkMatchEvent } from "../../network/events";
 import { recordEndingSink } from "../../network/match-record";
 import { type MatchAbortReason, MatchResultRecorder } from "../../network/match-results";
@@ -60,6 +62,7 @@ import {
   type RematchCloser,
   buildCatalog,
   buildPieces,
+  buildReactionRelay,
   buildRouter,
   registerIndividualCommands,
 } from "./commands/di-wiring";
@@ -223,6 +226,15 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         // ninguno. La partida se quedaría quieta hasta el siguiente vencimiento.
         this.bots?.poke();
       },
+      {
+        shouldInterrupt: () => this.seatLostToServer(),
+        interrupt: () => {
+          this.log.warn(
+            "partida cancelada: el reloj iba a retirar a quien se cayó por el servidor",
+          );
+          this.cancelTable("INTERRUPTED");
+        },
+      },
     );
     // El scheduler tiene que estar registrado antes de armar los actores: el conductor
     // del motor recibe solo el puerto y nunca debe conocer la sala.
@@ -300,12 +312,26 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         // próximo latido del reloj. Solo SUELTA (`settle`): si nadie salió no escribe nada, y los
         // plazos los renueva el reloj de abajo.
         () => this.beat(),
+        () => this.disposeWhenEmptyIfDecided(),
       ],
     );
     // DESPUÉS del historial y del notificador, que es lo que cada verbo necesita para
     // atenderse. El catálogo ya no vive en la sala: entra acá, se convierte en rutas y lo
     // que queda es la tabla.
-    this.router = buildRouter(catalog, this.history, (events) => this.notifier.notify(events));
+    //
+    // LAS REACCIONES entran por la misma tabla y salen por `broadcast` directo, sin el notificador:
+    // un gesto no es un hecho de la partida, así que no lo ven el historial, el registro ni el
+    // resultado.
+    this.router = buildRouter(
+      catalog,
+      this.history,
+      (events) => this.notifier.notify(events),
+      buildReactionRelay(
+        child,
+        (type, payload) => this.broadcast(type, payload),
+        rootLogger.child({ matchId: config.matchId, roomId: this.roomId }),
+      ),
+    );
     // ⚠ EL BOT NO ENTRA POR EL ROUTER, y no es un atajo: el router es la frontera del CABLE, y su
     // handler graba la fuente `"PLAYER"` por construcción —que es la mitad del valor de tenerlo—.
     // Una jugada de la máquina es un acto del SISTEMA, y el historial que alguien va a auditar es
@@ -372,10 +398,22 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     this.heartbeat = this.clock.setInterval(() => this.beat(true), HEARTBEAT_MS);
     this.probing = this.clock.setInterval(() => this.connections.probe(), PROBE_INTERVAL_MS);
 
+    // LA MESA VACÍA NO ES UNA PARTIDA TERMINADA, portado de truco (`102a06b`). Colyseus dispone la
+    // sala un segundo después de que se va el último socket y vencen sus reconexiones; si la ventana
+    // es más corta que lo que tarda el reloj en decidir —la ventana se edita en caliente, y su mínimo
+    // (10 s) es menor que un turno con su reserva (60 + 30 s)—, la sala moría `INTERRUPTED`, con
+    // reembolso, en vez de que el reloj retirara al que tenía el turno, que es un veredicto. Mientras
+    // se juega la sala se sostiene sola, y la decisión vuelve a Colyseus con el veredicto o la
+    // anulación del reparto (`disposeWhenEmptyIfDecided`). Antes de eso la cierran el plazo de
+    // ocupación y el cobro rechazado, como siempre, y el apagado la cierra igual (`disconnect`).
+    this.autoDispose = false;
+
+    // EL PLAZO DE OCUPACIÓN: alguien del emparejamiento nunca consumió su reserva. La mesa se cierra
+    // sin arrancar —sale abortada `NEVER_STARTED` y no se cobró nada, porque el cobro de la entrada
+    // espera a la mesa completa— y al que sí entró se le dice por qué.
     this.seating = this.clock.setTimeout(() => {
       this.log.warn("plazo de ocupación vencido", { clients: this.clients.length });
-      this.closingByRoom = true;
-      this.disconnect();
+      this.cancelTable("SEATING_TIMEOUT");
     }, global.seatingTimeoutMs);
     this.onMessage("*", (client, type, payload) =>
       this.handleMessage(client, String(type), payload),
@@ -602,6 +640,18 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       );
   }
 
+  // DECIDIDA LA PARTIDA —veredicto, o anulada en el reparto—, una sala vacía es una sala terminada:
+  // quien siga en la pantalla final la sostiene y se cierra cuando se va el último. La decisión se le
+  // devuelve a Colyseus una vez, en el primer hecho que la trae; y si ya no queda nadie se cierra acá
+  // mismo, porque nadie más va a dispararla yéndose: los que se cayeron ya lo hicieron.
+  private disposeWhenEmptyIfDecided(): void {
+    if (this.autoDispose || !(this.hasOutcome() || wasAbortedAtDeal(this.state))) return;
+    // Encenderlo arma la espera de un segundo con la que Colyseus mira si la sala quedó vacía: si el
+    // último se va en ese segundo, la sala se cierra un segundo tarde. No cambia nada de la partida.
+    this.autoDispose = true;
+    if (this.clients.length === 0) void this.disconnect().catch(() => undefined);
+  }
+
   // LOS userId QUE ESTA MESA TODAVÍA RETIENE, para que el registro suelte al resto. Portado de
   // truco, con dos diferencias del dominó:
   //
@@ -748,12 +798,7 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
         error: String(error),
       });
       this.orchestratorAbortReason = "CHARGE_REJECTED";
-      if (!this.disposed) {
-        this.closingByRoom = true;
-        for (const client of this.clients)
-          client.send("matchCancelled", { reason: "CHARGE_REJECTED" });
-        void this.disconnect().catch(() => undefined);
-      }
+      if (!this.disposed) this.cancelTable("CHARGE_REJECTED");
       return;
     }
     this.entryCharge = "charged";
@@ -762,6 +807,21 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // corriendo sin dueño.
     if (this.disposed) return;
     this.notifier.notify(this.startMatch());
+  }
+
+  // LA MESA QUE SE CIERRA SIN ARRANCAR, con el motivo a la vista de los que están sentados. Sin el
+  // aviso, el cliente solo ve el cierre 4000 (CONSENTED), que es el mismo código del socket desplazado
+  // por otra pestaña, y el front le decía «abriste la partida en otro lado».
+  //
+  // ⚠ EL AVISO VA ANTES DEL `disconnect()` y así llega: un cliente que ya confirmó su entrada recibe
+  // el `send` en el acto (`enqueueClientRaw`, `@colyseus/core/build/Transport.mjs`) y el cierre sale
+  // después por el mismo socket, porque `disconnect` cierra cada cliente recién cuando termina su
+  // `onLeave`. Uno que todavía no confirmó el `JOIN_ROOM` lo tiene en la cola de entrada, y esa cola
+  // se pierde con el cierre: no lo había visto y no ve el aviso tampoco.
+  private cancelTable(reason: "CHARGE_REJECTED" | "SEATING_TIMEOUT" | "INTERRUPTED"): void {
+    this.closingByRoom = true;
+    for (const client of this.clients) client.send("matchCancelled", { reason });
+    void this.disconnect().catch(() => undefined);
   }
 
   private probeSocket(playerId: PlayerId, client: Client): void {
@@ -817,6 +877,25 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     const player = this.state.players.find((candidate) => candidate.playerId === playerId);
     if (!player) throw new Error(`jugador sin estado: ${playerId}`);
     return player;
+  }
+
+  // EL RELOJ IBA A RETIRAR A QUIEN SE CAYÓ POR CULPA NUESTRA. Vence el turno, ya no le queda reserva
+  // —`extendWithReserve` (round/driver) estira el turno mientras quede, así que solo con la reserva en
+  // cero este vencimiento retira—, el jugador sigue afuera y su última caída fue un error o una
+  // sobrecarga del servidor (`droppedByServer`). Entonces la partida se cancela en vez de perderse: el
+  // cierre sale `INTERRUPTED`, el mismo motivo del apagado, y el orquestador reembolsa todo lo cobrado.
+  // Una máquina no tiene conexión que perder, y el que volvió juega como cualquiera.
+  private seatLostToServer(): boolean {
+    if (this.hasOutcome() || deadlineKindOf(this.state) !== "TURN") return false;
+    const playerId = this.state.currentRound?.currentTurn?.playerId;
+    if (!playerId) return false;
+    const player = this.player(playerId);
+    return (
+      !player.isBot &&
+      !player.connected &&
+      player.extraTimeRemainingMs <= 0 &&
+      droppedByServer(this.connections.connectionOf(playerId))
+    );
   }
 
   private abortReason(): AbortReason {

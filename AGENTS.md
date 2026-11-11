@@ -37,10 +37,10 @@ pieza del dominó.
   nuestra, no la de un cliente.
 - **Cada admin tiene proveedor y rol.** El token de admin de billing-auth trae `prv` (el proveedor;
   `null` = Tablea Gaming) y `role` (`admin` | `support`), **obligatorios**: sin alguno, 401. `requireAdminKey` **cierra por default**: una ruta es de Tablea Gaming y de escritura salvo
-  que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Hoy ninguna
-  ruta declara `providers` (lo declaraba el catálogo, que se borró): el historial, los registros,
-  `/game-data` y `/internal/settings` son de Tablea Gaming. Ver «Incremento completo — modos con dueño y
-  suscripciones».
+  que declare `read` (entra `support`) o `providers` (entran los proveedores, y la ruta acota). Declaran
+  `providers` el listado y el detalle de partidas (`GET /internal/matches[/:matchId]`, acotados por
+  `seats[].providerId`); el historial de soporte, `/internal/players/:userId/matches`, `/game-data` y
+  `/internal/settings` son de Tablea Gaming. Ver «Incremento completo — partidas por proveedor».
 - **Dominó no tiene catálogo de modos (C7, 2026-11-10).** El catálogo es del orquestador, el único
   que lo lee y lo edita: cada `POST /internal/matches` casual trae el modo entero (`gameMode`,
   obligatorio) además de `gameModeId`, que solo nombra la mesa. `configOf(request, betLevels)` arma la
@@ -58,8 +58,8 @@ pieza del dominó.
   (`GET /game-data/:roomId`), el endpoint de soporte y el CLI de replay, que ya no pide argumentos.
   Ver «Incremento completo — el registro v2.1 de cada partida».
 - **El listado del panel filtra y pagina por cursor** (`after`, `from`/`to`, `matchId`, `roomId`, `id`,
-  `userId` —cualquier asiento, `seats[].userId`—)
-  con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
+  `userId` —cualquier asiento, `seats[].userId`—, `matchEndReason`, `status`, `tournamentId`,
+  `providerId` —cualquier asiento, `seats[].providerId`—) con un índice detrás de cada forma, medido con `explain` contra Mongo: nunca recorre la colección ni
   ordena en memoria, y una página honda cuesta lo mismo que la primera. Ver «Incremento completo — el
   listado del panel con filtros y cursor».
 - **El outbox de resultados no se bloquea por la cabeza**: la espera tras un fallo es del broker
@@ -90,6 +90,13 @@ pieza del dominó.
   `PublicMatchConfig` trae `isFreeRoom`, `enableBots` y `betLevels[].extra`. El orquestador pregunta
   la mesa de un jugador sin reservar con `GET /internal/players/:userId/match`. Ver «Incremento
   completo — la mesa completa y el asiento sin reserva».
+- **Reacciones en la mesa**: `SEND_REACTION` `{ reactionId }` → `REACTION_SENT` a toda la mesa, con una
+  lista fija de 24 emojis en el código que sirve `GET /reactions`. Ver «Incremento completo — las
+  reacciones».
+- **El precio en la moneda del jugador**: el orquestador puede mandar `participants[].price` (texto
+  decimal de billing); el asiento lo congela, la config pública lo publica en `seatPrices` y el cierre
+  elige lo cobrado y lo pagado en su moneda para `GET /me/matches`. Los montos en UC no cambian. Ver
+  «Incremento completo — el precio en la moneda del jugador».
 
 ## El plan es la autoridad
 
@@ -600,10 +607,11 @@ tasas de v1: es un incremento propio, no una línea.
 
 ### Lo que se decidió NO portar
 
-- **Las reacciones** (truco `f8713f3`). Allá el argumento era que existen en v1 y el día del corte
+- ~~**Las reacciones** (truco `f8713f3`). Allá el argumento era que existen en v1 y el día del corte
   dejarían de funcionar. **El dominó v1 no las tiene** —verificado: no hay una sola mención en
   `Betaso-Domino-Backend/src`—, así que acá no sería una regresión que se tapa sino una feature
-  nueva que nadie pidió.
+  nueva que nadie pidió.~~ **HECHAS** después, a pedido y con lista propia: ver «Incremento completo —
+  las reacciones».
 - **El catálogo fuera de matchmaking** (`a1605d2`), **el registrar y su API administrativa**
   (`c51b4cd`), **la llave interna** (`3308781`) y **el `PUT` como parche** (`d1f23fc`): ya estaban
   hechos, y el último **mejor que en truco**. Allá el `PUT` exigía los seis campos y lo destapó
@@ -1554,7 +1562,8 @@ mutación: sacando el productor del cableado, ese `it` es el único que se pone 
 
 Comparado archivo por archivo y símbolo por símbolo:
 
-- **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
+- ~~**`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.~~ **HECHO**, ver
+  «Incremento completo — las reacciones».
 - **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
 - ~~`charge-multiplier`~~ — **HECHO**, ver el bloque del final.
 - ~~`logSink`~~ y ~~los cinco archivos de test~~ — **HECHOS**, ver el bloque del final.
@@ -1638,7 +1647,8 @@ antes. **Nada de esto está certificado contra un backend de verdad**: el smoke 
 
 ### Lo que sigue faltando de truco, después de esto
 
-- **`reactions`** — deliberado: v1 del dominó no las tiene.
+- ~~**`reactions`** — deliberado: v1 del dominó no las tiene.~~ **HECHO**, ver «Incremento completo —
+  las reacciones».
 - **`bot.ts` / `BotPort`** — deuda escrita; v1 los tiene en 4P.
 - ~~`logSink`~~ y ~~los cinco archivos de test~~ — **HECHOS**, ver el bloque de abajo.
 
@@ -1702,7 +1712,8 @@ decisión de qué es un token vacío — ahí habría que mantenerla dos veces.
 
 ### Lo que sigue faltando de truco, después de esto
 
-- **`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.
+- ~~**`reactions`** — deliberado: v1 del dominó no las tiene, sería feature nueva.~~ **HECHO**, ver
+  «Incremento completo — las reacciones».
 - ~~`bot.ts` / `BotPort`~~ — **HECHO**, y no como truco: ver el bloque de abajo.
 
 ## Incremento completo — la mesa de cuatro y la máquina que la sostiene
@@ -2156,7 +2167,7 @@ si hay `BILLING_AUTH_PUBLIC_KEY`; el `alg` del header elige la clave y cada rama
 Hechos medidos en la Tarea 13, Parte B:
 
 - **`createRoom` propaga el mensaje del error `onCreate` con su prefijo de código** (`UNKNOWN_GAME_MODE: …`), que es cómo la ruta responde 422 (medido sobre `@colyseus/core` 0.18.15). ~~`MaintenanceModeError` no tiene prefijo y sale como 500 (pendiente).~~ Ya no existe: el mantenimiento es del orquestador.
-- **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. La ruta responde 404 solo si `matchMaker.query({ roomId })` no encuentra nada; una sala bloqueada es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa).
+- **`seatBack`: `joinById` lanza `MATCHMAKE_INVALID_ROOM_ID` tanto para una sala ida como para una LOCKED**; las reservas de asiento cuentan hacia `maxClients` (asientos × 2), así que las reservas sin consumir pueden bloquear una mesa. Ante **cualquier** error de la reserva (no solo `MATCHMAKE_INVALID_ROOM_ID`: la sala de un proceso muerto da `SeatReservationError`), la ruta confirma con `matchMaker.query({ roomId })` en 2 s; si no la encuentra, borra `player_match` y responde 404, y si la encuentra o no puede confirmarlo es 500 (el orquestador la trata como desconocida y nunca abre segunda mesa). Es el T-04 de truco (`53d1030`).
 - **Toda reserva sin consumir mantiene viva su sala ~15 s** (`seatReservationTimeout`) y retrasa `server.shutdown()` — los tests que obtienen una reserva tienen que consumirla.
 - **Pendiente de decidir:** ~~qué pasa con el lobby propio cuando el orquestador esté vivo (ahí la mesa sí cobra); la publicación de resultados de las salas del orquestador por RabbitMQ; autenticación con ES256 de billing-auth también en lobby/matchmaking/torneo propios de dominó (falla seguro hoy: la wallet de Betaso no sabe un `sub` de billing);~~ (cerradas: no hay lobby propio y el resultado sale por `tablea_gaming`) `player_match:<userId>` sigue apuntando a una sala cuya partida terminó pero no se dispuso aún, así que `seatBack` entrega una reserva que `onJoin` rechaza (`PlayerAlreadyOutError`) — el mismo comportamiento que el rejoin propio de dominó; hasta que la sala se disponga ese jugador no puede obtener nueva mesa por el orquestador.
 - **`BILLING_AUTH_PUBLIC_KEY` se valida al boot** (EC P-256 solo público; una clave privada se rechaza).
@@ -2794,7 +2805,7 @@ Del plan «rendimiento del backend, roles y pendientes» (sección C, PR5). Apil
   espera `waitForInitialState` y para entonces el comodín de `src/tests/e2e.ts` ya se tragó el
   mensaje).
 - **`GET /internal/players/:userId/match`** (`tables.ts`, misma llave y `SEAT_PARAMS` que `.../seat`):
-  `matchOf` + `publicConfigOf` del registro, sin Colyseus ni reserva. 200 `{status, data: {matchId,
+  `matchOf` + `publicConfigOf` del registro, sin reserva; confirma la sala con `matchMaker.query` (2 s) y borra la entrada si no está. 200 `{status, data: {matchId,
   roomId}}`; 404 `{code: "NO_LIVE_MATCH"}` (con `sendError`, como `.../seat` desde los errores con código);
   la llave y la forma dan los `401 UNAUTHORIZED` y `400 MALFORMED` comunes. `player_match:<userId>` no
   cambia.
@@ -2864,6 +2875,74 @@ respuesta para todos.
   `404` sale `no-store`.
 - ⚠ Un test que da de baja un modo **directo en el repositorio** (como otro proceso) y después lee lo
   público tiene que adelantar el reloj `PUBLIC_MEMO_MS`; por el servicio no hace falta.
+
+## Incremento completo — las reacciones (rama `feature/reacciones`)
+
+Port de truco `f8713f3`, a pedido: el dominó v1 no las tenía (ver «Lo que se decidió NO portar»), pero
+el front de dominó v2 las quiere con el mismo contrato que truco.
+
+- **Feature propia, `src/features/reactions`**, no parte de `match`: no tiene reglas, no muta el estado,
+  no produce eventos, no entra en el historial ni en el registro. `match` la conoce por su índice y no
+  al revés; el cable está en `match/transports/colyseus/reactions.ts` y entra por el `MessageRouter`
+  como una ruta más (`buildRouter` recibe el relay; `buildReactionRelay` lo arma por mesa).
+- **El cliente manda un id; el contenido lo pone el servidor.** Lista cerrada = no es un chat.
+- **La lista es FIJA en el código** (`static-catalog.ts`, `StaticReactionCatalog` detrás del mismo
+  puerto `ReactionCatalog` que truco), y ésta es la diferencia con truco: allá se la pide al backend de
+  Betaso; acá el dominó sirve a varios proveedores y ninguno es dependencia suya. Sin TTL, sin
+  `auxFiles`: en el cable va `{ id, type, content }`. Un paquete, `global`, 24 emojis con id ASCII.
+- **`GET /reactions`**, pública y sin credencial, con `Cache-Control: public, max-age=300`; se monta en
+  `app.config.ts` como un router más.
+- **Límite por jugador y por mesa**: 3 cada 2 s, ventana deslizante (`ReactionLimiter`, consume el
+  permiso en una sola operación). Va antes del catálogo, así que un id inventado también gasta.
+- **Los dos rechazos son silenciosos** (demasiado seguido, id desconocido): ni se difunden ni contestan,
+  y quedan en `debug`. El payload malformado sí contesta `illegal` `MALFORMED`, como un verbo. Sin
+  `.strict()`, al revés que los verbos: el `targetPlayerId` del front viejo se ignora.
+- **`fromPlayerId` es el `seat-N`** que el router inyecta desde la identidad verificada: el mismo
+  `PlayerState.playerId` que el front ya usa para ubicar cada asiento. Se difunde a toda la mesa, el
+  que lo mandó incluido. Sin precio ni destinatario.
+- **Quién y cuándo**: cualquier socket de la sala, que por la puerta de `onJoin` es siempre el dueño de
+  un asiento; en cualquier fase mientras la sala esté abierta (reparto, mano, resultado). No se mira la
+  fase ni si el jugador abandonó.
+- **Fuera:** los mensajes de seguimiento de truco (`ENABLE_REACTIONS_TRACKING`,
+  `REACTIONS_MUTE_CHANGED`).
+- **Docs:** «Reacciones» y las tablas de mensajes, HTTP público y errores en `docs/api-y-mensajes.md`.
+- **Tests:** `reactions/tests/` (relay, límite y la lista), `reactions/transports/http.int.test.ts` y
+  `match/tests/reactions.e2e.test.ts` (puerto 2593): +13 unit, +2 int, +7 e2e.
+
+## Incremento completo — el precio en la moneda del jugador (rama `feature/reacciones`)
+
+El front mostraba la mesa en UC. El orquestador ya tiene la cotización de billing de cada jugador, y la
+manda; el dominó la muestra y la guarda, y no hace cuentas.
+
+- **`participants[].price`** (`match-contract.ts`, `seatPrice`), opcional y **sin default** en el pedido y
+  en el snapshot: `{ currency, rate, entry, prize, levels: [{ level, entry, prize }] }`. Montos y tasa son
+  TEXTO decimal (`/^\d+(\.\d+)?$/`, ≤ 32), nunca `number`: un `number` sería la conversión que pierde el
+  centavo. `level` ≥ 2, sin repetir, hasta 16; `levels` ausente es `[]`. `price.currency` distinta de la
+  del participante es 400. Ausente = la mesa en UC de siempre (gratis, orquestador viejo, goldens).
+- ⚠ **zod no extiende un objeto refinado**: el chequeo de moneda es `priceInSeatCurrency(schema)` y se
+  aplica a `participantShape` y a `participantShape.extend({ playerId })` por separado.
+- **En la mesa:** `PublicMatchConfig.seatPrices` (`match-registry.ts`), un mapa `seat-N → price` con sólo
+  los asientos que lo trajeron, ausente si ninguno; lo sirven `GET /config/:roomId`, `GET /matches/:roomId`
+  y el mensaje `config`. `seats` sigue siendo `string[]`: cambiarlo a objetos rompía al front. El precio
+  del rival se ve (no es secreto); identidad y `rateId` siguen afuera.
+- **En el registro:** `seats[]`/`players[]` guardan `price`, y `SeatMoney` suma
+  `chargedInPlayerCurrency`/`prizePaidInPlayerCurrency` (`localMoneyOf`, `network/player-currency.ts`),
+  elegidos con la regla de UC de `matchCloseOf`: cobrado = `entry` + el `entry` del nivel aceptado si se
+  confirmó la entrada (si no, cero); pagado = `prize` o el del nivel, sólo si `payoutOf` le asigna premio.
+  La única cuenta es esa suma, exacta con `bigint`. Un nivel aceptado que el precio no cotizó deja el
+  asiento en UC. Los ceros van con la escala del precio (`"0.00"`).
+- **En `/me/matches`:** `currency`, `betInPlayerCurrency`, `prizeInPlayerCurrency` (`rowOf`), los tres o
+  ninguno, sólo si el asiento tiene `price` y el cierre los dejó; cancelada en ceros y premio sólo del
+  que ganó, como `bet`/`prize`. Se leen del registro y no se recalculan: una tasa nueva no cambia una
+  partida vieja.
+- **Orden de despliegue:** dominó primero (campo opcional), después el orquestador, después el front. Al
+  revés, el `strictObject` de `participant` rechaza el `price` y el orquestador no abre mesas.
+- **Docs:** el pedido, `seatPrices` en «Mensajes del servidor», `/config` y `/me/matches` en
+  `docs/api-y-mensajes.md`, y el registro.
+- **Tests:** +42 unit (contrato, `player-currency`, `matchCloseOf`, `rowOf`, registro) y +3 e2e
+  (`orchestrator-tables`: `seatPrices` por `/config` y por el mensaje, y el 400; `match-record`: del
+  asiento a `/me/matches`). Totales: 1100 unit (+27 de `scripts/deploy/tests/` rojos en Windows, ya
+  rojos en `develop`), 441 int (+130 saltados), 146 e2e.
 
 ## Cómo se ejecuta una tarea
 
@@ -3120,7 +3199,8 @@ orquestador. Sin maniobra de migración ni modo de solo lectura: rompe al panel 
   su colección sigue siendo `game_mode_leases` (renombrarla deja dos versiones sin exclusión).
 - **Se quedan**: `ADMIN_API_KEY` (historial y `/internal/settings`), `payoutOf` y `payouts[].amountUc`
   (se calculan con el modo en línea), `stakes` del resultado y `entryFee`/`prize` de `/config/:roomId`.
-  La opción `providers` de `requireAdminKey` queda sin usuarios en `main`.
+  La opción `providers` de `requireAdminKey` sigue en uso: la declaran el listado y el detalle de
+  partidas («Incremento completo — partidas por proveedor»).
 - **Tests**: `src/tests/table-modes.ts` (`CASUAL_2P`, `CASUAL_4P` en línea) reemplaza al sembrado del
   catálogo; `casualTable(seats, seed, table)` recibe el modo, no un uuid. `admin-scope.e2e` pinea que las
   rutas del catálogo dan 404.
@@ -3189,6 +3269,11 @@ cobro de la entrada y de cada aumento pasan por este cliente.
   con cuerpo colgado: rechaza en plazo y el servidor ve el socket cerrado) y el caso colgado en
   `orchestrator-charges.test.ts`. Los cuatro salen rojos con el cliente anterior.
 
+## Corrección — el plazo de ocupación avisa y la mesa de un proceso muerto no retiene (rama `fix/seating-timeout-notice`)
+
+- **`SEATING_TIMEOUT`**: al vencer el plazo de ocupación la sala manda `matchCancelled { reason: "SEATING_TIMEOUT" }` a los presentes y recién después cierra (abortada `NEVER_STARTED`, sin cobro, 4000). Sin el mensaje, el front leía el 4000 como «abriste la partida en otra pestaña». Lo hace `cancelTable(reason)`, el mismo camino que `CHARGE_REJECTED`. Un cliente que todavía no confirmó `JOIN_ROOM` pierde el mensaje con su cola (ya pasaba con `CHARGE_REJECTED`).
+- **T-04** (truco `53d1030`): `POST …/seat` y `GET …/match` confirman la sala con `matchMaker.query` (2 s) y borran `player_match` (`forget`, solo si sigue apuntando a esa sala) cuando no existe. «No sé» cuenta como viva. `GET …/match` mira solo el registro de salas, no el proceso dueño: una sala de un proceso muerto que nadie revisó sigue contestando 200 hasta que un `POST …/seat` fallido la revisa.
+
 ## Incremento completo — la mesa de torneo (rama `feat/torneos-mesa`)
 
 Fase 3 del plan de torneos de Tablea Gaming (spec `docs/superpowers/specs/2026-11-09-torneos-design.md`
@@ -3221,3 +3306,29 @@ del monorepo del orquestador). Toca el camino del dinero solo para APAGARLO en l
 - `computeQuality` y las constantes de calidad que vivían en `features/tournament/` siguen en `main`
   antes de este merge (`git show dc1f513:src/features/tournament/quality.ts`): el orquestador las porta.
 
+
+## Incremento completo — partidas por proveedor (rama `feat/match-records-by-provider`)
+
+Para que la pantalla «Partidas» del panel se abra a los admins de proveedor (`admin` y `support`), cada uno
+con las suyas. Sale de `fbd41aa` (`feat/match-list-tournament-filter`), que sumó el filtro `tournamentId`
+al listado (igualdad sobre `table.tournamentId`, índice `table.tournamentId_1_createdAt_-1__id_-1`
+PARCIAL sobre las mesas de torneo).
+
+- **`participants[].providerId`** (opcional, casual y torneo, `match-contract.ts`): el `prv` de la sesión
+  del jugador. Es una llave como el `userId` (`identityPart`: sin vacíos, recortado). El snapshot lo
+  acepta igual (sin default), así que los goldens y lo grabado antes rebobinan idéntico.
+  ⚠ **El orquestador despliega DESPUÉS del dominó**: el `strictObject` de `participant` rechaza el campo
+  en una versión vieja y la mesa no abre.
+- **El registro lo guarda por asiento** (`SeatSetup.providerId`, `matchSetupOf`), sólo si vino; el cierre
+  lo copia a `players[]` porque extiende el asiento. `recordedReplayOf` no lo lee: el motor no lo usa.
+- **`MatchListQuery.providerId`** → `{ "seats.providerId": x }` (cualquier asiento; memoria con el mismo
+  `some`), cuenta en `isFiltered`. Índice nuevo `seats.providerId_1_createdAt_-1__id_-1`, MULTIKEY como el
+  del jugador y no parcial, en el segundo `createIndexes` (son nueve). Sin el campo no coincide nunca.
+- **Las rutas** (`records.ts`): `GET /internal/matches` y `GET /internal/matches/:matchId` con
+  `{ read: true, providers: true }`. Al listado de un proveedor se le FUERZA `providerId = prv`; nombrar
+  otro es `404 UNKNOWN_PROVIDER` (la regla del catálogo); Tablea filtra opcional con `?providerId=`. El
+  detalle es `404 MATCH_NOT_FOUND` a un proveedor sin asiento en la partida. El historial de soporte,
+  `/internal/players/:userId/matches` y `/game-data` siguen siendo de Tablea (`admin-scope.e2e.test.ts`).
+- ⚠ **Una casual cruzada la ven los dos proveedores ENTERA**, el asiento del rival incluido (`userId`,
+  nombre, su mano en la timeline). Aceptado: recortarla dejaría un registro que no se rebobina.
+- Sin verificar: el `explain` del índice nuevo (`mongo-history.int.test.ts`, pide `MONGO_INT_URI`).

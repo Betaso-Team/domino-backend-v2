@@ -37,8 +37,10 @@ const ALL_INDEXES = [
   "matchEndedAt_1_statsPending",
   "matchId_1",
   "roomId_1_createdAt_-1__id_-1",
+  "seats.providerId_1_createdAt_-1__id_-1",
   "seats.userId_1_createdAt_-1__id_-1",
   "status_1_createdAt_-1__id_-1",
+  "table.tournamentId_1_createdAt_-1__id_-1",
 ];
 const INDEX_WAIT = { timeout: 5_000, interval: 20 };
 const indexNames = async () =>
@@ -64,6 +66,25 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
 
   describeHistoryContract("MongoHistory", (options) => fresh(undefined, options));
   describePlayerLogContract("MongoHistory", (options) => fresh(undefined, options));
+
+  // LA MARCA DE PÉRDIDA NO REABRE NADA: `$set`/`$inc` sobre un documento ya cerrado deja su estado
+  // y su desenlace como estaban, y suma lo perdido. Una entrada que llega después del cierre, con el
+  // pendiente de la partida en cero, es la pérdida más simple de provocar.
+  it("la marca deja cerrada una partida cerrada y suma lo perdido", async () => {
+    const history = await fresh(undefined, { maxPendingPerMatch: 0 });
+    history.open("m-1", { ...SETUP, matchStartedAt: 1_000 });
+    history.close("m-1", CLOSING);
+    history.record([entry(1)]);
+    history.record([entry(2)]);
+    await history.drain();
+
+    const document = await (await collection()).findOne({ matchId: "m-1" });
+    expect(document?.status).toBe(CLOSING.status);
+    expect(document?.matchEndedAt).toEqual(new Date(CLOSING.matchEndedAt));
+    expect(document?.timelineIncomplete).toBe(true);
+    expect(document?.lostEntries).toBe(2);
+    expect(document?.timeline).toBeUndefined();
+  });
 
   it("crea sus siete índices, con el de `matchId` único", async () => {
     const history = await fresh();
@@ -220,7 +241,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     beforeAll(async () => {
       history = await fresh();
       // Los índices se piden con el primer uso, como en producción, y se crean en segundo plano: los
-      // planes de abajo se miden con los seis ya puestos.
+      // planes de abajo se miden con todos ya puestos.
       await history.list({ pageSize: 1 });
       await vi.waitFor(async () => expect(await indexNames()).toEqual(ALL_INDEXES), INDEX_WAIT);
       // TRESCIENTAS PARTIDAS en quince salas, de a tres por segundo —empates en el mismo milisegundo—,
@@ -248,7 +269,15 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
             `jugador-${(index + 3) % 10}`,
             `jugador-${(index + 6) % 10}`,
             index % 5 === 0 ? `jugador-${index % 10}` : "jugador-x",
-          ].map((userId, seat) => ({ id: `seat-${seat + 1}`, seat, userId })),
+          ].map((userId, seat) => ({
+            id: `seat-${seat + 1}`,
+            seat,
+            userId,
+            // EL PROVEEDOR: los asientos impares son siempre de `betaso` —el mismo proveedor en dos
+            // asientos, dos claves del multikey para un documento— y los pares de uno de cuatro, así que
+            // `prov-1` está en una de cada cuatro partidas.
+            providerId: seat % 2 === 0 ? `prov-${index % 4}` : "betaso",
+          })),
           timeline: [entry(1, { matchId: `p-${index}` })],
         })),
         // TREINTA ABIERTAS, sin motivo y con jugadores propios: el historial del jugador las descarta
@@ -266,6 +295,24 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
             userId,
           })),
           timeline: [entry(1, { matchId: `abierta-${index}` })],
+        })),
+        // CUARENTA DE TORNEO en dos torneos, intercaladas con las de arriba: el parcial del torneo solo
+        // carga estas, y la página de un torneo tiene que salir de él sin leer casuales.
+        ...Array.from({ length: 40 }, (_, index) => ({
+          matchId: `torneo-${index}`,
+          roomId: `sala-t-${index % 4}`,
+          version: 2.1,
+          status: "finished",
+          matchEndReason: "SCORE",
+          table: { mode: "TOURNAMENT", tournamentId: index % 2 === 0 ? "copa" : "relampago" },
+          createdAt: new Date(T + index * 2_000 + 750),
+          updatedAt: new Date(T + index * 2_000 + 750),
+          seats: [`torneo-${index % 6}`, `torneo-${(index + 1) % 6}`].map((userId, seat) => ({
+            id: `seat-${seat + 1}`,
+            seat,
+            userId,
+          })),
+          timeline: [entry(1, { matchId: `torneo-${index}` })],
         })),
         ...Array.from({ length: 20 }, (_, index) => ({
           matchId: `vieja-${index}`,
@@ -305,6 +352,11 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ],
       ["status (una de cada trece)", () => ({ pageSize: PAGE, status: "aborted" })],
       ["fechas + status", () => ({ pageSize: PAGE, from, to, status: "started" })],
+      ["tournamentId", () => ({ pageSize: PAGE, tournamentId: "copa" })],
+      ["fechas + tournamentId", () => ({ pageSize: PAGE, from, to, tournamentId: "relampago" })],
+      ["providerId (uno de cada cuatro)", () => ({ pageSize: PAGE, providerId: "prov-1" })],
+      ["providerId en dos asientos", () => ({ pageSize: PAGE, providerId: "betaso" })],
+      ["fechas + providerId", () => ({ pageSize: PAGE, from, to, providerId: "prov-2" })],
       [
         "matchId + roomId + id",
         () => ({
@@ -367,6 +419,27 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         expect(items.length).toBeGreaterThan(0);
         expect(items.every((item) => item.matchEndReason === matchEndReason)).toBe(true);
       }
+      const { tournamentId } = query();
+      if (tournamentId !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        const inTournament = await (await collection()).countDocuments({
+          matchId: { $in: items.map((item) => item.matchId) },
+          "table.tournamentId": tournamentId,
+        });
+        expect(inTournament).toBe(items.length);
+      }
+      const { providerId } = query();
+      if (providerId !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        expect(new Set(items.map((item) => item._id)).size).toBe(items.length);
+        const provided = await (await collection()).countDocuments({
+          matchId: { $in: items.map((item) => item.matchId) },
+          "seats.providerId": providerId,
+        });
+        expect(provided).toBe(items.length);
+      }
       const { status } = query();
       if (status !== undefined) {
         const { items } = await history.list(query());
@@ -387,6 +460,8 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["cursor + fechas + userId", { from: new Date(T), to, userId: "jugador-x" }, 2, PAGE],
       ["cursor + matchEndReason", { matchEndReason: "ABANDONMENT" }, 2, 4],
       ["cursor + status", { status: "aborted" }, 2, 4],
+      ["cursor + tournamentId", { tournamentId: "copa" }, 2, 4],
+      ["cursor + providerId", { providerId: "prov-1" }, 2, 4],
     ] as const)(
       "%s: sin COLLSCAN, sin SORT y sin leer de más",
       async (_name, filters, depth, pageSize) => {
@@ -452,6 +527,29 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       expect(seen).toHaveLength(seated);
       expect(new Set(seen).size).toBe(seated);
       expect((await history.list({ pageSize: 1, userId: "jugador-5" })).total).toBe(seated);
+    });
+
+    // EL MISMO PROVEEDOR EN DOS ASIENTOS (`betaso` en los impares de todas), por lo mismo: una vez en el
+    // recorrido y una vez en el total.
+    it("un proveedor en dos asientos sale una vez: el recorrido entero y el total", async () => {
+      const provided = await (await collection()).countDocuments({ "seats.providerId": "betaso" });
+      expect(provided).toBe(300);
+
+      const seen: string[] = [];
+      let after: MatchCursor | undefined;
+      do {
+        const page = await history.list({
+          pageSize: 50,
+          providerId: "betaso",
+          ...(after ? { after } : {}),
+        });
+        seen.push(...page.items.map((item) => item._id));
+        after = page.next;
+      } while (after);
+
+      expect(seen).toHaveLength(provided);
+      expect(new Set(seen).size).toBe(provided);
+      expect((await history.list({ pageSize: 1, providerId: "betaso" })).total).toBe(provided);
     });
 
     // MOTIVO + JUGADOR NO TIENE ÍNDICE PROPIO, a propósito: Mongo usa uno de los dos y filtra el otro

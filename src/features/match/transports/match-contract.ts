@@ -48,13 +48,70 @@ const identityPart = nonBlank.transform((value) => value.trim());
 // un fixture golden con un monto corrupto reconstruiría una partida cuya liquidación no cierra.
 const ucAmount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
-const participant = z.strictObject({
+// LOS MONTOS EN LA MONEDA DEL JUGADOR SON TEXTO DECIMAL, y no `ucAmount`: los cotizó billing con su
+// tasa y su redondeo (`"200.00"`), y el dominó no hace cuentas con ellos —los muestra y elige cuál
+// corresponde—. Un `number` acá sería la primera conversión, y la que pierde el centavo. Sin signo ni
+// exponente; el techo de largo es de forma, para que un texto de un mega no viaje a cada snapshot.
+const decimalText = z
+  .string()
+  .max(32)
+  .regex(/^\d+(\.\d+)?$/, "no es un monto decimal");
+
+// UN NIVEL DE AUMENTO CON PRECIO. El nivel 1 es la mesa sin aumento, y su precio es el de arriba.
+const levelPrice = z.strictObject({
+  level: z.number().int().min(2).safe(),
+  entry: decimalText,
+  prize: decimalText,
+});
+
+// LO QUE LA MESA LE CUESTA Y LE PAGA A UN ASIENTO EN SU MONEDA (`MatchSeat.price`). Opcional y sin
+// default en las DOS entradas: ausente es la mesa en UC de siempre —las gratis nunca lo traen, un
+// orquestador viejo tampoco— y una partida grabada antes no puede inventarse un precio que no tuvo.
+const seatPrice = z
+  .strictObject({
+    currency: nonBlank,
+    rate: decimalText,
+    entry: decimalText,
+    prize: decimalText,
+    levels: z.array(levelPrice).max(16).default([]),
+  })
+  .superRefine(({ levels }, context) => {
+    // DOS PRECIOS PARA EL MISMO NIVEL es elegir uno a ciegas al cerrar.
+    const seen = new Set<number>();
+    levels.forEach(({ level }, index) => {
+      if (seen.has(level)) {
+        context.addIssue({ code: "custom", path: ["levels", index], message: "nivel duplicado" });
+      }
+      seen.add(level);
+    });
+  });
+
+const participantShape = z.strictObject({
   userId: identityPart,
   displayName: nonBlank,
   username: nonBlank.optional(),
   profilePicture: nonBlank.optional(),
   currency: nonBlank,
+  price: seatPrice.optional(),
+  // EL PROVEEDOR DEL JUGADOR (el `prv` de su sesión en billing-auth), para que el panel le muestre a cada
+  // proveedor sus partidas y sólo ésas. Es una LLAVE —se compara contra el `prv` del token del admin—, así
+  // que se normaliza como el `userId`. Opcional: el orquestador lo manda recién después de que este campo
+  // exista acá (el `strictObject` lo rechazaría), y una partida grabada antes no lo tiene.
+  providerId: identityPart.optional(),
 });
+
+// EL PRECIO VA EN LA MONEDA QUE SE COBRA, y si no coincide el que se equivocó es el que lo mandó: el
+// jugador vería la entrada en una moneda y la pagaría en otra. Es una función y no un `.refine` sobre
+// la forma porque el snapshot la EXTIENDE con el `playerId`, y zod no extiende un objeto refinado.
+const priceInSeatCurrency = <T extends { currency: string; price?: { currency: string } }>(
+  schema: z.ZodType<T>,
+) =>
+  schema.refine(({ currency, price }) => price === undefined || price.currency === currency, {
+    path: ["price", "currency"],
+    message: "no es la moneda del participante",
+  });
+
+const participant = priceInSeatCurrency(participantShape);
 
 const teamAssignment = z.enum(["SHUFFLED", "SEAT_ORDER"]);
 
@@ -189,7 +246,7 @@ const matchSnapshot = z
     matchId: nonBlank,
     gameModeId: nonBlank,
     seats: z
-      .array(participant.extend({ playerId: nonBlank }))
+      .array(priceInSeatCurrency(participantShape.extend({ playerId: nonBlank })))
       .min(2)
       .max(4),
     seed: nonBlank,

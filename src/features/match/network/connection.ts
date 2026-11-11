@@ -162,3 +162,21 @@ export function connectionVerdictOf(evidence: DropEvidence): ConnectionVerdict {
       : verdict("NETWORK", "CONNECTION_LOST");
   return verdict("UNKNOWN", "UNKNOWN_CLOSE");
 }
+
+/**
+ * LA ÚLTIMA CAÍDA DEL ASIENTO FUE CULPA DEL SERVIDOR y el jugador sigue afuera. Es lo que la sala
+ * pregunta antes de dejar que el reloj lo retire: en ese caso la partida se cancela con reembolso en
+ * vez de darla por perdida. Solo cuenta la última: volver la borra (el que volvió puede jugar), y la
+ * salida que llega al vencerse la ventana (`GONE` tras la caída) lleva el veredicto de esa caída.
+ */
+export function droppedByServer(connection: SeatConnection | undefined): boolean {
+  const events = connection?.events ?? [];
+  const last = events.at(-1);
+  if (!last || last.kind === "RECONNECTED") return false;
+  if (last.kind === "DROPPED") return last.verdict.blame === "OURS";
+  if (!last.afterDrop) return last.verdict?.blame === "OURS";
+  // El `GONE` de una ventana vencida no trae veredicto propio (el monitor no tiene evidencia nueva):
+  // vale el de la caída que lo abrió, que es el `DROPPED` inmediatamente anterior.
+  const drop = events.at(-2);
+  return drop?.kind === "DROPPED" && drop.verdict.blame === "OURS";
+}

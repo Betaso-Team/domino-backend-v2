@@ -83,4 +83,46 @@ describe("RoomTimeoutScheduler", () => {
     expect(timers[0]?.delay).toBe(0);
     vi.restoreAllMocks();
   });
+
+  // LA SALA PUEDE CORTAR ANTES DEL MOTOR: un vencimiento que retiraría a quien se cayó por culpa del
+  // servidor cancela la partida en vez de correr. Así el motor nunca ve ese vencimiento, y el
+  // historial queda como el de un apagado.
+  it("si la sala interrumpe, no corre el vencimiento y avisa la interrupción", () => {
+    const { clock, timers, fire } = recordingClock();
+    const emitted: Array<readonly MatchEvent[]> = [];
+    let interrupted = 0;
+    let expired = 0;
+    const scheduler = new RoomTimeoutScheduler(clock, (events) => emitted.push(events), {
+      shouldInterrupt: () => true,
+      interrupt: () => {
+        interrupted++;
+      },
+    });
+
+    scheduler.schedule(Date.now(), () => {
+      expired++;
+      return expiry("TURN");
+    });
+    fire(timers[0]);
+
+    expect(expired).toBe(0);
+    expect(emitted).toEqual([]);
+    expect(interrupted).toBe(1);
+  });
+
+  it("si la sala no interrumpe, el vencimiento corre como siempre", () => {
+    const { clock, timers, fire } = recordingClock();
+    const emitted: Array<readonly MatchEvent[]> = [];
+    const scheduler = new RoomTimeoutScheduler(clock, (events) => emitted.push(events), {
+      shouldInterrupt: () => false,
+      interrupt: () => {
+        throw new Error("no debía interrumpir");
+      },
+    });
+
+    scheduler.schedule(Date.now(), () => expiry("TURN"));
+    fire(timers[0]);
+
+    expect(emitted).toEqual([[{ type: "DEADLINE_EXPIRED", kind: "TURN" }]]);
+  });
 });
