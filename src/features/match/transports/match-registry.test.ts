@@ -906,6 +906,9 @@ function countingStore() {
       inner.del(key);
     },
     delIfEquals: track("delIfEquals", (key, value) => inner.delIfEquals(key, value)),
+    setIfAbsent: track("setIfAbsent", (key, value, seconds) =>
+      inner.setIfAbsent(key, value, seconds),
+    ),
     sadd: track("sadd", (key, value) => inner.sadd(key, value)),
     srem: track("srem", (key, value) => inner.srem(key, value)),
     smembers: track("smembers", (key) => inner.smembers(key)),

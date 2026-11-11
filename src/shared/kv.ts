@@ -31,6 +31,9 @@ export interface KeyValueStore {
   // Lua: `src/shared/redis-presence.ts`). Un `get` seguido de un `del` deja una ventana en la que otro
   // escribe un valor nuevo y el `del` se lo lleva. @returns si borró.
   delIfEquals(key: string, value: string): Promise<boolean>;
+  // ESCRIBE CON PLAZO SÓLO SI NO EXISTE (`SET NX EX`), atómico: el candado de abrir una mesa por
+  // `matchId`. @returns si escribió.
+  setIfAbsent(key: string, value: string, seconds: number): Promise<boolean>;
   sadd(key: string, value: string): Promise<unknown>;
   srem(key: string, value: string): Promise<unknown>;
   smembers(key: string): Promise<string[]>;
@@ -77,6 +80,12 @@ export class MemoryKeyValueStore implements KeyValueStore {
 
   del(key: string): void {
     this.entries.delete(key);
+  }
+
+  async setIfAbsent(key: string, value: string, seconds: number): Promise<boolean> {
+    if (this.live(key) !== undefined) return false;
+    this.entries.set(key, { value, expiresAt: this.now() + seconds * 1000 });
+    return true;
   }
 
   // Atómico por construcción: el event loop no intercala nada entre la lectura y el borrado.

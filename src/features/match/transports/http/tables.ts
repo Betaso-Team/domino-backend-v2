@@ -103,6 +103,11 @@ export function tablesRoutes(deps: TablesDeps): Router {
         const table = await deps.tables.openRequest(body);
         response.status(201).json({ status: "success", data: table });
       } catch (error) {
+        // UN DUPLICADO QUE NO ENCONTRÓ LA SALA A TIEMPO: la está abriendo otro pedido. Reintentable.
+        if (error instanceof Error && error.message.startsWith("MATCH_OPENING:")) {
+          sendError(response, 409, "MATCH_OPENING");
+          return;
+        }
         const code = error instanceof Error ? REFUSAL.exec(error.message)?.[1] : undefined;
         // Todo lo que no es un rechazo de la sala es NUESTRO: 500, no un 422 que lo disfrace.
         if (!code) throw error;

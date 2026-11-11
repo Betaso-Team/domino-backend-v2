@@ -8,7 +8,7 @@ export const COMPARE_AND_DELETE_LUA = `if redis.call("GET", KEYS[1]) == ARGV[1] 
 end
 return 0`;
 
-// EL PRESENCE DE COLYSEUS MÁS EL ÚNICO COMANDO QUE LE FALTA AL REGISTRO. Es una subclase y no un
+// EL PRESENCE DE COLYSEUS MÁS LOS DOS COMANDOS QUE LE FALTAN AL REGISTRO. Es una subclase y no un
 // envoltorio porque la conexión (`pub`) es `protected`: así se reusa la misma conexión que Colyseus
 // ya abre, sin una tercera conexión a Redis por proceso, y el resto de `KeyValueStore` sigue encajando
 // por estructura (ver `kv.ts`).

@@ -189,6 +189,10 @@ const CENSUS_KEY = "live_seats";
 // UN RESULTADO QUE UN PROCESO VIVO TIENE EN MEMORIA Y NO PUDO ENCOLAR (Mongo caído): la recuperación de
 // partidas interrumpidas no la toca. Con plazo, renovado en cada reintento: si el proceso muere, vence.
 const pendingResultKey = (matchId: string) => `match_result_pending:${matchId}`;
+// EL CANDADO DE ABRIR LA MESA DE UNA PARTIDA: dos `POST /internal/matches` del mismo `matchId` a la vez
+// (el orquestador que reintenta, dos instancias) abren UNA sala. Con plazo, por si quien lo tomó muere.
+const openingKey = (matchId: string) => `match_opening:${matchId}`;
+export const OPENING_LOCK_SECONDS = 30;
 export const PENDING_RESULT_TTL_SECONDS = 180;
 
 // EL PLAZO DE TODAS ELLAS, y el latido que lo renueva. Son una sola decisión y no dos:
@@ -404,6 +408,24 @@ export class MatchRegistry {
   async isLive(matchId: string): Promise<boolean> {
     const roomId = await this.store.get(matchKey(matchId));
     return roomId !== undefined && (await this.store.get(configKey(roomId))) !== undefined;
+  }
+
+  /** La sala viva de esa partida (la misma prueba que `isLive`), o `undefined`. */
+  async roomOf(matchId: string): Promise<string | undefined> {
+    const roomId = await this.store.get(matchKey(matchId));
+    if (roomId === undefined || (await this.store.get(configKey(roomId))) === undefined)
+      return undefined;
+    return roomId;
+  }
+
+  /** Toma el candado de abrir la mesa de `matchId` con `token`. @returns si lo tomó. */
+  async claimOpening(matchId: string, token: string): Promise<boolean> {
+    return this.store.setIfAbsent(openingKey(matchId), token, OPENING_LOCK_SECONDS);
+  }
+
+  /** Lo suelta sólo si sigue siendo suyo (vencido y tomado por otro, no se toca). */
+  async releaseOpening(matchId: string, token: string): Promise<void> {
+    await this.store.delIfEquals(openingKey(matchId), token);
   }
 
   async matchOf(userId: string): Promise<string | undefined> {

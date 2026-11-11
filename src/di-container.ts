@@ -139,7 +139,7 @@ export const driver: MatchMakerDriver | undefined = env.redisUrl
 // Sin Redis queda el de memoria, que NO es un doble: es la implementación del proceso único,
 // igual que `MemoryHistory` más abajo.
 const store: KeyValueStore =
-  (redisPresence as (Presence & Pick<KeyValueStore, "delIfEquals">) | undefined) ??
+  (redisPresence as (Presence & Pick<KeyValueStore, "delIfEquals" | "setIfAbsent">) | undefined) ??
   new MemoryKeyValueStore();
 
 // EL REGISTRO DE PARTIDAS VIVAS, que ya no es del proceso sino del CLÚSTER: sus dos respuestas
@@ -387,7 +387,9 @@ if (isTestingEnvironment(env.appEnv)) {
 }
 // LA API INTERNA DEL ORQUESTADOR abre las mesas con este gateway: es la única puerta de entrada a
 // una partida.
-rootContainer.register(ColyseusMatchGateway, { useValue: new ColyseusMatchGateway() });
+rootContainer.register(ColyseusMatchGateway, {
+  useValue: new ColyseusMatchGateway(undefined, undefined, matchRegistry),
+});
 // LA TRAZA DEL JUEGO, y el token existe SÓLO cuando el nivel la pide. El sink no sabe de
 // niveles ni pregunta por ninguno: con el debug apagado no se construye, y así el costo de
 // filtrar los campos de cada evento de cada mesa tampoco se paga.

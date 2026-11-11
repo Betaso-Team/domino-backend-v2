@@ -57,6 +57,35 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     await sitEveryone(opened);
   });
 
+  // UNA SALA POR `matchId`: el orquestador que reintenta un `POST` cuya respuesta se perdió recibe la
+  // MISMA sala con reservas nuevas, y las reservas nuevas sirven.
+  it("un POST repetido con el mismo matchId devuelve la misma sala con reservas que sirven", async () => {
+    const table = casualTable(["o-dup1", "o-dup2"]);
+    const first = (await (await post("/internal/matches", table)).json()) as Opened;
+    const again = await post("/internal/matches", table);
+    expect(again.status).toBe(201);
+    const second = (await again.json()) as Opened;
+    expect(second.data.roomId).toBe(first.data.roomId);
+    expect(second.data.seats.map((seat) => seat.reservation.sessionId)).not.toEqual(
+      first.data.seats.map((seat) => seat.reservation.sessionId),
+    );
+    await sitEveryone(second);
+  });
+
+  // A LA VEZ: el candado `match_opening:<matchId>` deja abrir a uno; los demás esperan su sala.
+  it("seis POST simultáneos del mismo matchId abren UNA sala", async () => {
+    const table = casualTable(["o-par1", "o-par2"]);
+    const before = (await matchMaker.query({ name: "domino" })).length;
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, () => post("/internal/matches", table)),
+    );
+    const bodies = (await Promise.all(responses.map((res) => res.json()))) as Opened[];
+    expect(responses.map((res) => res.status)).toEqual(Array(6).fill(201));
+    expect(new Set(bodies.map((body) => body.data.roomId)).size).toBe(1);
+    expect((await matchMaker.query({ name: "domino" })).length).toBe(before + 1);
+    await sitEveryone(bodies[5] as Opened);
+  });
+
   it("le devuelve el asiento a quien sigue en una mesa llena, con el matchId del orquestador", async () => {
     const table = casualTable(["o-c", "o-d"]);
     const opened = (await (await post("/internal/matches", table)).json()) as Opened;
