@@ -14,8 +14,12 @@ return 0`;
 // por estructura (ver `kv.ts`).
 export class DominoRedisPresence
   extends RedisPresence
-  implements Pick<KeyValueStore, "delIfEquals">
+  implements Pick<KeyValueStore, "delIfEquals" | "setIfAbsent">
 {
+  async setIfAbsent(key: string, value: string, seconds: number): Promise<boolean> {
+    return (await this.pub.set(key, value, "EX", seconds, "NX")) === "OK";
+  }
+
   async delIfEquals(key: string, value: string): Promise<boolean> {
     return Number(await this.pub.eval(COMPARE_AND_DELETE_LUA, 1, key, value)) === 1;
   }
