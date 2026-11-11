@@ -221,8 +221,8 @@ describe("el registro y el historial en la moneda del jugador", () => {
 
   it("el asiento con precio lo guarda, y su fila lo devuelve; el que no lo trajo queda en UC", async () => {
     const match = await seatPair(server, [
-      { userId: "rec7", displayName: "Siete", currency: "VES", price },
-      { userId: "rec8", displayName: "Ocho", currency: "VES" },
+      { userId: "rec7", displayName: "Siete", currency: "VES", providerId: "betaso", price },
+      { userId: "rec8", displayName: "Ocho", currency: "VES", providerId: "betaso" },
     ]);
     await revealHands(match);
     await act(match, "rec8", "ABANDON");
@@ -281,7 +281,7 @@ describe("el registro por proveedor", () => {
   it("el asiento guarda su proveedor, y el admin de ese proveedor ve la partida", async () => {
     const match = await seatPair(server, [
       { userId: "rec9", displayName: "Nueve", currency: "VES", providerId: "betaso" },
-      { userId: "rec10", displayName: "Diez", currency: "VES" },
+      { userId: "rec10", displayName: "Diez", currency: "VES", providerId: "parley" },
     ]);
     await revealHands(match);
     await act(match, "rec10", "ABANDON");
@@ -289,9 +289,9 @@ describe("el registro por proveedor", () => {
 
     const record = await recordOf(match.config.matchId);
     for (const field of ["seats", "players"] as const) {
-      const [provided, plain] = record?.[field] as Doc[];
-      expect(provided).toMatchObject({ userId: "rec9", providerId: "betaso" });
-      expect(plain).not.toHaveProperty("providerId");
+      const [mine, theirs] = record?.[field] as Doc[];
+      expect(mine).toMatchObject({ userId: "rec9", providerId: "betaso" });
+      expect(theirs).toMatchObject({ userId: "rec10", providerId: "parley" });
     }
 
     const as = (prv: string) => ({
@@ -302,10 +302,23 @@ describe("el registro por proveedor", () => {
       const body = (await response.json()) as { data: { items: Doc[] } };
       return body.data.items.map((item) => item.matchId);
     };
-    expect(await listed("betaso")).toEqual([match.config.matchId]);
-    expect(await listed("parley")).toEqual([]);
-    expect((await get(`/internal/matches/${match.config.matchId}`, as("betaso"))).status).toBe(200);
-    expect((await get(`/internal/matches/${match.config.matchId}`, as("parley"))).status).toBe(404);
+    expect(await listed("betaso")).toContain(match.config.matchId);
+    expect(await listed("parley")).toEqual([match.config.matchId]);
+    expect(await listed("otro")).toEqual([]);
+    // CADA UNO LA VE DESDE SU LADO: su asiento entero, el del otro sin identidad ni proveedor.
+    const seatsAs = async (prv: string) => {
+      const response = await get(`/internal/matches/${match.config.matchId}`, as(prv));
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { data: { seats: Doc[] } }).data.seats;
+    };
+    const [ownB, rivalB] = await seatsAs("betaso");
+    expect(ownB).toMatchObject({ userId: "rec9", providerId: "betaso" });
+    expect(rivalB).not.toHaveProperty("userId");
+    expect(rivalB).not.toHaveProperty("providerId");
+    const [rivalP, ownP] = await seatsAs("parley");
+    expect(ownP).toMatchObject({ userId: "rec10", providerId: "parley" });
+    expect(JSON.stringify(rivalP)).not.toMatch(/rec9|betaso/);
+    expect((await get(`/internal/matches/${match.config.matchId}`, as("otro"))).status).toBe(404);
   });
 });
 

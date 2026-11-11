@@ -21,8 +21,8 @@ const options = {
   matchId: "money-1",
   gameModeId: "classic-2p",
   seats: seatsOf([
-    { userId: "ada", displayName: "Ada", currency: "VES" },
-    { userId: "lin", displayName: "Lin", currency: "USD" },
+    { userId: "ada", displayName: "Ada", currency: "VES", providerId: "betaso" },
+    { userId: "lin", displayName: "Lin", currency: "USD", providerId: "betaso" },
   ]),
   seed: "money-seed",
   pointsToWin: 100,
@@ -41,10 +41,10 @@ const fourSeatOptions = {
   matchId: "money-4p",
   gameModeId: "classic-4p",
   seats: seatsOf([
-    { userId: "u1", displayName: "Ada", currency: "VES" },
-    { userId: "u2", displayName: "Lin", currency: "VES" },
-    { userId: "u3", displayName: "Rex", currency: "USD" },
-    { userId: "u4", displayName: "Zoe", currency: "COP" },
+    { userId: "u1", displayName: "Ada", currency: "VES", providerId: "betaso" },
+    { userId: "u2", displayName: "Lin", currency: "VES", providerId: "betaso" },
+    { userId: "u3", displayName: "Rex", currency: "USD", providerId: "betaso" },
+    { userId: "u4", displayName: "Zoe", currency: "COP", providerId: "betaso" },
   ]),
 } as const;
 
@@ -318,8 +318,8 @@ describe("payoutOf — el resto", () => {
       ...options,
       matchId: "money-2",
       seats: seatsOf([
-        { userId: "rex", displayName: "Rex", currency: "USD" },
-        { userId: "zoe", displayName: "Zoe", currency: "COP" },
+        { userId: "rex", displayName: "Rex", currency: "USD", providerId: "betaso" },
+        { userId: "zoe", displayName: "Zoe", currency: "COP", providerId: "betaso" },
       ]),
     });
     expect(() =>
@@ -342,8 +342,8 @@ describe("payoutOf — el resto", () => {
       ...options,
       matchId: "money-dec",
       seats: seatsOf([
-        { userId: "u1", displayName: "Ada", currency: "VES" },
-        { userId: "u2", displayName: "Lin", currency: "USD" },
+        { userId: "u1", displayName: "Ada", currency: "VES", providerId: "betaso" },
+        { userId: "u2", displayName: "Lin", currency: "USD", providerId: "betaso" },
       ]),
       entryFee: 1.5,
       prize: 2.75,

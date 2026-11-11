@@ -1,7 +1,9 @@
 import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { describe, expect, it } from "vitest";
 import { seatPriceView, seatText, ucText, wireEventOf } from "../amounts";
-import { entryView, recordView } from "../record-view";
+import { type RecordAudience, entryView, recordView } from "../record-view";
+
+const TABLEA: RecordAudience = { kind: "tablea" };
 
 // LA CONVENCIÓN DE MONTOS v2 EN LA FRONTERA DEL DOMINÓ: lo que `network/amounts.ts` y `record-view.ts`
 // emiten. Las llaves de plata de cada forma, para `findBadAmounts`.
@@ -177,7 +179,7 @@ describe("recordView: el registro como lo lee el panel", () => {
   };
 
   it("la mesa en UC y cada asiento en su moneda, con la tasa de la partida", () => {
-    const view = recordView(stored) as typeof stored & Record<string, unknown>;
+    const view = recordView(stored, TABLEA) as typeof stored & Record<string, unknown>;
     expect(view.table).toEqual({
       gameModeId: "g",
       name: "Clásica",
@@ -236,7 +238,7 @@ describe("recordView: el registro como lo lee el panel", () => {
       prizePaidInPlayerCurrency: _p,
       ...seat
     } = stored.players[0] as (typeof stored.players)[0];
-    const view = recordView({ ...stored, players: [seat] }) as Record<string, unknown>;
+    const view = recordView({ ...stored, players: [seat] }, TABLEA) as Record<string, unknown>;
     expect(view.players).toEqual([
       {
         currency: "UC",
@@ -253,15 +255,15 @@ describe("recordView: el registro como lo lee el panel", () => {
 
   it("una partida abierta (sin `rateId` todavía) publica el precio sin tasa", () => {
     const { rateId: _r, players: _p, ...opened } = stored;
-    const view = recordView(opened) as Record<string, unknown>;
+    const view = recordView(opened, TABLEA) as Record<string, unknown>;
     const [first] = view.seats as Record<string, unknown>[];
     const { rateId: _none, ...withoutRate } = priceView;
     expect(first?.price).toEqual(withoutRate);
   });
 
   it("no deja ningún monto fuera de la convención ni ninguna llave de antes", () => {
-    const text = JSON.stringify(recordView(stored));
-    expect(findBadAmounts(recordView(stored), RECORD_KEYS)).toEqual([]);
+    const text = JSON.stringify(recordView(stored, TABLEA));
+    expect(findBadAmounts(recordView(stored, TABLEA), RECORD_KEYS)).toEqual([]);
     for (const old of ["InUC", "InPlayerCurrency", '"uc"', '"ves"']) {
       expect(text).not.toContain(old);
     }
@@ -269,15 +271,15 @@ describe("recordView: el registro como lo lee el panel", () => {
 
   it("no toca el documento guardado", () => {
     const before = JSON.stringify(stored);
-    recordView(stored);
+    recordView(stored, TABLEA);
     expect(JSON.stringify(stored)).toBe(before);
   });
 
   it("un documento de la forma vieja, o una fila sin montos, sale como está", () => {
     const legacy = { _id: "x", matchId: "m-0", entries: [{ seq: 1, type: "PLACE_TILE" }] };
-    expect(recordView(legacy)).toEqual(legacy);
+    expect(recordView(legacy, TABLEA)).toEqual(legacy);
     const summary = { _id: "y", matchId: "m-2", status: "started" };
-    expect(recordView(summary)).toEqual(summary);
+    expect(recordView(summary, TABLEA)).toEqual(summary);
   });
 
   it("una entrada de la timeline sin plata pasa tal cual", () => {

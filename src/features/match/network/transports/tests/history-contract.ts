@@ -43,8 +43,24 @@ export const SETUP: MatchSetup = {
     isRematchEnabled: true,
   },
   seats: [
-    { id: "seat-1", teamId: "A", seat: 0, userId: "u1", displayName: "Ana", currency: "VES" },
-    { id: "seat-2", teamId: "B", seat: 1, userId: "u2", displayName: "Beto", currency: "VES" },
+    {
+      id: "seat-1",
+      teamId: "A",
+      seat: 0,
+      userId: "u1",
+      displayName: "Ana",
+      currency: "VES",
+      providerId: "betaso",
+    },
+    {
+      id: "seat-2",
+      teamId: "B",
+      seat: 1,
+      userId: "u2",
+      displayName: "Beto",
+      currency: "VES",
+      providerId: "betaso",
+    },
   ],
 };
 
@@ -141,7 +157,11 @@ interface Row {
   readonly providers?: readonly (string | undefined)[];
 }
 
-/** Los asientos de una mesa con estos usuarios, en orden: dos o cuatro, con su proveedor si lo hay. */
+/**
+ * Los asientos de una mesa con estos usuarios, en orden: dos o cuatro, con su proveedor si lo hay. Un
+ * asiento sin proveedor es el de un documento grabado antes de que el orquestador lo mandara: el
+ * escritor de hoy ya no lo produce, pero Mongo todavía los tiene.
+ */
 const seatsOf = (
   users: readonly string[],
   providers: readonly (string | undefined)[] = [],
@@ -156,7 +176,7 @@ const seatsOf = (
       displayName: userId,
       currency: "VES",
       ...(providerId === undefined ? {} : { providerId }),
-    };
+    } as MatchSetup["seats"][number];
   });
 
 async function seed(

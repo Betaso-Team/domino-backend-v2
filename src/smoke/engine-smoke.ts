@@ -40,8 +40,8 @@ const OPTIONS = {
   gameModeId: "00000000-0000-4000-8000-00000000500e",
   gameMode: GAME_MODE,
   participants: [
-    { userId: "smoke-ada", displayName: "Ada", currency: "VES" },
-    { userId: "smoke-lin", displayName: "Lin", currency: "USD" },
+    { userId: "smoke-ada", displayName: "Ada", currency: "VES", providerId: "smoke-betaso" },
+    { userId: "smoke-lin", displayName: "Lin", currency: "USD", providerId: "smoke-parley" },
   ],
   seed: "smoke-deterministic-seed",
   teamAssignment: "SEAT_ORDER",
@@ -49,6 +49,17 @@ const OPTIONS = {
 } satisfies CreateMatchRequest;
 
 type SmokeRoom = Room<unknown, MatchState>;
+
+// EL ASIENTO PROPIO LLEGA EN EL MENSAJE `config` (`seat.playerId`), no en el estado. El handler se
+// registra en el mismo turno en que resuelve el `join`, sin un `await` en el medio: si no, el mensaje
+// llega antes que el handler.
+function seatOf(room: SmokeRoom): Promise<string> {
+  return new Promise((resolve) => {
+    room.onMessage("config", (message: { seat: { playerId: string } }) =>
+      resolve(message.seat.playerId),
+    );
+  });
+}
 
 export function requireSmokeFlag(enabled: boolean): void {
   if (!enabled) throw new Error("el smoke requiere RUN_ENGINE_SMOKE=1");
@@ -232,8 +243,10 @@ async function run(): Promise<void> {
   try {
     const first = await sdkA.create<MatchState>("domino", OPTIONS, MatchState);
     roomA = first;
+    const seatA = seatOf(first);
     const second = await sdkB.joinById<MatchState>(first.roomId, {}, MatchState);
     roomB = second;
+    const seatB = seatOf(second);
     await waitUntil(
       "estado inicial de ambos clientes",
       () => first.state.players.length === 2 && second.state.players.length === 2,
@@ -246,15 +259,23 @@ async function run(): Promise<void> {
     const wire = JSON.stringify(first.state.toJSON());
     assert.match(wire, /Ada/);
     assert.match(wire, /Lin/);
-    // El `userId` viaja a propósito: es como cada cliente encuentra SU asiento. La moneda no.
-    for (const [room, userId] of [
-      [first, "smoke-ada"],
-      [second, "smoke-lin"],
+    // Cada cliente encuentra SU asiento por el `seat.playerId` de su mensaje `config`. Ni el `userId`
+    // ni el proveedor ni la moneda de nadie viajan en el estado.
+    for (const [room, seat, userId] of [
+      [first, await seatA, "smoke-ada"],
+      [second, await seatB, "smoke-lin"],
     ] as const) {
-      const mine = room.state.players.find((player) => player.userId === userId);
-      assert.ok(mine, `el cliente de ${userId} no encuentra su asiento por userId`);
+      const mine = room.state.players.find((player) => player.playerId === seat);
+      assert.ok(mine, `el cliente de ${userId} no encuentra su asiento por seat.playerId`);
     }
-    for (const privateValue of ["VES", "USD"]) {
+    for (const privateValue of [
+      "VES",
+      "USD",
+      "smoke-ada",
+      "smoke-lin",
+      "smoke-betaso",
+      "smoke-parley",
+    ]) {
       assert.equal(wire.includes(privateValue), false, `dato privado filtrado: ${privateValue}`);
     }
 

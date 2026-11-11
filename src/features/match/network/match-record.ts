@@ -68,7 +68,7 @@ export function matchSetupOf(
       // llegue a cerrar, y nadie lo vuelve a pedir con la tasa de otro día.
       ...(seat.price === undefined ? {} : { price: seat.price }),
       // EL PROVEEDOR, para el ámbito del panel. Lo copia también el cierre (`players[]` extiende el asiento).
-      ...(seat.providerId === undefined ? {} : { providerId: seat.providerId }),
+      providerId: seat.providerId,
     })),
   };
 }

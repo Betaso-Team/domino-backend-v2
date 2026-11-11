@@ -45,8 +45,8 @@ export interface PublicMatchConfig {
   readonly pointsToWin: number;
   /**
    * LA MONEDA DE LA MESA, que es siempre UC: la mesa es de todos sus asientos y cada uno paga en su
-   * moneda, así que sus montos son los del catálogo, en UC. La cifra en la moneda de cada asiento está
-   * en `seatPrices`, que es otra entidad con su propio `currency`.
+   * moneda, así que sus montos son los del catálogo, en UC. La cifra en la moneda de un asiento la recibe
+   * sólo ese asiento, en el `seat.price` de su mensaje `config` (`SeatConfigMessage`).
    */
   readonly currency: typeof UC;
   /**
@@ -59,7 +59,7 @@ export interface PublicMatchConfig {
    * LOS NIVELES DE AUMENTO QUE LA MESA OFRECE (truco `58ce78f`), para que el front pinte el aumento
    * ANTES de proponer. Con el `extra` del catálogo: el front lo muestra junto al nivel, y no es
    * secreto —lo publica el catálogo de modos—. Vacío = esta mesa no ofrece aumentar. El precio de
-   * cada uno lo deriva el cliente con `betAmountsOf`, o lo lee de `seatPrices[seat].levels`.
+   * cada uno lo deriva el cliente con `betAmountsOf`, o lo lee de `seat.price.levels` de su mensaje `config`.
    *
    * `extra` NO ES PLATA, y por eso sigue siendo un número: es lo que el nivel le SUMA al multiplicador
    * de puntos del ranking (`multiplier + extra`, `core/rules/config.ts`). Ni `additionalPoints`.
@@ -74,22 +74,17 @@ export interface PublicMatchConfig {
   /** Si la mesa sienta una máquina en el asiento del que se retira (`DominoMatchConfig.enableBots`). */
   readonly enableBots: boolean;
   readonly timeouts: PublicMatchTimeouts;
-  /**
-   * LO QUE LA MESA CUESTA Y PAGA EN LA MONEDA DE CADA ASIENTO, por su id opaco (`seat-1` → precio). El
-   * front toma el de su asiento y pinta la entrada, el premio y cada aumento en Bs. o en lo que pague
-   * el jugador. Cada precio es una entidad en la convención: `{ currency: "VES", rateId, rate, entry:
-   * "200.00", prize, levels }`, con la tasa de la mesa (`rateId`) con la que billing cotizó cada monto, y
-   * sin `uc`. Sólo los asientos que trajeron precio, y AUSENTE si ninguno lo trajo (mesa gratis, orquestador viejo): el front sigue en
-   * UC. No es secreto —el rival ve cuánto paga el otro—, pero no lleva nada más del asiento.
-   */
-  readonly seatPrices?: Readonly<Record<string, SeatPriceView>>;
 }
 
 // LA CONFIGURACIÓN PÚBLICA DE UNA MESA, pura: la usan el registro (lo que estampa en el almacén) y la
-// sala (el mensaje `config` que manda al entrar), y tienen que ser la misma. Allowlist explícita:
-// restar `seed` filtraría solo lo conocido hoy y una propiedad secreta agregada mañana se filtraría
-// al wire. Tampoco se exponen campos derivados de la ventana de reparto ni identidad. La tasa de la mesa
-// (`rateId`) sale sólo dentro de cada `seatPrices`, que es el registro cotizado con ella.
+// sala (la base del mensaje `config` que manda al entrar), y tienen que ser la misma. Allowlist
+// explícita: restar `seed` filtraría solo lo conocido hoy y una propiedad secreta agregada mañana se
+// filtraría al wire. Tampoco se exponen campos derivados de la ventana de reparto.
+//
+// ES DE LA MESA Y DE NADIE MÁS: lo mismo para todos sus asientos, de cualquier proveedor. Nada de un
+// asiento —su identidad, su proveedor, su moneda, su precio, la tasa— entra acá: lo de un asiento lo
+// arma la sala para ese asiento solo (`DominoRoom.sendConfig`). Antes llevaba `seatPrices`, el precio de
+// todos por asiento, y el jugador de un proveedor veía la moneda y lo que pagaba el del otro.
 export function publicConfigOf(
   config: DominoMatchConfig,
   timeouts: PublicMatchTimeouts,
@@ -123,21 +118,46 @@ export function publicConfigOf(
       dealingMs: timeouts.dealingMs,
       betResponseMs: timeouts.betResponseMs,
     },
-    ...seatPricesOf(config),
   };
 }
 
-// CAMPO POR CAMPO, como el resto (`seatPriceView`), con la tasa de la mesa.
-function seatPricesOf(config: DominoMatchConfig): Pick<PublicMatchConfig, "seatPrices"> {
-  const priced = config.seats.flatMap(({ playerId, price }) =>
-    price === undefined ? [] : [[playerId, seatPriceView(price, config.rateId)] as const],
-  );
-  return priced.length === 0 ? {} : { seatPrices: Object.fromEntries(priced) };
+/**
+ * LO QUE LA MESA LE DICE A UN ASIENTO SOBRE SÍ MISMO, y sólo a él: cuál es el suyo (`playerId`, el
+ * `seat-N` del estado) y, si se sentó con precio, lo que la mesa le cuesta y le paga EN SU MONEDA
+ * (`{ currency: "VES", rateId, rate, entry: "200.00", prize, levels }`, con la tasa de la mesa con la que
+ * billing cotizó, y sin `uc`). Sin precio (mesa gratis, de torneo) no hay `price` y el front sigue en UC.
+ */
+export interface SeatConfigView {
+  readonly playerId: string;
+  readonly price?: SeatPriceView;
 }
 
-export interface MatchConfigResponse extends PublicMatchConfig {
+/** EL MENSAJE `config` de la sala: la mesa, el asiento de quien lo recibe y el reloj del servidor. */
+export interface SeatConfigMessage extends PublicMatchConfig {
+  readonly seat: SeatConfigView;
   // No cachear: el cliente usa este instante para calcular el offset de activeDeadline.
   readonly serverNow: number;
+}
+
+// EL MENSAJE DE UN ASIENTO, puro. La mesa va entera (es de todos) y del asiento va sólo el que lo recibe,
+// CAMPO POR CAMPO: ni su `userId` —el jugador ya lo conoce, y el rival no tiene por qué— ni su
+// proveedor. Nunca recorre `config.seats` para armar algo de varios: un mensaje con lo de otro asiento
+// es la fuga que esto vino a cerrar.
+export function seatConfigOf(
+  table: PublicMatchConfig,
+  config: DominoMatchConfig,
+  playerId: string,
+  serverNow: number,
+): SeatConfigMessage {
+  const price = config.seats.find((seat) => seat.playerId === playerId)?.price;
+  return {
+    ...table,
+    seat: {
+      playerId,
+      ...(price === undefined ? {} : { price: seatPriceView(price, config.rateId) }),
+    },
+    serverNow,
+  };
 }
 
 // LAS DOS CLAVES, sin prefijo de producto adentro del template a propósito. El aislamiento entre
@@ -192,45 +212,42 @@ const DEAD_MS = 4 * HEARTBEAT_MS;
  */
 interface SeatRef {
   readonly userId: string;
-  /** Ausente si el orquestador no lo mandó: el censo lo cuenta con `providerId: null`. */
-  readonly providerId?: string;
+  readonly providerId: string;
   readonly currency: string;
 }
 
 /**
- * UN GRUPO DEL CENSO: cuántos asientos activos tiene un (proveedor, moneda). `providerId: null` es el
- * asiento que llegó sin proveedor. Las mesas de torneo cuentan en los MISMOS grupos que las casuales:
- * su jugador está tan ocupado como el de una casual, y así la suma de los grupos es el mismo total que
- * `playersInMatch` (salvo las entradas viejas, que no traen grupos; ver `MatchCensusCount.groups`).
+ * LA MESA DE UN GRUPO DEL CENSO: el modo de una casual (`gameModeId`) o el torneo de una de torneo
+ * (`tournamentId`), exactamente uno de los dos. Con la mesa adentro, el orquestador decide qué grupos
+ * ve cada proveedor (los modos que ofrece, sus torneos) sin perder el número de los demás.
  */
-export interface CensusGroup {
-  readonly providerId: string | null;
+export type CensusTable =
+  | { readonly gameModeId: string; readonly tournamentId?: never }
+  | { readonly tournamentId: string; readonly gameModeId?: never };
+
+/**
+ * UN GRUPO DEL CENSO: cuántos asientos activos tiene un (proveedor, moneda) en una mesa (un modo o un
+ * torneo). Todo asiento tiene proveedor, así que la suma de los grupos es exactamente `playersInMatch`.
+ */
+export type CensusGroup = CensusTable & {
+  readonly providerId: string;
   readonly currency: string;
   readonly seats: number;
-}
+};
 
 interface CensusEntry {
   readonly seats: number;
-  readonly gameModeId: string;
-  /** Solo en una mesa de torneo. Las entradas escritas antes de los torneos no lo tienen. */
-  readonly tournamentId?: string;
-  /** Los `seats` por (proveedor, moneda). Las entradas escritas antes del censo por proveedor no lo tienen. */
-  readonly groups?: readonly CensusGroup[];
+  /** Los `seats` de esta sala por (proveedor, moneda), cada grupo con la mesa. */
+  readonly groups: readonly CensusGroup[];
   readonly at: number;
 }
 
 export interface MatchCensusCount {
   /** Todos los asientos que siguen jugando, casuales y de torneo. */
   readonly playersInMatch: number;
-  /** Solo las mesas casuales: una de torneo no tiene modo. */
-  readonly byGameMode: ReadonlyMap<string, number>;
-  /** Las mesas de torneo, por torneo. */
-  readonly byTournament: ReadonlyMap<string, number>;
   /**
-   * Todos los asientos que siguen jugando, casuales y de torneo, por (proveedor, moneda), en el orden
-   * en que aparecen. Solo suma las entradas que traen grupos: las que escribió una sala de una versión
-   * anterior cuentan en `playersInMatch` y en ningún grupo, así que `playersInMatch − Σ groups` son los
-   * asientos SIN ATRIBUIR.
+   * Los mismos asientos por (proveedor, moneda, mesa), en el orden en que aparecen. Suman exactamente
+   * `playersInMatch`: no hay asientos sin atribuir.
    */
   readonly groups: readonly CensusGroup[];
 }
@@ -241,7 +258,7 @@ export interface MatchCensusCount {
 //
 // **Las dos preguntas se contestan desde el almacén compartido y no desde la memoria**, y ése es
 // todo el cambio. Con varios procesos, la sala de un jugador puede estar en otro nodo: el `Map`
-// que había acá contestaba "esa sala no existe" —404 en `GET /config/:roomId`— con total
+// que había acá contestaba "esa sala no existe" —404 en la ruta de la config, que ya no existe— con total
 // confianza y total falsedad. La memoria que queda es de ESCRITURA: qué anotó ESTE proceso, para
 // saber qué renovar y qué borrar. Nadie lee de ella.
 //
@@ -286,9 +303,7 @@ export class MatchRegistry {
     this.byRoomId.set(roomId, publicConfigOf(config, timeouts));
     this.seatsByRoomId.set(
       roomId,
-      config.seats.map(({ userId, providerId, currency }) =>
-        providerId === undefined ? { userId, currency } : { userId, providerId, currency },
-      ),
+      config.seats.map(({ userId, providerId, currency }) => ({ userId, providerId, currency })),
     );
     await this.keepAlive(roomId);
   }
@@ -352,23 +367,23 @@ export class MatchRegistry {
 
   // El censo cuenta ASIENTOS QUE SIGUEN JUGANDO, como truco: el que perdió la señal sigue
   // contando —su reloj corre—, el que se retiró o terminó ya no está en ninguna partida. Los `groups`
-  // salen de la MISMA lista `active`, así que suman exactamente `seats`.
+  // salen de la MISMA lista `active`, así que suman exactamente `seats`, y cada uno lleva la mesa: el
+  // torneo si es de torneo, el modo si es casual.
   private async writeCensus(
     roomId: string,
     config: PublicMatchConfig,
     active: readonly SeatRef[],
   ): Promise<void> {
-    await this.store.hset(
-      CENSUS_KEY,
-      roomId,
-      JSON.stringify({
-        seats: active.length,
-        gameModeId: config.gameModeId,
-        ...(config.tournamentId === undefined ? {} : { tournamentId: config.tournamentId }),
-        groups: groupSeats(active),
-        at: this.now(),
-      }),
-    );
+    const table: CensusTable =
+      config.tournamentId === undefined
+        ? { gameModeId: config.gameModeId }
+        : { tournamentId: config.tournamentId };
+    const entry: CensusEntry = {
+      seats: active.length,
+      groups: groupSeats(active, table),
+      at: this.now(),
+    };
+    await this.store.hset(CENSUS_KEY, roomId, JSON.stringify(entry));
   }
 
   async publicConfigOf(roomId: string): Promise<PublicMatchConfig | undefined> {
@@ -394,8 +409,6 @@ export class MatchRegistry {
   async census(): Promise<MatchCensusCount> {
     const now = this.now();
     let playersInMatch = 0;
-    const byGameMode = new Map<string, number>();
-    const byTournament = new Map<string, number>();
     const groups = new GroupTally();
 
     for (const [roomId, raw] of Object.entries(await this.store.hgetall(CENSUS_KEY))) {
@@ -406,19 +419,11 @@ export class MatchRegistry {
       }
       if (now - entry.at >= STALE_MS) continue;
       playersInMatch += entry.seats;
-      for (const group of entry.groups ?? [])
-        groups.add(group.providerId, group.currency, group.seats);
-      if (entry.tournamentId !== undefined) {
-        byTournament.set(
-          entry.tournamentId,
-          (byTournament.get(entry.tournamentId) ?? 0) + entry.seats,
-        );
-        continue;
-      }
-      byGameMode.set(entry.gameModeId, (byGameMode.get(entry.gameModeId) ?? 0) + entry.seats);
+      for (const group of entry.groups)
+        groups.add(group.providerId, group.currency, group, group.seats);
     }
 
-    return { playersInMatch, byGameMode, byTournament, groups: groups.list() };
+    return { playersInMatch, groups: groups.list() };
   }
 
   async remove(roomId: string): Promise<void> {
@@ -457,15 +462,26 @@ export class MatchRegistry {
   }
 }
 
-// LA SUMA POR (PROVEEDOR, MONEDA). La clave es la pareja serializada con `JSON.stringify` y no
-// concatenada: un `a|b` no dice dónde termina el proveedor, y `null` tiene que seguir distinto de "null".
+// LA SUMA POR (PROVEEDOR, MONEDA, MESA). La clave es la tupla serializada con `JSON.stringify` y no
+// concatenada: un `a|b|c` no dice dónde termina cada parte. El modo y el torneo van en posiciones
+// distintas, así que un torneo nunca se suma con un modo que se llame igual.
 class GroupTally {
   private readonly byKey = new Map<string, CensusGroup>();
 
-  add(providerId: string | null, currency: string, seats: number): void {
-    const key = JSON.stringify([providerId, currency]);
+  add(providerId: string, currency: string, table: CensusTable, seats: number): void {
+    // La mesa se copia CAMPO POR CAMPO: un grupo leído del almacén puede traer más de lo que dice el tipo.
+    const only: CensusTable =
+      table.tournamentId === undefined
+        ? { gameModeId: table.gameModeId }
+        : { tournamentId: table.tournamentId };
+    const key = JSON.stringify([
+      providerId,
+      currency,
+      only.gameModeId ?? null,
+      only.tournamentId ?? null,
+    ]);
     const seen = this.byKey.get(key);
-    this.byKey.set(key, { providerId, currency, seats: (seen?.seats ?? 0) + seats });
+    this.byKey.set(key, { providerId, currency, ...only, seats: (seen?.seats ?? 0) + seats });
   }
 
   list(): readonly CensusGroup[] {
@@ -473,33 +489,39 @@ class GroupTally {
   }
 }
 
-function groupSeats(seats: readonly SeatRef[]): readonly CensusGroup[] {
+function groupSeats(seats: readonly SeatRef[], table: CensusTable): readonly CensusGroup[] {
   const tally = new GroupTally();
-  for (const { providerId, currency } of seats) tally.add(providerId ?? null, currency, 1);
+  for (const { providerId, currency } of seats) tally.add(providerId, currency, table, 1);
   return tally.list();
 }
 
+const isText = (value: unknown): value is string => typeof value === "string";
+
+// UN GRUPO DE LA FORMA DE HOY: proveedor y moneda en texto, y exactamente una mesa. Uno de una versión
+// anterior (sin mesa, o con `providerId: null`) no lo es.
 function isCensusGroup(value: unknown): value is CensusGroup {
   if (typeof value !== "object" || value === null) return false;
-  const group = value as Partial<CensusGroup>;
+  const group = value as Record<string, unknown>;
   return (
-    (group.providerId === null || typeof group.providerId === "string") &&
-    typeof group.currency === "string" &&
-    typeof group.seats === "number"
+    isText(group.providerId) &&
+    isText(group.currency) &&
+    typeof group.seats === "number" &&
+    isText(group.gameModeId) !== isText(group.tournamentId) &&
+    (group.gameModeId === undefined || isText(group.gameModeId)) &&
+    (group.tournamentId === undefined || isText(group.tournamentId))
   );
 }
 
-// `groups` es OPCIONAL —las salas de una versión anterior no lo escriben y cuentan como sin
-// atribuir—, pero si viene tiene que estar bien: una entrada con grupos rotos es una entrada rota, y
-// se barre como las demás.
+// UNA ENTRADA DE LA FORMA DE HOY, o nada. La de una versión anterior —sin `groups`, o con grupos sin
+// mesa o sin proveedor— no se lee de otra manera: se trata como una entrada rota, no cuenta y se barre.
+// Si la escribió una sala viva de un proceso todavía viejo, la vuelve a escribir en su próximo latido y
+// vuelve a no contar, hasta que ese proceso se reemplaza (ver «Censo» en `docs/api-y-mensajes.md`).
 function parseCensus(raw: string): CensusEntry | undefined {
   try {
     const entry = JSON.parse(raw) as Partial<CensusEntry>;
     return typeof entry.seats === "number" &&
-      typeof entry.gameModeId === "string" &&
-      (entry.tournamentId === undefined || typeof entry.tournamentId === "string") &&
-      (entry.groups === undefined ||
-        (Array.isArray(entry.groups) && entry.groups.every(isCensusGroup))) &&
+      Array.isArray(entry.groups) &&
+      entry.groups.every(isCensusGroup) &&
       typeof entry.at === "number"
       ? (entry as CensusEntry)
       : undefined;

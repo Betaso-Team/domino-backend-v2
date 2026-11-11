@@ -8,7 +8,7 @@ import type { NetworkMatchEvent } from "./events";
 // entryFee: "2.0000" }`—. Sin `uc` al lado: un registro cobrado con una tasa expone su `rateId`, y quien
 // quiera el UC consulta esa tasa. Adentro nada cambia: el motor, el snapshot y el registro en Mongo
 // siguen guardando los números en UC y los textos en la moneda del jugador; la forma es de la FRONTERA
-// (el mensaje `config`, `GET /config/:roomId`, el estado y los eventos de la sala, el resultado por
+// (el mensaje `config`, el estado y los eventos de la sala, el resultado por
 // RabbitMQ y las lecturas del historial).
 //
 // DE DÓNDE SALE CADA ENTIDAD:

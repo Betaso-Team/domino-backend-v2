@@ -49,11 +49,11 @@ import { type SeatCredentials, configOf, requestOf } from "../match-contract";
 const TOURNAMENT_TABLE_NAME = "Torneo";
 import {
   HEARTBEAT_MS,
-  type MatchConfigResponse,
   MatchRegistry,
   type PublicMatchConfig,
   publicConfigOf,
   publicTimeoutsOf,
+  seatConfigOf,
 } from "../match-registry";
 import {
   type MatchHasOutcome,
@@ -84,9 +84,9 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
   // al asiento opaco necesita la identidad externa, que el estado no sincroniza y el
   // registro no guarda. Se asigna en `onCreate`, antes de que la sala pueda recibir a nadie.
   private config!: DominoMatchConfig;
-  // LA CONFIGURACIÓN PÚBLICA DE LA MESA, la misma que el registro estampa y `GET /config/:roomId`
-  // sirve: la sala la manda en el mensaje `config` a cada uno que entra o vuelve, así el front no
-  // necesita ir a buscarla por HTTP. Recortada (`publicConfigOf`): nunca lleva el `seed`.
+  // LA CONFIGURACIÓN PÚBLICA DE LA MESA, la misma que el registro estampa: la sala la manda en el
+  // mensaje `config` a cada uno que entra o vuelve, junto con lo de SU asiento (`seatConfigOf`).
+  // Recortada (`publicConfigOf`): nunca lleva el `seed` ni nada de un asiento.
   private publicConfig!: PublicMatchConfig;
   private closeRematch: RematchCloser = () => [];
   // EL MOTIVO QUE SOLO LA SALA SABE de por qué una mesa del orquestador se cerró sin veredicto: el
@@ -384,8 +384,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
     // SE ANOTA ENTRE LAS PARTIDAS VIVAS DEL CLÚSTER, y SE ESPERA. A partir de que `onCreate`
     // devuelve, la sala ya puede recibir gente y su `roomId` ya circula en la reserva de asiento:
-    // un `GET /config/:roomId` que llegue antes de que la clave esté escrita —y que caiga en otro
-    // proceso, que es todo el punto de esto— responde 404 por una sala que existe.
+    // un `POST /internal/players/:userId/seat` que llegue antes de que la clave esté escrita —y que
+    // caiga en otro proceso, que es todo el punto de esto— responde 404 por una sala que existe.
     this.matches = rootContainer.resolve(MatchRegistry);
     this.publicConfig = publicConfigOf(config, publicTimeoutsOf(global));
     await this.matches.register(this.roomId, config, publicTimeoutsOf(global));
@@ -436,8 +436,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
 
   override async onJoin(client: Client): Promise<void> {
     // ACÁ SE CRUZA EL `userId` DEL TOKEN CON EL ASIENTO OPACO, y es el único lugar donde pasa.
-    // De estas líneas para abajo el motor, el historial y el wire hablan de `seat-N`; el
-    // `userId` solo sale en `PlayerState.userId`, para que cada cliente encuentre su asiento.
+    // De estas líneas para abajo el motor, el historial y el wire hablan de `seat-N`; el `userId` no
+    // sale a nadie. Cada cliente encuentra su asiento por el `seat.playerId` de su mensaje `config`.
     const identity = client.auth as SeatCredentials;
     const playerId = this.config.seats.find((seat) => seat.userId === identity.userId)?.playerId;
     // Primero pertenece a la mesa; recién después se pregunta si sigue jugando. Invertir
@@ -606,14 +606,19 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     await this.matches?.remove(this.roomId);
   }
 
-  // EL MENSAJE `config`: la configuración pública de la mesa con el `serverNow` del que el cliente
-  // saca su desfase de reloj, igual que `GET /config/:roomId`. Va al entrar y al volver. Lo que se
-  // manda en `onJoin` Colyseus lo encola hasta que el cliente confirma el `JOIN_ROOM`, así que llega
-  // después de la confirmación y antes que cualquier `events` posterior; un front que todavía no lo
-  // escucha solo ve un aviso del SDK.
+  // EL MENSAJE `config`, UNO POR ASIENTO: la configuración pública de la mesa, lo de SU asiento —cuál es
+  // (`seat.playerId`) y su precio en su moneda— y el `serverNow` del que el cliente saca su desfase de
+  // reloj. Es la única vía: no hay ruta HTTP de la config. Va al entrar y al volver. Lo que se manda en
+  // `onJoin` Colyseus lo encola hasta que el cliente confirma el `JOIN_ROOM`, así que llega después de la
+  // confirmación y antes que cualquier `events` posterior; un front que todavía no lo escucha solo ve un
+  // aviso del SDK.
+  //
+  // EL ASIENTO SALE DEL `userData` DE ESTA CONEXIÓN —lo escribió `onJoin` después de cruzar el token— y
+  // nunca de un `broadcast`: lo de un asiento no le llega a otro.
   private sendConfig(client: Client): void {
-    const message: MatchConfigResponse = { ...this.publicConfig, serverNow: Date.now() };
-    client.send("config", message);
+    const playerId = this.playerIdOf(client);
+    if (!playerId) return;
+    client.send("config", seatConfigOf(this.publicConfig, this.config, playerId, Date.now()));
   }
 
   // UN LATIDO. No se espera —la partida no depende de él— pero sí se ENCOLA, y un fallo se

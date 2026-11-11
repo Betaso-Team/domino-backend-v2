@@ -35,10 +35,10 @@ const BOTS_MODE = {
 } as const;
 
 const PARTICIPANTS = [
-  { userId: "ada", displayName: "Ada", currency: "VES" },
-  { userId: "lin", displayName: "Lin", currency: "VES" },
-  { userId: "rex", displayName: "Rex", currency: "VES" },
-  { userId: "zoe", displayName: "Zoe", currency: "VES" },
+  { userId: "ada", displayName: "Ada", currency: "VES", providerId: "betaso" },
+  { userId: "lin", displayName: "Lin", currency: "VES", providerId: "betaso" },
+  { userId: "rex", displayName: "Rex", currency: "VES", providerId: "betaso" },
+  { userId: "zoe", displayName: "Zoe", currency: "VES", providerId: "betaso" },
 ] as const;
 
 beforeAll(async () => {

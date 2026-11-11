@@ -48,6 +48,7 @@ export function createMatchState(
     player.displayName = seat.displayName;
     player.username = seat.username;
     player.profilePicture = seat.profilePicture;
+    // Del lado del servidor: no viaja (`PlayerState.userId` es `noSync()`).
     player.userId = seat.userId;
     player.seatIndex = seatIndex;
     player.teamId = teamId;

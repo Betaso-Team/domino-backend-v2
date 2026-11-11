@@ -1,6 +1,5 @@
 import type { TokenVerifier } from "@/features/auth";
 import {
-  type Clock,
   ColyseusMatchGateway,
   type HistoryReader,
   type MatchArchive,
@@ -196,7 +195,6 @@ const registerHttp = (app: Application) => {
   app.use(
     matchHttp({
       registry: rootContainer.resolve(MatchRegistry),
-      clock: rootContainer.resolve<Clock>("Clock"),
       logger,
       history: rootContainer.resolve<HistoryReader>("HistoryReader"),
       archive: rootContainer.resolve<MatchArchive>("MatchArchive"),

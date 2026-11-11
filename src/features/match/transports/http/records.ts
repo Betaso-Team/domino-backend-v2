@@ -11,7 +11,7 @@ import {
   type MatchCursor,
   MatchListTimeoutError,
 } from "../../network/history";
-import { recordView } from "../../network/record-view";
+import { type RecordAudience, recordView } from "../../network/record-view";
 
 // En consts para que el aviso de arranque y el registro no puedan divergir.
 export const MATCHES_ROUTE = "/internal/matches";
@@ -127,6 +127,12 @@ function listedProviderOf(
   return provider;
 }
 
+/** Quién mira, según el admin: Tablea Gaming (sin proveedor) o un proveedor. */
+function audienceOf(response: Response): RecordAudience {
+  const { provider } = adminOf(response);
+  return provider === null ? { kind: "tablea" } : { kind: "provider", providerId: provider };
+}
+
 /** ¿Algún asiento del registro es de este proveedor? Un documento sin asientos no es de nadie. */
 const hasProviderSeat = (record: Record<string, unknown>, provider: string): boolean =>
   Array.isArray(record.seats) &&
@@ -166,9 +172,10 @@ export function recordRoutes({
   // orquestador): un admin de proveedor ve sólo las partidas donde se sentó alguno de sus jugadores, y
   // una sin el campo —grabada antes de que el orquestador lo mandara— sólo la ve Tablea Gaming.
   //
-  // ⚠ EN UNA CASUAL CRUZADA LOS DOS PROVEEDORES VEN EL DOCUMENTO ENTERO, el asiento del rival incluido
-  // (su `userId`, su nombre, su mano en la timeline). Es aceptado: es la partida que jugó su jugador, y
-  // recortarla dejaría un registro que no se puede rebobinar.
+  // Y CADA UNO LA VE DESDE SU LADO (`recordView` con la audiencia del admin): sus asientos enteros, y el
+  // del otro proveedor en una casual cruzada recortado a lo que su jugador vio en la mesa —asiento,
+  // equipo, nombre, puntos, salida y conexión—, sin `userId`, proveedor, moneda, precio ni plata. La
+  // mesa (cabecera, timeline, manos) es de los dos: es la partida que jugó su jugador.
   //
   // `/game-data` sigue siendo de Tablea Gaming: es el contrato del backend principal, no del panel.
   const admin = requireAdminKey(adminApiKey, adminTokens, { read: true });
@@ -213,8 +220,8 @@ export function recordRoutes({
           ...(providerId === null ? {} : { providerId }),
         });
         sendData(response, {
-          // LOS MONTOS EN LA CONVENCIÓN (`recordView`): Mongo guarda `*InUC`, el panel lee `{ uc }`.
-          items: page.items.map(recordView),
+          // LOS MONTOS EN LA CONVENCIÓN, Y POR AUDIENCIA (`recordView`).
+          items: page.items.map((item) => recordView(item, audienceOf(response))),
           pageSize,
           nextCursor: page.next ? encodeCursor(page.next) : null,
           total: page.total,
@@ -246,7 +253,7 @@ export function recordRoutes({
         sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }
-      sendData(response, recordView(record));
+      sendData(response, recordView(record, audienceOf(response)));
     }),
   );
 
@@ -262,7 +269,8 @@ export function recordRoutes({
         sendError(response, 404, "MATCH_NOT_FOUND");
         return;
       }
-      response.json(recordView(snapshot));
+      // SÓLO TABLEA GAMING entra (`admin`, sin `providers`): ve el documento entero.
+      response.json(recordView(snapshot, { kind: "tablea" }));
     }),
   );
   return router;
