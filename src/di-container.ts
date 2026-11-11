@@ -206,10 +206,7 @@ export const tableaGamingAmqp = env.tableaGamingRabbitmqUrl
   ? new AmqpPublisher(env.tableaGamingRabbitmqUrl, logger)
   : undefined;
 const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
-  ? new MongoOutboxStore(mongo, "match_result_outbox", clock, {
-      // SIETE DÍAS: lo enviado se borra solo, y mientras tanto es la red si el broker pierde su disco.
-      sentRetentionSeconds: 7 * 24 * 3600,
-    })
+  ? new MongoOutboxStore(mongo, "match_result_outbox", clock)
   : new MemoryOutboxStore(clock);
 export const matchResultDispatcher = tableaGamingAmqp
   ? new TopicOutboxDispatcher({

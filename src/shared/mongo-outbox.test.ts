@@ -4,42 +4,43 @@ import { describe, expect, it, vi } from "vitest";
 import type { CollectionSource } from "./mongo-lease";
 import { MongoOutboxStore } from "./mongo-outbox";
 
-// EL VENCIMIENTO DE LO ENVIADO, y solo de lo enviado. Mongo no vence un documento sin el campo del
-// índice TTL, y una entrada pendiente no tiene `sentAt`: lo que no salió no vence nunca, por
-// construcción. Lo que salió se borra solo después del plazo.
+// LOS ÍNDICES Y LA CABEZA DE LA COLA, contra un doble del driver. La semántica de la base (el único
+// parcial, el orden, la compactación) la mide `mongo-outbox.int.test.ts` contra un Mongo de verdad.
 
 function source(found: unknown = null) {
   const createIndexes = vi.fn(async (_specs: IndexDescription[]) => []);
   const updateOne = vi.fn(async (_filter: unknown, _update: unknown) => ({}));
   const findOne = vi.fn(async (_filter: unknown, _options: unknown) => found);
   const insertOne = vi.fn(async (_document: unknown) => ({}));
-  const collection = { createIndexes, updateOne, findOne, insertOne };
+  const dropIndex = vi.fn(async (_name: string) => {
+    throw Object.assign(new Error("index not found"), { code: 27 });
+  });
+  const collection = { createIndexes, updateOne, findOne, insertOne, dropIndex };
   const from = { collection: async () => collection } as unknown as CollectionSource;
-  return { from, createIndexes, updateOne, findOne, insertOne };
+  return { from, createIndexes, updateOne, findOne, insertOne, dropIndex };
 }
 
 const clock = { now: () => Date.UTC(2026, 9, 5) };
 const ID = "65f000000000000000000000";
 
 describe("MongoOutboxStore: los índices", () => {
-  it("sin plazo no vence nada: el catálogo necesita sus enviados para siempre", async () => {
-    const { from, createIndexes } = source();
-    await new MongoOutboxStore(from, "game_mode_outbox", clock).sent(ID, new Date());
+  it("nada vence: borra el TTL viejo de lo enviado y no crea ninguno", async () => {
+    const { from, createIndexes, dropIndex } = source();
+    await new MongoOutboxStore(from, "match_result_outbox", clock).sent(ID, new Date());
+    expect(dropIndex).toHaveBeenCalledWith("sentAt_1");
     expect(createIndexes.mock.calls[0]?.[0]).not.toContainEqual(
       expect.objectContaining({ expireAfterSeconds: expect.anything() }),
     );
   });
 
-  it("con plazo, vence lo enviado por `sentAt`", async () => {
+  it("la clave exclusiva es única y parcial", async () => {
     const { from, createIndexes } = source();
-    const store = new MongoOutboxStore(from, "match_result_outbox", clock, {
-      sentRetentionSeconds: 7 * 24 * 3600,
-    });
-    await store.sent(ID, new Date());
+    await new MongoOutboxStore(from, "match_result_outbox", clock).sent(ID, new Date());
     expect(createIndexes.mock.calls[0]?.[0]).toContainEqual({
-      key: { sentAt: 1 },
-      name: "sentAt_1",
-      expireAfterSeconds: 604_800,
+      key: { exclusiveKey: 1 },
+      name: "exclusiveKey_1",
+      unique: true,
+      partialFilterExpression: { exclusiveKey: { $exists: true } },
     });
   });
 });
@@ -72,10 +73,10 @@ describe("MongoOutboxStore: la cabeza de la cola", () => {
     expect(await new MongoOutboxStore(from, "match_result_outbox", clock).hasPending()).toBe(false);
   });
 
-  it("`next` ofrece el más viejo aunque su `nextAttemptAt` legado sea futuro", async () => {
+  it("`next` ordena por intentos y edad, y no mira el `nextAttemptAt` legado", async () => {
     const { from, findOne } = source(legacy);
     const entry = await new MongoOutboxStore(from, "match_result_outbox", clock).next();
-    expect(findOne).toHaveBeenCalledWith({ status: "PENDING" }, { sort: { _id: 1 } });
+    expect(findOne).toHaveBeenCalledWith({ status: "PENDING" }, { sort: { attempts: 1, _id: 1 } });
     expect(entry).toEqual({
       id: ID,
       dedupeKey: "m-1",
@@ -83,6 +84,7 @@ describe("MongoOutboxStore: la cabeza de la cola", () => {
       payload: { n: 1 },
       status: "PENDING",
       attempts: 3,
+      strikes: 0,
       createdAt: legacy.createdAt,
       sentAt: undefined,
       lastError: undefined,
@@ -95,6 +97,15 @@ describe("MongoOutboxStore: la cabeza de la cola", () => {
     expect(updateOne).toHaveBeenCalledWith(
       { _id: new ObjectId(ID) },
       { $set: { lastError: "caído" }, $inc: { attempts: 1 } },
+    );
+  });
+
+  it("`retry` con strike lo suma aparte", async () => {
+    const { from, updateOne } = source();
+    await new MongoOutboxStore(from, "match_result_outbox", clock).retry(ID, "devuelto", true);
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: new ObjectId(ID) },
+      { $set: { lastError: "devuelto" }, $inc: { attempts: 1, strikes: 1 } },
     );
   });
 

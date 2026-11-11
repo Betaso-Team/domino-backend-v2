@@ -129,3 +129,29 @@ describe("los dos chequeos del balanceador", () => {
     await server.close();
   });
 });
+
+// LOS NÚMEROS QUE NO DECIDEN: un resultado estacionado se ve en `/ready` pero no saca a la instancia de
+// rotación, y un número que no contesta a tiempo sale `null` sin colgar la sonda.
+describe("los números de `/ready`", () => {
+  it("acompañan a la respuesta sin cambiar el status", async () => {
+    const app = express().use(
+      healthRoutes({ mongo: arriba }, 50, {
+        match_results_parked: async () => 2,
+        lento: () => new Promise<number>(() => {}),
+      }),
+    );
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("sin puerto");
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/ready`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "ready",
+      gauges: { match_results_parked: 2, lento: null },
+    });
+    await new Promise((resolve) => server.close(resolve));
+  });
+});

@@ -30,6 +30,7 @@ import {
 import express, { type Application } from "express";
 import {
   driver,
+  matchResults,
   mongo,
   presence,
   rootContainer,
@@ -188,7 +189,13 @@ const registerHttp = (app: Application) => {
   // profundo: no se solapan con ninguna. Son dos a propósito y la diferencia está argumentada
   // en `shared/http/health.ts` — `/health` no consulta nada porque "reiniciame" es la única
   // respuesta que destruye partidas en curso.
-  app.use(healthRoutes(hardDependencies));
+  app.use(
+    healthRoutes(hardDependencies, undefined, {
+      // LOS RESULTADOS ESTACIONADOS: cada uno es una partida que el orquestador no supo. Ver
+      // «Resultados estacionados» en `docs/operacion.md`.
+      match_results_parked: () => matchResults.parkedCount(),
+    }),
+  );
   // CADA FEATURE ES UN ROUTER, y se monta en la raíz porque sus paths son absolutos: la guarda va por
   // ruta y no por prefijo, y las dependencias entran ya resueltas (truco `0b0a467`). El orden de
   // montaje es el de registro, y sólo importa DENTRO de una feature.
