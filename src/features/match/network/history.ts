@@ -20,6 +20,7 @@ import type { Clock } from "../core/engine/clock";
 import type { PlayerId, TeamId } from "../core/ids";
 import { handValue } from "../core/rules/tiles";
 import type { MatchState } from "../core/state";
+import { type StoredUcAmount, ucText } from "./amounts";
 import type { SeatConnection } from "./connection";
 import type { AbortReason, NetworkMatchEvent } from "./events";
 
@@ -111,9 +112,12 @@ export interface MatchSetup {
     readonly gameModeId: string;
     /** El nombre del modo COMO SE JUGÓ: el panel puede renombrarlo después. */
     readonly name: string;
-    /** Lo que la mesa cobraba y ofrecía, en UC completas, ANTES de cualquier aumento. */
-    readonly entryFeeInUC: number;
-    readonly prizeInUC: number;
+    /**
+     * Lo que la mesa cobraba y ofrecía, en UC completas, ANTES de cualquier aumento. Texto con los 4
+     * decimales de UC (`"125.0000"`); un documento de antes lo tiene como número (`StoredUcAmount`).
+     */
+    readonly entryFeeInUC: StoredUcAmount;
+    readonly prizeInUC: StoredUcAmount;
     readonly isFree: boolean;
   };
   readonly matchConfig: {
@@ -222,8 +226,9 @@ export interface BetMultiplierProposal {
  * del precio congelado con la misma regla que los de UC (`localMoneyOf`). Texto decimal, como el precio.
  */
 export interface SeatMoney {
-  readonly chargedInUC: number;
-  readonly prizePaidInUC: number;
+  /** Texto en UC con 4 decimales; número en un documento de antes (`StoredUcAmount`). */
+  readonly chargedInUC: StoredUcAmount;
+  readonly prizePaidInUC: StoredUcAmount;
   readonly chargedInPlayerCurrency?: string;
   readonly prizePaidInPlayerCurrency?: string;
 }
@@ -241,8 +246,9 @@ export interface MatchClose {
     readonly offeredValues: readonly number[];
     /** El nivel con que terminó; 1 si no hubo aumento cobrado. */
     readonly finalValue: number;
-    readonly resultingEntryFeeInUC?: number;
-    readonly resultingPrizeInUC?: number;
+    /** Texto en UC con 4 decimales, como `SeatMoney`. */
+    readonly resultingEntryFeeInUC?: StoredUcAmount;
+    readonly resultingPrizeInUC?: StoredUcAmount;
   };
   /** El peso en el ranking: el del modo, más el `extra` del aumento que quedó. */
   readonly rankingMultiplier: {
@@ -550,7 +556,7 @@ export class MatchHistory {
         this.open();
         this.roundNumber = event.roundNumber;
       }
-      const { type, ...rest } = event as NetworkMatchEvent & Record<string, unknown>;
+      const { type, ...rest } = storedEventOf(event) as NetworkMatchEvent & Record<string, unknown>;
       const entry = this.wrap("SYSTEM", "EVENT", type, rest);
       this.follow("SYSTEM", type, entry.payload);
       return type === "ROUND_STARTED" ? [entry, this.dealt()] : [entry];
@@ -727,6 +733,14 @@ export class MatchHistory {
       payload: flatten(payload) as Record<string, unknown>,
     };
   }
+}
+
+// EL EVENTO COMO LO GUARDA LA TIMELINE: el único con plata, `MULTIPLIER_AGREED`, lleva su
+// `additionalEntryFee` como texto en UC con 4 decimales (`"125.0000"`), porque Mongo no guarda un
+// `Decimal`. Las entradas de antes lo tienen como número; `entryView` lee las dos.
+function storedEventOf(event: NetworkMatchEvent): object {
+  if (event.type !== "MULTIPLIER_AGREED") return event;
+  return { ...event, additionalEntryFee: ucText(event.additionalEntryFee) };
 }
 
 // En @colyseus/schema 5 los campos NO son propiedades propias del objeto: viven en

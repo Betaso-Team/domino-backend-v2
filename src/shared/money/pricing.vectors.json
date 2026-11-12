@@ -1,0 +1,1069 @@
+{
+  "stakeAt": [
+    {
+      "base": "0.02",
+      "level": 1,
+      "expected": "0.02"
+    },
+    {
+      "base": "0.02",
+      "level": 2,
+      "expected": "0.04"
+    },
+    {
+      "base": "0.02",
+      "level": 3,
+      "expected": "0.06"
+    },
+    {
+      "base": "0.02",
+      "level": 5,
+      "expected": "0.10"
+    },
+    {
+      "base": "0.02",
+      "level": 6,
+      "expected": "0.12"
+    },
+    {
+      "base": "0.02",
+      "level": 7,
+      "expected": "0.14"
+    },
+    {
+      "base": "0.02",
+      "level": 10,
+      "expected": "0.20"
+    },
+    {
+      "base": "0.02",
+      "level": 64,
+      "expected": "1.28"
+    },
+    {
+      "base": "0.02",
+      "level": 100,
+      "expected": "2.00"
+    },
+    {
+      "base": "0.01",
+      "level": 1,
+      "expected": "0.01"
+    },
+    {
+      "base": "0.01",
+      "level": 2,
+      "expected": "0.02"
+    },
+    {
+      "base": "0.01",
+      "level": 3,
+      "expected": "0.03"
+    },
+    {
+      "base": "0.01",
+      "level": 5,
+      "expected": "0.05"
+    },
+    {
+      "base": "0.01",
+      "level": 6,
+      "expected": "0.06"
+    },
+    {
+      "base": "0.01",
+      "level": 7,
+      "expected": "0.07"
+    },
+    {
+      "base": "0.01",
+      "level": 10,
+      "expected": "0.10"
+    },
+    {
+      "base": "0.01",
+      "level": 64,
+      "expected": "0.64"
+    },
+    {
+      "base": "0.01",
+      "level": 100,
+      "expected": "1.00"
+    },
+    {
+      "base": "0.1",
+      "level": 1,
+      "expected": "0.1"
+    },
+    {
+      "base": "0.1",
+      "level": 2,
+      "expected": "0.2"
+    },
+    {
+      "base": "0.1",
+      "level": 3,
+      "expected": "0.3"
+    },
+    {
+      "base": "0.1",
+      "level": 5,
+      "expected": "0.5"
+    },
+    {
+      "base": "0.1",
+      "level": 6,
+      "expected": "0.6"
+    },
+    {
+      "base": "0.1",
+      "level": 7,
+      "expected": "0.7"
+    },
+    {
+      "base": "0.1",
+      "level": 10,
+      "expected": "1.0"
+    },
+    {
+      "base": "0.1",
+      "level": 64,
+      "expected": "6.4"
+    },
+    {
+      "base": "0.1",
+      "level": 100,
+      "expected": "10.0"
+    },
+    {
+      "base": "0.3",
+      "level": 1,
+      "expected": "0.3"
+    },
+    {
+      "base": "0.3",
+      "level": 2,
+      "expected": "0.6"
+    },
+    {
+      "base": "0.3",
+      "level": 3,
+      "expected": "0.9"
+    },
+    {
+      "base": "0.3",
+      "level": 5,
+      "expected": "1.5"
+    },
+    {
+      "base": "0.3",
+      "level": 6,
+      "expected": "1.8"
+    },
+    {
+      "base": "0.3",
+      "level": 7,
+      "expected": "2.1"
+    },
+    {
+      "base": "0.3",
+      "level": 10,
+      "expected": "3.0"
+    },
+    {
+      "base": "0.3",
+      "level": 64,
+      "expected": "19.2"
+    },
+    {
+      "base": "0.3",
+      "level": 100,
+      "expected": "30.0"
+    },
+    {
+      "base": "1",
+      "level": 1,
+      "expected": "1"
+    },
+    {
+      "base": "1",
+      "level": 2,
+      "expected": "2"
+    },
+    {
+      "base": "1",
+      "level": 3,
+      "expected": "3"
+    },
+    {
+      "base": "1",
+      "level": 5,
+      "expected": "5"
+    },
+    {
+      "base": "1",
+      "level": 6,
+      "expected": "6"
+    },
+    {
+      "base": "1",
+      "level": 7,
+      "expected": "7"
+    },
+    {
+      "base": "1",
+      "level": 10,
+      "expected": "10"
+    },
+    {
+      "base": "1",
+      "level": 64,
+      "expected": "64"
+    },
+    {
+      "base": "1",
+      "level": 100,
+      "expected": "100"
+    },
+    {
+      "base": "2.5",
+      "level": 1,
+      "expected": "2.5"
+    },
+    {
+      "base": "2.5",
+      "level": 2,
+      "expected": "5.0"
+    },
+    {
+      "base": "2.5",
+      "level": 3,
+      "expected": "7.5"
+    },
+    {
+      "base": "2.5",
+      "level": 5,
+      "expected": "12.5"
+    },
+    {
+      "base": "2.5",
+      "level": 6,
+      "expected": "15.0"
+    },
+    {
+      "base": "2.5",
+      "level": 7,
+      "expected": "17.5"
+    },
+    {
+      "base": "2.5",
+      "level": 10,
+      "expected": "25.0"
+    },
+    {
+      "base": "2.5",
+      "level": 64,
+      "expected": "160.0"
+    },
+    {
+      "base": "2.5",
+      "level": 100,
+      "expected": "250.0"
+    },
+    {
+      "base": "10.0000",
+      "level": 1,
+      "expected": "10.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 2,
+      "expected": "20.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 3,
+      "expected": "30.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 5,
+      "expected": "50.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 6,
+      "expected": "60.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 7,
+      "expected": "70.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 10,
+      "expected": "100.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 64,
+      "expected": "640.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 100,
+      "expected": "1000.0000"
+    },
+    {
+      "base": "33.3333",
+      "level": 1,
+      "expected": "33.3333"
+    },
+    {
+      "base": "33.3333",
+      "level": 2,
+      "expected": "66.6666"
+    },
+    {
+      "base": "33.3333",
+      "level": 3,
+      "expected": "99.9999"
+    },
+    {
+      "base": "33.3333",
+      "level": 5,
+      "expected": "166.6665"
+    },
+    {
+      "base": "33.3333",
+      "level": 6,
+      "expected": "199.9998"
+    },
+    {
+      "base": "33.3333",
+      "level": 7,
+      "expected": "233.3331"
+    },
+    {
+      "base": "33.3333",
+      "level": 10,
+      "expected": "333.3330"
+    },
+    {
+      "base": "33.3333",
+      "level": 64,
+      "expected": "2133.3312"
+    },
+    {
+      "base": "33.3333",
+      "level": 100,
+      "expected": "3333.3300"
+    },
+    {
+      "base": "0.0001",
+      "level": 1,
+      "expected": "0.0001"
+    },
+    {
+      "base": "0.0001",
+      "level": 2,
+      "expected": "0.0002"
+    },
+    {
+      "base": "0.0001",
+      "level": 3,
+      "expected": "0.0003"
+    },
+    {
+      "base": "0.0001",
+      "level": 5,
+      "expected": "0.0005"
+    },
+    {
+      "base": "0.0001",
+      "level": 6,
+      "expected": "0.0006"
+    },
+    {
+      "base": "0.0001",
+      "level": 7,
+      "expected": "0.0007"
+    },
+    {
+      "base": "0.0001",
+      "level": 10,
+      "expected": "0.0010"
+    },
+    {
+      "base": "0.0001",
+      "level": 64,
+      "expected": "0.0064"
+    },
+    {
+      "base": "0.0001",
+      "level": 100,
+      "expected": "0.0100"
+    },
+    {
+      "base": "999.9999",
+      "level": 1,
+      "expected": "999.9999"
+    },
+    {
+      "base": "999.9999",
+      "level": 2,
+      "expected": "1999.9998"
+    },
+    {
+      "base": "999.9999",
+      "level": 3,
+      "expected": "2999.9997"
+    },
+    {
+      "base": "999.9999",
+      "level": 5,
+      "expected": "4999.9995"
+    },
+    {
+      "base": "999.9999",
+      "level": 6,
+      "expected": "5999.9994"
+    },
+    {
+      "base": "999.9999",
+      "level": 7,
+      "expected": "6999.9993"
+    },
+    {
+      "base": "999.9999",
+      "level": 10,
+      "expected": "9999.9990"
+    },
+    {
+      "base": "999.9999",
+      "level": 64,
+      "expected": "63999.9936"
+    },
+    {
+      "base": "999.9999",
+      "level": 100,
+      "expected": "99999.9900"
+    },
+    {
+      "base": "1000",
+      "level": 1,
+      "expected": "1000"
+    },
+    {
+      "base": "1000",
+      "level": 2,
+      "expected": "2000"
+    },
+    {
+      "base": "1000",
+      "level": 3,
+      "expected": "3000"
+    },
+    {
+      "base": "1000",
+      "level": 5,
+      "expected": "5000"
+    },
+    {
+      "base": "1000",
+      "level": 6,
+      "expected": "6000"
+    },
+    {
+      "base": "1000",
+      "level": 7,
+      "expected": "7000"
+    },
+    {
+      "base": "1000",
+      "level": 10,
+      "expected": "10000"
+    },
+    {
+      "base": "1000",
+      "level": 64,
+      "expected": "64000"
+    },
+    {
+      "base": "1000",
+      "level": 100,
+      "expected": "100000"
+    }
+  ],
+  "betDifference": [
+    {
+      "base": "0.02",
+      "level": 1,
+      "expected": "0.00"
+    },
+    {
+      "base": "0.02",
+      "level": 2,
+      "expected": "0.02"
+    },
+    {
+      "base": "0.02",
+      "level": 3,
+      "expected": "0.04"
+    },
+    {
+      "base": "0.02",
+      "level": 5,
+      "expected": "0.08"
+    },
+    {
+      "base": "0.02",
+      "level": 6,
+      "expected": "0.10"
+    },
+    {
+      "base": "0.02",
+      "level": 7,
+      "expected": "0.12"
+    },
+    {
+      "base": "0.02",
+      "level": 10,
+      "expected": "0.18"
+    },
+    {
+      "base": "0.02",
+      "level": 64,
+      "expected": "1.26"
+    },
+    {
+      "base": "0.02",
+      "level": 100,
+      "expected": "1.98"
+    },
+    {
+      "base": "0.01",
+      "level": 1,
+      "expected": "0.00"
+    },
+    {
+      "base": "0.01",
+      "level": 2,
+      "expected": "0.01"
+    },
+    {
+      "base": "0.01",
+      "level": 3,
+      "expected": "0.02"
+    },
+    {
+      "base": "0.01",
+      "level": 5,
+      "expected": "0.04"
+    },
+    {
+      "base": "0.01",
+      "level": 6,
+      "expected": "0.05"
+    },
+    {
+      "base": "0.01",
+      "level": 7,
+      "expected": "0.06"
+    },
+    {
+      "base": "0.01",
+      "level": 10,
+      "expected": "0.09"
+    },
+    {
+      "base": "0.01",
+      "level": 64,
+      "expected": "0.63"
+    },
+    {
+      "base": "0.01",
+      "level": 100,
+      "expected": "0.99"
+    },
+    {
+      "base": "0.1",
+      "level": 1,
+      "expected": "0.0"
+    },
+    {
+      "base": "0.1",
+      "level": 2,
+      "expected": "0.1"
+    },
+    {
+      "base": "0.1",
+      "level": 3,
+      "expected": "0.2"
+    },
+    {
+      "base": "0.1",
+      "level": 5,
+      "expected": "0.4"
+    },
+    {
+      "base": "0.1",
+      "level": 6,
+      "expected": "0.5"
+    },
+    {
+      "base": "0.1",
+      "level": 7,
+      "expected": "0.6"
+    },
+    {
+      "base": "0.1",
+      "level": 10,
+      "expected": "0.9"
+    },
+    {
+      "base": "0.1",
+      "level": 64,
+      "expected": "6.3"
+    },
+    {
+      "base": "0.1",
+      "level": 100,
+      "expected": "9.9"
+    },
+    {
+      "base": "0.3",
+      "level": 1,
+      "expected": "0.0"
+    },
+    {
+      "base": "0.3",
+      "level": 2,
+      "expected": "0.3"
+    },
+    {
+      "base": "0.3",
+      "level": 3,
+      "expected": "0.6"
+    },
+    {
+      "base": "0.3",
+      "level": 5,
+      "expected": "1.2"
+    },
+    {
+      "base": "0.3",
+      "level": 6,
+      "expected": "1.5"
+    },
+    {
+      "base": "0.3",
+      "level": 7,
+      "expected": "1.8"
+    },
+    {
+      "base": "0.3",
+      "level": 10,
+      "expected": "2.7"
+    },
+    {
+      "base": "0.3",
+      "level": 64,
+      "expected": "18.9"
+    },
+    {
+      "base": "0.3",
+      "level": 100,
+      "expected": "29.7"
+    },
+    {
+      "base": "1",
+      "level": 1,
+      "expected": "0"
+    },
+    {
+      "base": "1",
+      "level": 2,
+      "expected": "1"
+    },
+    {
+      "base": "1",
+      "level": 3,
+      "expected": "2"
+    },
+    {
+      "base": "1",
+      "level": 5,
+      "expected": "4"
+    },
+    {
+      "base": "1",
+      "level": 6,
+      "expected": "5"
+    },
+    {
+      "base": "1",
+      "level": 7,
+      "expected": "6"
+    },
+    {
+      "base": "1",
+      "level": 10,
+      "expected": "9"
+    },
+    {
+      "base": "1",
+      "level": 64,
+      "expected": "63"
+    },
+    {
+      "base": "1",
+      "level": 100,
+      "expected": "99"
+    },
+    {
+      "base": "2.5",
+      "level": 1,
+      "expected": "0.0"
+    },
+    {
+      "base": "2.5",
+      "level": 2,
+      "expected": "2.5"
+    },
+    {
+      "base": "2.5",
+      "level": 3,
+      "expected": "5.0"
+    },
+    {
+      "base": "2.5",
+      "level": 5,
+      "expected": "10.0"
+    },
+    {
+      "base": "2.5",
+      "level": 6,
+      "expected": "12.5"
+    },
+    {
+      "base": "2.5",
+      "level": 7,
+      "expected": "15.0"
+    },
+    {
+      "base": "2.5",
+      "level": 10,
+      "expected": "22.5"
+    },
+    {
+      "base": "2.5",
+      "level": 64,
+      "expected": "157.5"
+    },
+    {
+      "base": "2.5",
+      "level": 100,
+      "expected": "247.5"
+    },
+    {
+      "base": "10.0000",
+      "level": 1,
+      "expected": "0.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 2,
+      "expected": "10.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 3,
+      "expected": "20.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 5,
+      "expected": "40.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 6,
+      "expected": "50.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 7,
+      "expected": "60.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 10,
+      "expected": "90.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 64,
+      "expected": "630.0000"
+    },
+    {
+      "base": "10.0000",
+      "level": 100,
+      "expected": "990.0000"
+    },
+    {
+      "base": "33.3333",
+      "level": 1,
+      "expected": "0.0000"
+    },
+    {
+      "base": "33.3333",
+      "level": 2,
+      "expected": "33.3333"
+    },
+    {
+      "base": "33.3333",
+      "level": 3,
+      "expected": "66.6666"
+    },
+    {
+      "base": "33.3333",
+      "level": 5,
+      "expected": "133.3332"
+    },
+    {
+      "base": "33.3333",
+      "level": 6,
+      "expected": "166.6665"
+    },
+    {
+      "base": "33.3333",
+      "level": 7,
+      "expected": "199.9998"
+    },
+    {
+      "base": "33.3333",
+      "level": 10,
+      "expected": "299.9997"
+    },
+    {
+      "base": "33.3333",
+      "level": 64,
+      "expected": "2099.9979"
+    },
+    {
+      "base": "33.3333",
+      "level": 100,
+      "expected": "3299.9967"
+    },
+    {
+      "base": "0.0001",
+      "level": 1,
+      "expected": "0.0000"
+    },
+    {
+      "base": "0.0001",
+      "level": 2,
+      "expected": "0.0001"
+    },
+    {
+      "base": "0.0001",
+      "level": 3,
+      "expected": "0.0002"
+    },
+    {
+      "base": "0.0001",
+      "level": 5,
+      "expected": "0.0004"
+    },
+    {
+      "base": "0.0001",
+      "level": 6,
+      "expected": "0.0005"
+    },
+    {
+      "base": "0.0001",
+      "level": 7,
+      "expected": "0.0006"
+    },
+    {
+      "base": "0.0001",
+      "level": 10,
+      "expected": "0.0009"
+    },
+    {
+      "base": "0.0001",
+      "level": 64,
+      "expected": "0.0063"
+    },
+    {
+      "base": "0.0001",
+      "level": 100,
+      "expected": "0.0099"
+    },
+    {
+      "base": "999.9999",
+      "level": 1,
+      "expected": "0.0000"
+    },
+    {
+      "base": "999.9999",
+      "level": 2,
+      "expected": "999.9999"
+    },
+    {
+      "base": "999.9999",
+      "level": 3,
+      "expected": "1999.9998"
+    },
+    {
+      "base": "999.9999",
+      "level": 5,
+      "expected": "3999.9996"
+    },
+    {
+      "base": "999.9999",
+      "level": 6,
+      "expected": "4999.9995"
+    },
+    {
+      "base": "999.9999",
+      "level": 7,
+      "expected": "5999.9994"
+    },
+    {
+      "base": "999.9999",
+      "level": 10,
+      "expected": "8999.9991"
+    },
+    {
+      "base": "999.9999",
+      "level": 64,
+      "expected": "62999.9937"
+    },
+    {
+      "base": "999.9999",
+      "level": 100,
+      "expected": "98999.9901"
+    },
+    {
+      "base": "1000",
+      "level": 1,
+      "expected": "0"
+    },
+    {
+      "base": "1000",
+      "level": 2,
+      "expected": "1000"
+    },
+    {
+      "base": "1000",
+      "level": 3,
+      "expected": "2000"
+    },
+    {
+      "base": "1000",
+      "level": 5,
+      "expected": "4000"
+    },
+    {
+      "base": "1000",
+      "level": 6,
+      "expected": "5000"
+    },
+    {
+      "base": "1000",
+      "level": 7,
+      "expected": "6000"
+    },
+    {
+      "base": "1000",
+      "level": 10,
+      "expected": "9000"
+    },
+    {
+      "base": "1000",
+      "level": 64,
+      "expected": "63000"
+    },
+    {
+      "base": "1000",
+      "level": 100,
+      "expected": "99000"
+    }
+  ],
+  "toCurrency": [
+    {
+      "amountUc": "1",
+      "rate": "95.1",
+      "decimals": 2,
+      "expected": "95.10"
+    },
+    {
+      "amountUc": "0.02",
+      "rate": "36.5",
+      "decimals": 2,
+      "expected": "0.73"
+    },
+    {
+      "amountUc": "0.12",
+      "rate": "36.5",
+      "decimals": 2,
+      "expected": "4.38"
+    },
+    {
+      "amountUc": "10.0000",
+      "rate": "1",
+      "decimals": 0,
+      "expected": "10"
+    },
+    {
+      "amountUc": "0.0005",
+      "rate": "1",
+      "decimals": 3,
+      "expected": "0.001"
+    },
+    {
+      "amountUc": "0.125",
+      "rate": "1",
+      "decimals": 2,
+      "expected": "0.13"
+    },
+    {
+      "amountUc": "3.3333",
+      "rate": "3.3333",
+      "decimals": 4,
+      "expected": "11.1109"
+    },
+    {
+      "amountUc": "2",
+      "rate": "0.000105",
+      "decimals": 8,
+      "expected": "0.00021000"
+    }
+  ],
+  "errors": [
+    {
+      "fn": "stakeAt",
+      "base": "1",
+      "level": 0
+    },
+    {
+      "fn": "stakeAt",
+      "base": "1",
+      "level": 1.5
+    },
+    {
+      "fn": "betDifference",
+      "base": "1",
+      "level": 0
+    },
+    {
+      "fn": "toCurrency",
+      "amountUc": "1",
+      "rate": "1",
+      "decimals": -1
+    }
+  ]
+}

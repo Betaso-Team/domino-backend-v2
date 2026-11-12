@@ -1,6 +1,6 @@
+import { type Decimal, stakeAt } from "@/shared/money";
 import type { DominoMatchConfig, MatchSeat } from "../core/config";
 import { InvariantViolationError } from "../core/engine/errors";
-import { betAmountsOf } from "../core/rules/config";
 import type { MatchState } from "../core/state";
 import type { NetworkMatchEvent } from "./events";
 
@@ -22,7 +22,7 @@ export type PayoutKind = "REWARD" | "REFUND";
  * ⚠ `currency` ES LA MONEDA EN QUE SE COBRÓ, NO LA UNIDAD DEL MONTO, y confundirlas es la
  * ambigüedad más cara que puede tener este tipo. `amount` está SIEMPRE en UC COMPLETAS —la
  * unidad interna, la misma que guarda el catálogo—, así que
- * `{ currency: "VES", amount: 250 }` **no** son 250 bolívares: son 250 UC que este jugador
+ * `{ currency: "VES", amount: 250 }` (el `Decimal` de 250) **no** son 250 bolívares: son 250 UC que este jugador
  * pagó en VES y que en VES tiene que cobrar. Lo que traduce una cosa en la otra es el
  * `rateId` de la instrucción, y la traducción es del que PAGA: acá no se convierte nada,
  * porque convertir dos veces con dos tasas da dos pagos distintos —y el redondeo a los
@@ -35,7 +35,8 @@ export type PayoutKind = "REWARD" | "REFUND";
 export interface PayoutEntry {
   readonly userId: string;
   readonly currency: string;
-  readonly amount: number;
+  /** En UC, el `Decimal` de billing: sale como texto sólo en el resultado (`ucText`). */
+  readonly amount: Decimal;
   readonly idempotencyKey: string;
 }
 
@@ -53,7 +54,7 @@ export interface PayoutInstruction {
 const entryOf = (
   matchId: string,
   kind: PayoutKind,
-  amount: number,
+  amount: Decimal,
   seat: MatchSeat,
 ): PayoutEntry => ({
   userId: seat.userId,
@@ -165,19 +166,19 @@ const prizeWinnersOf = (match: MatchState, winnerTeamId: string): readonly strin
  * LO QUE VALE LA MESA AL CERRAR, con el aumento aceptado adentro. La config está CONGELADA al nacer
  * y el aumento se acuerda a mitad de partida, así que el nivel sale del ESTADO: el que ganó una mesa
  * a x3 cobra `prize × 3`, y una mesa abortada después de un aumento devuelve `entryFee × 3`. Es la
- * regla de v1 (`betAmountsOf`; al aceptar escribe `state.prize = proposal.newPrize` y paga ése): la
- * mesa entera se multiplica por el nivel. Nivel 0 es "ninguno aceptado".
+ * regla de v1 (al aceptar escribe `state.prize = proposal.newPrize` y paga ése): la mesa entera se
+ * multiplica por el nivel. Nivel 0 es "ninguno aceptado", que vale lo mismo que el nivel 1.
+ *
+ * ES `stakeAt`, LA FÓRMULA DEL ORQUESTADOR, y no `base + base × (nivel − 1)` en `number`: el
+ * orquestador compara el premio publicado con `stakeAt(prize, nivel)` con igualdad decimal exacta, y
+ * en coma flotante `0.02 + 0.1` es `0.12000000000000001`, un premio que no coincide y que nadie cobra.
  */
-const stakesOf = (
-  table: { readonly entryFee: number; readonly prize: number },
+export const stakesOf = (
+  table: { readonly entryFee: Decimal; readonly prize: Decimal },
   match: Pick<MatchState, "acceptedBetLevel">,
-): { readonly entryFee: number; readonly prize: number } => {
-  if (match.acceptedBetLevel <= 0) return { entryFee: table.entryFee, prize: table.prize };
-  const extra = betAmountsOf(match.acceptedBetLevel, table.entryFee, table.prize);
-  return {
-    entryFee: table.entryFee + extra.additionalEntryFee,
-    prize: table.prize + extra.additionalPrize,
-  };
+): { readonly entryFee: Decimal; readonly prize: Decimal } => {
+  const level = Math.max(1, match.acceptedBetLevel);
+  return { entryFee: stakeAt(table.entryFee, level), prize: stakeAt(table.prize, level) };
 };
 
 /**

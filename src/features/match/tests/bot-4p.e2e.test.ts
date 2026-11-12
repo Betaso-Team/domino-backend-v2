@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MatchState } from "../core/state";
 import type { HistoryReader } from "../network";
 import type { DominoRoom } from "../transports/colyseus/domino-room";
+import { enableFourSeats } from "./e2e-harness";
 
 // LA MESA DE CUATRO DE PUNTA A PUNTA, y lo que cierra el círculo: que la MÁQUINA JUEGUE. Las
 // capas de abajo miden la decisión de sentarla (`bot-seating.int.test.ts`) y qué ficha elige
@@ -43,6 +44,9 @@ const PARTICIPANTS = [
 
 beforeAll(async () => {
   server = await bootTestServer(2_601);
+  // EL DOMINÓ DE CUATRO NO SALE, y la sala no abre esa mesa: se le habilita sólo en este proceso, para
+  // seguir midiendo el motor de cuatro.
+  enableFourSeats();
 });
 
 afterAll(async () => {

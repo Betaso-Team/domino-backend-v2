@@ -1,6 +1,7 @@
+import { decimal, stakeAt } from "@/shared/money";
 import { findBadAmounts } from "@/shared/tests/find-bad-amounts";
 import { describe, expect, it } from "vitest";
-import { seatPriceView, seatText, ucText, wireEventOf } from "../amounts";
+import { seatPriceView, seatText, storedUcOf, ucText, wireEventOf } from "../amounts";
 import { type RecordAudience, entryView, recordView } from "../record-view";
 
 const TABLEA: RecordAudience = { kind: "tablea" };
@@ -18,21 +19,36 @@ const RECORD_KEYS = [
   "additionalEntryFee",
 ];
 
-describe("ucText: un número en UC como texto", () => {
+describe("ucText: un monto en UC como texto", () => {
   it.each([
-    [125, "125.0000"],
-    [1.5, "1.5000"],
-    [0, "0.0000"],
-    [1e-7, "0.0000001"],
+    ["125", "125.0000"],
+    ["1.5", "1.5000"],
+    ["0", "0.0000"],
+    ["0.0000001", "0.0000001"],
   ])("%s → %j", (amount, expected) => {
-    expect(ucText(amount)).toBe(expected);
+    expect(ucText(decimal(amount))).toBe(expected);
   });
 
-  // NUNCA REDONDEA: el ruido de un producto en coma flotante vuelve al MISMO número, que es lo que el
-  // orquestador compara contra su planilla.
-  it("conserva todos los dígitos y vuelve al mismo número", () => {
-    const noisy = 0.1 + 0.1 * 2;
-    expect(Number(ucText(noisy))).toBe(noisy);
+  // NUNCA REDONDEA, y nunca pasa por coma flotante: el premio a x6 de una mesa de 0.02 es 0.12, que es
+  // lo que el orquestador calcula con la misma fórmula (en `number` era 0.12000000000000001).
+  it("es el decimal exacto de la fórmula", () => {
+    expect(ucText(stakeAt(decimal("0.02"), 6))).toBe("0.1200");
+  });
+});
+
+describe("storedUcOf: un monto en UC del registro, de cualquier época", () => {
+  it.each([
+    [125, "125"],
+    [1.5, "1.5"],
+    [0.12000000000000001, "0.12000000000000001"],
+    ["125.0000", "125"],
+    ["0.1200", "0.12"],
+  ])("%j → %s", (stored, expected) => {
+    expect(storedUcOf(stored)?.toString()).toBe(expected);
+  });
+
+  it.each([undefined, null, -1, Number.NaN, "1e3", "-1", "", {}])("%j no es un monto", (value) => {
+    expect(storedUcOf(value)).toBeUndefined();
   });
 });
 
@@ -93,7 +109,7 @@ describe("wireEventOf: los eventos que difunde la sala", () => {
       type: "MULTIPLIER_AGREED",
       level: 2,
       extra: 1,
-      additionalEntryFee: 125,
+      additionalEntryFee: decimal("125"),
       playerIds: ["seat-1", "seat-2"],
     } as const;
     expect(wireEventOf(event)).toEqual({
@@ -103,7 +119,7 @@ describe("wireEventOf: los eventos que difunde la sala", () => {
     });
     expect(findBadAmounts(wireEventOf(event), RECORD_KEYS)).toEqual([]);
     // El evento interno no se toca: lo sigue leyendo el cobro del aumento.
-    expect(event.additionalEntryFee).toBe(125);
+    expect(event.additionalEntryFee.eq(decimal("125"))).toBe(true);
   });
 
   it("los demás pasan tal cual", () => {
@@ -230,6 +246,34 @@ describe("recordView: el registro como lo lee el panel", () => {
       additionalEntryFee: "125.0000",
     });
     expect(view.rankingMultiplier).toEqual(stored.rankingMultiplier);
+  });
+
+  // LOS DOCUMENTOS NUEVOS GUARDAN LOS MONTOS EN UC COMO TEXTO, los de antes como número, y no se migra
+  // nada: los dos se leen igual.
+  it("un documento nuevo, con los montos en UC como texto, se lee igual que uno de antes", () => {
+    const text = (value: number) => ucText(decimal(String(value)));
+    const [first, second] = stored.players;
+    const asText = {
+      ...stored,
+      table: { ...stored.table, entryFeeInUC: text(125), prizeInUC: text(250) },
+      players: [
+        { ...first, chargedInUC: text(250), prizePaidInUC: text(500) },
+        { ...second, chargedInUC: text(250), prizePaidInUC: text(0) },
+      ],
+      betMultiplier: {
+        ...stored.betMultiplier,
+        resultingEntryFeeInUC: text(250),
+        resultingPrizeInUC: text(500),
+      },
+      timeline: [
+        stored.timeline[0],
+        {
+          ...stored.timeline[1],
+          payload: { ...stored.timeline[1]?.payload, additionalEntryFee: text(125) },
+        },
+      ],
+    };
+    expect(recordView(asText, TABLEA)).toEqual(recordView(stored, TABLEA));
   });
 
   it("un asiento con precio que el cierre no dejó en su moneda queda en UC", () => {

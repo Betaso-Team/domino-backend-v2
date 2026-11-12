@@ -1,4 +1,4 @@
-import type { InlineGameMode } from "@/features/match";
+import type { InlineGameModeInput } from "@/features/match";
 
 // LOS MODOS CON LOS QUE LA SUITE SIENTA SUS MESAS, escritos UNA vez y en UN solo lugar.
 //
@@ -14,7 +14,7 @@ import type { InlineGameMode } from "@/features/match";
 // historial, el censo y el resultado.
 export interface TableMode {
   readonly uuid: string;
-  readonly gameMode: InlineGameMode;
+  readonly gameMode: InlineGameModeInput;
 }
 
 export const CASUAL_2P: TableMode = {
@@ -24,8 +24,10 @@ export const CASUAL_2P: TableMode = {
     playersQuantity: 2,
     pointsToWin: 100,
     multiplier: 1,
-    entryFee: 125,
-    prize: 250,
+    // EN TEXTO, como los manda el orquestador desde que sus montos son `Decimal` (el número de un
+    // orquestador viejo también entra; lo mide `match-contract.test.ts`).
+    entryFee: "125.0000",
+    prize: "250.0000",
     isFreeRoom: false,
     enableBots: false,
   },

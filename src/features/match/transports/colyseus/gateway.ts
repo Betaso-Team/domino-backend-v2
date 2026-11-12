@@ -1,6 +1,8 @@
 import { withTimeout } from "@/shared/deadline";
+import { sleep } from "@/shared/sleep";
 import { generateId, matchMaker } from "@colyseus/core";
 import type { CreateMatchRequest, MatchParticipant } from "../match-contract";
+import type { MatchRegistry } from "../match-registry";
 
 // CUÁNTO SE ESPERA A QUE EL MATCHMAKER DIGA SI UNA SALA EXISTE, como truco (`53d1030`). Es una lectura
 // del registro de salas (`roomcaches` en Redis): si tarda más que esto, algo anda mal y la respuesta es
@@ -19,17 +21,43 @@ export interface OpenedTable {
   readonly seats: readonly { readonly userId: string; readonly reservation: unknown }[];
 }
 
+// CUÁNTO ESPERA UN `POST` DUPLICADO A QUE EL QUE TIENE EL CANDADO TERMINE DE ABRIR LA SALA, y cada
+// cuánto mira. Abrir una sala tarda milisegundos (dos escrituras en Redis); vencido esto, el duplicado
+// contesta `MATCH_OPENING` y el orquestador reintenta.
+export const OPENING_WAIT_MS = 5_000;
+const OPENING_POLL_MS = 100;
+
+/** Lo que el gateway necesita del registro del clúster para no abrir dos salas por partida. */
+export type OpeningRegistry = Pick<MatchRegistry, "roomOf" | "claimOpening" | "releaseOpening">;
+
+/** El duplicado no encontró la sala a tiempo: la está abriendo otro pedido. Reintentable. */
+export class MatchOpeningError extends Error {
+  constructor(matchId: string) {
+    super(`MATCH_OPENING: la mesa de ${matchId} la está abriendo otro pedido`);
+    this.name = "MatchOpeningError";
+  }
+}
+
 export class ColyseusMatchGateway {
   constructor(
     private readonly rooms: SeatBackMatchMaker = matchMaker,
     private readonly queryTimeoutMs: number = ROOM_QUERY_TIMEOUT_MS,
+    // Sin registro (la suite unitaria del gateway) no hay deduplicación por `matchId`.
+    private readonly registry?: OpeningRegistry,
+    private readonly openingWaitMs: number = OPENING_WAIT_MS,
   ) {}
 
   // LA MESA QUE PIDE EL ORQUESTADOR, que es la única forma de abrir una: el request crudo, validado
   // por la sala (`requestOf`). La sala no cobra, no reembolsa y no paga: el dinero de la mesa lo
   // mueve el orquestador, nunca el juego.
+  //
+  // UNA SALA POR `matchId`. Si la partida ya tiene sala viva (el orquestador reintentó un `POST` cuya
+  // respuesta se perdió), se devuelve ESA sala con reservas nuevas, en vez de abrir una segunda que
+  // cobraría y publicaría otra vez. Dos pedidos A LA VEZ los ordena el candado `match_opening:<matchId>`
+  // (SET NX en Redis): el que lo toma abre; el otro espera a que la sala aparezca en el registro —la
+  // sala se anota ANTES de que `createRoom` resuelva (`DominoRoom.onCreate`)— y reserva en ella.
   async openRequest(request: CreateMatchRequest): Promise<OpenedTable> {
-    const { roomId, reservations } = await this.create(request);
+    const { roomId, reservations } = await this.openOnce(request);
     return {
       roomId,
       seats: reservations.map((reservation, index) => ({
@@ -77,9 +105,49 @@ export class ColyseusMatchGateway {
     return listed?.length === 0;
   }
 
+  private async openOnce(request: CreateMatchRequest) {
+    const registry = this.registry;
+    if (!registry) return this.create(request);
+    const existing = await this.existing(request, registry);
+    if (existing) return existing;
+    const token = generateId();
+    if (await registry.claimOpening(request.matchId, token)) {
+      try {
+        // SE VUELVE A MIRAR CON EL CANDADO EN LA MANO: otro pudo haber abierto y soltado entre la
+        // primera mirada y el candado.
+        return (await this.existing(request, registry)) ?? (await this.create(request));
+      } finally {
+        await registry.releaseOpening(request.matchId, token).catch(() => undefined);
+      }
+    }
+    const deadline = Date.now() + this.openingWaitMs;
+    while (Date.now() < deadline) {
+      await sleep(OPENING_POLL_MS);
+      const opened = await this.existing(request, registry);
+      if (opened) return opened;
+    }
+    throw new MatchOpeningError(request.matchId);
+  }
+
+  // LA SALA VIVA DE ESTA PARTIDA, con una reserva nueva por participante; `undefined` si no hay.
+  private async existing(request: CreateMatchRequest, registry: OpeningRegistry) {
+    const roomId = await registry.roomOf(request.matchId);
+    if (roomId === undefined) return undefined;
+    const [room] = await matchMaker.query({ roomId });
+    if (!room) return undefined;
+    return this.reserve(room, request.participants.length);
+  }
+
   private async create(request: CreateMatchRequest) {
     const room = await matchMaker.createRoom("domino", request);
-    const sessionIds = Array.from({ length: request.participants.length }, () => generateId());
+    return this.reserve(room, request.participants.length);
+  }
+
+  private async reserve(
+    room: Parameters<typeof matchMaker.reserveMultipleSeatsFor>[0],
+    seats: number,
+  ) {
+    const sessionIds = Array.from({ length: seats }, () => generateId());
     const reserved = await matchMaker.reserveMultipleSeatsFor(
       room,
       sessionIds.map((sessionId) => ({ sessionId, options: {}, auth: undefined })),

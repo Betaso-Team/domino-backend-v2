@@ -1,4 +1,4 @@
-import { UC, UC_DECIMALS, fixed, readAmount } from "@/shared/money";
+import { type Decimal, UC_DECIMALS, ZERO, decimal, fixed } from "@/shared/money";
 import type { BetLevel } from "../../config";
 import type { PlayerId } from "../../ids";
 import type { MatchState } from "../../state";
@@ -23,7 +23,8 @@ export interface BetSettlement {
    */
   readonly level: number;
   readonly extra: number;
-  readonly additionalEntryFee: number;
+  /** En UC; cero cuando no hubo oferta. */
+  readonly additionalEntryFee: Decimal;
 }
 
 export class BetNegotiation {
@@ -32,12 +33,12 @@ export class BetNegotiation {
   /**
    * @param additionalEntryFee cuánto le sale a cada uno aceptar. Llega CALCULADO y no sale del
    * nivel: el catálogo remoto no trae montos —no sabe cuánto cuesta esta mesa— y la cuenta es
-   * `betAmountsOf`. Quien la hace es el juez, que es el único acá que tiene la config de la mesa.
+   * `betDifference`. Quien la hace es el juez, que es el único acá que tiene la config de la mesa.
    */
   open(
     proposerId: PlayerId,
     option: BetLevel,
-    additionalEntryFee: number,
+    additionalEntryFee: Decimal,
     turnRemainingMs: number,
   ): void {
     const offer = new BetOffer();
@@ -46,9 +47,9 @@ export class BetNegotiation {
     offer.extra = option.extra;
     offer.additionalPoints = option.additionalPoints;
     // EN LA CONVENCIÓN DE MONTOS, porque el estado ES el wire: texto en UC, la moneda de la mesa
-    // (`"10.0000"`). Su forma decimal más corta rellenada y sin redondear, así que `settle` lo vuelve a
-    // leer como el MISMO número.
-    offer.additionalEntryFee = fixed(readAmount(additionalEntryFee, UC), UC_DECIMALS);
+    // (`"10.0000"`). El decimal rellenado y sin redondear, así que `settle` lo vuelve a leer como el
+    // MISMO decimal.
+    offer.additionalEntryFee = fixed(additionalEntryFee.toString(), UC_DECIMALS);
     offer.turnRemainingMs = turnRemainingMs;
     currentRoundOf(this.match).betOffer = offer;
   }
@@ -70,7 +71,7 @@ export class BetNegotiation {
     // Sin oferta no hay nada que cerrar. Es alcanzable: el plazo puede vencer en el mismo
     // tick en que entra la respuesta, y el segundo en llegar no debe aplicar nada.
     if (!offer)
-      return { accepted: false, turnRemainingMs: 0, level: 0, extra: 0, additionalEntryFee: 0 };
+      return { accepted: false, turnRemainingMs: 0, level: 0, extra: 0, additionalEntryFee: ZERO };
 
     if (accepted) {
       // LO ACORDADO SUBE A LA PARTIDA y la oferta muere con su ronda. Es la partición del
@@ -79,9 +80,9 @@ export class BetNegotiation {
       this.match.acceptedBetLevel = offer.level;
     }
     const { turnRemainingMs, level, extra } = offer;
-    // El texto que `open` escribió es la forma más corta del número con ceros a la derecha, así que
-    // vuelve idéntico. Vacío no lo deja `open`; si apareciera, no hay nada que cobrar.
-    const additionalEntryFee = Number(offer.additionalEntryFee || "0");
+    // El texto que `open` escribió es el decimal con ceros a la derecha, así que vuelve idéntico. Vacío
+    // no lo deja `open`; si apareciera, no hay nada que cobrar.
+    const additionalEntryFee = offer.additionalEntryFee ? decimal(offer.additionalEntryFee) : ZERO;
     round.betOffer = undefined;
     return {
       accepted,

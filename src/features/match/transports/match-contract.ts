@@ -1,4 +1,5 @@
 import type { Identity } from "@/features/auth";
+import { DECIMAL_TEXT, Decimal, ZERO, decimal, fromNumber } from "@/shared/money";
 import { z } from "zod";
 import type { BetLevel, DominoMatchConfig } from "../core/config";
 
@@ -31,31 +32,41 @@ const nonBlank = z.string().refine((value) => value.trim().length > 0, "no puede
 // dinero que ya se movió. Lo mismo vale para el perfil, que es presentación.
 const identityPart = nonBlank.transform((value) => value.trim());
 
-// LOS MONTOS SON UC COMPLETAS Y ADMITEN DECIMALES. `entryFee: 10` son diez UC: es la
-// convención del catálogo de v1, de donde salen estos números, y un modo productivo puede
-// tener `1.5`. Rechazar la fracción —como hacía `Number.isSafeInteger`— obligaría a
-// escalar por 100 en la frontera, y el factor sobreviviría en una sola de las dos puntas
-// el día que alguien lo toque.
-//
-// Lo que se sigue cerrando es todo lo demás, y cada refine cubre un fallo distinto:
-// `.finite()` saca `NaN` e `Infinity` —montos que nadie puede acreditar y que contaminan
-// cualquier aritmética posterior—, `.nonnegative()` saca el cobro al revés, y el techo del
-// entero seguro saca el desborde de la mantisa, donde dos montos distintos son el mismo
-// número. No se expresa con `.safe()` porque en zod 4 `.safe()` IMPLICA entero y rechazaría
-// `1.5`, que es justo lo que esta frontera vino a aceptar (medido sobre la 4.6.1 instalada).
-//
-// SIGUE ACÁ AUNQUE EL REQUEST YA NO TRAIGA DINERO: lo trae el SNAPSHOT que el replay rebobina, y
-// un fixture golden con un monto corrupto reconstruiría una partida cuya liquidación no cierra.
-const ucAmount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
+// LOS MONTOS EN LA MONEDA DEL JUGADOR SON TEXTO DECIMAL: los cotizó billing con su tasa y su redondeo
+// (`"200.00"`), y el dominó no hace cuentas con ellos —los muestra y elige cuál corresponde—. Un
+// `number` acá sería la primera conversión, y la que pierde el centavo. Sin signo ni exponente; el techo
+// de largo es de forma, para que un texto de un mega no viaje a cada snapshot.
+const decimalText = z.string().max(32).regex(DECIMAL_TEXT, "no es un monto decimal");
 
-// LOS MONTOS EN LA MONEDA DEL JUGADOR SON TEXTO DECIMAL, y no `ucAmount`: los cotizó billing con su
-// tasa y su redondeo (`"200.00"`), y el dominó no hace cuentas con ellos —los muestra y elige cuál
-// corresponde—. Un `number` acá sería la primera conversión, y la que pierde el centavo. Sin signo ni
-// exponente; el techo de largo es de forma, para que un texto de un mega no viaje a cada snapshot.
-const decimalText = z
-  .string()
-  .max(32)
-  .regex(/^\d+(\.\d+)?$/, "no es un monto decimal");
+// LOS MONTOS DE LA MESA SON UC COMPLETAS, ADMITEN DECIMALES Y ADENTRO SON EL `Decimal` DE BILLING
+// (`@/shared/money`): `entryFee` de `10` son diez UC, y un modo productivo puede tener `1.5`. Toda cuenta
+// con ellos —el premio a un nivel de aumento— usa las fórmulas compartidas con el orquestador, que
+// compara el premio publicado con igualdad decimal exacta: un `number` acá era `0.02 + 0.1 =
+// 0.12000000000000001` y un resultado en la DLQ.
+//
+// LLEGAN EN TRES FORMAS, y las tres terminan en el mismo `Decimal`:
+//   · TEXTO DECIMAL (`"10.0000"`): lo que manda el orquestador desde que sus montos son `Decimal`, y lo
+//     que guarda el registro desde este cambio.
+//   · UN NÚMERO finito no negativo (`10`, `1.5`): lo que mandaba el orquestador anterior y lo que tienen
+//     los snapshots grabados antes (los goldens del replay, los registros viejos). Se lee en su forma
+//     decimal más corta (`fromNumber`), sin redondear. Se acepta durante una versión, mientras el
+//     orquestador desplegado sea el viejo; el registro lo seguirá teniendo siempre.
+//   · UN `Decimal` YA VALIDADO: la ruta del orquestador valida el pedido y se lo pasa a la sala, que lo
+//     vuelve a validar al crearse. Entre procesos viaja como JSON, y el `Decimal` se serializa como su
+//     texto.
+// El techo del entero seguro del número saca el desborde de la mantisa, donde dos montos distintos son
+// el mismo número; no se expresa con `.safe()` porque en zod 4 `.safe()` IMPLICA entero.
+const ucAmount = z
+  .union([
+    decimalText,
+    z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    z.instanceof(Decimal).refine((value) => value.gte(ZERO), "no puede ser negativo"),
+  ])
+  .transform((value): Decimal => {
+    if (typeof value === "string") return decimal(value);
+    if (typeof value === "number") return fromNumber(value);
+    return value;
+  });
 
 // UN NIVEL DE AUMENTO CON PRECIO. El nivel 1 es la mesa sin aumento, y su precio es el de arriba.
 const levelPrice = z.strictObject({
@@ -110,8 +121,8 @@ const participantShape = z.strictObject({
 // EL PRECIO VA EN LA MONEDA QUE SE COBRA, y si no coincide el que se equivocó es el que lo mandó: el
 // jugador vería la entrada en una moneda y la pagaría en otra. Es una función y no un `.refine` sobre
 // la forma porque el snapshot la EXTIENDE con el `playerId`, y zod no extiende un objeto refinado.
-const priceInSeatCurrency = <T extends { currency: string; price?: { currency: string } }>(
-  schema: z.ZodType<T>,
+const priceInSeatCurrency = <T extends { currency: string; price?: { currency: string } }, I>(
+  schema: z.ZodType<T, I>,
 ) =>
   schema.refine(({ currency, price }) => price === undefined || price.currency === currency, {
     path: ["price", "currency"],
@@ -161,83 +172,131 @@ const betLevel = z.strictObject({
   level: z.number().int().positive().safe(),
   extra: z.number().nonnegative().safe(),
   // LOS MONTOS NO ESTÁN, y la ausencia es la corrección: el catálogo del backend principal devuelve
-  // `{ level, extra, additionalPoints }` y la plata se deriva de la mesa (`betAmountsOf`). Guardarlos
+  // `{ level, extra, additionalPoints }` y la plata se deriva de la mesa (`betDifference`). Guardarlos
   // acá era pedirle al snapshot un dato que nadie produce — y un cobro cableado contra ellos habría
   // cobrado cero, en silencio.
   additionalPoints: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
 
-// EL REQUEST VIVO DE UNA MESA CASUAL. Trae su modo ENTERO en línea (`gameMode`): el catálogo de modos
-// es del orquestador, que lo lee y lo edita, y dominó no guarda ninguno. El orquestador manda los siete
-// campos que `configOf` usa, más el nombre para el historial, tomados de la misma fila con la que armó la
-// planilla y el libro de billing. Las guardas son las del snapshot (`matchSnapshot`): enteros positivos
-// seguros para los puntos, `ucAmount` para los importes; el multiplicador además entero, como lo pide el
-// catálogo del orquestador. Se llama `gameMode` y no `mode` porque `mode` es el discriminante de la
-// unión. `strictObject` rechaza `pointsToWin`, `entryFee` o `prize` sueltos en el pedido: la economía de
-// la mesa viaja solo dentro del modo.
-const inlineGameMode = z.strictObject({
-  name: z.string().min(1).max(100),
-  playersQuantity: z.union([z.literal(2), z.literal(4)]),
-  pointsToWin: z.number().int().positive().safe(),
-  multiplier: z.number().int().positive().safe(),
-  entryFee: ucAmount,
-  prize: ucAmount,
-  isFreeRoom: z.boolean(),
-  enableBots: z.boolean(),
-});
+/**
+ * LAS MESAS QUE ESTE DOMINÓ ABRE: sólo de dos. El dominó de cuatro no sale (ver «Antes de habilitar
+ * dominó de 4» en `AGENTS.md`), y tiene que ser IMPOSIBLE crear una mesa de cuatro, ni por error: el
+ * pedido que la pide es un 400 en la ruta del orquestador y un rechazo en la sala. Es una constante del
+ * código y no una variable de entorno a propósito: habilitar el 4P es un cambio de código con su
+ * revisión, no un valor que alguien pueda poner en un `.env`.
+ *
+ * El motor sí sabe jugar de cuatro, y sus tests lo siguen midiendo: la sala recibe los asientos
+ * habilitados por inyección (`EnabledSeats` en el container), y sólo el arnés de los E2E de cuatro la
+ * registra (`tests/e2e-harness.ts`). Producción no la registra nunca y queda con esta lista.
+ */
+export const ENABLED_SEATS: readonly number[] = Object.freeze([2]);
 
-const casualRequest = z
-  .strictObject({
-    mode: z.literal("CASUAL"),
-    matchId: nonBlank,
-    // EL UUID DEL MODO NO SE RESUELVE: nombra la mesa en el snapshot, el historial, el censo y el
-    // resultado. Los números de la mesa los trae `gameMode`.
-    gameModeId: nonBlank,
-    gameMode: inlineGameMode,
-    // El techo de cuatro es de FORMA y no la regla del 4P: la cantidad real la decide el modo, y
-    // el rechazo del 4P vive en `configOf`, que es el único que ve los dos.
-    participants: z.array(participant).min(2).max(4),
-    seed: nonBlank,
-    teamAssignment,
-    // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
-    rateId: nonBlank,
-    // LOS NIVELES DE AUMENTO QUE OFRECE LA MESA, y los decide el ORQUESTADOR: él es quien cobra el
-    // aumento, así que él dice cuáles hay. Opcional y sin default de catálogo: ausente es "esta mesa
-    // no ofrece aumentar", que es el reposo y lo que hacen las mesas del orquestador hasta que el
-    // orquestador mande niveles.
-    betLevels: z.array(betLevel).max(16).optional(),
-  })
-  .superRefine(({ participants }, context) =>
-    checkTableShape(participants, context, "participants"),
-  );
+/** El token del container con el que el arnés de los E2E de cuatro le habilita esas mesas a la sala. */
+export const ENABLED_SEATS_TOKEN = "EnabledSeats";
 
-// LA MESA DE TORNEO, y NO TRAE DINERO NI CATÁLOGO: ni `gameModeId`, ni `rateId`, ni `betLevels`. Las
-// partidas de un torneo son gratis —la inscripción la cobró billing al inscribirse— y las reglas las
-// manda el orquestador, que las copió del torneo. `strictObject` rechaza cualquier campo de dinero:
-// un llamador que crea estar cobrando una mesa de torneo se entera acá y no al ver que no se cobró.
-const tournamentRequest = z
-  .strictObject({
-    mode: z.literal("TOURNAMENT"),
-    matchId: nonBlank,
-    tournamentId: identityPart,
-    // Mismas reglas de forma que la casual: 2 o 4, par, sin el mismo jugador dos veces.
-    participants: z.array(participant).min(2).max(4),
-    seed: nonBlank,
-    teamAssignment,
-    // SIN TECHO PROPIO: el tope de puntos de un torneo es una decisión de producto de
-    // `apps/tournaments` (su ajuste `maxPointsToWin`). El motor solo usa `pointsToWin` como meta
-    // (`referee.ts`), así que acá se exige únicamente la regla técnica: un entero positivo seguro. El
-    // 100 del catálogo casual del orquestador es de ese catálogo, no del motor.
-    rules: z.strictObject({
-      pointsToWin: z.number().int().positive().safe(),
-    }),
-  })
-  .superRefine(({ participants }, context) =>
-    checkTableShape(participants, context, "participants"),
-  );
+// LOS DOS REQUESTS VIVOS, armados para unas mesas habilitadas. Es una función y no dos constantes porque
+// la cantidad de asientos es la única regla que cambia entre producción (`ENABLED_SEATS`, sólo 2) y el
+// arnés que todavía mide el motor de cuatro; todo lo demás es el mismo schema.
+function createRequestFor(enabledSeats: readonly number[]) {
+  const maxSeats = Math.max(...enabledSeats);
+  const seatCount = z
+    .number()
+    .int()
+    .refine((value) => enabledSeats.includes(value), {
+      message: `sólo se abren mesas de ${enabledSeats.join(" o ")}`,
+    });
 
-// `mode` DISCRIMINA: una mesa casual con campos de torneo, o al revés, es un 400 y no una mesa a medias.
-const createRequest = z.discriminatedUnion("mode", [casualRequest, tournamentRequest]);
+  // EL REQUEST VIVO DE UNA MESA CASUAL. Trae su modo ENTERO en línea (`gameMode`): el catálogo de modos
+  // es del orquestador, que lo lee y lo edita, y dominó no guarda ninguno. El orquestador manda los siete
+  // campos que `configOf` usa, más el nombre para el historial, tomados de la misma fila con la que armó
+  // la planilla y el libro de billing. Las guardas son las del snapshot (`matchSnapshot`): enteros
+  // positivos seguros para los puntos, `ucAmount` para los importes; el multiplicador además entero, como
+  // lo pide el catálogo del orquestador. Se llama `gameMode` y no `mode` porque `mode` es el
+  // discriminante de la unión. `strictObject` rechaza `pointsToWin`, `entryFee` o `prize` sueltos en el
+  // pedido: la economía de la mesa viaja solo dentro del modo.
+  const inlineGameMode = z.strictObject({
+    name: z.string().min(1).max(100),
+    // SÓLO LAS MESAS HABILITADAS (`ENABLED_SEATS`): un modo de cuatro es un 400.
+    playersQuantity: seatCount,
+    pointsToWin: z.number().int().positive().safe(),
+    multiplier: z.number().int().positive().safe(),
+    entryFee: ucAmount,
+    prize: ucAmount,
+    isFreeRoom: z.boolean(),
+    enableBots: z.boolean(),
+  });
+
+  const casualRequest = z
+    .strictObject({
+      mode: z.literal("CASUAL"),
+      matchId: nonBlank,
+      // EL UUID DEL MODO NO SE RESUELVE: nombra la mesa en el snapshot, el historial, el censo y el
+      // resultado. Los números de la mesa los trae `gameMode`.
+      gameModeId: nonBlank,
+      gameMode: inlineGameMode,
+      // EL TECHO ES EL DE LAS MESAS HABILITADAS (dos): más participantes es un 400 aunque el modo diga
+      // otra cosa. Que la cantidad coincida con el modo lo decide `configOf`, el único que ve los dos.
+      participants: z.array(participant).min(2).max(maxSeats),
+      seed: nonBlank,
+      teamAssignment,
+      // Opaco: lo emite la plataforma que cobra (Betaso usa el `_id` de Mongo de sus tasas).
+      rateId: nonBlank,
+      // LOS NIVELES DE AUMENTO QUE OFRECE LA MESA, y los decide el ORQUESTADOR: él es quien cobra el
+      // aumento, así que él dice cuáles hay. Opcional y sin default de catálogo: ausente es "esta mesa
+      // no ofrece aumentar", que es el reposo y lo que hacen las mesas del orquestador hasta que el
+      // orquestador mande niveles.
+      betLevels: z.array(betLevel).max(16).optional(),
+    })
+    .superRefine(({ participants }, context) =>
+      checkTableShape(participants, context, "participants"),
+    );
+
+  // LA MESA DE TORNEO, y NO TRAE DINERO NI CATÁLOGO: ni `gameModeId`, ni `rateId`, ni `betLevels`. Las
+  // partidas de un torneo son gratis —la inscripción la cobró billing al inscribirse— y las reglas las
+  // manda el orquestador, que las copió del torneo. `strictObject` rechaza cualquier campo de dinero:
+  // un llamador que crea estar cobrando una mesa de torneo se entera acá y no al ver que no se cobró.
+  const tournamentRequest = z
+    .strictObject({
+      mode: z.literal("TOURNAMENT"),
+      matchId: nonBlank,
+      tournamentId: identityPart,
+      // Mismas reglas de forma que la casual: las mesas habilitadas, par, sin el mismo jugador dos
+      // veces. Sin modo que diga la cantidad, el techo es la única guarda del 4P.
+      participants: z.array(participant).min(2).max(maxSeats),
+      seed: nonBlank,
+      teamAssignment,
+      // SIN TECHO PROPIO: el tope de puntos de un torneo es una decisión de producto de
+      // `apps/tournaments` (su ajuste `maxPointsToWin`). El motor solo usa `pointsToWin` como meta
+      // (`referee.ts`), así que acá se exige únicamente la regla técnica: un entero positivo seguro. El
+      // 100 del catálogo casual del orquestador es de ese catálogo, no del motor.
+      rules: z.strictObject({
+        pointsToWin: z.number().int().positive().safe(),
+      }),
+    })
+    .superRefine(({ participants }, context) =>
+      checkTableShape(participants, context, "participants"),
+    );
+
+  // `mode` DISCRIMINA: una mesa casual con campos de torneo, o al revés, es un 400 y no una mesa a
+  // medias.
+  return z.discriminatedUnion("mode", [casualRequest, tournamentRequest]);
+}
+
+const createRequest = createRequestFor(ENABLED_SEATS);
+
+// Los schemas de otras mesas habilitadas se arman una vez: la sala valida con ellos cada `onCreate`.
+const requestSchemas = new Map<string, typeof createRequest>([
+  [ENABLED_SEATS.join(","), createRequest],
+]);
+function createRequestSchemaFor(enabledSeats: readonly number[]): typeof createRequest {
+  const key = enabledSeats.join(",");
+  let schema = requestSchemas.get(key);
+  if (!schema) {
+    schema = createRequestFor(enabledSeats);
+    requestSchemas.set(key, schema);
+  }
+  return schema;
+}
 
 // EL SNAPSHOT GRABADO. Es la mesa ENTERA —asientos ya numerados, puntos y dinero adentro— y es lo
 // que el replay recibe: reconstruir una partida no puede depender del catálogo, porque el catálogo
@@ -307,11 +366,19 @@ const matchSnapshot = z
 export const createMatchRequestSchema = createRequest;
 
 export type MatchParticipant = z.infer<typeof participant>;
-export type InlineGameMode = z.infer<typeof inlineGameMode>;
 
 export type CreateMatchRequest = z.infer<typeof createRequest>;
-export type CasualMatchRequest = z.infer<typeof casualRequest>;
-export type TournamentMatchRequest = z.infer<typeof tournamentRequest>;
+export type CasualMatchRequest = Extract<CreateMatchRequest, { mode: "CASUAL" }>;
+export type TournamentMatchRequest = Extract<CreateMatchRequest, { mode: "TOURNAMENT" }>;
+export type InlineGameMode = CasualMatchRequest["gameMode"];
+
+/**
+ * EL PEDIDO COMO LO MANDA EL ORQUESTADOR, antes de validarlo: los montos del modo en texto decimal (o el
+ * número de un orquestador viejo). Es el tipo de lo que un test le pasa a la sala o a la ruta.
+ */
+export type CreateMatchRequestInput = z.input<typeof createRequest>;
+export type CasualMatchRequestInput = Extract<CreateMatchRequestInput, { mode: "CASUAL" }>;
+export type InlineGameModeInput = CasualMatchRequestInput["gameMode"];
 
 export interface SeatCredentials extends Identity {
   readonly token: string;
@@ -323,8 +390,8 @@ export interface SeatCredentials extends Identity {
  * inscripción se configuraron para una mesa que no es ésa. El código viaja en el `message` porque
  * es lo único que cruza el cable: Colyseus propaga el mensaje al que pidió crear la sala.
  *
- * Un modo que no es de 2 ni de 4 no llega hasta acá: `gameMode.playersQuantity` solo acepta esos
- * dos, que son las mesas que este motor sabe sentar.
+ * Un modo de otra cantidad que las habilitadas (`ENABLED_SEATS`) no llega hasta acá: el schema lo
+ * rechaza, y `configOf` lo vuelve a rechazar (`SeatsNotEnabledError`).
  */
 export class SeatCountMismatchError extends Error {
   override readonly name = "SeatCountMismatchError";
@@ -335,8 +402,29 @@ export class SeatCountMismatchError extends Error {
   }
 }
 
-export function requestOf(input: unknown): CreateMatchRequest {
-  return createRequest.parse(input);
+/**
+ * LA MESA QUE EL DOMINÓ NO ABRE: una cantidad de asientos fuera de `ENABLED_SEATS`. El schema ya la
+ * rechaza; esto es la segunda guarda, en `configOf`, para el pedido que llegue armado a mano sin pasar
+ * por `requestOf`. No es un rechazo del contrato sino un defecto nuestro, y por eso no tiene 422.
+ */
+export class SeatsNotEnabledError extends Error {
+  override readonly name = "SeatsNotEnabledError";
+  constructor(seats: number, enabledSeats: readonly number[]) {
+    super(
+      `SEATS_NOT_ENABLED: el dominó sólo abre mesas de ${enabledSeats.join(" o ")}, y el pedido es de ${seats}`,
+    );
+  }
+}
+
+/**
+ * @param enabledSeats las mesas que se pueden abrir. Producción usa el default (`ENABLED_SEATS`, sólo
+ * 2); sólo el arnés de los E2E de cuatro pasa otra lista.
+ */
+export function requestOf(
+  input: unknown,
+  enabledSeats: readonly number[] = ENABLED_SEATS,
+): CreateMatchRequest {
+  return createRequestSchemaFor(enabledSeats).parse(input);
 }
 
 /**
@@ -352,11 +440,20 @@ export function requestOf(input: unknown): CreateMatchRequest {
 export function configOf(
   request: CreateMatchRequest,
   betLevels: readonly BetLevel[] = [],
+  enabledSeats: readonly number[] = ENABLED_SEATS,
 ): DominoMatchConfig {
+  // EL 4P SE RECHAZA ACÁ TAMBIÉN, y no sólo en el schema: este es el punto por el que nace TODA mesa, y
+  // un pedido que llegara sin pasar por `requestOf` no puede sentar a cuatro.
+  if (!enabledSeats.includes(request.participants.length)) {
+    throw new SeatsNotEnabledError(request.participants.length, enabledSeats);
+  }
   // LA MESA DE TORNEO NO TIENE MODO NI NIVELES: se arma con lo que trae el request, y lo que el
   // llamador pase en `betLevels` no la toca.
   if (request.mode === "TOURNAMENT") return tournamentConfigOf(request);
   const mode = request.gameMode;
+  if (!enabledSeats.includes(mode.playersQuantity)) {
+    throw new SeatsNotEnabledError(mode.playersQuantity, enabledSeats);
+  }
   if (request.participants.length !== mode.playersQuantity) {
     throw new SeatCountMismatchError(request.participants.length, request);
   }
@@ -437,8 +534,8 @@ export function tournamentConfigOf(request: TournamentMatchRequest): DominoMatch
     teamAssignment: request.teamAssignment,
     isDealWindowEnabled: true,
     rateId: NO_RATE,
-    entryFee: 0,
-    prize: 0,
+    entryFee: ZERO,
+    prize: ZERO,
     multiplier: 1,
     isFreeRoom: true,
     enableBots: false,
@@ -454,6 +551,7 @@ export function tournamentConfigOf(request: TournamentMatchRequest): DominoMatch
  * panel dejó configurado después.
  *
  * Por eso acepta cuatro asientos y `configOf` no: acá no nace nada, se reconstruye lo que ya pasó.
+ * Tampoco mira `ENABLED_SEATS`, por lo mismo.
  */
 export function replayConfigOf(input: unknown): DominoMatchConfig {
   return matchSnapshot.parse(input);

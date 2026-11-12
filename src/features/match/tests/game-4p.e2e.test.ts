@@ -115,7 +115,7 @@ describe("partida 4P completa", () => {
     // ENTERO A CADA UNO Y NO LA MITAD: el `prize` del catálogo es el premio POR CABEZA, que es la
     // regla de v1. Dividirlo entre los cobradores le pagaría de menos a los dos.
     for (const entry of instruction?.entries ?? []) {
-      expect(entry.amount).toBe(match.config.prize);
+      expect(entry.amount.eq(match.config.prize)).toBe(true);
     }
     // Y les paga a los dos del equipo que ganó, por su identidad externa y no por el asiento.
     const winners = state.players

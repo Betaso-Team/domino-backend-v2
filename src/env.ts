@@ -124,6 +124,11 @@ const schema = z.object({
   REMATCH_RESPONSE_MS: z.coerce.number().int().positive().default(5_000),
   REMATCH_HANDOFF_MS: z.coerce.number().int().positive().default(6_000),
   SEATING_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // EL TOPE DE MENSAJES POR SEGUNDO DE CADA CONEXIÓN (`Room.maxMessagesPerSecond`). El default de
+  // Colyseus es `Infinity`: un cliente roto o malicioso podía mandar miles por segundo, y cada uno
+  // es trabajo del motor y una línea de log. Un jugador de dominó manda un puñado por turno; pasado
+  // el tope, Colyseus CIERRA la conexión (código 1011) y el jugador puede volver con su reserva.
+  MAX_MESSAGES_PER_SECOND: z.coerce.number().int().positive().default(25),
   /**
    * Cuánto se le guarda el asiento al que se cayó (`allowReconnection`). Va en SEGUNDOS
    * porque esa es la unidad de la API de Colyseus, y convertir acá sería dejar dos números
@@ -396,6 +401,7 @@ export interface Env {
   readonly rematchResponseMs: number;
   readonly rematchHandoffMs: number;
   readonly seatingTimeoutMs: number;
+  readonly maxMessagesPerSecond: number;
   readonly reconnectionWindowSeconds: number;
   readonly logLevel: LogLevel;
   /** El release que corre, o `undefined` si esto no lo levantó un deploy. */
@@ -523,6 +529,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     rematchResponseMs: parsed.REMATCH_RESPONSE_MS,
     rematchHandoffMs: parsed.REMATCH_HANDOFF_MS,
     seatingTimeoutMs: parsed.SEATING_TIMEOUT_MS,
+    maxMessagesPerSecond: parsed.MAX_MESSAGES_PER_SECOND,
     reconnectionWindowSeconds: parsed.RECONNECTION_WINDOW_SECONDS,
     logLevel: parsed.LOG_LEVEL ?? defaultLogLevel(appEnv),
     release: parsed.RELEASE,

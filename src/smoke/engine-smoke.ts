@@ -10,7 +10,7 @@ import { playableSides } from "@/features/match/core/rules/playable";
 import { MatchState } from "@/features/match/core/state";
 import type { BoardSide } from "@/features/match/core/state/tile";
 import {
-  type CreateMatchRequest,
+  type CreateMatchRequestInput,
   configOf,
   requestOf,
 } from "@/features/match/transports/match-contract";
@@ -28,8 +28,8 @@ const GAME_MODE = {
   playersQuantity: 2,
   pointsToWin: 30,
   multiplier: 1,
-  entryFee: 125,
-  prize: 250,
+  entryFee: "125.0000",
+  prize: "250.0000",
   isFreeRoom: false,
   enableBots: false,
 } as const;
@@ -46,7 +46,7 @@ const OPTIONS = {
   seed: "smoke-deterministic-seed",
   teamAssignment: "SEAT_ORDER",
   rateId: "8b16f47f-8cf0-4e1f-9e72-ff1a79bb3fd0",
-} satisfies CreateMatchRequest;
+} satisfies CreateMatchRequestInput;
 
 type SmokeRoom = Room<unknown, MatchState>;
 
@@ -166,27 +166,37 @@ function assertPayouts(
   const winnerId = state.players.find(({ teamId }) => teamId === winnerTeamId)?.playerId;
   const winner = config.seats.find(({ playerId }) => playerId === winnerId);
   assert.ok(winner, "config sin asiento ganador");
-  assert.deepEqual(reward, {
-    matchId: config.matchId,
-    rateId: config.rateId,
-    kind: "REWARD",
-    entries: [
-      {
-        userId: winner.userId,
-        currency: winner.currency,
-        amount: config.prize,
-        idempotencyKey: `["${config.matchId}","REWARD","${winner.userId}"]`,
-      },
-    ],
-  });
+  // LOS MONTOS SON `Decimal`: se comparan por su texto, que es lo que se publica.
+  const textual = (entries: readonly { amount: { toString(): string } }[] = []) =>
+    entries.map((entry) => ({ ...entry, amount: entry.amount.toString() }));
+  assert.deepEqual(
+    { ...reward, entries: textual(reward?.entries) },
+    {
+      matchId: config.matchId,
+      rateId: config.rateId,
+      kind: "REWARD",
+      entries: [
+        {
+          userId: winner.userId,
+          currency: winner.currency,
+          amount: "250",
+          idempotencyKey: `["${config.matchId}","REWARD","${winner.userId}"]`,
+        },
+      ],
+    },
+  );
 
   const refund = payoutOf({ type: "MATCH_ABORTED", reason: "INTERRUPTED" }, payoutState, config);
   assert.equal(refund?.kind, "REFUND");
   assert.deepEqual(
-    refund?.entries.map(({ userId, currency, amount }) => ({ userId, currency, amount })),
+    refund?.entries.map(({ userId, currency, amount }) => ({
+      userId,
+      currency,
+      amount: amount.toString(),
+    })),
     [
-      { userId: "smoke-ada", currency: "VES", amount: 125 },
-      { userId: "smoke-lin", currency: "USD", amount: 125 },
+      { userId: "smoke-ada", currency: "VES", amount: "125" },
+      { userId: "smoke-lin", currency: "USD", amount: "125" },
     ],
   );
 }

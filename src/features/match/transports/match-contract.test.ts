@@ -1,5 +1,12 @@
+import { ZERO, decimal } from "@/shared/money";
 import { describe, expect, it } from "vitest";
-import { configOf, replayConfigOf, requestOf } from "./match-contract";
+import {
+  ENABLED_SEATS,
+  SeatsNotEnabledError,
+  configOf,
+  replayConfigOf,
+  requestOf,
+} from "./match-contract";
 
 // LAS DOS FRONTERAS, y desde esta tarea son dos porque las entradas son dos cosas distintas.
 //
@@ -58,6 +65,11 @@ const withMode = (overrides: Record<string, unknown>, input: object = request) =
 });
 
 const configFrom = (input: unknown = request) => configOf(requestOf(input));
+
+// LAS MESAS DE CUATRO, habilitadas sólo para medir el motor: producción abre sólo de dos
+// (`ENABLED_SEATS`).
+const FOUR_SEATS = [2, 4];
+const configWithFour = (input: unknown) => configOf(requestOf(input, FOUR_SEATS), [], FOUR_SEATS);
 
 // OTRO PRINCIPAL CUALQUIERA, para armar mesas de largo distinto del válido. Cada uno es un
 // `userId` nuevo, así que lo único que estas filas ejercen es el LARGO — si reusaran uno
@@ -232,15 +244,21 @@ describe("configOf", () => {
   // implementación copia mediría que dos lecturas del mismo dato coinciden.
   it("arma la mesa con el modo del pedido", () => {
     const config = configFrom(
-      withMode({ pointsToWin: 75, multiplier: 3, entryFee: 1.5, prize: 2.75, enableBots: true }),
+      withMode({
+        pointsToWin: 75,
+        multiplier: 3,
+        entryFee: "1.5000",
+        prize: "2.7500",
+        enableBots: true,
+      }),
     );
 
     expect(config).toMatchObject({
       gameModeId: "mode-2p",
       pointsToWin: 75,
       multiplier: 3,
-      entryFee: 1.5,
-      prize: 2.75,
+      entryFee: decimal("1.5"),
+      prize: decimal("2.75"),
       isFreeRoom: false,
       enableBots: true,
     });
@@ -281,8 +299,8 @@ describe("configOf", () => {
   // `payoutOf` exigía exactamente un ganador y el final de una mesa de cuatro lanzaba DESPUÉS
   // del veredicto —sin premio y sin reembolso, o sea plata trabada—. Lo que la abrió fue traer la
   // regla de reparto de v1, no borrar la guarda.
-  it("sienta un modo de cuatro y le copia los bots", () => {
-    const config = configFrom(
+  it("sienta un modo de cuatro y le copia los bots (con las mesas de cuatro habilitadas)", () => {
+    const config = configWithFour(
       withMode(
         { playersQuantity: 4, enableBots: true },
         { ...request, participants: [...participants, extra(1), extra(2)] },
@@ -307,8 +325,76 @@ describe("configOf", () => {
       { ...request, participants: [...participants, extra(1), extra(2)] },
     ],
     ["dos contra un modo de cuatro", withMode({ playersQuantity: 4 })],
-  ])("rechaza %s con SEAT_COUNT_MISMATCH", (_name, input) => {
-    expect(() => configFrom(input)).toThrow(/SEAT_COUNT_MISMATCH/);
+  ])("rechaza %s con SEAT_COUNT_MISMATCH (con las mesas de cuatro habilitadas)", (_name, input) => {
+    expect(() => configWithFour(input)).toThrow(/SEAT_COUNT_MISMATCH/);
+  });
+});
+
+// SÓLO DOMINÓ DE DOS. El dominó de cuatro no sale, y una mesa de cuatro no se puede crear ni por error:
+// ni por el modo, ni por los participantes, ni armando el pedido a mano sin pasar por `requestOf`.
+describe("sólo mesas de dos", () => {
+  const fourParticipants = [...participants, extra(1), extra(2)];
+  const { gameModeId: _mode, gameMode: _gameMode, rateId: _rate, ...shared } = request;
+  const tournament = {
+    ...shared,
+    mode: "TOURNAMENT",
+    tournamentId: "t-1",
+    rules: { pointsToWin: 50 },
+  } as const;
+
+  it("es una constante del código: sólo 2", () => {
+    expect(ENABLED_SEATS).toEqual([2]);
+  });
+
+  it.each<[string, object]>([
+    ["un modo de cuatro", withMode({ playersQuantity: 4 })],
+    ["cuatro participantes", { ...request, participants: fourParticipants }],
+    [
+      "un modo de cuatro con cuatro participantes",
+      withMode({ playersQuantity: 4 }, { ...request, participants: fourParticipants }),
+    ],
+  ])("la casual rechaza %s", (_name, input) => {
+    expect(() => requestOf(input)).toThrow();
+  });
+
+  it("la de torneo rechaza cuatro participantes", () => {
+    expect(() => requestOf({ ...tournament, participants: fourParticipants })).toThrow();
+  });
+
+  it("`configOf` rechaza la mesa de cuatro aunque el pedido no haya pasado por `requestOf`", () => {
+    const casual = requestOf(
+      withMode({ playersQuantity: 4 }, { ...request, participants: fourParticipants }),
+      FOUR_SEATS,
+    );
+    expect(() => configOf(casual)).toThrow(SeatsNotEnabledError);
+    const cup = requestOf({ ...tournament, participants: fourParticipants }, FOUR_SEATS);
+    expect(() => configOf(cup)).toThrow(/SEATS_NOT_ENABLED/);
+  });
+});
+
+// LOS MONTOS DEL MODO: texto decimal del orquestador nuevo, o el número del viejo durante una versión.
+// Los dos terminan en el MISMO `Decimal`, sin redondear.
+describe("los montos del modo", () => {
+  it.each<[string, unknown, string]>([
+    ["texto con los 4 decimales de UC", "0.0200", "0.02"],
+    ["texto sin decimales", "125", "125"],
+    ["el número de un orquestador viejo", 0.02, "0.02"],
+    ["un número entero", 125, "125"],
+  ])("acepta %s", (_name, entryFee, expected) => {
+    const config = configFrom(withMode({ entryFee, prize: entryFee }));
+    expect(config.entryFee.toString()).toBe(expected);
+    expect(config.prize.eq(decimal(expected))).toBe(true);
+  });
+
+  it.each<[string, unknown]>([
+    ["con exponente", "1e3"],
+    ["negativo en texto", "-1"],
+    ["con signo", "+1"],
+    ["vacío", ""],
+    ["sin dígito entero", ".5"],
+    ["un objeto", { uc: "1.0000" }],
+  ])("rechaza un monto %s", (_name, entryFee) => {
+    expect(() => requestOf(withMode({ entryFee }))).toThrow();
   });
 });
 
@@ -426,6 +512,9 @@ describe("replayConfigOf", () => {
   it("reconstruye el snapshot completo tal cual se grabó, con el aumento apagado", () => {
     expect(replayConfigOf(snapshot)).toEqual({
       ...snapshot,
+      // LOS MONTOS DEL SNAPSHOT VIEJO ERAN NÚMEROS, y se leen como el `Decimal` de su forma más corta.
+      entryFee: decimal("125"),
+      prize: decimal("250"),
       betLevels: [],
       isFreeRoom: false,
       isRematchEnabled: false,
@@ -499,8 +588,15 @@ describe("replayConfigOf", () => {
   // había acá: un modo productivo con `entryFee: 1.5` son UN UC Y MEDIO, no quince centésimos.
   it("conserva los decimales finitos sin escalarlos", () => {
     const config = replayConfigOf({ ...snapshot, entryFee: 1.5, prize: 2.75 });
-    expect(config.entryFee).toBe(1.5);
-    expect(config.prize).toBe(2.75);
+    expect(config.entryFee.toString()).toBe("1.5");
+    expect(config.prize.toString()).toBe("2.75");
+  });
+
+  // UN REGISTRO NUEVO GUARDA LOS MONTOS COMO TEXTO EN UC, y se rebobina igual que uno viejo.
+  it("acepta los montos como texto decimal, el registro nuevo", () => {
+    const config = replayConfigOf({ ...snapshot, entryFee: "125.0000", prize: "0.0200" });
+    expect(config.entryFee.eq(decimal("125"))).toBe(true);
+    expect(config.prize.toString()).toBe("0.02");
   });
 });
 
@@ -531,8 +627,8 @@ describe("mesa de torneo", () => {
       teamAssignment: "SHUFFLED",
       isDealWindowEnabled: true,
       rateId: "none",
-      entryFee: 0,
-      prize: 0,
+      entryFee: ZERO,
+      prize: ZERO,
       multiplier: 1,
       isFreeRoom: true,
       enableBots: false,
@@ -573,13 +669,13 @@ describe("mesa de torneo", () => {
     expect(() => requestOf({ ...tournament, mode: "RANKED" })).toThrow();
   });
 
-  it("sienta cuatro, por parejas", () => {
+  it("sienta cuatro, por parejas (con las mesas de cuatro habilitadas)", () => {
     const four = [
       ...participants,
       { userId: "max", displayName: "Max", currency: "VES", providerId: "betaso" },
       { userId: "zoe", displayName: "Zoe", currency: "VES", providerId: "betaso" },
     ];
-    expect(configOf(requestOf({ ...tournament, participants: four })).seats).toHaveLength(4);
+    expect(configWithFour({ ...tournament, participants: four }).seats).toHaveLength(4);
   });
 
   it("el snapshot de torneo se rebobina con su torneo; el torneo sin modo, o al revés, no", () => {

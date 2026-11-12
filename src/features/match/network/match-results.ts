@@ -196,8 +196,8 @@ export function matchResultOf(
               : "lost",
         abandon: abandonOf(player),
       })),
-      // `ucText` no redondea: el orquestador compara `Number(amount)` contra su planilla, y el texto
-      // vuelve al mismo número que `payoutOf` calculó.
+      // `ucText` no redondea: el orquestador lee `amount` como decimal y lo compara EXACTO con
+      // `stakeAt(prize, nivel)`, la misma fórmula y el mismo `Decimal` con que `payoutOf` lo calculó.
       payouts: (reward?.entries ?? []).map(({ userId, amount }) => ({
         userId,
         currency: UC,
@@ -229,13 +229,28 @@ function endReasonOf(
 }
 
 // LO QUE LA PIEZA NECESITA DEL OUTBOX: encolar y despertar al despachador. Encolar es idempotente por
-// clave, así que reintentar es seguro.
+// clave, así que reintentar es seguro. `exclusiveKey` es el `matchId`: una partida tiene un solo
+// desenlace en el outbox (`finished` O `aborted`), y el segundo lo rechaza la base.
 export interface MatchResultOutbox {
   enqueue(
     dedupeKey: string,
     routingKey: MatchResultKey,
     payload: MatchResultPayload,
+    options?: { readonly exclusiveKey?: string },
   ): Promise<boolean>;
+  // Cuáles de estas claves ya están: distingue «ya estaba el mío» de «estaba el OTRO desenlace».
+  present?(keys: readonly string[]): Promise<ReadonlySet<string>>;
+}
+
+/**
+ * LA MARCA COMPARTIDA DE «TENGO ESTE RESULTADO EN MEMORIA Y NO PUDE ENCOLARLO». La pone el primer
+ * fallo y la renueva cada reintento (con plazo: si el proceso muere, vence sola); la quita el encolado.
+ * La recuperación de partidas interrumpidas (`interrupted-matches.ts`) no toca una partida marcada:
+ * su desenlace verdadero está por entrar. Los fallos de la marca se tragan: es una precaución.
+ */
+export interface PendingResultMarks {
+  hold(matchId: string): Promise<void>;
+  release(matchId: string): Promise<void>;
 }
 
 export interface MatchResultRecorderDeps {
@@ -243,22 +258,36 @@ export interface MatchResultRecorderDeps {
   readonly wake: () => void;
   readonly now: () => number;
   readonly log: Logger;
+  readonly marks?: PendingResultMarks;
   // Para la suite: cuánto espera el primer reintento.
   readonly retryBaseMs?: number;
 }
 
-// Reintento de un encolado que falló (Mongo caído): duplica hasta un minuto y NO SE RINDE. Un
-// resultado que no llega al outbox es un premio que no se paga.
+// Reintento de un encolado que falló (Mongo caído): duplica hasta un minuto y NO SE RINDE mientras el
+// proceso vive. Un resultado que no llega al outbox es un premio que no se paga.
 const RETRY_BASE_MS = 1_000;
 const RETRY_MAX_MS = 60_000;
+// DURANTE EL APAGADO se reintenta seguido: queda poco tiempo y cada intento es un resultado que se salva.
+const DRAIN_RETRY_MS = 250;
+// EL PLAZO DEL DRENADO: el cobro del aumento en vuelo (15 s, `OrchestratorBetCharger`) más cinco
+// segundos de reintentos. `kill_timeout` (pm2) y `stop_grace_period` (Docker) lo cubren con margen.
+export const RESULT_DRAIN_DEADLINE_MS = 20_000;
 
 /**
  * EL QUE ESCRIBE EL RESULTADO EN EL OUTBOX, enganchado como sink de la sala. El motor es síncrono y
  * el outbox no: el sink arranca el trabajo y no lo espera, como el cobro del aumento.
+ *
+ * CADA RESULTADO ES UN BUCLE que vive hasta que entra al outbox (o hasta que el apagado se rinde), y el
+ * bucle entero —no sólo su primer intento— está en `pending`: `drain()` lo espera.
  */
 export class MatchResultRecorder {
-  // Lo que todavía no llegó a su primer encolado: el apagado lo espera antes de cerrar Mongo.
   private readonly pending = new Set<Promise<void>>();
+  // LO QUE TODAVÍA NO ENTRÓ, por clave: lo que el apagado escribe en el log si se rinde.
+  private readonly unsaved = new Map<string, MatchResult>();
+  // Los bucles dormidos entre reintentos: el drenado los despierta.
+  private readonly sleepers = new Set<() => void>();
+  private draining = false;
+  private abandoned = false;
 
   constructor(private readonly deps: MatchResultRecorderDeps) {}
 
@@ -286,25 +315,59 @@ export class MatchResultRecorder {
         const reason = abortReason();
         const result = matchResultOf(event, match, config, roomId, at, reason);
         if (!result) continue;
+        // Desde ya es «no guardado»: si el apagado se rinde esperando el cobro, al menos esto queda.
+        this.unsaved.set(result.key, result);
         // Una mesa abortada no lleva montos, así que no tiene nada que esperar.
         if (event.type !== "MATCH_RESOLVED") {
-          this.track(this.record(result, 0));
+          this.track(this.record(result));
           continue;
         }
         this.track(
           settledBet().then(() => {
             // Releído con el cobro ya resuelto: si no se pudo, el trato ya está anulado en el estado.
             const settled = matchResultOf(event, match, config, roomId, at, reason) ?? result;
-            return this.record(settled, 0);
+            this.unsaved.set(settled.key, settled);
+            return this.record(settled);
           }),
         );
       }
     };
   }
 
-  /** Espera a lo que todavía aguarda un cobro o su primer encolado. No espera los reintentos. */
-  async drain(): Promise<void> {
-    await Promise.all(this.pending);
+  /**
+   * ESPERA HASTA QUE TODO LO PENDIENTE ENTRE AL OUTBOX, reintentando seguido, o hasta el plazo. Al
+   * vencer se rinde: escribe en el log, a nivel `error` y con el cuerpo ENTERO, cada resultado que no
+   * entró —para reproducirlo a mano, ver «Resultados que no llegaron al outbox» en
+   * `docs/operacion.md`— y resuelve. Nunca rechaza.
+   */
+  async drain(deadlineMs = RESULT_DRAIN_DEADLINE_MS): Promise<void> {
+    this.draining = true;
+    for (const wake of [...this.sleepers]) wake();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), deadlineMs);
+    });
+    try {
+      while (this.pending.size > 0) {
+        const done = Promise.all([...this.pending]).then(() => "done" as const);
+        if ((await Promise.race([done, late])) === "late") break;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    if (this.unsaved.size === 0) return;
+    this.abandoned = true;
+    for (const wake of [...this.sleepers]) wake();
+    for (const result of this.unsaved.values()) {
+      this.deps.log.error(
+        "resultado de partida SIN ENCOLAR: el apagado se rindió; reproducir a mano",
+        {
+          key: result.key,
+          routingKey: result.routingKey,
+          payload: result.payload,
+        },
+      );
+    }
   }
 
   private track(work: Promise<void>): void {
@@ -312,24 +375,63 @@ export class MatchResultRecorder {
     void work.finally(() => this.pending.delete(work));
   }
 
-  private record(result: MatchResult, attempt: number): Promise<void> {
-    return this.deps.outbox.enqueue(result.key, result.routingKey, result.payload).then(
-      () => this.deps.wake(),
-      (error: unknown) => {
+  // EL BUCLE DE UN RESULTADO. Nunca rechaza.
+  private async record(result: MatchResult): Promise<void> {
+    const { outbox, log, marks } = this.deps;
+    const matchId = result.payload.matchId;
+    for (let attempt = 0; !this.abandoned; attempt += 1) {
+      try {
+        const inserted = await outbox.enqueue(result.key, result.routingKey, result.payload, {
+          exclusiveKey: matchId,
+        });
+        if (!inserted) await this.explainDuplicate(result);
+        this.unsaved.delete(result.key);
+        if (attempt > 0) await marks?.release(matchId).catch(() => undefined);
+        this.deps.wake();
+        return;
+      } catch (error) {
+        await marks?.hold(matchId).catch(() => undefined);
         const base = this.deps.retryBaseMs ?? RETRY_BASE_MS;
-        const delay = Math.min(RETRY_MAX_MS, base * 2 ** attempt);
-        this.deps.log.error("no se pudo encolar el resultado de la partida; se reintenta", {
+        const delay = this.draining
+          ? Math.min(DRAIN_RETRY_MS, base)
+          : Math.min(RETRY_MAX_MS, base * 2 ** attempt);
+        log.error("no se pudo encolar el resultado de la partida; se reintenta", {
           key: result.key,
           attempt: attempt + 1,
           delayMs: delay,
           error: String(error),
         });
-        const timer: { unref?: () => void } = setTimeout(
-          () => this.record(result, attempt + 1),
-          delay,
-        );
-        timer.unref?.();
-      },
-    );
+        await this.sleep(delay);
+      }
+    }
+  }
+
+  // `false` DE `enqueue`: o ya estaba el mismo (un reintento cuyo primer intento sí llegó) o estaba el
+  // OTRO desenlace de la partida. Lo segundo no debería pasar nunca desde una sala —una sala emite un
+  // solo desenlace— y sí puede pasar si la recuperación de partidas interrumpidas se adelantó: el
+  // desenlace que ganó es el que se publica, y éste se escribe entero en el log para revisarlo a mano.
+  private async explainDuplicate(result: MatchResult): Promise<void> {
+    const present = await this.deps.outbox.present?.([result.key]);
+    if (!present || present.has(result.key)) return;
+    this.deps.log.error("la partida ya tenía el OTRO desenlace en el outbox; éste no se publica", {
+      key: result.key,
+      routingKey: result.routingKey,
+      payload: result.payload,
+    });
+  }
+
+  // UN SUEÑO QUE EL DRENADO PUEDE CORTAR. `unref`: un reintento no sostiene vivo al proceso; el que
+  // tiene que esperar es `drain()`.
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        this.sleepers.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, ms);
+      timer.unref?.();
+      this.sleepers.add(wake);
+    });
   }
 }
