@@ -28,6 +28,7 @@ sentó, normalizado con `trim()`.
 | `PROPOSE_BET_MULTIPLIER` | `{ level }` | Congela el turno y abre la negociación |
 | `RESPOND_BET_MULTIPLIER` | `{ accept }` | Acepta o rechaza la propuesta vigente |
 | `SEND_REACTION` | `{ reactionId }` | Manda un gesto a la mesa (ver «Reacciones») |
+| `REACTIONS_MUTE_CHANGED` | `{ muted, eventId }` | El jugador silenció o reactivó los gestos; sólo se registra (ver «Reacciones») |
 
 El cliente no envía `playerId`: el handler lo toma del asiento autenticado. Cada payload pasa por un
 decoder estricto antes de alcanzar el comando.
@@ -53,9 +54,42 @@ contenido lo pone el servidor, así que no es un chat.
   no se difunden ni devuelven nada (quedan en el log de debug). Sólo el payload malformado (sin
   `reactionId`, o de otro tipo) contesta `illegal` con `MALFORMED`.
 - No toca la partida: no cambia el estado, no produce `events` y no entra en el historial ni en el
-  registro de la partida.
+  registro de la partida. Sí queda en el registro de uso (abajo), sólo si salió a la mesa.
 
 La lista de gestos la sirve `GET /reactions` (ver «HTTP público»).
+
+**Silenciar.** Silenciar los gestos es del cliente: el servidor los sigue difundiendo a todos. Cuando
+el jugador silencia o reactiva, el cliente manda `REACTIONS_MUTE_CHANGED` `{ muted: boolean, eventId:
+string }`, donde `eventId` es un uuid que **genera el cliente** por cada cambio y repite si reenvía el
+mismo. No contesta nada; un payload sin `muted` booleano o con un `eventId` que no es uuid contesta
+`illegal` con `MALFORMED`, como `SEND_REACTION`.
+
+**El registro de uso (BI).** Cada gesto que sale a la mesa y cada cambio de silencio quedan en Mongo,
+de todos los jugadores, sin flag ni muestreo, con las colecciones y los nombres de campo del dominó v1
+(UA-GAM-DOM-004). Un fallo al escribir se loguea y se traga: nunca tira la mesa. Sin `MONGO_URI` queda
+en la memoria del proceso.
+
+| `domino_reaction_events` | Qué es |
+|---|---|
+| `id_evento` | uuid que genera el servidor; único |
+| `id_jugador` | El `userId` de Tablea del que mandó el gesto |
+| `id_proveedor` | Su proveedor (`providerId`) |
+| `id_partida` | El `matchId` del orquestador |
+| `tipo_juego` | `paga`, `gratuita` o `torneo` |
+| `id_reaccion` | El id del gesto (`fire`) |
+| `codigo_emoji` | El contenido que salió a la mesa (`🔥`) |
+| `fecha_hora` | `Date`, cuándo salió |
+
+| `domino_reaction_mute_events` | Qué es |
+|---|---|
+| `id_evento` | El `eventId` del cliente; único, así que un reenvío no suma otra fila |
+| `id_jugador`, `id_proveedor`, `id_partida` | Como arriba |
+| `accion` | `silenciar` (`muted: true`) o `reactivar` |
+| `origen` | `partida` (hoy sólo se silencia desde la mesa) |
+| `fecha_hora` | `Date`, cuándo llegó |
+
+Índices de las dos: `id_evento_1` (único), `fecha_hora_1` e `id_jugador_1`. Los crea el proceso la
+primera vez que escribe en cada una.
 
 ## Mensajes del servidor
 

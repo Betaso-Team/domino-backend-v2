@@ -1,4 +1,5 @@
-import type { ReactionSent } from "@/features/reactions";
+import { rootContainer } from "@/di-container";
+import type { MemoryReactionUsage, ReactionSent, ReactionUsageStore } from "@/features/reactions";
 import type { ColyseusTestServer } from "@colyseus/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -151,6 +152,57 @@ describe("Reacciones end-to-end", () => {
       fromPlayerId: playerIdOf(match, "rf2"),
       reaction: { id: "trophy", type: "emoji", content: "🏆" },
     });
+  });
+
+  // EL REGISTRO DE USO, de punta a punta: sin `MONGO_URI` la app ensamblada usa la memoria. Un gesto
+  // deja una fila con el jugador de Tablea, y un silenciado reenviado con el mismo `eventId` (el que
+  // genera el cliente) deja una sola.
+  it("una reacción y un silenciado repetido dejan una fila cada uno", async () => {
+    const usage = rootContainer.resolve<ReactionUsageStore>(
+      "ReactionUsageStore",
+    ) as MemoryReactionUsage;
+    const match = await seatPair(server, ["ru1", "ru2"]);
+    const theirs = heardBy(match, "ru2");
+    const eventId = "3f2b8c1e-7a4d-4e9b-9c2f-1d0e5a6b7c80";
+
+    clientOf(match, "ru1").send("SEND_REACTION", { reactionId: FIRE.id });
+    clientOf(match, "ru1").send("REACTIONS_MUTE_CHANGED", { muted: true, eventId });
+    clientOf(match, "ru1").send("REACTIONS_MUTE_CHANGED", { muted: true, eventId });
+
+    const ofMatch = <T extends { matchId: string }>(rows: readonly T[]) =>
+      rows.filter((row) => row.matchId === match.config.matchId);
+    await waitUntil(
+      () =>
+        theirs.length === 1 &&
+        ofMatch(usage.reactions()).length === 1 &&
+        ofMatch(usage.muteChanges()).length === 1,
+    );
+    await settle();
+    expect(ofMatch(usage.reactions())).toEqual([
+      expect.objectContaining({
+        userId: "ru1",
+        matchId: match.config.matchId,
+        gameKind: "paga",
+        reactionId: "fire",
+        emoji: "🔥",
+      }),
+    ]);
+    expect(ofMatch(usage.muteChanges())).toEqual([
+      expect.objectContaining({ eventId, userId: "ru1", muted: true, origin: "partida" }),
+    ]);
+  });
+
+  it("un silenciado sin eventId uuid es MALFORMED y no se registra", async () => {
+    const usage = rootContainer.resolve<ReactionUsageStore>(
+      "ReactionUsageStore",
+    ) as MemoryReactionUsage;
+    const match = await seatPair(server, ["rx1", "rx2"]);
+    const illegal = illegalOf(match, "rx1");
+
+    clientOf(match, "rx1").send("REACTIONS_MUTE_CHANGED", { muted: true, eventId: "no-es-uuid" });
+    await waitUntil(() => illegal.length === 1);
+    expect(illegal).toEqual([expect.objectContaining({ code: "MALFORMED" })]);
+    expect(usage.muteChanges().filter((row) => row.matchId === match.config.matchId)).toEqual([]);
   });
 
   // LA LISTA QUE EL FRONT DIBUJA, en la app ensamblada: pública, sin credencial.

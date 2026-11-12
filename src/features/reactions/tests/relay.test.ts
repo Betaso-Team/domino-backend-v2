@@ -22,6 +22,7 @@ function silentLogger(): Logger {
 const build = (over: Partial<ReactionsConfig> = {}) => {
   let now = 1_000_000;
   const sent: ReactionSent[] = [];
+  const relayed: ReactionSent[] = [];
   const config = { ...DEFAULT_REACTIONS_CONFIG, ...over };
   const log = silentLogger();
   const relay = new ReactionRelay({
@@ -29,10 +30,12 @@ const build = (over: Partial<ReactionsConfig> = {}) => {
     limiter: new ReactionLimiter(config, () => now),
     publish: (s) => void sent.push(s),
     log,
+    onRelayed: (s) => void relayed.push(s),
   });
   return {
     relay,
     sent,
+    relayed,
     log,
     passes: (ms: number) => {
       now += ms;
@@ -131,5 +134,41 @@ describe("ReactionLimiter: la ráfaga y la ventana", () => {
     await relay.relay("seat-1", GESTO.id);
 
     expect(sent).toEqual([]);
+  });
+});
+
+// EL REGISTRO DE USO cuelga de acá: sólo cuenta lo que salió a la mesa.
+describe("ReactionRelay: onRelayed", () => {
+  it("avisa del gesto que salió, con lo mismo que salió a la mesa", async () => {
+    const { relay, sent, relayed } = build();
+
+    await relay.relay("seat-1", GESTO.id);
+
+    expect(relayed).toEqual([{ fromPlayerId: "seat-1", reaction: GESTO }]);
+    expect(relayed).toEqual(sent);
+  });
+
+  it("no avisa de un gesto que no está en el catálogo ni de uno por encima del límite", async () => {
+    const { relay, relayed, config } = build();
+
+    await relay.relay("seat-1", "me-lo-invente");
+    for (let i = 0; i < config.perWindow + 2; i++) await relay.relay("seat-2", GESTO.id);
+
+    expect(relayed).toHaveLength(config.perWindow);
+    expect(relayed.every(({ fromPlayerId }) => fromPlayerId === "seat-2")).toBe(true);
+  });
+
+  it("sin onRelayed el relay difunde igual", async () => {
+    const sent: ReactionSent[] = [];
+    const relay = new ReactionRelay({
+      catalog: new StaticReactionCatalog(),
+      limiter: new ReactionLimiter(DEFAULT_REACTIONS_CONFIG),
+      publish: (s) => void sent.push(s),
+      log: silentLogger(),
+    });
+
+    await relay.relay("seat-1", GESTO.id);
+
+    expect(sent).toHaveLength(1);
   });
 });
