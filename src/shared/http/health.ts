@@ -60,9 +60,25 @@ function answersWithin(check: () => Promise<unknown>, ms: number): Promise<boole
 
 // LAS DOS SONDAS COMO UN ROUTER, igual que toda otra ruta (truco `0abf704`). Se monta ANTES que las
 // rutas de las features, en el mismo lugar que antes.
+// LOS NÚMEROS QUE ACOMPAÑAN A `/ready` Y NO DECIDEN NADA: hoy, cuántos resultados están estacionados
+// (`PARKED`). Un resultado estacionado no saca a la instancia de rotación —no es culpa de ella ni se
+// arregla reiniciándola— pero tiene que verse donde se mira la salud. `null` si no contestó a tiempo.
+export type HealthGauges = Readonly<Record<string, () => Promise<number>>>;
+
+function gaugeWithin(gauge: () => Promise<number>, ms: number): Promise<number | null> {
+  return new Promise<number | null>((resolve) => {
+    const timer: { unref?: () => void } = setTimeout(() => resolve(null), ms);
+    timer.unref?.();
+    gauge()
+      .then(resolve, () => resolve(null))
+      .finally(() => clearTimeout(timer as unknown as Parameters<typeof clearTimeout>[0]));
+  });
+}
+
 export function healthRoutes(
   checks: DependencyChecks,
   timeoutMs: number = READINESS_TIMEOUT_MS,
+  gauges: HealthGauges = {},
 ): Router {
   const router = Router();
   // VIVO. No consulta nada: que esta línea llegue a ejecutarse ya demuestra que el event loop
@@ -81,11 +97,18 @@ export function healthRoutes(
       entries.map(([name, check]) => answersWithin(check, timeoutMs).then((ok) => ({ name, ok }))),
     );
     const missing = answers.filter((answer) => !answer.ok).map((answer) => answer.name);
+    const gaugeEntries = Object.entries(gauges);
+    const measured = await Promise.all(
+      gaugeEntries.map(
+        async ([name, gauge]) => [name, await gaugeWithin(gauge, timeoutMs)] as const,
+      ),
+    );
+    const extra = measured.length === 0 ? {} : { gauges: Object.fromEntries(measured) };
     if (missing.length === 0) {
-      response.json({ status: "ready" });
+      response.json({ status: "ready", ...extra });
       return;
     }
-    response.status(503).json({ status: "not-ready", missing });
+    response.status(503).json({ status: "not-ready", missing, ...extra });
   });
   return router;
 }

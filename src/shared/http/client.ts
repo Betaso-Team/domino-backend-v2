@@ -46,12 +46,23 @@ export class HttpClient {
     return this.send<T>(path, { method: "GET", headers });
   }
 
-  async post<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
-    return this.send<T>(path, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify(body),
-    });
+  // `timeoutMs` per call overrides the client's: a caller that promises the other side a deadline
+  // (`x-charge-deadline`) has to abort at exactly that deadline, not at the client's default.
+  async post<T>(
+    path: string,
+    body: unknown,
+    headers: Record<string, string> = {},
+    timeoutMs: number = this.timeoutMs,
+  ): Promise<T> {
+    return this.send<T>(
+      path,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      },
+      timeoutMs,
+    );
   }
 
   // THE DEADLINE COVERS THE WHOLE EXCHANGE, HEADERS AND BODY, AND IT ABORTS. A deadline wrapped
@@ -59,8 +70,12 @@ export class HttpClient {
   // that sends its headers and then hangs left `text()` waiting forever, and a table waiting on its
   // entry charge stayed in `charging` for good. The signal tears the socket down, so a late answer
   // cannot land after the caller already gave up.
-  private async send<T>(path: string, init: RequestInit): Promise<T> {
-    const signal = AbortSignal.timeout(this.timeoutMs);
+  private async send<T>(
+    path: string,
+    init: RequestInit,
+    timeoutMs: number = this.timeoutMs,
+  ): Promise<T> {
+    const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
         ...init,
@@ -73,7 +88,7 @@ export class HttpClient {
       // An `HttpError` is an answer even if its body was cut short: the `status` already decides.
       // Anything else after the signal fired is the deadline, whatever `fetch` called it.
       if (signal.aborted && !(error instanceof HttpError)) {
-        throw new DeadlineExceededError(this.timeoutMs);
+        throw new DeadlineExceededError(timeoutMs);
       }
       throw error;
     }

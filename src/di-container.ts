@@ -23,6 +23,7 @@ import {
 } from "@/features/match/core/config";
 import type { Clock } from "@/features/match/core/engine/clock";
 import type { HistoryPort, HistoryReader, MatchArchive } from "@/features/match/network/history";
+import { InterruptedMatchRecovery } from "@/features/match/network/interrupted-matches";
 import {
   MATCH_RESULT_EXCHANGE,
   type MatchResultKey,
@@ -30,6 +31,7 @@ import {
   MatchResultRecorder,
 } from "@/features/match/network/match-results";
 import {
+  BET_CHARGE_TIMEOUT_MS,
   OrchestratorBetCharger,
   type OrchestratorCharges,
 } from "@/features/match/network/orchestrator-charges";
@@ -66,7 +68,8 @@ import { Mongo } from "@/shared/mongo";
 import { type Lease, MemoryLease, MongoLease } from "@/shared/mongo-lease";
 import { MongoOutboxStore } from "@/shared/mongo-outbox";
 import { MemoryOutboxStore, type OutboxStore, TopicOutboxDispatcher } from "@/shared/outbox";
-import { type MatchMakerDriver, type Presence, RedisDriver, RedisPresence } from "colyseus";
+import { DominoRedisPresence } from "@/shared/redis-presence";
+import { type MatchMakerDriver, type Presence, RedisDriver } from "colyseus";
 import { container } from "tsyringe";
 import { env, isTestingEnvironment } from "./env";
 import { type Logger, logger } from "./logger";
@@ -120,9 +123,9 @@ rootContainer.register<AdminTokenCheck>("AdminTokenCheck", {
 // Se EXPORTAN en vez de registrarse contra un token, por el mismo motivo que `mongo` de más
 // abajo: no son colaboradores que alguien resuelva, son piezas del proceso que el otro
 // composition root necesita nombrar.
-export const presence: Presence | undefined = env.redisUrl
-  ? new RedisPresence(env.redisUrl)
-  : undefined;
+// `DominoRedisPresence` es el `RedisPresence` de Colyseus más el compare-and-delete del registro.
+const redisPresence = env.redisUrl ? new DominoRedisPresence(env.redisUrl) : undefined;
+export const presence: Presence | undefined = redisPresence;
 export const driver: MatchMakerDriver | undefined = env.redisUrl
   ? new RedisDriver(env.redisUrl)
   : undefined;
@@ -135,7 +138,9 @@ export const driver: MatchMakerDriver | undefined = env.redisUrl
 //
 // Sin Redis queda el de memoria, que NO es un doble: es la implementación del proceso único,
 // igual que `MemoryHistory` más abajo.
-const store: KeyValueStore = presence ?? new MemoryKeyValueStore();
+const store: KeyValueStore =
+  (redisPresence as (Presence & Pick<KeyValueStore, "delIfEquals" | "setIfAbsent">) | undefined) ??
+  new MemoryKeyValueStore();
 
 // EL REGISTRO DE PARTIDAS VIVAS, que ya no es del proceso sino del CLÚSTER: sus dos respuestas
 // —el config público del endpoint HTTP y en qué sala está sentado un jugador— salen del almacén
@@ -169,7 +174,8 @@ export const mongo = env.mongoUri ? new Mongo(env.mongoUri) : undefined;
 // escritura no, exactamente como el comentario de `history.ts` había previsto. Los dos
 // `register` van TIPADOS: sin el parámetro de tipo, tsyringe acepta cualquier valor contra
 // el token y el error aparece recién en el `resolve`, es decir en runtime.
-const history = mongo ? new MongoHistory(mongo, logger) : new MemoryHistory();
+const mongoHistory = mongo ? new MongoHistory(mongo, logger) : undefined;
+const history = mongoHistory ?? new MemoryHistory();
 // EL LEASE DE LOS TRABAJOS DE FONDO (barrido de estadísticas y despachador de resultados): la misma
 // base, así que el mismo adaptador. Con Mongo excluye procesos; sin Mongo no hay a quién excluir.
 const jobsLease: Lease = mongo ? new MongoLease(mongo, clock) : new MemoryLease();
@@ -205,12 +211,11 @@ rootContainer.register<PlayerLog>("PlayerLog", { useValue: history });
 export const tableaGamingAmqp = env.tableaGamingRabbitmqUrl
   ? new AmqpPublisher(env.tableaGamingRabbitmqUrl, logger)
   : undefined;
-const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> = mongo
-  ? new MongoOutboxStore(mongo, "match_result_outbox", clock, {
-      // SIETE DÍAS: lo enviado se borra solo, y mientras tanto es la red si el broker pierde su disco.
-      sentRetentionSeconds: 7 * 24 * 3600,
-    })
-  : new MemoryOutboxStore(clock);
+const mongoResultOutbox = mongo
+  ? new MongoOutboxStore<MatchResultKey, MatchResultPayload>(mongo, "match_result_outbox", clock)
+  : undefined;
+const matchResultOutbox: OutboxStore<MatchResultKey, MatchResultPayload> =
+  mongoResultOutbox ?? new MemoryOutboxStore(clock);
 export const matchResultDispatcher = tableaGamingAmqp
   ? new TopicOutboxDispatcher({
       exchange: MATCH_RESULT_EXCHANGE,
@@ -236,8 +241,37 @@ const matchResultRecorder = new MatchResultRecorder({
   wake: () => matchResultDispatcher?.wake(),
   now: () => clock.now(),
   log: logger,
+  // LA MARCA COMPARTIDA del resultado que este proceso tiene en memoria sin poder encolarlo: la
+  // recuperación de partidas interrumpidas no la toca (ver `interrupted-matches.ts`).
+  marks: {
+    hold: (matchId) => matchRegistry.holdResult(matchId),
+    release: (matchId) => matchRegistry.releaseResult(matchId),
+  },
 });
 rootContainer.register(MatchResultRecorder, { useValue: matchResultRecorder });
+
+// LAS PARTIDAS QUE MURIERON CON SU PROCESO (`network/interrupted-matches.ts`): al arrancar y cada dos
+// minutos, bajo un lease, se publican abortadas `INTERRUPTED`. Sólo con Mongo: sin Mongo no hay
+// registro de lo abierto, y lo que el proceso tenía en memoria murió con él.
+//
+// EN LA MISMA PASADA, LA COMPACTACIÓN DEL OUTBOX: lo enviado hace más de siete días pierde el cuerpo y
+// queda la lápida que `GET .../existence` necesita para contestar `published`.
+const SENT_BODY_RETENTION_MS = 7 * 24 * 3600_000;
+const interruptedMatches =
+  mongoHistory && mongoResultOutbox
+    ? new InterruptedMatchRecovery({
+        backlog: mongoHistory,
+        liveness: matchRegistry,
+        outbox: mongoResultOutbox,
+        wake: () => matchResultDispatcher?.wake(),
+        lease: jobsLease,
+        now: () => clock.now(),
+        log: logger,
+        maintenance: async () => {
+          await mongoResultOutbox.compactSent(SENT_BODY_RETENTION_MS);
+        },
+      })
+    : undefined;
 // Para la suite: lo encolado, sin broker.
 export const matchResults = matchResultOutbox;
 
@@ -245,7 +279,9 @@ export const matchResults = matchResultOutbox;
 // exige la URL y la llave junto con `ORCHESTRATOR_API_KEY`.
 const orchestratorCharges: OrchestratorCharges | undefined = env.orchestratorCallback
   ? new HttpOrchestratorCharges(
-      new HttpClient({ baseUrl: env.orchestratorCallback.url, timeoutMs: 10_000 }),
+      // El plazo de cada cobro lo pone `HttpOrchestratorCharges` por llamada (y lo promete en
+      // `x-charge-deadline`); el del cliente no se usa para cobrar.
+      new HttpClient({ baseUrl: env.orchestratorCallback.url }),
       env.orchestratorCallback.apiKey,
     )
   : undefined;
@@ -256,9 +292,9 @@ if (orchestratorCharges) {
   rootContainer.register(OrchestratorBetCharger, {
     useValue: new OrchestratorBetCharger({
       orchestrator: orchestratorCharges,
-      // EL TECHO DE v1 (15 s), generoso a propósito: el que espera es un jugador que ya apretó
-      // «acepto», y el trato espera, con la mesa diciendo x2, a lo sumo esto.
-      timeoutMs: 15_000,
+      // EL MISMO PLAZO que el HTTP del aumento y que su `x-charge-deadline` (15 s, el techo de v1):
+      // acá es la red para un puerto que no aborte solo.
+      timeoutMs: BET_CHARGE_TIMEOUT_MS,
       log: logger,
     }),
   });
@@ -349,9 +385,13 @@ if (isTestingEnvironment(env.appEnv)) {
     },
   });
 }
+// EL TOPE DE MENSAJES POR SEGUNDO de cada conexión a una sala (`DominoRoom.maxMessagesPerSecond`).
+rootContainer.register<number>("MaxMessagesPerSecond", { useValue: env.maxMessagesPerSecond });
 // LA API INTERNA DEL ORQUESTADOR abre las mesas con este gateway: es la única puerta de entrada a
 // una partida.
-rootContainer.register(ColyseusMatchGateway, { useValue: new ColyseusMatchGateway() });
+rootContainer.register(ColyseusMatchGateway, {
+  useValue: new ColyseusMatchGateway(undefined, undefined, matchRegistry),
+});
 // LA TRAZA DEL JUEGO, y el token existe SÓLO cuando el nivel la pide. El sink no sabe de
 // niveles ni pregunta por ninguno: con el debug apagado no se construye, y así el costo de
 // filtrar los campos de cada evento de cada mesa tampoco se paga.
@@ -367,6 +407,7 @@ if (env.logLevel === "debug") {
 export function startServices(): void {
   settingsSignal.start();
   statsRecorder.start();
+  interruptedMatches?.start();
 }
 
 export function stopAcceptingMatches(): void {
@@ -409,6 +450,7 @@ export async function shutdown(): Promise<void> {
   await matchResultDispatcher?.close();
   // El barrido de estadísticas se para antes de drenar: un tick nuevo escribiría en una base que se cierra.
   statsRecorder.stop();
+  await interruptedMatches?.stop();
   await historyPort.drain();
   // 2. CERRAR EL BROKER, y DESPUÉS del despachador por la misma razón: al revés la publicación en
   //    vuelo se cae sobre un canal cerrado y el evento vuelve a PENDING sin necesidad. `close()`

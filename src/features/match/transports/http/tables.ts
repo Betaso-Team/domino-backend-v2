@@ -57,9 +57,27 @@ export interface TablesDeps {
   >;
   /** Si una partida tiene registro, sin leerlo: `GET .../existence`. */
   readonly archive: Pick<MatchArchive, "hasRecord">;
+  /**
+   * EL ESTADO DE LAS ENTRADAS DEL OUTBOX DE RESULTADOS por clave (`<matchId>:finished|aborted`), para el
+   * `outcome` de `GET .../existence`. Rechaza si la base no contesta.
+   */
+  readonly results: {
+    statuses(keys: readonly string[]): Promise<ReadonlyMap<string, string>>;
+  };
   readonly logger: Logger;
   /** `undefined` ⇒ las rutas NO se registran (fail closed, como el historial). */
   readonly orchestratorApiKey: string | undefined;
+}
+
+export type MatchOutcome = "none" | "pending" | "published";
+
+// PENDIENTE GANA A PUBLICADO: sólo puede haber los dos en una partida de antes de la exclusión por
+// desenlace, y mientras algo de ella siga sin salir, no está todo dicho.
+export function outcomeOf(statuses: ReadonlyMap<string, string>): MatchOutcome {
+  const values = [...statuses.values()];
+  if (values.some((status) => status === "PENDING" || status === "PARKED")) return "pending";
+  if (values.some((status) => status === "SENT")) return "published";
+  return "none";
 }
 
 /**
@@ -85,6 +103,11 @@ export function tablesRoutes(deps: TablesDeps): Router {
         const table = await deps.tables.openRequest(body);
         response.status(201).json({ status: "success", data: table });
       } catch (error) {
+        // UN DUPLICADO QUE NO ENCONTRÓ LA SALA A TIEMPO: la está abriendo otro pedido. Reintentable.
+        if (error instanceof Error && error.message.startsWith("MATCH_OPENING:")) {
+          sendError(response, 409, "MATCH_OPENING");
+          return;
+        }
         const code = error instanceof Error ? REFUSAL.exec(error.message)?.[1] : undefined;
         // Todo lo que no es un rechazo de la sala es NUESTRO: 500, no un 422 que lo disfrace.
         if (!code) throw error;
@@ -147,21 +170,30 @@ export function tablesRoutes(deps: TablesDeps): Router {
       });
     }),
   );
-  // SI UNA PARTIDA EXISTE, y nada más: si su mesa sigue viva (el registro del clúster) y si quedó
-  // registro de ella (el archivo). Lo pregunta el orquestador antes de dar por perdida una mesa de torneo
-  // que nunca le contestó; con la llave del orquestador, así que NO devuelve el documento (ese es del
-  // panel, con su llave). Ante la duda no contesta: un registro o una base que fallan son 503, nunca un
-  // `false` que el orquestador tomaría como prueba de que la mesa no existió.
+  // SI UNA PARTIDA EXISTE, y nada más: si su mesa sigue viva (el registro del clúster), si quedó
+  // registro de ella (el archivo) y en qué está su DESENLACE en el outbox de resultados (`outcome`):
+  //
+  //   none       ninguna entrada `finished` ni `aborted` de esa partida
+  //   pending    hay una sin publicar todavía (`PENDING`, o `PARKED` esperando que alguien la reproduzca)
+  //   published  el broker la confirmó (`SENT`; compactada o no, la lápida no vence)
+  //
+  // El orquestador aborta el ledger de una mesa casual paga —reembolsa las entradas— SOLO con
+  // `live: false && outcome: "none"` pasada la duración máxima de una partida: un `none` falso
+  // reembolsaría una partida cuyo resultado sí existe. Por eso ante la duda no contesta: un registro o
+  // una base que fallan son 503, nunca un `false` ni un `none`. Con la llave del orquestador, así que NO
+  // devuelve el documento (ese es del panel, con su llave).
   router.get(
     MATCH_EXISTENCE_ROUTE,
     guard,
     validated({ params: MATCH_PARAMS }, async ({ params }, response) => {
       let live: boolean;
       let recorded: boolean;
+      let statuses: ReadonlyMap<string, string>;
       try {
-        [live, recorded] = await Promise.all([
+        [live, recorded, statuses] = await Promise.all([
           deps.registry.isLive(params.matchId),
           deps.archive.hasRecord(params.matchId),
+          deps.results.statuses([`${params.matchId}:finished`, `${params.matchId}:aborted`]),
         ]);
       } catch (error) {
         deps.logger.warn("no se pudo saber si la partida existe", {
@@ -171,7 +203,7 @@ export function tablesRoutes(deps: TablesDeps): Router {
         sendError(response, 503, "UNAVAILABLE");
         return;
       }
-      response.json({ status: "success", data: { live, recorded } });
+      response.json({ status: "success", data: { live, recorded, outcome: outcomeOf(statuses) } });
     }),
   );
   // Del CLÚSTER, no de este proceso: el censo es el hash que escriben todas las salas. CAMPO POR CAMPO:

@@ -11,7 +11,7 @@ import { historyRoutes } from "./history";
 import { meRoutes } from "./me";
 import { playerRoutes } from "./players";
 import { recordRoutes } from "./records";
-import { tablesRoutes } from "./tables";
+import { type TablesDeps, tablesRoutes } from "./tables";
 
 // TODAS las dependencias entran por PARÁMETRO OBLIGATORIO, ninguna con default y ninguna
 // leída de `env` acá adentro. El razonamiento ya estaba escrito para la llave interna
@@ -40,6 +40,8 @@ export interface MatchHttpDeps {
   /** Los operadores con sesión en el panel (token de billing-auth). Sin él, solo la llave abre. */
   readonly adminTokens?: AdminTokenCheck;
   readonly tables: Pick<ColyseusMatchGateway, "openRequest" | "seatBack" | "isGone">;
+  /** El outbox de resultados, para el `outcome` de `GET .../existence`. Ver `tablesRoutes`. */
+  readonly results: TablesDeps["results"];
   /** `undefined` ⇒ la API del orquestador NO se registra. Ver `tablesRoutes`. */
   readonly orchestratorApiKey: string | undefined;
   readonly verifier?: TokenVerifier;

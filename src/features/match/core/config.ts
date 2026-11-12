@@ -1,3 +1,4 @@
+import type { Decimal } from "@/shared/money";
 import type { PlayerId } from "./ids";
 import type { BetLevel } from "./rules/config";
 
@@ -110,19 +111,17 @@ export interface DominoMatchConfig {
    */
   readonly rateId: string;
   /**
-   * Lo COBRADO por asiento y el premio de la mesa, en UC COMPLETAS: `entryFee: 10` son
-   * diez UC, no diez centésimos. Es la convención del catálogo de v1, que es de donde
-   * salen estos dos números, y copiarla sin escalar es lo que impide que la mesa cobre
-   * cien veces de menos.
+   * Lo COBRADO por asiento y el premio de la mesa, en UC COMPLETAS: `entryFee` de `10` son diez UC,
+   * no diez centésimos. Es la convención del catálogo, que es de donde salen estos dos montos.
    *
-   * SON NÚMEROS FINITOS NO NEGATIVOS Y PUEDEN TRAER DECIMALES (`1.5` es un UC y medio):
-   * un modo productivo los tiene así. Acá NO se hace aritmética con ellos —se copian a la
-   * instrucción de liquidación tal cual—, así que el `0.1 + 0.2` que justificaría enteros
-   * no ocurre en este repo: quien convierta a la moneda del jugador con el `rateId` es el
-   * que decide el redondeo, y es el único que puede decidirlo.
+   * SON EL `Decimal` DE BILLING (`@/shared/money`), nunca un `number`: toda cuenta con ellos —el
+   * premio y la entrada a un nivel de aumento (`stakeAt`), lo que cuesta aceptarlo (`betDifference`)—
+   * se hace con las MISMAS fórmulas que el orquestador, que compara el premio que el dominó publica
+   * con igualdad decimal exacta. En `number`, `0.02 + 0.02 × 5` es `0.12000000000000001` y el
+   * resultado terminaba en la DLQ. Salen como texto en UC sólo en la frontera (`network/amounts.ts`).
    */
-  readonly entryFee: number;
-  readonly prize: number;
+  readonly entryFee: Decimal;
+  readonly prize: Decimal;
   /**
    * EL PESO DE LA MESA EN EL RANKING, congelado con el resto. Es el `multiplier` del modo de
    * juego, y multiplica los PUNTOS que el ganador suma al ranking — **no el premio**, que sale de

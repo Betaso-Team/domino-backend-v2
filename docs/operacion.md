@@ -64,6 +64,11 @@ flowchart TD
 partidas que viven en ese proceso. `/ready` sí consulta cada dependencia, en paralelo y con un plazo
 individual de dos segundos.
 
+`/ready` trae además `gauges.match_results_parked`: cuántos resultados de partida están **estacionados**
+(ver «Resultados estacionados»). No cambia el status —una instancia no se arregla sacándola de rotación—,
+pero cualquier valor mayor que cero es una alerta: detrás hay una partida que el orquestador no supo
+(`null` si la base no contestó a tiempo).
+
 ## Varias instancias
 
 Cada proceso PM2 corre en modo `fork` y escucha en `PORT + NODE_APP_INSTANCE`; la suma la hace
@@ -104,7 +109,17 @@ sequenceDiagram
 ```
 
 Redis lo cierra Colyseus en el primer paso; cerrarlo otra vez deja rechazos durante el deploy. Un
-`kill -9` no ejecuta este flujo: las claves huérfanas desaparecen por TTL.
+`kill -9` no ejecuta este flujo: las claves huérfanas desaparecen por TTL y las partidas abiertas las
+publica abortadas la recuperación de partidas interrumpidas (abajo).
+
+**El presupuesto**: `kill_timeout` de pm2 es **40 s** y `stop_grace_period` de Docker **45 s**, la suma de
+los plazos del drenado: los resultados en vuelo (`MatchResultRecorder.drain`, hasta **20 s**: el cobro del
+aumento en vuelo, 15 s, más reintentos cada 250 ms contra un Mongo caído), el despachador del outbox (la
+publicación en vuelo, 5 s) y el historial (5 s). Un `pm2 reload` no aplica un `kill_timeout` nuevo: hace
+falta `pm2 delete` + `start`.
+
+**Cada deploy cancela las partidas en curso** de la instancia que se apaga: salen abortadas (`INTERRUPTED`
+si se estaba jugando) y el orquestador reembolsa lo cobrado. No hay drenado que las deje terminar.
 
 ## Registro de partidas
 
@@ -216,35 +231,126 @@ Minimizar la app en el celular hoy sale como `NETWORK`. Cada hecho sale además 
 ## Resultados de partida
 
 Cada resultado se escribe primero en Mongo (`match_result_outbox`) y después se publica al exchange
-`tablea_gaming` con confirmación del broker. La entrada queda `SENT` y **se borra sola a los 7 días**
-(índice TTL sobre `sentAt`). Una entrada que no sale no vence nunca: se reintenta sin límite y en orden
-(el más viejo primero; nada se adelanta).
+`tablea_gaming` con confirmación del broker. La entrada queda `SENT` **para siempre**: a los 7 días la
+pasada de mantenimiento le saca el cuerpo (`payload`) y queda la lápida (`dedupeKey`, `exclusiveKey`,
+`status`, `sentAt`, `compacted: true`), que es lo que deja a `GET .../existence` contestar `published`. El
+índice TTL que antes borraba lo enviado (`sentAt_1`) se borra solo al arrancar.
 
+- **Un desenlace por partida.** Cada entrada lleva `exclusiveKey = matchId`, con un índice único parcial
+  (`exclusiveKey_1`): `finished` y `aborted` de la misma partida no conviven, y el segundo insert lo
+  rechaza la base, también si llegan a la vez desde dos procesos. El que llega segundo deja un `error`
+  con su cuerpo entero (`«la partida ya tenía el OTRO desenlace en el outbox»`).
+- **Ninguna entrada traba a las demás.** `next()` ofrece la de menos intentos y, entre iguales, la más
+  vieja (`status_1_attempts_1__id_1`): una entrada que falló pasa detrás de las que todavía no se
+  intentaron.
 - **La espera es del broker, no de cada entrada.** Tras un fallo, el despachador deja de intentar
   durante una ventana que duplica desde 1 s con cada fallo seguido, con techo de **30 s**; la primera
   publicación confirmada la cierra. Cada partida que termina despierta al despachador y ese sondeo
-  ignora la ventana, así que cuando el broker vuelve, todo lo pendiente sale con la próxima partida o
-  a los 30 s como mucho. Con la cola vacía, el tick de cada segundo es una sola consulta cubierta por
-  el índice (`status_1__id_1`) y no toma el lease.
-- **`attempts` y `lastError`** de cada entrada se siguen anotando, para diagnóstico. Los documentos
-  anteriores traen un `nextAttemptAt` que ya nadie lee ni escribe.
-
+  ignora la ventana. Con la cola vacía, el tick de cada segundo es una sola consulta cubierta por
+  el índice (`status_1__id_1`) y no toma el lease. Una caída del broker no tiene límite de intentos.
 - **Un resultado trabado** deja un `warn` por cada fallo, y pasados **10 minutos** sin salir cada fallo
-  es un `error` con `«el resultado de partida lleva demasiado sin salir»`. Es la línea que conviene
-  alertar: detrás hay un premio que no se pagó.
-- **Si el broker pierde su disco**, se pierde lo que estaba en las colas sin consumir, pero dominó
-  conserva cada resultado de los últimos 7 días. Para reenviarlos, se vuelven a `PENDING` los enviados
-  desde un poco antes del incidente; el despachador los publica solo:
+  es un `error` con `«el resultado de partida lleva demasiado sin salir»`.
 
-  ```js
-  db.match_result_outbox.updateMany(
-    { status: "SENT", sentAt: { $gte: ISODate("<instante anterior al incidente>") } },
-    { $set: { status: "PENDING", attempts: 0 }, $unset: { sentAt: "" } },
-  )
-  ```
+### Resultados estacionados
 
-  Repetirlos es seguro: el orquestador encuentra las órdenes de un premio por su clave y no paga dos
-  veces, y cada cliente descarta un reporte repetido por `Idempotency-Key`.
+Una entrada que falla **con el broker sano** (el despachador acababa de confirmar otra) suma un `strike`;
+a los **5** pasa a `PARKED`: sale de la cola, **no se borra nunca**, cuenta en
+`/ready` → `gauges.match_results_parked` y deja un `error` con el cuerpo entero
+(`«resultado de partida estacionado: falló 5 veces con el broker sano»`). El caso típico es un
+`mandatory` devuelto porque la cola de esa routing key no existe. Una caída del broker suma como mucho un
+strike por caída, así que no estaciona nada.
+
+Para reproducirlas, después de arreglar la causa (`lastError` dice cuál):
+
+```js
+db.match_result_outbox.find({ status: "PARKED" }, { dedupeKey: 1, lastError: 1, parkedAt: 1 })
+db.match_result_outbox.updateMany(
+  { status: "PARKED" },
+  { $set: { status: "PENDING", attempts: 0, strikes: 0 }, $unset: { parkedAt: "" } },
+)
+```
+
+El despachador las publica solo. Repetirlas es seguro: el orquestador deduplica por `messageId`.
+
+### Resultados que no llegaron al outbox
+
+Con Mongo caído, el resultado vive en la memoria del proceso: `MatchResultRecorder` lo reintenta sin
+rendirse (hasta un minuto entre intentos) y mientras falla marca `match_result_pending:<matchId>` en Redis
+(180 s, renovada en cada intento) para que la recuperación de partidas interrumpidas no lo pise. En el
+apagado reintenta cada 250 ms hasta **20 s**; si se rinde, escribe cada resultado sin encolar a nivel
+`error`, **con el cuerpo entero**:
+
+```
+resultado de partida SIN ENCOLAR: el apagado se rindió; reproducir a mano  {key, routingKey, payload}
+```
+
+Para reproducirlo, con Mongo de vuelta, se inserta tal cual en el outbox (el despachador lo publica):
+
+```js
+db.match_result_outbox.insertOne({
+  dedupeKey: "<key>", exclusiveKey: "<payload.matchId>", routingKey: "<routingKey>",
+  payload: <payload>, status: "PENDING", attempts: 0, strikes: 0, createdAt: new Date(),
+})
+```
+
+Si el insert choca con `exclusiveKey_1`, la recuperación ya publicó la partida como abortada (y el
+orquestador reembolsó): un `finished` perdido así se resuelve con el orquestador, no reinsertándolo.
+
+**Por qué no es atómico con el cierre del registro.** Escribir el cierre en `match_history` y la entrada
+del outbox en una transacción pediría un replica set, y el Mongo de este servicio es un nodo solo (el
+`compose.yaml` y los servidores): sin replica set no hay transacciones multi-documento. El resultado sale
+de la memoria de la sala, no del registro, así que la garantía es el reintento hasta el plazo y el log
+completo al rendirse.
+
+### Partidas interrumpidas
+
+Una partida que muere con su proceso (OOM, `kill -9`, el `kill_timeout` de pm2) no corre `onDispose` y no
+publica nada. La recuperación (`network/interrupted-matches.ts`) corre al arrancar y cada **2 minutos**,
+en un solo proceso a la vez (lease `interrupted-matches`), y publica `domino.match.aborted` con motivo
+`INTERRUPTED` (clave `<matchId>:aborted`) por cada documento de `match_history` que cumpla todo esto:
+
+1. está abierto (`status: "started"`) y sin escribir hace más de **10 minutos**;
+2. su mesa no está viva en el clúster (`match_room:<matchId>`);
+3. ningún proceso tiene su resultado en memoria (`match_result_pending:<matchId>`);
+4. el outbox no tiene ningún desenlace suyo;
+5. y el insert gana: si otro desenlace entró entre 4 y 5, la base lo rechaza y no se publica nada más.
+
+Después cierra el documento (`status: "aborted"`, `matchEndReason: "INTERRUPTED"`,
+`recovery: { at, outcome: "aborted" }`) y deja un `warn` `«partida interrumpida…»`. Un documento abierto
+cuyo desenlace ya está en el outbox (se perdió sólo el cierre del registro) queda marcado
+`recovery: { outcome, recordOnly: true }` y no se vuelve a mirar. Una partida que murió antes de su primer
+reparto no tiene documento: la cubre la red del orquestador (`existence` con `live: false` y
+`outcome: "none"` pasada la duración máxima).
+
+### Las carreras y su mecanismo
+
+| Interleaving | Qué podía pasar | Mecanismo |
+|---|---|---|
+| La sala encola `finished` y la recuperación encola `aborted` de la misma partida, a la vez | Publicar los dos: premio y reembolso | Índice único parcial `exclusiveKey_1`: el segundo insert falla (test con 20 inserts en carrera desde dos stores) |
+| Dos procesos recuperan a la vez | Doble aborto | Lease `interrupted-matches` y, debajo, `dedupeKey_1` + `exclusiveKey_1` (test con dos recuperadores y el `finished` entrando a la vez) |
+| Proceso vivo con Mongo caído reintentando un `finished`; Mongo vuelve y la recuperación pasa antes | Abortar una partida terminada | Marca `match_result_pending:<matchId>` (Redis, 180 s, renovada) + 10 min sin escribir; si igual se cruzan, gana uno solo y el otro queda en el log |
+| Mesa viva cuyo `match_room` venció (Redis sin latido > 2 min) | Abortar una partida viva | 10 min sin escribir en el registro: una partida viva escribe en cada jugada y vencimiento |
+| Dos `POST /internal/matches` del mismo `matchId` | Dos salas, dos cobros | Candado `match_opening:<matchId>` (`SET NX EX`) + relectura de `match_room` con el candado (e2e con seis `POST` simultáneos) |
+| La sala vieja suelta a un jugador mientras la nueva lo anota | Perder `player_match` de la mesa nueva | `delIfEquals`, un Lua compare-and-delete (test contra Redis real con dos conexiones) |
+| El candado de apertura vence y otro lo toma; el primero lo suelta | Soltar el candado ajeno | Token por pedido y `delIfEquals` |
+| Un `wake()` sobre un tick en vuelo | Publicar dos veces | La promesa `inFlight` del despachador (y el lease entre procesos) |
+| `park` sobre una entrada que otro proceso ya marcó `SENT` | Estacionar algo publicado | `park` filtra `status: "PENDING"` |
+
+### Si el broker pierde su disco
+
+Se pierde lo que estaba en las colas sin consumir, pero dominó conserva cada resultado enviado (con
+cuerpo, los últimos 7 días). Para reenviarlos, se vuelven a `PENDING` los enviados desde un poco antes del
+incidente; el despachador los publica solo:
+
+```js
+db.match_result_outbox.updateMany(
+  { status: "SENT", sentAt: { $gte: ISODate("<instante anterior al incidente>") }, payload: { $exists: true } },
+  { $set: { status: "PENDING", attempts: 0, strikes: 0 }, $unset: { sentAt: "" } },
+)
+```
+
+Repetirlos es seguro: el orquestador encuentra las órdenes de un premio por su clave y no paga dos
+veces, y cada cliente descarta un reporte repetido por `Idempotency-Key`.
 
 ## Verificación
 

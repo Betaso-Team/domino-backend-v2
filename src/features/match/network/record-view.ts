@@ -1,12 +1,13 @@
 import { UC } from "@/shared/money";
 import type { SeatPrice } from "../core/config";
-import { type SeatPriceView, seatPriceView, seatText, ucText } from "./amounts";
+import { type SeatPriceView, seatPriceView, seatText, storedUcOf, ucText } from "./amounts";
 import type { StoredMatchRecord } from "./history";
 
 // EL REGISTRO DE UNA PARTIDA COMO LO LEE EL PANEL, en la convención de montos v2 (`network/amounts.ts`):
-// cada entidad con su `currency` y sus montos en texto. Mongo lo sigue guardando como siempre —números
-// en UC (`*InUC`) y textos en la moneda del jugador (`*InPlayerCurrency`), con su `currency` en el
-// precio— y estas funciones lo traducen AL SALIR por `GET /internal/matches`,
+// cada entidad con su `currency` y sus montos en texto. Mongo lo guarda con los montos en UC en `*InUC`
+// —texto con 4 decimales; número en un documento de antes, y los dos se leen (`storedUcOf`)— y los de la
+// moneda del jugador en `*InPlayerCurrency`, con su `currency` en el precio, y estas funciones lo
+// traducen AL SALIR por `GET /internal/matches`,
 // `GET /internal/matches/:matchId`, `GET /game-data/:roomId` y `GET /internal/matches/:matchId/history`.
 // Lo que no reconocen lo dejan como está: un documento de la forma vieja (`{ matchId, entries }`) sale
 // igual, y un campo que falta no se inventa.
@@ -31,8 +32,11 @@ type Doc = Readonly<Record<string, unknown>>;
 const isDoc = (value: unknown): value is Doc =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value);
+/** Un monto en UC del registro (número de antes o texto de ahora) en la convención, o `undefined`. */
+const ucView = (value: unknown): string | undefined => {
+  const amount = storedUcOf(value);
+  return amount === undefined ? undefined : ucText(amount);
+};
 
 /** Reemplaza las llaves `from` por `to` → valor, en el lugar de la primera, sin mover las demás. */
 function replaceKeys(
@@ -55,12 +59,11 @@ function replaceKeys(
 
 /** La cabecera de la mesa: lo que cobraba y pagaba antes de cualquier aumento, en UC. */
 export function tableView(table: unknown): unknown {
-  if (!isDoc(table) || !isNumber(table.entryFeeInUC) || !isNumber(table.prizeInUC)) return table;
-  return replaceKeys(table, ["entryFeeInUC", "prizeInUC"], {
-    currency: UC,
-    entryFee: ucText(table.entryFeeInUC),
-    prize: ucText(table.prizeInUC),
-  });
+  if (!isDoc(table)) return table;
+  const entryFee = ucView(table.entryFeeInUC);
+  const prize = ucView(table.prizeInUC);
+  if (entryFee === undefined || prize === undefined) return table;
+  return replaceKeys(table, ["entryFeeInUC", "prizeInUC"], { currency: UC, entryFee, prize });
 }
 
 /** El precio de un asiento; sin `rateId` si el documento todavía no lo tiene (una partida abierta). */
@@ -88,10 +91,12 @@ function seatAmounts(seat: Doc, price: SeatPrice | undefined) {
       prizePaid: seatText(price, paid),
     };
   }
+  const chargedUc = ucView(seat.chargedInUC);
+  const paidUc = ucView(seat.prizePaidInUC);
   return {
     currency: UC,
-    ...(isNumber(seat.chargedInUC) ? { charged: ucText(seat.chargedInUC) } : {}),
-    ...(isNumber(seat.prizePaidInUC) ? { prizePaid: ucText(seat.prizePaidInUC) } : {}),
+    ...(chargedUc === undefined ? {} : { charged: chargedUc }),
+    ...(paidUc === undefined ? {} : { prizePaid: paidUc }),
   };
 }
 
@@ -108,7 +113,8 @@ function seatView(seat: unknown, rateId: string | undefined): unknown {
   const price = isDoc(seat.price) ? (seat.price as unknown as SeatPrice) : undefined;
   let out: Doc = seat;
   if (price !== undefined) out = { ...out, price: priceView(price, rateId) };
-  if (!isNumber(seat.chargedInUC) && !isNumber(seat.prizePaidInUC)) return out;
+  if (ucView(seat.chargedInUC) === undefined && ucView(seat.prizePaidInUC) === undefined)
+    return out;
   // UN ASIENTO CON PLATA es una entidad en su moneda: `currency` (en el lugar del de la billetera, que
   // es la misma cuando hay precio) y la tasa de la partida, y después sus montos.
   const { currency, ...amounts } = seatAmounts(seat, price);
@@ -119,24 +125,24 @@ function seatView(seat: unknown, rateId: string | undefined): unknown {
 
 function betMultiplierView(bet: unknown): unknown {
   if (!isDoc(bet)) return bet;
-  const entryFee = bet.resultingEntryFeeInUC;
-  const prize = bet.resultingPrizeInUC;
-  if (!isNumber(entryFee) && !isNumber(prize)) return bet;
+  const entryFee = ucView(bet.resultingEntryFeeInUC);
+  const prize = ucView(bet.resultingPrizeInUC);
+  if (entryFee === undefined && prize === undefined) return bet;
   return replaceKeys(bet, ["resultingEntryFeeInUC", "resultingPrizeInUC"], {
     currency: UC,
-    ...(isNumber(entryFee) ? { resultingEntryFee: ucText(entryFee) } : {}),
-    ...(isNumber(prize) ? { resultingPrize: ucText(prize) } : {}),
+    ...(entryFee === undefined ? {} : { resultingEntryFee: entryFee }),
+    ...(prize === undefined ? {} : { resultingPrize: prize }),
   });
 }
 
 /** Una entrada de la timeline: sólo `MULTIPLIER_AGREED` lleva plata, en UC como el evento de la sala. */
 export function entryView<T>(entry: T): T {
   if (!isDoc(entry) || entry.type !== "MULTIPLIER_AGREED" || !isDoc(entry.payload)) return entry;
-  const fee = entry.payload.additionalEntryFee;
-  if (!isNumber(fee)) return entry;
+  const fee = ucView(entry.payload.additionalEntryFee);
+  if (fee === undefined) return entry;
   return {
     ...entry,
-    payload: { ...entry.payload, currency: UC, additionalEntryFee: ucText(fee) },
+    payload: { ...entry.payload, currency: UC, additionalEntryFee: fee },
   } as T;
 }
 

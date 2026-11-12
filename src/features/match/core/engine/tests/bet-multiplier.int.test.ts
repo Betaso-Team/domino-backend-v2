@@ -1,3 +1,4 @@
+import { decimal } from "@/shared/money";
 import { describe, expect, it } from "vitest";
 import type { BetLevel } from "../../config";
 import { RuleViolationError } from "../errors";
@@ -9,7 +10,7 @@ import { engineWithHands } from "./build-engine";
 // LOS NIVELES SON LOS DE v1 —2 y 5— y eso ahora significa algo: el nivel ES el multiplicador
 // de la mesa, no un índice. Con `entryFee: 125`, el x2 cuesta 125 de más y el x5 cuesta 500.
 // Los montos NO están acá: el catálogo del backend principal no los trae, los deriva
-// `betAmountsOf` de la mesa.
+// `betDifference` de la mesa (`@/shared/money`).
 const LEVELS: readonly BetLevel[] = [
   { level: 2, extra: 2, additionalPoints: 100 },
   { level: 5, extra: 5, additionalPoints: 250 },
@@ -122,7 +123,7 @@ describe("aumento de apuesta: responder", () => {
         type: "MULTIPLIER_AGREED",
         level: 5,
         extra: 5,
-        additionalEntryFee: 500,
+        additionalEntryFee: decimal("500"),
         playerIds: ["u1", "u2"],
       },
     ]);

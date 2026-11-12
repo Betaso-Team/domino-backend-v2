@@ -8,9 +8,18 @@ import type { Lease } from "./mongo-lease";
 //
 // 1. **Quien encola nunca espera a Rabbit.** Escribe acá y sigue; el despachador publica después.
 // 2. **Una entrada se marca `SENT` solo después del confirm del broker**, dentro de un plazo.
-// 3. **No hay límite de intentos**: una caída larga del broker cuesta retraso, no datos.
-// 4. **No se adelanta**: `next()` ofrece siempre el pendiente más viejo, así que la segunda entrada
-//    no sale antes que la primera. En los resultados, mantiene el orden en que las partidas terminaron.
+// 3. **Una caída del broker no tiene límite de intentos**: cuesta retraso, no datos. Lo que sí tiene
+//    límite es la entrada que falla SOLA (con el broker confirmando a las demás): a los
+//    `maxStrikes` fallos así pasa a `PARKED` —nunca se borra, sale en `/ready` y en un `error` con
+//    el cuerpo entero— y se reproduce a mano (`docs/operacion.md`, «Resultados estacionados»).
+// 4. **Una entrada que falla no traba a las de atrás**: `next()` ofrece el pendiente con MENOS
+//    intentos y, entre iguales, el más viejo. Sin fallos es el orden de llegada; una entrada que falló
+//    queda detrás de las que todavía no se intentaron. El orden entre partidas distintas no es parte
+//    del contrato (el consumidor deduplica por `messageId` y cada partida tiene un solo desenlace).
+//
+// 5. **Exclusión por desenlace** (`exclusiveKey`): dos entradas con la misma clave exclusiva no
+//    conviven, en ningún estado. Los resultados la usan con el `matchId`: una partida publica
+//    `finished` O `aborted`, nunca los dos (en Mongo, un índice único parcial; ver `mongo-outbox.ts`).
 //
 // LA ESPERA ES DEL BROKER, NO DE CADA ENTRADA. Antes cada entrada guardaba su `nextAttemptAt` con un
 // backoff de hasta cinco minutos, y como nadie se adelanta, una sola entrada que falló dejaba a toda
@@ -25,7 +34,8 @@ import type { Lease } from "./mongo-lease";
 // Lo que es de cada uso —las claves de deduplicación, el nombre del exchange y del lease— entra por
 // parámetro.
 
-export type OutboxStatus = "PENDING" | "SENT";
+// `PARKED`: falló `maxStrikes` veces con el broker sano. No se reintenta sola y no se borra nunca.
+export type OutboxStatus = "PENDING" | "SENT" | "PARKED";
 
 // EL RELOJ INYECTADO, estructural como en `mongo-lease.ts`: sin él, medir el backoff exigiría esperar
 // de verdad.
@@ -45,8 +55,14 @@ export interface OutboxEntry<K extends string = string, P = unknown> {
   readonly payload: P;
   readonly status: OutboxStatus;
   readonly attempts: number;
+  // LOS FALLOS CON EL BROKER SANO: el despachador acababa de confirmar otra publicación y ésta falló
+  // igual. Es lo que distingue una entrada envenenada de una caída del broker, y lo que la estaciona.
+  readonly strikes?: number;
+  // Ver la propiedad 5 de arriba. Ausente en las entradas que no la piden (y en las escritas antes).
+  readonly exclusiveKey?: string;
   readonly createdAt: Date;
   readonly sentAt?: Date;
+  readonly parkedAt?: Date;
   readonly lastError?: string;
 }
 
@@ -58,11 +74,20 @@ export interface OutboxQueue<K extends string = string, P = unknown> {
   // Si hay algo pendiente. Es lo que el despachador pregunta ANTES de tomar el lease, una vez por
   // segundo para siempre: tiene que ser barato (en Mongo, una consulta cubierta por el índice).
   hasPending(): Promise<boolean>;
-  // El pendiente más viejo, sin mirar cuándo falló: la espera tras un fallo es del despachador.
+  // El pendiente con menos intentos y, entre iguales, el más viejo. La espera tras un fallo es del
+  // despachador.
   next(): Promise<OutboxEntry<K, P> | undefined>;
   sent(id: string, at: Date): Promise<void>;
-  // Anota el fallo: suma un intento y guarda el error. No agenda nada.
-  retry(id: string, error: string): Promise<void>;
+  // Anota el fallo: suma un intento (y un `strike` si el broker estaba sano) y guarda el error. No
+  // agenda nada.
+  retry(id: string, error: string, strike?: boolean): Promise<void>;
+  // La saca de la cola para siempre: `PARKED`, con el instante y el motivo. Sólo una PENDING.
+  park(id: string, error: string, at: Date): Promise<void>;
+}
+
+export interface EnqueueOptions {
+  // Ver la propiedad 5: con otra entrada de la misma clave exclusiva, no se inserta.
+  readonly exclusiveKey?: string;
 }
 
 // LO QUE UN ALMACÉN DE OUTBOX SABE HACER, que es la cola más encolar y preguntar por claves. Lo
@@ -70,9 +95,14 @@ export interface OutboxQueue<K extends string = string, P = unknown> {
 export interface OutboxStore<K extends string = string, P = unknown> extends OutboxQueue<K, P> {
   // IDEMPOTENTE POR `dedupeKey`: encolar dos veces la misma clave deja una sola entrada. Devuelve si
   // insertó. Cualquier fallo que no sea "ya estaba" sube.
-  enqueue(dedupeKey: string, routingKey: K, payload: P): Promise<boolean>;
+  // También devuelve `false` si otra entrada tiene la misma `exclusiveKey`: `present` dice cuál.
+  enqueue(dedupeKey: string, routingKey: K, payload: P, options?: EnqueueOptions): Promise<boolean>;
   // Cuáles de estas claves ya existen, en cualquier estado.
   present(keys: readonly string[]): Promise<ReadonlySet<string>>;
+  // El estado de cada una de estas claves que exista. Rechaza si la base no contesta.
+  statuses(keys: readonly string[]): Promise<ReadonlyMap<string, OutboxStatus>>;
+  // Cuántas hay estacionadas: lo que `/ready` informa.
+  parkedCount(): Promise<number>;
 }
 
 // Quince segundos, el del escritor del catálogo. No se renueva (ver `mongo-lease.ts`), y la
@@ -118,7 +148,14 @@ export interface TopicOutboxDispatcherOptions<K extends string, P> {
   // broker que se reinicia es normal, un resultado que lleva diez minutos sin salir es un premio que
   // un jugador va a reclamar. Sin él, todo fallo es un `warn`.
   readonly stuckAfterMs?: number;
+  // A cuántos fallos CON EL BROKER SANO se estaciona una entrada (default `DEFAULT_MAX_STRIKES`).
+  readonly maxStrikes?: number;
 }
+
+// CINCO fallos con el broker sano: una entrada que el broker devuelve cuando a las demás las confirma.
+// Una caída del broker suma como mucho UN strike por caída (el primer fallo, con `failures` en cero),
+// y la entrada que lo recibió pasa al fondo de la cola, así que la próxima caída golpea a otra.
+export const DEFAULT_MAX_STRIKES = 5;
 
 // EL DESPACHADOR. Un tick = hasta `perTick` vueltas de un lease, el trabajo previo y UNA entrada.
 export class TopicOutboxDispatcher<K extends string, P> {
@@ -236,11 +273,25 @@ export class TopicOutboxDispatcher<K extends string, P> {
       );
     } catch (error) {
       // EL BACKOFF ES DEL BROKER, por fallos SEGUIDOS de este proceso: el primero espera un segundo.
-      // Los intentos de la entrada se siguen contando, pero sólo para el log.
+      // UN STRIKE si el broker venía sano (cero fallos seguidos): la entrada falló sola.
+      const strike = this.failures === 0;
       const delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** this.failures);
       this.failures += 1;
       this.brokerDownUntil = clock.now() + delay;
-      await queue.retry(entry.id, String(error));
+      await queue.retry(entry.id, String(error), strike);
+      const strikes = (entry.strikes ?? 0) + (strike ? 1 : 0);
+      if (strikes >= (this.options.maxStrikes ?? DEFAULT_MAX_STRIKES)) {
+        await queue.park(entry.id, String(error), new Date(clock.now()));
+        // EL CUERPO ENTERO, para poder reproducirlo aunque la base se pierda. Nunca se borra de la cola.
+        log.error(`${label} estacionado: falló ${strikes} veces con el broker sano`, {
+          id: entry.id,
+          dedupeKey: entry.dedupeKey,
+          routingKey: entry.routingKey,
+          payload: entry.payload,
+          error: String(error),
+        });
+        return false;
+      }
       const pendingMs = clock.now() - entry.createdAt.getTime();
       const detail = {
         id: entry.id,
@@ -298,15 +349,24 @@ export class MemoryOutboxStore<K extends string = string, P = unknown>
   // EN ORDEN DE INSERCIÓN, que es lo que el adaptador Mongo obtiene ordenando por `_id`.
   private readonly entries: StoredEntry<K, P>[] = [];
   private readonly keys = new Set<string>();
+  private readonly exclusive = new Set<string>();
   private sequence = 0;
 
   constructor(private readonly clock: OutboxClock) {}
 
-  async enqueue(dedupeKey: string, routingKey: K, payload: P): Promise<boolean> {
+  async enqueue(
+    dedupeKey: string,
+    routingKey: K,
+    payload: P,
+    options: EnqueueOptions = {},
+  ): Promise<boolean> {
+    const { exclusiveKey } = options;
     if (this.keys.has(dedupeKey)) return false;
+    if (exclusiveKey !== undefined && this.exclusive.has(exclusiveKey)) return false;
     const now = new Date(this.clock.now());
     this.sequence += 1;
     this.keys.add(dedupeKey);
+    if (exclusiveKey !== undefined) this.exclusive.add(exclusiveKey);
     this.entries.push({
       id: String(this.sequence),
       dedupeKey,
@@ -314,9 +374,23 @@ export class MemoryOutboxStore<K extends string = string, P = unknown>
       payload,
       status: "PENDING",
       attempts: 0,
+      strikes: 0,
+      ...(exclusiveKey === undefined ? {} : { exclusiveKey }),
       createdAt: now,
     });
     return true;
+  }
+
+  async statuses(keys: readonly string[]): Promise<ReadonlyMap<string, OutboxStatus>> {
+    return new Map(
+      this.entries
+        .filter((entry) => keys.includes(entry.dedupeKey))
+        .map((entry) => [entry.dedupeKey, entry.status] as const),
+    );
+  }
+
+  async parkedCount(): Promise<number> {
+    return this.entries.filter((entry) => entry.status === "PARKED").length;
   }
 
   async present(keys: readonly string[]): Promise<ReadonlySet<string>> {
@@ -328,9 +402,13 @@ export class MemoryOutboxStore<K extends string = string, P = unknown>
   }
 
   async next(): Promise<OutboxEntry<K, P> | undefined> {
-    // SIEMPRE EL MÁS VIEJO: la regla de no adelantarse.
-    const oldest = this.entries.find((entry) => entry.status === "PENDING");
-    return oldest && { ...oldest };
+    // EL DE MENOS INTENTOS y, entre iguales, el más viejo (el orden de inserción): `(attempts, _id)`.
+    let best: StoredEntry<K, P> | undefined;
+    for (const entry of this.entries) {
+      if (entry.status !== "PENDING") continue;
+      if (!best || entry.attempts < best.attempts) best = entry;
+    }
+    return best && { ...best };
   }
 
   async sent(id: string, at: Date): Promise<void> {
@@ -340,11 +418,20 @@ export class MemoryOutboxStore<K extends string = string, P = unknown>
     entry.sentAt = at;
   }
 
-  async retry(id: string, error: string): Promise<void> {
+  async retry(id: string, error: string, strike = false): Promise<void> {
     const entry = this.entries.find((one) => one.id === id);
     if (!entry) return;
     // SE ACUMULA, no se reescribe.
     entry.attempts += 1;
+    if (strike) entry.strikes = (entry.strikes ?? 0) + 1;
+    entry.lastError = error;
+  }
+
+  async park(id: string, error: string, at: Date): Promise<void> {
+    const entry = this.entries.find((one) => one.id === id);
+    if (!entry || entry.status !== "PENDING") return;
+    entry.status = "PARKED";
+    entry.parkedAt = at;
     entry.lastError = error;
   }
 }

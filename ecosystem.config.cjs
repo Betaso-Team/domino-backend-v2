@@ -91,13 +91,23 @@ module.exports = {
       // dispondrían. Una partida que muere sin veredicto es un reembolso que nunca se anuncia.
       //
       // `kill_timeout` es cuánto espera pm2 antes de matar de verdad: es el presupuesto del
-      // drenado. Medido con Mongo y Redis reales, el apagado tarda decenas de milisegundos, pero
-      // el resultado de una partida que terminó con el cobro de un aumento en vuelo espera a ese
-      // cobro, hasta 15 s (`OrchestratorBetCharger`), así que tiene que quedar por encima.
+      // drenado, y se arma sumando los plazos del apagado (`src/main.ts` y `shutdown()` de
+      // `src/di-container.ts`), cada uno con su tope:
+      //
+      //   · los resultados (`MatchResultRecorder.drain`): hasta 20 s —el cobro del aumento en vuelo
+      //     (15 s, `BET_CHARGE_TIMEOUT_MS`) más reintentos contra un Mongo caído—; al vencer, cada
+      //     resultado sin encolar sale ENTERO en el log, para reproducirlo a mano;
+      //   · el despachador del outbox: la publicación en vuelo, hasta 5 s;
+      //   · el historial (`MongoHistory.drain`): hasta 5 s;
+      //   · disponer las salas, cerrar Rabbit y Mongo: milisegundos (medido con Mongo y Redis reales).
+      //
+      // Unos 30 s en el peor caso, así que 40 s. Matar antes es lo que esto existe para evitar: el
+      // resultado que vivía en memoria se pierde (la recuperación de partidas interrumpidas la publica
+      // abortada después, pero un `finished` se convierte en un reembolso).
       //
       // Un `reload` no lo aplica: hace falta `pm2 delete` + `start`.
       shutdown_with_message: true,
-      kill_timeout: 20_000,
+      kill_timeout: 40_000,
 
       // CADA INSTANCIA ESCUCHA EN `PORT + NODE_APP_INSTANCE`, y el que suma no es pm2 ni
       // nosotros: es `@colyseus/tools`, adentro de su `listen()`. pm2 solo aporta el índice.

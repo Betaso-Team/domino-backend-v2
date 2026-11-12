@@ -17,3 +17,9 @@
 // puedan discrepar sobre su valor. Concentrarlo acá es lo que mantiene esa exclusión en UN archivo
 // en vez de una por test de integración.
 export const MONGO_INT_URI = process.env.MONGO_INT_URI;
+
+// LO MISMO PARA REDIS: el compare-and-delete del registro (`src/shared/redis-presence.ts`) es un script
+// Lua, y su atomicidad es del servidor. Con un Redis de la máquina, EN UN ÍNDICE PROPIO:
+//
+//     REDIS_INT_URL=redis://127.0.0.1:6379/15 npm run test:int
+export const REDIS_INT_URL = process.env.REDIS_INT_URL;

@@ -1,11 +1,12 @@
+import { type Decimal, ZERO } from "@/shared/money";
 import type { DominoMatchConfig, GlobalDominoConfig } from "../core/config";
-import { betAmountsOf } from "../core/rules/config";
 import type { MatchState } from "../core/state";
+import { ucText } from "./amounts";
 import type { NetworkMatchEvent } from "./events";
 import type { MatchClose, MatchHistory, MatchSetup, SeatMoney } from "./history";
 import type { MatchEventSink } from "./listeners";
 import type { MatchAbortReason } from "./match-results";
-import { payoutOf } from "./payout";
+import { payoutOf, stakesOf } from "./payout";
 import { localMoneyOf } from "./player-currency";
 
 // LAS DOS PUNTAS DEL REGISTRO QUE NO SON DEL GRABADOR: con qué se armó la mesa —que la sala sabe al
@@ -34,8 +35,10 @@ export function matchSetupOf(
       ...(config.tournamentId === undefined ? {} : { tournamentId: config.tournamentId }),
       gameModeId: config.gameModeId,
       name: table.gameModeName,
-      entryFeeInUC: config.entryFee,
-      prizeInUC: config.prize,
+      // EN TEXTO, con los 4 decimales de UC: Mongo no guarda un `Decimal`, y un `number` sería volver a
+      // la coma flotante. Los documentos de antes lo tienen como número (`storedUcOf` lee los dos).
+      entryFeeInUC: ucText(config.entryFee),
+      prizeInUC: ucText(config.prize),
       isFree: config.isFreeRoom,
     },
     matchConfig: {
@@ -107,9 +110,9 @@ export function matchCloseOf(
 ): MatchClose | undefined {
   if (event.type !== "MATCH_RESOLVED" && event.type !== "MATCH_ABORTED") return undefined;
   const level = match.acceptedBetLevel;
-  const extra = level > 0 ? betAmountsOf(level, config.entryFee, config.prize) : undefined;
-  const entryFee = config.entryFee + (extra?.additionalEntryFee ?? 0);
-  const prizes = new Map<string, number>();
+  // LA MESA AL NIVEL QUE QUEDÓ, con la misma función que el premio publicado (`stakesOf`).
+  const stakes = stakesOf(config, match);
+  const prizes = new Map<string, Decimal>();
   if (event.type === "MATCH_RESOLVED") {
     for (const { userId, amount } of payoutOf(event, match, config)?.entries ?? [])
       prizes.set(userId, amount);
@@ -127,8 +130,8 @@ export function matchCloseOf(
       return [
         seat.playerId,
         {
-          chargedInUC: facts.entryCharged ? entryFee : 0,
-          prizePaidInUC: prizes.get(seat.userId) ?? 0,
+          chargedInUC: ucText(facts.entryCharged ? stakes.entryFee : ZERO),
+          prizePaidInUC: ucText(prizes.get(seat.userId) ?? ZERO),
           ...local,
         },
       ];
@@ -140,10 +143,10 @@ export function matchCloseOf(
     betMultiplier: {
       offeredValues: config.betLevels.map((option) => option.level),
       finalValue: level > 0 ? level : 1,
-      ...(extra
+      ...(level > 0
         ? {
-            resultingEntryFeeInUC: entryFee,
-            resultingPrizeInUC: config.prize + extra.additionalPrize,
+            resultingEntryFeeInUC: ucText(stakes.entryFee),
+            resultingPrizeInUC: ucText(stakes.prize),
           }
         : {}),
     },

@@ -121,7 +121,7 @@ describe("TopicOutboxDispatcher", () => {
     expect(delivery.published).toHaveLength(1);
   });
 
-  it("un rechazo corta el tick y deja la entrada primera, sin adelantar la siguiente", async () => {
+  it("un rechazo corta el tick y la entrada que falló pasa detrás de las no intentadas", async () => {
     const { store, delivery, dispatcher } = fixture(5);
     for (const n of [1, 2]) await store.enqueue(`m-${n}`, "domino.match.finished", { n });
     delivery.fails();
@@ -129,8 +129,13 @@ describe("TopicOutboxDispatcher", () => {
     await dispatcher.drain();
 
     expect(delivery.attempts()).toBe(1);
-    const head = await store.next();
-    expect(head).toMatchObject({ dedupeKey: "m-1", attempts: 1, lastError: expect.any(String) });
+    expect(await store.statuses(["m-1", "m-2"])).toEqual(
+      new Map([
+        ["m-1", "PENDING"],
+        ["m-2", "PENDING"],
+      ]),
+    );
+    expect(await store.next()).toMatchObject({ dedupeKey: "m-2", attempts: 0 });
   });
 
   it("con la cola vacía, el tick no toma el lease", async () => {
@@ -191,7 +196,7 @@ describe("TopicOutboxDispatcher: la ventana del broker caído", () => {
     expect((await store.next())?.attempts).toBe(9);
   });
 
-  it("`wake()` sondea dentro de la ventana y publica todo lo pendiente, en orden", async () => {
+  it("`wake()` sondea dentro de la ventana y publica todo lo pendiente; la que falló, al final", async () => {
     const { store, delivery, dispatcher } = fixture(20);
     for (const n of [1, 2]) await store.enqueue(`m-${n}`, "domino.match.finished", { n });
     delivery.fails();
@@ -203,7 +208,7 @@ describe("TopicOutboxDispatcher: la ventana del broker caído", () => {
     await settle();
     await dispatcher.close();
 
-    expect(delivery.published.map((one) => one.body)).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+    expect(delivery.published.map((one) => one.body)).toEqual([{ n: 2 }, { n: 3 }, { n: 1 }]);
     expect(await store.hasPending()).toBe(false);
   });
 
@@ -271,20 +276,124 @@ describe("TopicOutboxDispatcher: lo que no sale", () => {
   });
 });
 
+// UNA ENTRADA ENVENENADA no traba a las demás y, si falla con el broker sano, se estaciona.
+describe("TopicOutboxDispatcher: la entrada que falla sola", () => {
+  function poisoned(maxStrikes = 3) {
+    const time = clock();
+    const log = fakeLogger();
+    const store = new MemoryOutboxStore<string, { n: number }>(time);
+    const published: number[] = [];
+    const delivery: AmqpDelivery = {
+      async publishTopic(_exchange, _routingKey, body) {
+        const { n } = body as { n: number };
+        if (n === 0) throw new Error("devuelto: sin cola");
+        published.push(n);
+      },
+      async publishPattern() {
+        throw new Error("no");
+      },
+    };
+    const dispatcher = new TopicOutboxDispatcher({
+      exchange: "tablea_gaming",
+      leaseName: "l",
+      queue: store,
+      delivery,
+      lease: new MemoryLease(),
+      clock: time,
+      log,
+      label: "resultado de partida",
+      perTick: 10,
+      maxStrikes,
+    });
+    return { time, log, store, published, dispatcher };
+  }
+
+  it("las de atrás salen aunque la primera falle siempre", async () => {
+    const { time, store, published, dispatcher } = poisoned(100);
+    await store.enqueue("veneno", "r", { n: 0 });
+    for (const n of [1, 2, 3]) await store.enqueue(`m-${n}`, "r", { n });
+
+    for (let i = 0; i < 4; i += 1) {
+      await dispatcher.drain();
+      time.advance(31_000);
+    }
+
+    expect(published).toEqual([1, 2, 3]);
+  });
+
+  it("a los `maxStrikes` fallos con el broker sano queda PARKED, con el cuerpo en el log", async () => {
+    const { time, log, store, dispatcher } = poisoned(3);
+    await store.enqueue("veneno", "r", { n: 0 });
+    // Cada ronda: una sana confirma (el broker está bien) y la envenenada falla con strike.
+    for (let round = 1; round <= 3; round += 1) {
+      await store.enqueue(`sana-${round}`, "r", { n: round });
+      await dispatcher.drain();
+      time.advance(31_000);
+      await dispatcher.drain();
+      time.advance(31_000);
+    }
+
+    expect(await store.statuses(["veneno"])).toEqual(new Map([["veneno", "PARKED"]]));
+    expect(await store.parkedCount()).toBe(1);
+    expect(await store.hasPending()).toBe(false);
+    expect(log.error).toHaveBeenCalledWith(
+      "resultado de partida estacionado: falló 3 veces con el broker sano",
+      expect.objectContaining({ dedupeKey: "veneno", payload: { n: 0 } }),
+    );
+  });
+
+  it("una caída del broker no estaciona: sólo el primer fallo de la racha es strike", async () => {
+    const time = clock();
+    const store = new MemoryOutboxStore<string, { n: number }>(time);
+    const delivery = recording();
+    const dispatcher = new TopicOutboxDispatcher({
+      exchange: "tablea_gaming",
+      leaseName: "l",
+      queue: store,
+      delivery: delivery.port,
+      lease: new MemoryLease(),
+      clock: time,
+      log: fakeLogger(),
+      label: "resultado de partida",
+      maxStrikes: 2,
+    });
+    await store.enqueue("m-1", "r", { n: 1 });
+    delivery.fails();
+    for (let i = 0; i < 20; i += 1) {
+      await dispatcher.drain();
+      time.advance(31_000);
+    }
+    delivery.recovers();
+    await dispatcher.drain();
+
+    expect(delivery.published).toHaveLength(1);
+    expect(await store.parkedCount()).toBe(0);
+  });
+});
+
 describe("MemoryOutboxStore", () => {
-  it("ofrece siempre el pendiente más viejo, aunque haya fallado", async () => {
+  it("ofrece el de menos intentos y, entre iguales, el más viejo", async () => {
     const store = new MemoryOutboxStore<string, number>(clock());
     expect(await store.hasPending()).toBe(false);
     await store.enqueue("a", "r", 1);
     await store.enqueue("b", "r", 2);
 
     const first = await store.next();
+    expect(first?.dedupeKey).toBe("a");
     await store.retry(first?.id ?? "", "caído");
-    expect(await store.next()).toMatchObject({ dedupeKey: "a", attempts: 1, lastError: "caído" });
+    expect(await store.next()).toMatchObject({ dedupeKey: "b", attempts: 0 });
 
-    await store.sent(first?.id ?? "", new Date());
-    expect((await store.next())?.dedupeKey).toBe("b");
+    const second = await store.next();
+    await store.sent(second?.id ?? "", new Date());
+    expect(await store.next()).toMatchObject({ dedupeKey: "a", attempts: 1, lastError: "caído" });
     expect(await store.hasPending()).toBe(true);
+  });
+
+  it("dos entradas con la misma clave exclusiva no conviven", async () => {
+    const store = new MemoryOutboxStore<string, number>(clock());
+    expect(await store.enqueue("m:finished", "r", 1, { exclusiveKey: "m" })).toBe(true);
+    expect(await store.enqueue("m:aborted", "r", 2, { exclusiveKey: "m" })).toBe(false);
+    expect([...(await store.present(["m:finished", "m:aborted"]))]).toEqual(["m:finished"]);
   });
 
   it("encolar dos veces la misma clave deja una sola entrada, y lo dice", async () => {

@@ -57,6 +57,35 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     await sitEveryone(opened);
   });
 
+  // UNA SALA POR `matchId`: el orquestador que reintenta un `POST` cuya respuesta se perdió recibe la
+  // MISMA sala con reservas nuevas, y las reservas nuevas sirven.
+  it("un POST repetido con el mismo matchId devuelve la misma sala con reservas que sirven", async () => {
+    const table = casualTable(["o-dup1", "o-dup2"]);
+    const first = (await (await post("/internal/matches", table)).json()) as Opened;
+    const again = await post("/internal/matches", table);
+    expect(again.status).toBe(201);
+    const second = (await again.json()) as Opened;
+    expect(second.data.roomId).toBe(first.data.roomId);
+    expect(second.data.seats.map((seat) => seat.reservation.sessionId)).not.toEqual(
+      first.data.seats.map((seat) => seat.reservation.sessionId),
+    );
+    await sitEveryone(second);
+  });
+
+  // A LA VEZ: el candado `match_opening:<matchId>` deja abrir a uno; los demás esperan su sala.
+  it("seis POST simultáneos del mismo matchId abren UNA sala", async () => {
+    const table = casualTable(["o-par1", "o-par2"]);
+    const before = (await matchMaker.query({ name: "domino" })).length;
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, () => post("/internal/matches", table)),
+    );
+    const bodies = (await Promise.all(responses.map((res) => res.json()))) as Opened[];
+    expect(responses.map((res) => res.status)).toEqual(Array(6).fill(201));
+    expect(new Set(bodies.map((body) => body.data.roomId)).size).toBe(1);
+    expect((await matchMaker.query({ name: "domino" })).length).toBe(before + 1);
+    await sitEveryone(bodies[5] as Opened);
+  });
+
   it("le devuelve el asiento a quien sigue en una mesa llena, con el matchId del orquestador", async () => {
     const table = casualTable(["o-c", "o-d"]);
     const opened = (await (await post("/internal/matches", table)).json()) as Opened;
@@ -310,10 +339,18 @@ describe("la API del orquestador: abrir mesa y devolver el asiento", () => {
     expect((await post("/internal/players/nadie/seat")).status).toBe(404);
   });
 
-  it("contesta 422 a una mesa cuyos asientos no son los del modo", async () => {
+  // SÓLO DOMINÓ DE DOS: el modo de cuatro es un 400 en la ruta, antes de llegar a la sala. Con sólo
+  // mesas de dos, «los asientos no son los del modo» (`422 SEAT_COUNT_MISMATCH`) ya no se puede pedir
+  // por la ruta: un modo de dos con dos participantes siempre coincide.
+  it("contesta 400 a una mesa de cuatro", async () => {
     const res = await post("/internal/matches", casualTable(["o-e", "o-f"], "seed", CASUAL_4P));
-    expect(res.status).toBe(422);
-    expect(await res.json()).toEqual({ code: "SEAT_COUNT_MISMATCH" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "MALFORMED" });
+    const four = await post(
+      "/internal/matches",
+      casualTable(["o-e", "o-f", "o-e3", "o-f3"], "seed", CASUAL_4P),
+    );
+    expect(four.status).toBe(400);
   });
 
   it("contesta 400 a una mesa casual sin su modo en línea", async () => {

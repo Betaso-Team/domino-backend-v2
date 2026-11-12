@@ -32,6 +32,11 @@ sentó, normalizado con `trim()`.
 El cliente no envía `playerId`: el handler lo toma del asiento autenticado. Cada payload pasa por un
 decoder estricto antes de alcanzar el comando.
 
+**Tope de mensajes**: cada conexión puede mandar hasta `MAX_MESSAGES_PER_SECOND` mensajes por segundo
+(default **25**); el que pasa el tope pierde la conexión (Colyseus la cierra con `1011`) y puede volver
+con su reserva o su token de reconexión. Los rechazos (`illegal`) se contestan siempre; en el log del
+servidor salen muestreados, cinco por minuto por asiento y clase, más una línea con los que se callaron.
+
 ### Reacciones
 
 `SEND_REACTION` `{ reactionId: string }` (de 1 a 64 caracteres; un campo de más, como el
@@ -106,7 +111,7 @@ también antes de revelar las fichas: el estado no lleva el `userId` de nadie. P
 aumento con `seat.price`, en la moneda del jugador; sin `price`, en UC con los montos de la mesa. Los montos
 en su moneda son los que cotizó billing: no se convierten ni se redondean, y se rellenan con los decimales
 de la moneda solo si el orquestador los mandó (`price.decimals`). Lo que eso vale en UC es lo de la mesa:
-`entryFee`, `prize`, y para el nivel N `entryFee × (N − 1)` y `prize × N`; quien quiera la conversión exacta
+`entryFee`, `prize`, y para el nivel N `entryFee × (N − 1)` (`betDifference`) y `prize × N` (`stakeAt`); quien quiera la conversión exacta
 consulta la tasa `rateId` (`GET /v1/rates/:rateId` de billing, por el gateway).
 
 **Lo de un asiento no le llega a otro.** El mensaje nunca lleva el `userId`, el proveedor, la moneda ni el
@@ -316,17 +321,19 @@ si no, por `matchId` (los documentos viejos no guardaban la sala).
 Las tres van con la llave o el token de admin; sin credencial, `401 { code: "UNAUTHORIZED" }` antes de
 mirar la forma. El `POST /internal/matches` del orquestador es otra ruta, con su llave.
 
-**El registro en la convención de montos.** Mongo guarda los montos como siempre, y el listado, el
-detalle, `/game-data` y `GET /internal/matches/:matchId/history` los traducen al salir
+**El registro en la convención de montos.** Mongo guarda los montos en UC de los campos `*InUC` como
+texto con 4 decimales (`"10.0000"`); los documentos escritos antes los tienen como número (`10`), no se
+migran, y los dos se leen igual (`storedUcOf`). El listado, el detalle, `/game-data` y
+`GET /internal/matches/:matchId/history` los traducen al salir
 (`network/record-view.ts`): **la mesa en UC y cada asiento en su moneda**, cada uno con su `currency`.
 Lo que no reconocen lo dejan como está: un documento de antes de la v2.1 sale igual, y un campo que
 falta no se inventa.
 
 | En Mongo | En la respuesta |
 |---|---|
-| `table.entryFeeInUC: 10`, `table.prizeInUC: 18` | `table: { currency: "UC", entryFee: "10.0000", prize: "18.0000", … }` |
+| `table.entryFeeInUC: "10.0000"` (o `10`), `table.prizeInUC: "18.0000"` (o `18`) | `table: { currency: "UC", entryFee: "10.0000", prize: "18.0000", … }` |
 | `seats[].price`, `players[].price`: `{ currency, rate, entry, prize, levels, decimals? }` | `{ currency: "VES", rateId, rate, entry: "4000.00", prize, levels }`: rellenado con `decimals`, con el `rateId` de la partida (sin él mientras la partida sigue abierta, porque el documento todavía no lo tiene) |
-| `players[]`: `chargedInUC: 20`, `prizePaidInUC: 36`, `chargedInPlayerCurrency: "4000.00"`, `prizePaidInPlayerCurrency: "7200.00"` | `players[]: { currency: "VES", rateId, …, charged: "4000.00", prizePaid: "7200.00" }`; sin montos en su moneda (sin precio, o un aumento que el precio no cotizó), `{ currency: "UC", rateId, …, charged: "20.0000", prizePaid: "36.0000" }` |
+| `players[]`: `chargedInUC: "20.0000"` (o `20`), `prizePaidInUC: "36.0000"` (o `36`), `chargedInPlayerCurrency: "4000.00"`, `prizePaidInPlayerCurrency: "7200.00"` | `players[]: { currency: "VES", rateId, …, charged: "4000.00", prizePaid: "7200.00" }`; sin montos en su moneda (sin precio, o un aumento que el precio no cotizó), `{ currency: "UC", rateId, …, charged: "20.0000", prizePaid: "36.0000" }` |
 | `betMultiplier.resultingEntryFeeInUC`, `resultingPrizeInUC` | `betMultiplier: { currency: "UC", resultingEntryFee, resultingPrize, … }` |
 | `timeline[]` `MULTIPLIER_AGREED`: `payload.additionalEntryFee: 125` | `payload: { currency: "UC", additionalEntryFee: "125.0000", … }` |
 
@@ -369,9 +376,18 @@ es 400), discriminado por `mode`:
 | `201` | `{ status, data: { roomId, seats: [{ userId, reservation }] } }` | La sala nació; cada jugador consume su `reservation` |
 | `400` | `{ code: "MALFORMED", detail }` | El cuerpo no cumple la forma |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `400` | `{ code: "MALFORMED", detail }` | También: una casual sin `gameMode`, o con un `gameMode` fuera de su forma |
-| `422` | `{ code: "SEAT_COUNT_MISMATCH" }` | La sala rechazó la mesa: la cantidad de `participants` no es la del modo |
+| `400` | `{ code: "MALFORMED", detail }` | También: una casual sin `gameMode`, o con un `gameMode` fuera de su forma; y **toda mesa de cuatro** (`gameMode.playersQuantity: 4`, o más de dos `participants`, casual o de torneo) |
+| `409` | `{ code: "MATCH_OPENING" }` | Otro pedido con el mismo `matchId` está abriendo la sala y no terminó en 5 s. Reintentable |
+| `422` | `{ code: "SEAT_COUNT_MISMATCH" }` | La sala rechazó la mesa: la cantidad de `participants` no es la del modo. Con sólo mesas de dos ya no se puede pedir por esta ruta (un modo de dos con dos participantes siempre coincide); queda como guarda de la sala |
 | `500` | `{ code: "INTERNAL" }` | Cualquier otra falla es nuestra |
+
+**Una sala por `matchId`.** Si la partida ya tiene sala viva —el orquestador reintentó un `POST` cuya
+respuesta se perdió—, la respuesta es `201` con **esa** sala y reservas nuevas, una por participante; no
+se abre otra. Dos pedidos simultáneos del mismo `matchId` los ordena un candado en Redis
+(`match_opening:<matchId>`, `SET NX` de 30 s): el que lo toma abre la sala y los demás esperan a que
+aparezca en el registro (hasta 5 s) y reservan en ella. Una partida cuya sala ya se cerró **no** tiene
+sala viva: un `POST` con ese `matchId` abre una nueva (el orquestador no debe repetir una partida
+terminada).
 
 **`POST /internal/players/:userId/seat`** devuelve el asiento de quien sigue jugando (sin cuerpo).
 
@@ -394,18 +410,30 @@ pregunta para no abrirle una segunda mesa; para volver a entrar sigue siendo `PO
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
 | `404` | `{ code: "NO_LIVE_MATCH" }` | No está en ninguna mesa viva (o ya lo soltó: se retiró, la partida tiene veredicto o se anuló), o su sala ya no figura en el matchmaker: la entrada se borra |
 
-**`GET /internal/matches/:matchId/existence`** dice si una partida existe, y **nada más**: si su mesa sigue
-viva en el clúster (el registro compartido, la misma prueba que `.../seat`: su sala anotada por `matchId` y la
-config de esa sala presente) y si quedó registro de ella (el archivo de partidas, sin leer el documento). El
-orquestador lo pregunta antes de dar por perdida una mesa de torneo que nunca le contestó. El documento sigue
-siendo del panel (`GET /internal/matches/:matchId`, con `ADMIN_API_KEY`); esta ruta no lo devuelve.
+**`GET /internal/matches/:matchId/existence`** dice si una partida existe y en qué está su desenlace, y
+**nada más**:
+
+- **`live`**: su mesa sigue viva en el clúster (el registro compartido, la misma prueba que `.../seat`: su
+  sala anotada por `matchId` y la config de esa sala presente).
+- **`recorded`**: quedó registro de ella (el archivo de partidas, sin leer el documento).
+- **`outcome`**: su desenlace en el outbox de resultados (`match_result_outbox`, claves
+  `<matchId>:finished` y `<matchId>:aborted`):
+  - `"none"`: no hay ninguno;
+  - `"pending"`: hay uno que todavía no salió (`PENDING`, o `PARKED` esperando que alguien lo reproduzca);
+  - `"published"`: el broker lo confirmó (`SENT`). Lo enviado no se borra nunca (a los 7 días pierde el
+    cuerpo y queda la lápida), así que una partida publicada sigue contestando `published`.
+
+El orquestador aborta el ledger de una mesa casual paga —reembolsa las entradas— **sólo** con
+`live: false && outcome: "none"` pasada la duración máxima de una partida; también lo pregunta antes de dar
+por perdida una mesa de torneo. El documento sigue siendo del panel (`GET /internal/matches/:matchId`, con
+`ADMIN_API_KEY`); esta ruta no lo devuelve.
 
 | Estado | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{ status: "success", data: { live, recorded } }` | Siempre que el registro y la base contestan |
+| `200` | `{ status: "success", data: { live, recorded, outcome } }` | Siempre que el registro, la base y el outbox contestan |
 | `400` | `{ code: "MALFORMED", detail }` | El `matchId` es inválido |
 | `401` | `{ code: "UNAUTHORIZED" }` | Llave ausente o equivocada |
-| `503` | `{ code: "UNAVAILABLE" }` | El registro compartido o la base no contestaron: **nunca** un `false` por una falla |
+| `503` | `{ code: "UNAVAILABLE" }` | El registro compartido, la base o el outbox no contestaron: **nunca** un `false` ni un `"none"` por una falla |
 
 El registro de una partida se escribe al **arrancar** el juego (el primer reparto, `MatchHistory.open`), y cada
 lote del juego lo crea si falta; las escrituras son de mejor esfuerzo. Una sala creada que nadie llegó a jugar
@@ -487,11 +515,11 @@ pedido, junto a `gameModeId`:
 ```ts
 gameMode: {
   name: string;               // 1 a 100 caracteres; es el `table.name` del registro
-  playersQuantity: 2 | 4;     // número, no texto
+  playersQuantity: 2;         // número, no texto; sólo dominó de dos (4 es 400)
   pointsToWin: number;        // entero positivo seguro
   multiplier: number;         // entero positivo seguro
-  entryFee: number;           // UC, finito, >= 0, <= MAX_SAFE_INTEGER (decimales sí)
-  prize: number;              // ídem
+  entryFee: string;           // UC, texto decimal sin signo ni exponente: "10.0000"
+  prize: string;              // ídem
   isFreeRoom: boolean;
   enableBots: boolean;
 }                             // estricto: una clave de más es 400
@@ -504,24 +532,39 @@ gameMode: {
   resultado.
 - La cantidad de `participants` tiene que ser `playersQuantity` (`422 SEAT_COUNT_MISMATCH`), y una mesa
   gratis no ofrece aumentos.
+- **Sólo dominó de dos.** `playersQuantity` distinto de 2, o más de dos `participants` (también en una
+  de torneo), es `400`: el dominó de cuatro no sale y no se puede abrir ni por error. Es una constante
+  del código (`ENABLED_SEATS` en `match-contract.ts`), no una variable de entorno.
+- **`entryFee` y `prize` son texto decimal en UC** (`"10.0000"`, `/^\d+(\.\d+)?$/`), como los manda el
+  orquestador desde que sus montos son `Decimal`. **Durante una versión** también se acepta el número de
+  un orquestador anterior (finito, `>= 0`, `<= MAX_SAFE_INTEGER`), leído en su forma decimal más corta
+  sin redondear. Adentro los dos son el `Decimal` de billing.
 - Sin `gameMode`, o con uno fuera de esta forma, es `400`. Una mesa de torneo no lo acepta (400).
 
 **Las mesas no mueven dinero: piden que se cobre y dicen qué pasó.** El dominó no tiene billetera,
 ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambio:
 
 - **Con la mesa completa** (solo una casual; la de torneo arranca directo), la sala pide al orquestador `POST {ORCHESTRATOR_URL}v1/matches/:matchId/charges`
-  (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`) y espera. Con `200` arranca; con cualquier otra
+  (`x-internal-api-key: ORCHESTRATOR_CALLBACK_API_KEY`, `x-charge-deadline: <epoch ms>`) y espera. Con `200` arranca; con cualquier otra
   cosa —un `409`, un orquestador caído, un plazo vencido— se cierra sin arrancar y sale abortada con
   `CHARGE_REJECTED`. El plazo del cliente HTTP cubre la respuesta entera, cabeceras y cuerpo, y al
   vencer corta la conexión: un orquestador que manda las cabeceras y se cuelga en el cuerpo también es
   un plazo vencido, y la mesa no queda esperando el cobro.
 - **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
   anula (`MULTIPLIER_REVOKED`).
+- **`x-charge-deadline`** va en los dos cobros: el instante (epoch ms) en que el dominó deja de esperar,
+  ahora + su plazo —**10 s** la entrada, **15 s** el aumento—. Es exactamente el plazo con que el cliente
+  HTTP aborta la llamada (y el del `withTimeout` del aumento): pasado ese instante, el dominó ya dio el
+  cobro por no hecho (mesa cerrada `CHARGE_REJECTED`, aumento anulado), así que el orquestador no debe
+  completar después un cobro que no alcanzó a contestar.
 - **El resultado** sale por un outbox durable al exchange `tablea_gaming` (broker y vhost de
   `TABLEA_GAMING_RABBITMQ_URL`), con `mandatory` y publisher confirm: `domino.match.finished` al
   dictaminarse (participantes, apuesta de la mesa y los premios en `payouts`, ya con el aumento) y
   `domino.match.aborted` al cerrarse sin veredicto (sin montos: el orquestador devuelve lo que cobró).
-  `messageId = <matchId>:finished|aborted`.
+  `messageId = <matchId>:finished|aborted`. **Una partida publica uno solo de los dos, nunca ambos**: el
+  outbox tiene un índice único parcial sobre `exclusiveKey` (= `matchId`), y el segundo desenlace lo
+  rechaza la base. Una partida que murió con su proceso (OOM, `kill -9`) sale `aborted` con motivo
+  `INTERRUPTED` por la recuperación de partidas interrumpidas (`docs/operacion.md`).
 
 `domino.match.finished` (`MatchFinishedPayload`, en `network/match-results.ts`):
 
@@ -584,11 +627,11 @@ antes de mirar la forma.
 | `GET /internal/players/:userId/matches` | `503 MATCH_LIST_TIMEOUT` (+ `detail`) |
 | `GET`/`PATCH`/`DELETE /internal/settings/:section` | `404 SETTINGS_SECTION_NOT_FOUND` |
 | `GET /internal/settings` | — |
-| `POST /internal/matches` (orquestador) | `422 SEAT_COUNT_MISMATCH` |
+| `POST /internal/matches` (orquestador) | `409 MATCH_OPENING`, `422 SEAT_COUNT_MISMATCH` |
 | `POST /internal/players/:userId/seat` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/players/:userId/match` (orquestador) | `404 NO_LIVE_MATCH` |
 | `GET /internal/census` (orquestador) | — |
-| `GET /internal/matches/:matchId/existence` (orquestador) | — |
+| `GET /internal/matches/:matchId/existence` (orquestador) | `503 UNAVAILABLE` |
 
 Los `404` no llevan `detail`.
 
@@ -616,7 +659,8 @@ Los eventos de dominio describen consecuencias (`ROUND_STARTED` en cada reparto,
 ya está en el historial como comando; no se duplica como evento salvo que exista información nueva.
 
 El único evento con plata es `MULTIPLIER_AGREED` (`{ level, extra, additionalEntryFee, playerIds }`).
-Adentro `additionalEntryFee` es un número en UC: lo lee el cobro del aumento y así lo graba la timeline.
+Adentro `additionalEntryFee` es el `Decimal` en UC: lo lee el cobro del aumento, y la timeline lo graba
+como texto en UC (`"125.0000"`; las entradas de antes, como número).
 Al salir a la mesa (`events`) y en las lecturas del historial va en la convención de montos, como
 entidad en UC: `currency: "UC"` y `additionalEntryFee: "125.0000"` (`wireEventOf`, en
 `network/amounts.ts`).
@@ -627,14 +671,23 @@ Todo monto que el dominó **emite** sigue la convención de Tablea Gaming (`docs
 del monorepo del orquestador, v2): cada **entidad** lleva un `currency`, y todos sus montos están en
 esa moneda como **texto decimal plano**, rellenado con los decimales de la moneda y nunca redondeado:
 `{ "currency": "UC", "entryFee": "125.0000", "prize": "250.0000" }`. El código es
-`src/shared/money.ts`, copia de `packages/money/src/money.ts` del orquestador (commit `c9222ea`, sin lo
-que el dominó no usa), con sus vectores (`money.vectors.json`, que corre `money.test.ts`).
+`src/shared/money/`, copia de `packages/money` del orquestador (commit `85cd1a4`): el `Decimal` de
+billing (`decimal.ts`, big.js 7.0.1 estricto), las fórmulas de la mesa (`pricing.ts`: `stakeAt`,
+`betDifference`, `toCurrency`) y la convención (`money.ts`, sin lo que el dominó no usa), con los vectores
+de los dos (`money.vectors.json`, `pricing.vectors.json`, que corren `money/tests/`).
+
+**Adentro, la plata nunca es un `number`.** Todo monto en UC —la mesa del snapshot, la oferta y el evento
+del aumento, el premio y el reembolso de `payoutOf`— es el `Decimal`, y se calcula con las MISMAS
+fórmulas que el orquestador: el premio al nivel L es `stakeAt(prize, L)` = `prize × L`, y aceptar un
+aumento cobra `betDifference(entryFee, L)` = `entryFee × (L − 1)`. El orquestador compara el premio
+publicado con su `stakeAt` con igualdad decimal exacta; con `number` el premio a x6 de una mesa de 0.02
+era `0.12000000000000001` y el resultado iba a la DLQ. `src/tests/no-number-money.test.ts` impide tipar
+un campo con nombre de plata como `number`.
 
 - **La mesa está en UC** (`currency: "UC"`): el mensaje `config`, `stakes` y `payouts` del resultado,
   la oferta de aumento del estado, `MULTIPLIER_AGREED` y la cabecera del registro. Sus montos son los
-  números del catálogo del orquestador, congelados en el snapshot, con 4 decimales y **sin redondear**:
-  el texto vuelve al mismo `number` con `Number(texto)`, que es lo que el orquestador compara contra su
-  planilla.
+  montos del catálogo del orquestador, congelados en el snapshot, con 4 decimales y **sin redondear**:
+  el texto es el `Decimal` tal cual (`fixed(x.toString(), 4)`), el mismo que el orquestador calcula.
 - **Cada asiento con precio está en su moneda**: `seat.price` de su mensaje `config`, la fila de `GET /me/matches` y el
   asiento del registro llevan el `currency` del precio (el código de billing tal cual, `VES`) y los
   textos que billing cotizó, rellenados con `price.decimals` si vino. El precio y el asiento cerrado
@@ -646,10 +699,12 @@ que el dominó no usa), con sus vectores (`money.vectors.json`, que corre `money
 - **Lo que no es plata sigue siendo número**: `betLevels[].extra`, `additionalPoints`, `multiplier`,
   `stakes.bet.extra` y `rankingMultiplier` son pesos de los puntos del ranking. `rate` es una tasa, no
   un monto, y va como el texto que congeló billing.
-- **Las entradas no cambian**: el `CreateMatchRequest` del orquestador (`gameMode.entryFee`,
-  `participants[].price`, con `price.decimals`) conserva su forma.
-- **Lo que se guarda tampoco**: Mongo y el snapshot conservan sus números y textos; la forma es de la
-  frontera (`network/amounts.ts`, `network/record-view.ts`).
+- **Las entradas**: `gameMode.entryFee` y `gameMode.prize` del `CreateMatchRequest` son texto decimal en
+  UC (y, durante una versión, el número del orquestador anterior); `participants[].price` no cambia.
+- **Lo que se guarda**: Mongo guarda los montos en UC (`*InUC` y el `additionalEntryFee` de la
+  timeline) como texto con 4 decimales; los documentos de antes los tienen como número y se leen igual,
+  sin migrar. La forma pública es de la frontera (`network/amounts.ts`, `network/record-view.ts`) y no
+  cambió.
 
 Salida por salida:
 

@@ -57,8 +57,8 @@ describe("matchSetupOf", () => {
       table: {
         gameModeId: "mode-1v1",
         name: "Clásica 1v1",
-        entryFeeInUC: 10,
-        prizeInUC: 18,
+        entryFeeInUC: "10.0000",
+        prizeInUC: "18.0000",
         isFree: false,
       },
       matchConfig: {
@@ -147,8 +147,8 @@ describe("matchCloseOf", () => {
       winnerIds: ["seat-1"],
       rateId: "69977c3dc3bf3e710572f941",
       money: {
-        "seat-1": { chargedInUC: 10, prizePaidInUC: 18 },
-        "seat-2": { chargedInUC: 10, prizePaidInUC: 0 },
+        "seat-1": { chargedInUC: "10.0000", prizePaidInUC: "18.0000" },
+        "seat-2": { chargedInUC: "10.0000", prizePaidInUC: "0.0000" },
       },
       betMultiplier: { offeredValues: [2, 3], finalValue: 1 },
       rankingMultiplier: { base: 2, extra: 0, final: 2 },
@@ -173,13 +173,13 @@ describe("matchCloseOf", () => {
       matchEndReason: "ABANDONMENT",
       winnerIds: ["seat-2"],
       money: {
-        "seat-1": { chargedInUC: 30, prizePaidInUC: 0 },
-        "seat-2": { chargedInUC: 30, prizePaidInUC: 54 },
+        "seat-1": { chargedInUC: "30.0000", prizePaidInUC: "0.0000" },
+        "seat-2": { chargedInUC: "30.0000", prizePaidInUC: "54.0000" },
       },
       betMultiplier: {
         finalValue: 3,
-        resultingEntryFeeInUC: 30,
-        resultingPrizeInUC: 54,
+        resultingEntryFeeInUC: "30.0000",
+        resultingPrizeInUC: "54.0000",
       },
       rankingMultiplier: { base: 2, extra: 2, final: 4 },
     });
@@ -199,8 +199,8 @@ describe("matchCloseOf", () => {
       matchEndReason: "CHARGE_REJECTED",
       winnerIds: [],
       money: {
-        "seat-1": { chargedInUC: 0, prizePaidInUC: 0 },
-        "seat-2": { chargedInUC: 0, prizePaidInUC: 0 },
+        "seat-1": { chargedInUC: "0.0000", prizePaidInUC: "0.0000" },
+        "seat-2": { chargedInUC: "0.0000", prizePaidInUC: "0.0000" },
       },
     });
   });
@@ -252,13 +252,13 @@ describe("matchCloseOf: en la moneda del jugador", () => {
       { entryCharged: true },
     );
     expect(ending?.money["seat-1"]).toEqual({
-      chargedInUC: 10,
-      prizePaidInUC: 18,
+      chargedInUC: "10.0000",
+      prizePaidInUC: "18.0000",
       chargedInPlayerCurrency: "2000.00",
       prizePaidInPlayerCurrency: "3600.00",
     });
     // EL ASIENTO SIN PRECIO QUEDA EN UC, sin campos vacíos.
-    expect(ending?.money["seat-2"]).toEqual({ chargedInUC: 10, prizePaidInUC: 0 });
+    expect(ending?.money["seat-2"]).toEqual({ chargedInUC: "10.0000", prizePaidInUC: "0.0000" });
   });
 
   // EL AUMENTO: la entrada más lo que costó subir, y el premio del nivel —no el de x1 más algo—.
@@ -272,8 +272,8 @@ describe("matchCloseOf: en la moneda del jugador", () => {
       { entryCharged: true },
     );
     expect(ending?.money["seat-1"]).toMatchObject({
-      chargedInUC: 30,
-      prizePaidInUC: 54,
+      chargedInUC: "30.0000",
+      prizePaidInUC: "54.0000",
       chargedInPlayerCurrency: "6000.00",
       prizePaidInPlayerCurrency: "10800.00",
     });
@@ -289,8 +289,8 @@ describe("matchCloseOf: en la moneda del jugador", () => {
       { entryCharged: true },
     );
     expect(ending?.money["seat-1"]).toMatchObject({
-      chargedInUC: 20,
-      prizePaidInUC: 0,
+      chargedInUC: "20.0000",
+      prizePaidInUC: "0.0000",
       chargedInPlayerCurrency: "4000.00",
       prizePaidInPlayerCurrency: "0.00",
     });
@@ -318,7 +318,7 @@ describe("matchCloseOf: en la moneda del jugador", () => {
       priced,
       { entryCharged: true },
     );
-    expect(ending?.money["seat-1"]).toEqual({ chargedInUC: 50, prizePaidInUC: 90 });
+    expect(ending?.money["seat-1"]).toEqual({ chargedInUC: "50.0000", prizePaidInUC: "90.0000" });
   });
 });
 
@@ -366,7 +366,7 @@ describe("recordEndingSink", () => {
 
     expect(close).toHaveBeenCalledTimes(1);
     expect(close.mock.calls[0]?.[0]).toMatchObject({
-      money: { "seat-1": { chargedInUC: 10, prizePaidInUC: 18 } },
+      money: { "seat-1": { chargedInUC: "10.0000", prizePaidInUC: "18.0000" } },
       betMultiplier: { finalValue: 1 },
     });
   });

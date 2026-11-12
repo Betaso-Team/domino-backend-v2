@@ -1,5 +1,6 @@
 import { withTimeout } from "@/shared/deadline";
 import type { Logger } from "@/shared/logger";
+import { ZERO } from "@/shared/money";
 import type { NetworkMatchEvent } from "./events";
 import type { MatchEventSink } from "./listeners";
 
@@ -12,6 +13,19 @@ import type { MatchEventSink } from "./listeners";
 // idempotente por mesa y por paso, pero el que decide reintentar un cobro es él, que ve el registro
 // contable. Del lado de dominó, "no sé si pagaron" se trata igual que "no pagaron": la mesa no
 // arranca, el aumento no vale, y el orquestador devuelve lo que haya cobrado.
+
+// CUÁNTO ESPERA EL DOMINÓ CADA COBRO, y es lo que le PROMETE al orquestador en `x-charge-deadline`
+// (el instante en que deja de esperar: ahora + esto). Un solo número por cobro para los tres lugares
+// que lo usan —el plazo del header, el `AbortSignal` del cliente HTTP y el `withTimeout` del aumento—:
+// si el orquestador terminara un cobro después de que el dominó se rindió, cobraría una mesa que el
+// dominó ya dio por no cobrada. Con el plazo en la mano, el orquestador no arranca (o revierte) lo que
+// no llega a contestar a tiempo.
+//
+// La ENTRADA espera menos: la mesa entera está mirando la pantalla de arranque. El AUMENTO, el techo de
+// v1 (15 s): el que espera es un jugador que ya apretó «acepto», con la mesa diciendo x2.
+export const ENTRY_CHARGE_TIMEOUT_MS = 10_000;
+export const BET_CHARGE_TIMEOUT_MS = 15_000;
+export const CHARGE_DEADLINE_HEADER = "x-charge-deadline";
 
 /** El orquestador contestó que alguno no pudo pagar (`409`). Ya devolvió lo que cobró. */
 export class ChargeRejectedError extends Error {
@@ -76,7 +90,7 @@ export class OrchestratorBetCharger {
     const sink: MatchEventSink = (events) => {
       for (const event of events) {
         if (event.type !== "MULTIPLIER_AGREED") continue;
-        if (event.additionalEntryFee <= 0) continue;
+        if (event.additionalEntryFee.lte(ZERO)) continue;
         const current = step;
         step += 1;
         inFlight = this.collect(matchId, current, event.level, emit, revoke);

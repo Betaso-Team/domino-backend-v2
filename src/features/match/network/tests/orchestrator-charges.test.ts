@@ -2,6 +2,7 @@ import { type Server, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { HttpClient } from "@/shared/http";
 import type { Logger } from "@/shared/logger";
+import { decimal } from "@/shared/money";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { NetworkMatchEvent } from "../events";
 import {
@@ -23,7 +24,7 @@ function silentLogger(): Logger {
   return self;
 }
 
-const agreed = (level: number, additionalEntryFee = 10): NetworkMatchEvent => ({
+const agreed = (level: number, additionalEntryFee = decimal("10")): NetworkMatchEvent => ({
   type: "MULTIPLIER_AGREED",
   level,
   extra: 1,
@@ -113,7 +114,7 @@ describe("OrchestratorBetCharger", () => {
     const chargeBet = vi.fn(async () => undefined);
     const { sink } = charger(chargeBet);
 
-    sink([agreed(2, 0)]);
+    sink([agreed(2, decimal("0"))]);
     await new Promise((resume) => setTimeout(resume, 0));
 
     expect(chargeBet).not.toHaveBeenCalled();
@@ -123,7 +124,7 @@ describe("OrchestratorBetCharger", () => {
 describe("HttpOrchestratorCharges", () => {
   let server: Server;
   let base: string;
-  const seen: Array<{ url?: string; key?: string; body: string }> = [];
+  const seen: Array<{ url?: string; key?: string; body: string; deadline?: string }> = [];
   let status = 200;
   let reply = "{}";
   let hang = false;
@@ -135,7 +136,12 @@ describe("HttpOrchestratorCharges", () => {
         body += chunk;
       });
       request.on("end", () => {
-        seen.push({ url: request.url, key: request.headers["x-internal-api-key"] as string, body });
+        seen.push({
+          url: request.url,
+          key: request.headers["x-internal-api-key"] as string,
+          body,
+          deadline: request.headers["x-charge-deadline"] as string,
+        });
         const head = response.writeHead(status, { "content-type": "application/json" });
         // CUERPO COLGADO: las cabeceras salen y el cuerpo no termina nunca.
         if (hang) head.write('{"ok":');
@@ -153,10 +159,13 @@ describe("HttpOrchestratorCharges", () => {
       }),
   );
 
+  const NOW = Date.UTC(2026, 10, 11, 12);
   const client = (timeoutMs?: number) =>
     new HttpOrchestratorCharges(
-      new HttpClient({ baseUrl: base, ...(timeoutMs !== undefined && { timeoutMs }) }),
+      new HttpClient({ baseUrl: base }),
       "callback-key-123456",
+      { entryMs: timeoutMs ?? 10_000, betMs: timeoutMs ?? 15_000 },
+      () => NOW,
     );
 
   it("pide la entrada y el aumento con la llave del orquestador", async () => {
@@ -164,12 +173,19 @@ describe("HttpOrchestratorCharges", () => {
     await client().chargeEntry("m/1");
     await client().chargeBet("m-1", 1, 3);
 
+    // `x-charge-deadline`: el instante (epoch ms) en que el dominó deja de esperar cada cobro.
     expect(seen.slice(-2)).toEqual([
-      { url: "/v1/matches/m%2F1/charges", key: "callback-key-123456", body: "{}" },
+      {
+        url: "/v1/matches/m%2F1/charges",
+        key: "callback-key-123456",
+        body: "{}",
+        deadline: String(NOW + 10_000),
+      },
       {
         url: "/v1/matches/m-1/bets",
         key: "callback-key-123456",
         body: '{"step":1,"level":3}',
+        deadline: String(NOW + 15_000),
       },
     ]);
   });

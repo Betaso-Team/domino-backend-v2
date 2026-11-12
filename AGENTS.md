@@ -117,11 +117,70 @@ pieza del dominó.
   a la mesa, `domino.match.finished` (`stakes`, `payouts[]`) y la cabecera del registro. **Cada asiento
   con precio está en su moneda** (el código de billing tal cual): `seat.price` del mensaje `config` y el asiento del
   registro, con el `rateId` de la mesa, y la fila de `GET /me/matches`; sin precio, en UC.
-  `src/shared/money.ts` es copia de `packages/money` del orquestador (commit en la cabecera, sin lo que
-  el dominó no usa) y corre sus vectores; se cambia allá primero. El motor, el snapshot y Mongo siguen
-  con números en UC y textos: la forma es de la frontera (`network/amounts.ts`,
-  `network/record-view.ts`). El texto en UC nunca se redondea (el orquestador compara `Number(texto)`
-  con su planilla). `betLevels[].extra` no es plata y sigue siendo número. Antes (v1, 2026-11-11) cada
+  `src/shared/money/` es copia de `packages/money` del orquestador (commit `85cd1a4` en cada cabecera:
+  `decimal.ts` y `pricing.ts` enteros, `money.ts` sin lo que el dominó no usa) y corre sus dos archivos
+  de vectores; se cambia allá primero. `betLevels[].extra` no es plata y sigue siendo número.
+- **La plata nunca es un `number` (2026-11-11).** Adentro todo monto en UC es el `Decimal` de billing
+  (big.js 7.0.1 estricto): `DominoMatchConfig.entryFee`/`prize`, la oferta y `MULTIPLIER_AGREED`, las
+  entradas de `payoutOf`. Las fórmulas son las del orquestador, escritas una vez: el premio y la entrada
+  al nivel L son `stakeAt(base, L)` (`stakesOf` en `network/payout.ts`, que usa también el registro) y
+  aceptar un aumento cobra `betDifference(entryFee, L)` (el juez, `engine/bet/referee.ts`); se borró
+  `betAmountsOf` de `rules/` (en `number`, y `rules/` no puede importar `@/shared`). El texto sale de un
+  `Decimal` con `ucText` = `fixed(x.toString(), 4)`; `payouts[].amount` es exactamente
+  `fixed(stakeAt(prize, L).toString(), 4)`, lo que el orquestador compara con igualdad decimal. Antes el
+  x6 de 0.02 era `0.12000000000000001` y el resultado iba a la DLQ. `POST /internal/matches` acepta
+  `gameMode.entryFee`/`prize` como texto decimal (el orquestador nuevo) o, durante UNA versión, como
+  número (el viejo, `fromNumber`). Mongo guarda los `*InUC` y el `additionalEntryFee` de la timeline como
+  texto con 4 decimales; los documentos de antes tienen números y se leen igual (`storedUcOf`), sin
+  migrar. Las respuestas públicas no cambiaron de forma. `src/tests/no-number-money.test.ts` falla si un
+  campo con nombre de plata se tipa `number`. Ver `docs/api-y-mensajes.md`, «Montos».
+- **Sólo dominó de dos (2026-11-11).** Una mesa de cuatro no se puede crear, ni por error: `ENABLED_SEATS
+  = [2]` en `transports/match-contract.ts`, constante del código y no variable de entorno. La ruta del
+  orquestador contesta 400 a `gameMode.playersQuantity: 4` o a más de dos `participants` (casual y
+  torneo), la sala lo vuelve a rechazar y `configOf` lanza `SeatsNotEnabledError`. El motor de cuatro se
+  sigue midiendo: la sala lee los asientos habilitados del token `EnabledSeats` del container, que sólo
+  registra el arnés de los E2E (`enableFourSeats()` en `features/match/tests/e2e-harness.ts`); producción
+  no lo registra nunca. `replayConfigOf` sigue aceptando cuatro asientos (rebobina historia).
+
+- **Ningún resultado se pierde ni se duplica (2026-11-11, `fix/revision-recuperacion`).**
+  - **Un desenlace por partida**: el outbox lleva `exclusiveKey = matchId` con un índice único parcial
+    (`exclusiveKey_1`); `finished` y `aborted` de una partida no conviven, el segundo insert lo rechaza
+    Mongo. Es la garantía; las demás piezas eligen bien cuál gana.
+  - **Partidas interrumpidas** (`network/interrupted-matches.ts`): al arrancar y cada 2 min, bajo el lease
+    `interrupted-matches`, se publica `domino.match.aborted` `INTERRUPTED` (`<matchId>:aborted`) por cada
+    `match_history` abierto, sin escribir hace 10 min, sin mesa viva, sin `match_result_pending:<matchId>` y
+    sin desenlace en el outbox; el registro queda `aborted` con `recovery`. Sólo con Mongo.
+  - **El drenado de resultados** (`MatchResultRecorder.drain`) espera el bucle entero de cada resultado,
+    reintenta cada 250 ms hasta 20 s y al rendirse escribe el cuerpo entero a nivel `error`. No hay
+    transacción con el cierre del registro: el Mongo es un nodo solo (sin replica set).
+  - **El outbox no se traba**: `next()` por `(attempts, _id)`; una entrada que falla 5 veces con el broker
+    sano pasa a `PARKED` (nunca se borra; `/ready` → `gauges.match_results_parked`). Lo enviado no vence: a
+    los 7 días pierde el cuerpo (compactación) y queda la lápida.
+  - **`GET /internal/matches/:matchId/existence`** contesta `{ live, recorded, outcome }`, con `outcome`
+    `none | pending | published` (PENDING y PARKED son `pending`).
+  - **Cada cobro manda `x-charge-deadline`** (epoch ms = ahora + 10 s la entrada, 15 s el aumento), el mismo
+    plazo con que el cliente HTTP aborta.
+  - **Una sala por `matchId`** en `POST /internal/matches` (candado `match_opening:<matchId>` en Redis;
+    `409 MATCH_OPENING` si el otro no termina en 5 s). `MatchRegistry.release` es un Lua compare-and-delete.
+  - **25 mensajes por segundo por conexión** (`MAX_MESSAGES_PER_SECOND`) y log de rechazos muestreado.
+  - **Apagado**: `kill_timeout` 40 s, `stop_grace_period` 45 s. Cada deploy cancela las partidas en curso
+    con reembolso. Ver `docs/operacion.md`, «Resultados de partida» y «Apagado ordenado».
+
+### Antes de habilitar dominó de 4
+
+Lo que se sabe roto o sin decidir en la mesa de cuatro, y que hay que resolver ANTES de agregar el 4 a
+`ENABLED_SEATS` (no se arregla ahora):
+
+1. **El asiento del bot en el equipo ganador.** El dueño decidió que sólo cobra el humano: `payoutOf`
+   ya no le paga al asiento que juega la máquina, así que el orquestador y billing tienen que aceptar
+   un resultado con menos cobradores que asientos ganadores.
+2. **El aumento lo tiene que aceptar el equipo rival**, no la pareja del que lo propuso:
+   `canRespondBet` en `core/rules/legality.ts` hoy deja contestar a cualquiera que no sea el que propuso.
+3. **El que abandona sigue viendo la mano** que la máquina juega por él: su vista no se cierra al
+   sentarse el bot.
+4. **Rehabilitar el 4P en la frontera**: agregar el 4 a `ENABLED_SEATS`, devolverle al contrato el
+   techo de cuatro participantes y revisar los tests que hoy fijan el rechazo (`match-contract.test.ts`,
+   `tables.int.test.ts`, `domino-room.e2e.test.ts`, `orchestrator-tables.e2e.test.ts`). Antes (v1, 2026-11-11) cada
   monto era un objeto por moneda (`{ ves, uc }`). Ver `docs/api-y-mensajes.md`, «Montos».
 
 ## El plan es la autoridad

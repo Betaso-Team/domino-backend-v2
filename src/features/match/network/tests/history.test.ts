@@ -280,8 +280,8 @@ describe("MatchHistory: el registro de la partida", () => {
       table: {
         gameModeId: "g",
         name: "Clásica",
-        entryFeeInUC: 125,
-        prizeInUC: 250,
+        entryFeeInUC: "125.0000",
+        prizeInUC: "250.0000",
         isFree: false,
       },
       // LO QUE EL REPLAY NECESITA Y TRUCO NO GUARDA: sin el seed y las parejas la partida grabada

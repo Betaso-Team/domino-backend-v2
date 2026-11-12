@@ -9,10 +9,10 @@ import {
   isDecimal,
   readAmount,
   sameAmount,
-} from "./money";
+} from "../money";
 
 // LOS VECTORES COMPARTIDOS: `money.vectors.json` es copia del de `packages/money` (tablea-gaming-orchestrator,
-// commit c9222ea), sin los grupos de lo que la copia de `money.ts` deja afuera (`money`, `ucOnly`, `toUc`,
+// commit 85cd1a4), sin los grupos de lo que la copia de `money.ts` deja afuera (`money`, `ucOnly`, `toUc`,
 // `isReservedCode`). Este archivo corre los mismos casos que `packages/money/src/tests/money.test.ts` para
 // lo que sí se copió: que pasen acá es lo que prueba que la copia se comporta igual que el original.
 
@@ -24,7 +24,7 @@ type Loose = Record<string, any>;
 const GROUPS = ["fixed", "fixedErrors", "isDecimal", "readAmount", "readAmountErrors"] as const;
 
 const vectors: Record<(typeof GROUPS)[number], Loose[]> = JSON.parse(
-  readFileSync(new URL("./money.vectors.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../money.vectors.json", import.meta.url), "utf8"),
 );
 
 it("el archivo de vectores tiene todos los grupos, y nada más", () => {

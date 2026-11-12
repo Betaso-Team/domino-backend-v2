@@ -1,6 +1,6 @@
 import { testConfig } from "@/app.config";
 import { rootContainer, startServices } from "@/di-container";
-import type { CreateMatchRequest, MatchParticipant } from "@/features/match";
+import type { CreateMatchRequestInput, MatchParticipant } from "@/features/match";
 import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import { mintBillingToken } from "./billing-auth-keys";
 import { fakeOrchestrator } from "./fake-orchestrator";
@@ -86,7 +86,7 @@ export function casualTable(
   // esto, una mesa de cuatro se pediría con `CASUAL_2P` y `configOf` la rechazaría por
   // cantidad — con un error que apunta al pedido cuando lo que está mal es el modo.
   table: TableMode = CASUAL_2P,
-): CreateMatchRequest & { mode: "CASUAL" } {
+): CreateMatchRequestInput & { mode: "CASUAL" } {
   const participants = seats.map(participantOf);
   return {
     mode: "CASUAL",

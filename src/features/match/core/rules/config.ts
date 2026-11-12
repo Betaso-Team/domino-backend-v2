@@ -15,7 +15,7 @@
 export interface BetLevel {
   /**
    * EL MULTIPLICADOR DE LA MESA, y no un índice de una tabla: v1 usa 2, 3 y 5, y con él calcula
-   * `entryFee * level` y `prize * level`. Por eso los montos NO viven acá — son una función de
+   * `entryFee × level` y `prize × level` (`stakeAt`). Por eso los montos NO viven acá — son una función de
    * la mesa, y esta lista viene del backend principal, que no sabe cuánto cuesta esta mesa.
    */
   readonly level: number;
@@ -31,28 +31,13 @@ export interface BetLevel {
   readonly additionalPoints: number;
 }
 
-/**
- * LO QUE CUESTA Y LO QUE PAGA ACEPTAR UN NIVEL, derivado de la mesa.
- *
- * ⚠ ES UNA REGLA Y NO UN CAMPO, y ese fue un defecto real del modelo: `BetLevel` guardaba
- * `additionalEntryFee`/`additionalPrize` como si el catálogo los trajera, y el catálogo de v1
- * NO los tiene — devuelve `{ level, extra, additionalPoints }` y nada más. Un cobro cableado
- * contra esos campos habría cobrado CERO, en silencio, porque nadie los llenaba.
- *
- * La cuenta es la de v1 (`on-propose-bet-multiplier.ts:113-117`): la mesa entera se multiplica
- * por el nivel, y lo que se cobra es la DIFERENCIA. Vive en `rules/` porque el cliente la
- * necesita para mostrar el precio ANTES de proponer, que es cuándo el jugador decide.
- */
-export function betAmountsOf(
-  level: number,
-  entryFee: number,
-  prize: number,
-): { readonly additionalEntryFee: number; readonly additionalPrize: number } {
-  return {
-    additionalEntryFee: entryFee * (level - 1),
-    additionalPrize: prize * (level - 1),
-  };
-}
+// LO QUE CUESTA Y LO QUE PAGA ACEPTAR UN NIVEL NO VIVE ACÁ. Es plata, y la plata se cuenta con el
+// `Decimal` de billing y con las fórmulas escritas UNA vez para todos los servicios (`stakeAt` y
+// `betDifference` de `@/shared/money/pricing.ts`, copia de `packages/money` del orquestador): la mesa
+// entera se multiplica por el nivel, y aceptarlo cobra `base × (nivel − 1)`. `rules/` no puede
+// importar nada de afuera de sí misma (`rules-self-contained`), así que la cuenta la hacen el juez
+// del aumento (`engine/bet/referee.ts`) y la red. Antes había acá un `betAmountsOf` en `number`, y
+// esa segunda copia de la fórmula era la que redondeaba distinto que el orquestador.
 
 /**
  * LO QUE LAS REGLAS NECESITAN SABER DE LA MESA, y nada más. Dos campos, y ninguno es secreto.

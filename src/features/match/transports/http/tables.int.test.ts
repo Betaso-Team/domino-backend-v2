@@ -4,7 +4,7 @@ import type { Logger } from "@/logger";
 import { httpErrorHandler } from "@/shared/http/error-handler";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CreateMatchRequest } from "../match-contract";
+import type { CreateMatchRequest, CreateMatchRequestInput } from "../match-contract";
 import { type TablesDeps, tablesRoutes } from "./tables";
 
 const KEY = "k".repeat(16);
@@ -24,8 +24,8 @@ const request = {
     playersQuantity: 2,
     pointsToWin: 100,
     multiplier: 1,
-    entryFee: 1.5,
-    prize: 2.5,
+    entryFee: "1.5000",
+    prize: "2.5000",
     isFreeRoom: false,
     enableBots: false,
   },
@@ -36,7 +36,7 @@ const request = {
   seed: "seed-1",
   teamAssignment: "SEAT_ORDER",
   rateId: "69977c3dc3bf3e710572f941",
-} satisfies CreateMatchRequest;
+} satisfies CreateMatchRequestInput;
 
 type PublicConfig = Awaited<ReturnType<TablesDeps["registry"]["publicConfigOf"]>>;
 
@@ -73,6 +73,16 @@ const deps = ({ tables, registry, ...over }: Over = {}): TablesDeps => ({
     ...registry,
   },
   archive: { hasRecord: async (matchId) => matchId === "m-live" || matchId === "m-stored" },
+  results: {
+    statuses: async (keys) => {
+      const known: Record<string, string> = {
+        "m-stored:finished": "SENT",
+        "m-pending:aborted": "PENDING",
+        "m-parked:finished": "PARKED",
+      };
+      return new Map(keys.flatMap((key) => (known[key] ? [[key, known[key]] as const] : [])));
+    },
+  },
   logger: fakeLogger(),
   orchestratorApiKey: KEY,
   ...over,
@@ -132,9 +142,11 @@ describe("tablesRoutes", () => {
     it("dice solo si la mesa sigue viva y si quedó registro, nunca el registro", async () => {
       const base = await serve();
       for (const [matchId, data] of [
-        ["m-live", { live: true, recorded: true }],
-        ["m-stored", { live: false, recorded: true }],
-        ["m-never", { live: false, recorded: false }],
+        ["m-live", { live: true, recorded: true, outcome: "none" }],
+        ["m-stored", { live: false, recorded: true, outcome: "published" }],
+        ["m-pending", { live: false, recorded: false, outcome: "pending" }],
+        ["m-parked", { live: false, recorded: false, outcome: "pending" }],
+        ["m-never", { live: false, recorded: false, outcome: "none" }],
       ] as const) {
         const res = await ask(base, matchId);
         expect(res.status).toBe(200);
@@ -164,6 +176,14 @@ describe("tablesRoutes", () => {
       const res = await ask(archiveDown, "m-never");
       expect(res.status).toBe(503);
       expect(await res.json()).toEqual({ code: "UNAVAILABLE" });
+      const outboxDown = await serve({
+        results: {
+          statuses: async () => {
+            throw new Error("mongo caído");
+          },
+        },
+      });
+      expect((await ask(outboxDown, "m-never")).status).toBe(503);
     });
 
     it("solo con la llave del orquestador", async () => {
@@ -237,7 +257,12 @@ describe("tablesRoutes", () => {
     });
 
     expect((await post(`${base}/internal/matches`, { ...request, gameMode })).status).toBe(201);
-    expect(opened[0]).toMatchObject({ gameModeId: "mode-2p", gameMode });
+    // LOS MONTOS LLEGAN A LA SALA COMO EL `Decimal` QUE MANDÓ EL ORQUESTADOR, sin redondear.
+    const { entryFee, prize, ...numbers } = gameMode;
+    expect(opened[0]).toMatchObject({ gameModeId: "mode-2p", gameMode: numbers });
+    const sent = opened[0]?.mode === "CASUAL" ? opened[0].gameMode : undefined;
+    expect([sent?.entryFee.toString(), sent?.prize.toString()]).toEqual(["1.5", "2.5"]);
+    expect([entryFee, prize]).toEqual(["1.5000", "2.5000"]);
     expect((await post(`${base}/internal/matches`, withoutMode)).status).toBe(400);
     for (const bad of [{ multiplier: 1.5 }, { pointsToWin: 0 }, { entryFee: -1 }, { extra: 1 }]) {
       expect(
@@ -245,6 +270,78 @@ describe("tablesRoutes", () => {
           .status,
       ).toBe(400);
     }
+  });
+
+  // UN ORQUESTADOR VIEJO MANDA LOS MONTOS COMO NÚMERO, y se aceptan durante una versión: se leen en su
+  // forma decimal más corta, sin redondear.
+  it("acepta los montos del modo como número de un orquestador viejo", async () => {
+    const opened: CreateMatchRequest[] = [];
+    const base = await serve({
+      tables: {
+        ...deps().tables,
+        openRequest: async (r) => {
+          opened.push(r);
+          return deps().tables.openRequest(r);
+        },
+      },
+    });
+    const gameMode = { ...request.gameMode, entryFee: 0.02, prize: 0.1 };
+    expect((await post(`${base}/internal/matches`, { ...request, gameMode })).status).toBe(201);
+    const sent = opened[0]?.mode === "CASUAL" ? opened[0].gameMode : undefined;
+    expect([sent?.entryFee.toString(), sent?.prize.toString()]).toEqual(["0.02", "0.1"]);
+    for (const bad of ["1e3", "-1", "1.5x", "", -0.5, null]) {
+      const res = await post(`${base}/internal/matches`, {
+        ...request,
+        gameMode: { ...request.gameMode, prize: bad },
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  // SÓLO DOMINÓ DE DOS: una mesa de cuatro no se puede pedir, ni por el modo ni por los participantes, y
+  // la ruta contesta 400 con la forma de error del repo sin llegar a la sala.
+  describe("una mesa de cuatro", () => {
+    const four = [
+      ...request.participants,
+      { userId: "p-c", displayName: "carla", currency: "VES", providerId: "betaso" },
+      { userId: "p-d", displayName: "dani", currency: "VES", providerId: "betaso" },
+    ];
+
+    it.each([
+      ["un modo de cuatro", { ...request, gameMode: { ...request.gameMode, playersQuantity: 4 } }],
+      ["cuatro participantes", { ...request, participants: four }],
+      [
+        "un modo de cuatro con cuatro participantes",
+        {
+          ...request,
+          gameMode: { ...request.gameMode, playersQuantity: 4 },
+          participants: four,
+        },
+      ],
+    ])("casual: rechaza %s con 400", async (_case, body) => {
+      const openRequest = vi.fn();
+      const base = await serve({ tables: { ...deps().tables, openRequest } });
+      const res = await post(`${base}/internal/matches`, body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "MALFORMED" });
+      expect(openRequest).not.toHaveBeenCalled();
+    });
+
+    it("torneo: rechaza cuatro participantes con 400", async () => {
+      const openRequest = vi.fn();
+      const base = await serve({ tables: { ...deps().tables, openRequest } });
+      const { gameModeId: _m, gameMode: _g, rateId: _r, ...rest } = request;
+      const res = await post(`${base}/internal/matches`, {
+        ...rest,
+        participants: four,
+        mode: "TOURNAMENT",
+        tournamentId: "t-1",
+        rules: { pointsToWin: 100 },
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "MALFORMED" });
+      expect(openRequest).not.toHaveBeenCalled();
+    });
   });
 
   it("abre una mesa de torneo, y le rechaza cualquier campo de dinero", async () => {
