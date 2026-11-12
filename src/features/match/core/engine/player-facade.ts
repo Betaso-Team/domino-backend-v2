@@ -8,12 +8,12 @@ import type { PlayerRepository } from "./player-repository";
 export class Player {
   constructor(private readonly repository: PlayerRepository) {}
 
-  abandon(playerId: PlayerId, how: SeatExitKind): void {
-    this.repository.get(playerId).abandon(how);
+  abandon(playerId: PlayerId, how: SeatExitKind, at: number): void {
+    this.repository.get(playerId).abandon(how, at);
   }
 
-  seatBot(playerId: PlayerId, how: SeatExitKind): void {
-    this.repository.get(playerId).seatBot(how);
+  seatBot(playerId: PlayerId, how: SeatExitKind, at: number): void {
+    this.repository.get(playerId).seatBot(how, at);
   }
 
   playTile(playerId: PlayerId, tile: TileLike, side: BoardSide): void {

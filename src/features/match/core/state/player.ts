@@ -90,18 +90,24 @@ export const PlayerState = schema(
     // `network/payout.ts`): dos mesas de dos tienen los mismos `seat-N`, y sin esto un cruce le pagaría
     // el premio a otra persona sin hacer ruido.
     userId: t.string().noSync(),
-    // CÓMO SE FUE DEL ASIENTO: `voluntary` (el verbo `ABANDON`) o `timeout` (lo retiró el reloj, en la
-    // ventana de reparto o en su turno). Vacío mientras sigue jugando. Lo escribe el mismo que escribe
+    // CÓMO SE FUE DEL ASIENTO: `voluntary` (el verbo `ABANDON`), `timeout` (lo retiró el reloj, en la
+    // ventana de reparto o en su turno, con el socket conectado) o `disconnected` (lo retiró el reloj
+    // con el socket caído, `connected === false`: el mismo criterio que separa `TIMEOUT` de
+    // `DISCONNECTED` en el registro, `network/history.ts`). Vacío mientras sigue jugando. Lo escribe el mismo que escribe
     // `hasAbandoned` e `isBot` (`MatchPlayer`), y lo lee el resultado que se publica (un torneo trata
     // distinto al que se rinde y al que desaparece).
     //
     // `noSync()`: NO VIAJA AL WIRE ni entra en `toJSON()` —no ocupa índice, así que no corre ningún
     // campo del cliente— porque al front no le hace falta y a los goldens no les cambia nada.
     leftBy: t.string().noSync().default(""),
+    // CUÁNDO SE FUE (epoch ms, la hora del conductor); `0` mientras sigue jugando. Lo escribe el mismo
+    // que escribe `leftBy`, y lo lee el resultado para los segundos jugados de cada participante.
+    // `noSync()`, por la misma razón que `leftBy`.
+    leftAt: t.number().noSync().default(0),
   },
   "PlayerState",
 );
 export type PlayerState = SchemaType<typeof PlayerState>;
 
 /** Cómo dejó el asiento quien lo dejó (`PlayerState.leftBy`). */
-export type SeatExitKind = "voluntary" | "timeout";
+export type SeatExitKind = "voluntary" | "timeout" | "disconnected";

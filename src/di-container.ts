@@ -48,7 +48,10 @@ import { MongoHistory } from "@/features/match/network/transports/mongo-history"
 import { MongoPlayerStats } from "@/features/match/network/transports/mongo-player-stats";
 import {
   DEFAULT_REACTIONS_CONFIG,
+  MemoryReactionUsage,
+  MongoReactionUsage,
   type ReactionCatalog,
+  type ReactionUsageStore,
   type ReactionsConfig,
   StaticReactionCatalog,
 } from "@/features/reactions";
@@ -309,6 +312,11 @@ rootContainer.register<ReactionCatalog>("ReactionCatalog", {
   useValue: new StaticReactionCatalog(),
 });
 rootContainer.register<ReactionsConfig>("ReactionsConfig", { useValue: DEFAULT_REACTIONS_CONFIG });
+// EL REGISTRO DE USO (BI): con `MONGO_URI`, las colecciones de v1 (`domino_reaction_events`,
+// `domino_reaction_mute_events`); sin él, la memoria del proceso. Un fallo nunca tira una mesa.
+rootContainer.register<ReactionUsageStore>("ReactionUsageStore", {
+  useValue: mongo ? new MongoReactionUsage(mongo, logger) : new MemoryReactionUsage(),
+});
 
 // ── LA CONFIGURACIÓN QUE SE MUEVE SIN DEPLOY ───────────────────────────────────────────────────
 //

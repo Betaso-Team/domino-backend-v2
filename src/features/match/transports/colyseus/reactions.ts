@@ -1,4 +1,4 @@
-import type { ReactionRelay, ReactionSent } from "@/features/reactions";
+import type { ReactionRelay, ReactionSent, ReactionUsageLog } from "@/features/reactions";
 import { z } from "zod";
 import type { PlayerId } from "../../core/ids";
 import { ValidationError } from "./errors";
@@ -16,6 +16,7 @@ import type { MessageDecoder, MessageHandler } from "./messages";
 
 export const SEND_REACTION = "SEND_REACTION";
 export const REACTION_SENT = "REACTION_SENT";
+export const REACTIONS_MUTE_CHANGED = "REACTIONS_MUTE_CHANGED";
 
 // Lo ÚNICO que el cliente elige. Sin `.strict()`, al revés que los verbos: el front viejo mandaba un
 // `targetPlayerId` que el servidor nunca usó, y rechazarlo dejaría mudo a ese cliente por un campo
@@ -56,3 +57,29 @@ export function reactionHandler(relay: ReactionRelay): MessageHandler<SendReacti
 export const broadcastReaction =
   (broadcast: (type: string, payload: unknown) => void) => (sent: ReactionSent) =>
     broadcast(REACTION_SENT, sent);
+
+// EL JUGADOR SILENCIÓ O REACTIVÓ LOS GESTOS DE LA MESA. Silenciar es del cliente —el servidor sigue
+// difundiendo a todos—; lo que llega acá es sólo para el registro de uso (BI). `eventId` lo genera el
+// cliente (un uuid) y es lo que hace que un reenvío no cuente dos veces. Sin `.strict()`, como
+// `SEND_REACTION`; un payload malformado contesta `illegal` `MALFORMED`, igual.
+const MuteChangedSchema = z.object({ muted: z.boolean(), eventId: z.uuid() });
+
+type MuteChanged = z.infer<typeof MuteChangedSchema>;
+
+export const muteChangedDecoder: MessageDecoder<MuteChanged> = {
+  decode(raw: unknown): MuteChanged {
+    const parsed = MuteChangedSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.issues.map((issue) => issue.message).join("; "));
+    }
+    return parsed.data;
+  },
+};
+
+// No contesta nada: el registro no rechaza y la mesa no se entera.
+export function muteChangedHandler(usage: ReactionUsageLog): MessageHandler<MuteChanged> {
+  return {
+    handle: ({ muted, eventId }: MuteChanged, playerId: PlayerId) =>
+      usage.muteChanged(playerId, { muted, eventId }),
+  };
+}

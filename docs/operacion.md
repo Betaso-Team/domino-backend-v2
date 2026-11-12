@@ -26,6 +26,10 @@ de un entorno viejo: dominó ya no las lee ni las escribe. `game_mode_leases` **
 colección del lease del despachador de resultados y del barrido de estadísticas (el nombre es
 histórico). No la borres.
 
+**El registro de uso de las reacciones** va a `domino_reaction_events` y `domino_reaction_mute_events`
+(los nombres de v1; los lee BI). Un fallo al escribir queda en el log (`uso de reacciones: …`) y la mesa
+sigue. Ver `docs/api-y-mensajes.md`, «Reacciones».
+
 `npm run dev` pasa los logs por `pino-pretty` (`pino-pretty.config.cjs`); el formato del cable sigue
 siendo JSON de una línea. El nivel lo decide `APP_ENV` (`debug` en local, dev y stage, `info` en
 prod) salvo un `LOG_LEVEL` explícito. Cada línea lleva `instance`, `release` y el `traceId` de la

@@ -79,8 +79,14 @@ describe("matchResultOf", () => {
           bet: null,
         },
         participants: [
-          { userId: "p-ana", teamId: winnerTeamId, result: "won", abandon: null },
-          { userId: "p-beto", teamId: teamOf(match, 1), result: "lost", abandon: null },
+          { userId: "p-ana", teamId: winnerTeamId, result: "won", abandon: null, playedSeconds: 0 },
+          {
+            userId: "p-beto",
+            teamId: teamOf(match, 1),
+            result: "lost",
+            abandon: null,
+            playedSeconds: 0,
+          },
         ],
         payouts: [{ userId: "p-ana", currency: "UC", amount: "18.0000" }],
       },
@@ -242,6 +248,8 @@ describe("matchResultOf", () => {
   it.each([
     ["voluntary", "ABANDONMENT_VOLUNTARY"],
     ["timeout", "ABANDONMENT_TIMEOUT"],
+    // El socket caído es un retiro del reloj, así que cierra como el `timeout`.
+    ["disconnected", "ABANDONMENT_TIMEOUT"],
   ] as const)("el que se fue por %s lo dice, y el cierre también", (how, endReason) => {
     const match = createMatchState(config);
     const quitter = match.players[1];
@@ -262,6 +270,55 @@ describe("matchResultOf", () => {
       endReason,
       participants: [{ abandon: null }, { result: "abandoned", abandon: how }],
     });
+  });
+
+  it("los segundos jugados: hasta que se fue o hasta el cierre, enteros hacia abajo", () => {
+    const match = createMatchState(config);
+    match.startedAt = AT.getTime() - 600_900;
+    const quitter = match.players[1];
+    if (quitter) {
+      quitter.hasAbandoned = true;
+      quitter.leftBy = "disconnected";
+      quitter.leftAt = AT.getTime() - 300_500;
+    }
+
+    const result = matchResultOf(
+      { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "ABANDONMENT" },
+      match,
+      config,
+      "room-9",
+      AT,
+    );
+
+    expect((result?.payload as MatchFinishedPayload).participants).toMatchObject([
+      { abandon: null, playedSeconds: 600 },
+      { result: "abandoned", abandon: "disconnected", playedSeconds: 300 },
+    ]);
+  });
+
+  it("sin juego arrancado los segundos son 0, y nunca negativos", () => {
+    const never = createMatchState(config);
+    const early = createMatchState(config);
+    early.startedAt = AT.getTime();
+    const quitter = early.players[1];
+    if (quitter) {
+      quitter.hasAbandoned = true;
+      quitter.leftBy = "timeout";
+      quitter.leftAt = AT.getTime() - 5_000;
+    }
+    const resolved = (match: ReturnType<typeof createMatchState>) =>
+      (
+        matchResultOf(
+          { type: "MATCH_RESOLVED", winnerTeamId: teamOf(match, 0), reason: "ABANDONMENT" },
+          match,
+          config,
+          "room-9",
+          AT,
+        )?.payload as MatchFinishedPayload
+      ).participants.map(({ playedSeconds }) => playedSeconds);
+
+    expect(resolved(never)).toEqual([0, 0]);
+    expect(resolved(early)).toEqual([0, 0]);
   });
 
   it("una mesa de torneo lleva su modo y su torneo, en el final y en el aborto", () => {

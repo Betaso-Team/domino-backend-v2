@@ -73,6 +73,7 @@ describe("el que se va de una mesa de cuatro", () => {
     ]);
     expect(playerOf("u1", e.match).isBot).toBe(true);
     expect(playerOf("u1", e.match).leftBy).toBe("timeout");
+    expect(playerOf("u1", e.match).leftAt).toBe(e.clockBox.now);
   });
 
   // ⚠ EL TURNO QUE LA MÁQUINA HEREDA VIENE VENCIDO por ese camino, así que hay que devolverle el

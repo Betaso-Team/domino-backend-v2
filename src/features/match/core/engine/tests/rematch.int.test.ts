@@ -234,7 +234,7 @@ describe("la mesa que no está entera", () => {
   it("no abre ventana cuando alguien se retiró", () => {
     const e = table();
     e.gate.allow();
-    e.players.abandon("seat-2", "voluntary");
+    e.players.abandon("seat-2", "voluntary", 0);
 
     const result = presentMatch(e);
 
