@@ -187,6 +187,14 @@ const STATUSES: Record<MatchStatus, true> = { started: true, finished: true, abo
 export const MATCH_STATUSES = Object.keys(STATUSES) as [MatchStatus, ...MatchStatus[]];
 
 /**
+ * LA MODALIDAD DE UNA MESA, como la filtra el listado: `tournament` es la que lleva
+ * `table.mode: "TOURNAMENT"`, y `casual` la que no lo lleva —el contrato de la mesa deja el campo
+ * ausente en una casual, y la forma vieja, sin mesa, es casual—.
+ */
+export const MATCH_LIST_MODES = ["casual", "tournament"] as const;
+export type MatchListMode = (typeof MATCH_LIST_MODES)[number];
+
+/**
  * Por qué un jugador ya no está en la mesa: lo dijo él (`LEFT`), o lo retiró el reloj — conectado
  * (`TIMEOUT`) o con la conexión caída (`DISCONNECTED`).
  */
@@ -375,6 +383,16 @@ export interface MatchListQuery {
    * casual y la forma vieja no coinciden nunca.
    */
   readonly tournamentId?: string;
+  /**
+   * La modalidad: `tournament` (`table.mode: "TOURNAMENT"`) o `casual` (sin `table.mode`, la forma
+   * vieja incluida).
+   */
+  readonly mode?: MatchListMode;
+  /**
+   * Un modo de juego: el `table.gameModeId` de la mesa, exacto. Una de torneo lleva
+   * `tournament:<tournamentId>`; la forma vieja no tiene mesa y no coincide nunca.
+   */
+  readonly gameModeId?: string;
   /**
    * Un proveedor: el `providerId` de CUALQUIERA de los asientos (`seats[].providerId`), exacto. En una
    * casual cruzada la partida sale para los dos proveedores. Un documento sin el campo —grabado antes,

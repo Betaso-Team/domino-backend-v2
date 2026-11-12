@@ -40,6 +40,8 @@ const ALL_INDEXES = [
   "seats.providerId_1_createdAt_-1__id_-1",
   "seats.userId_1_createdAt_-1__id_-1",
   "status_1_createdAt_-1__id_-1",
+  "table.gameModeId_1_createdAt_-1__id_-1",
+  "table.mode_1_createdAt_-1__id_-1",
   "table.tournamentId_1_createdAt_-1__id_-1",
 ];
 const INDEX_WAIT = { timeout: 5_000, interval: 20 };
@@ -86,7 +88,7 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
     expect(document?.timeline).toBeUndefined();
   });
 
-  it("crea sus siete índices, con el de `matchId` único", async () => {
+  it("crea sus once índices, con el de `matchId` único", async () => {
     const history = await fresh();
     history.record([entry(1)]);
     await history.drain();
@@ -262,6 +264,8 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
                 // UNO DE CADA SIETE abandonó: un motivo minoritario, como en producción.
                 matchEndReason: index % 7 === 0 ? "ABANDONMENT" : "SCORE",
               }),
+          // EL MODO DE JUEGO, uno de cinco; sin `table.mode`, que es lo que hace casual a una mesa.
+          table: { gameModeId: `modo-${index % 5}` },
           createdAt: new Date(T + Math.floor(index / 3) * 1_000),
           updatedAt: new Date(T + Math.floor(index / 3) * 1_000),
           seats: [
@@ -304,7 +308,11 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
           version: 2.1,
           status: "finished",
           matchEndReason: "SCORE",
-          table: { mode: "TOURNAMENT", tournamentId: index % 2 === 0 ? "copa" : "relampago" },
+          table: {
+            mode: "TOURNAMENT",
+            tournamentId: index % 2 === 0 ? "copa" : "relampago",
+            gameModeId: index % 2 === 0 ? "tournament:copa" : "tournament:relampago",
+          },
           createdAt: new Date(T + index * 2_000 + 750),
           updatedAt: new Date(T + index * 2_000 + 750),
           seats: [`torneo-${index % 6}`, `torneo-${(index + 1) % 6}`].map((userId, seat) => ({
@@ -357,6 +365,17 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["providerId (uno de cada cuatro)", () => ({ pageSize: PAGE, providerId: "prov-1" })],
       ["providerId en dos asientos", () => ({ pageSize: PAGE, providerId: "betaso" })],
       ["fechas + providerId", () => ({ pageSize: PAGE, from, to, providerId: "prov-2" })],
+      // CASUAL ES `table.mode` AUSENTE: la igualdad con `null` sale del índice, ordenada.
+      ["mode casual (casi todas)", () => ({ pageSize: PAGE, mode: "casual" })],
+      ["mode tournament (una de cada diez)", () => ({ pageSize: PAGE, mode: "tournament" })],
+      ["fechas + mode casual", () => ({ pageSize: PAGE, from, to, mode: "casual" })],
+      ["fechas + mode tournament", () => ({ pageSize: PAGE, from, to, mode: "tournament" })],
+      ["gameModeId (uno de cada cinco)", () => ({ pageSize: PAGE, gameModeId: "modo-2" })],
+      ["fechas + gameModeId", () => ({ pageSize: PAGE, from, to, gameModeId: "modo-4" })],
+      [
+        "mode casual + gameModeId",
+        () => ({ pageSize: PAGE, mode: "casual", gameModeId: "modo-3" }),
+      ],
       [
         "matchId + roomId + id",
         () => ({
@@ -440,6 +459,22 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
         });
         expect(provided).toBe(items.length);
       }
+      const { mode } = query();
+      if (mode !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        const ofMode = await (await collection()).countDocuments({
+          matchId: { $in: items.map((item) => item.matchId) },
+          "table.mode": mode === "tournament" ? "TOURNAMENT" : null,
+        });
+        expect(ofMode).toBe(items.length);
+      }
+      const { gameModeId } = query();
+      if (gameModeId !== undefined) {
+        const { items } = await history.list(query());
+        expect(items.length).toBeGreaterThan(0);
+        expect(items.every((item) => item.table?.gameModeId === gameModeId)).toBe(true);
+      }
       const { status } = query();
       if (status !== undefined) {
         const { items } = await history.list(query());
@@ -462,6 +497,9 @@ describe.skipIf(!MONGO_INT_URI)("MongoHistory contra Mongo", () => {
       ["cursor + status", { status: "aborted" }, 2, 4],
       ["cursor + tournamentId", { tournamentId: "copa" }, 2, 4],
       ["cursor + providerId", { providerId: "prov-1" }, 2, 4],
+      ["cursor + mode casual", { mode: "casual" }, 2, PAGE],
+      ["cursor + mode tournament", { mode: "tournament" }, 2, 4],
+      ["cursor + gameModeId", { gameModeId: "modo-1" }, 2, 4],
     ] as const)(
       "%s: sin COLLSCAN, sin SORT y sin leer de más",
       async (_name, filters, depth, pageSize) => {
