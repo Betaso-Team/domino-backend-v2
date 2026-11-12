@@ -103,8 +103,10 @@ pieza del dominó.
   la mesa de un jugador sin reservar con `GET /internal/players/:userId/match`. Ver «Incremento
   completo — la mesa completa y el asiento sin reserva».
 - **Reacciones en la mesa**: `SEND_REACTION` `{ reactionId }` → `REACTION_SENT` a toda la mesa, con una
-  lista fija de 24 emojis en el código que sirve `GET /reactions`. Ver «Incremento completo — las
-  reacciones».
+  lista fija de 24 emojis en el código que sirve `GET /reactions`. Cada gesto difundido y cada
+  `REACTIONS_MUTE_CHANGED` `{ muted, eventId }` quedan en `domino_reaction_events` /
+  `domino_reaction_mute_events` (BI, nombres de v1). Ver «Incremento completo — las reacciones» y «… el
+  registro de uso de las reacciones».
 - **El precio en la moneda del jugador**: el orquestador puede mandar `participants[].price` (texto
   decimal de billing); el asiento lo congela, la sala se lo manda sólo a ese asiento (`seat.price` de su `config`) y el cierre
   elige lo cobrado y lo pagado en su moneda para `GET /me/matches`. Los montos en UC no cambian. Ver
@@ -2988,8 +2990,6 @@ el front de dominó v2 las quiere con el mismo contrato que truco.
 - **Quién y cuándo**: cualquier socket de la sala, que por la puerta de `onJoin` es siempre el dueño de
   un asiento; en cualquier fase mientras la sala esté abierta (reparto, mano, resultado). No se mira la
   fase ni si el jugador abandonó.
-- **Fuera:** los mensajes de seguimiento de truco (`ENABLE_REACTIONS_TRACKING`,
-  `REACTIONS_MUTE_CHANGED`).
 - **Docs:** «Reacciones» y las tablas de mensajes, HTTP público y errores en `docs/api-y-mensajes.md`.
 - **Tests:** `reactions/tests/` (relay, límite y la lista), `reactions/transports/http.int.test.ts` y
   `match/tests/reactions.e2e.test.ts` (puerto 2593): +13 unit, +2 int, +7 e2e.
@@ -3461,3 +3461,52 @@ Para que el panel separe las casuales de las de torneo y filtre las casuales por
   y un parcial sobre `$exists` la dejaría afuera) y `table.gameModeId_1_createdAt_-1__id_-1`. Medido con
   `explain` contra un Mongo 9.0 (`mongodb-runner`; prod no se midió): la igualdad con `null` usa el
   índice, sin `SORT`.
+
+## Incremento completo — el reporte completo: cómo se fue cada uno y cuánto jugó (rama `feat/reporte-completo-y-reacciones`, 2026-11-12)
+
+Fase 2 del plan «el dominó v2 cuenta en Betaso» (del monorepo del orquestador): el orquestador arma un reporte
+por proveedor con el `outcome` y los segundos jugados de cada participante, y los necesita del juego.
+
+- **`PlayerState.leftBy`** pasa a `"voluntary" | "timeout" | "disconnected"` (`SeatExitKind`), y entra
+  **`leftAt`** (epoch ms, `noSync()`, `0` mientras juega). Los dos los escribe `MatchPlayer` (único escritor) con
+  la hora que le pasa el conductor (`this.clock.now()`): el núcleo sigue sin `async` ni runtime.
+- **`disconnected`** = el reloj retira a un asiento con `connected === false`, en su turno (`retire(_, true)`) o
+  en la ventana de reparto (`timeout()` de `DEALING`); conectado sigue siendo `timeout`, y el verbo `ABANDON`,
+  `voluntary`. Es el criterio de `network/history.ts` (`TIMEOUT` / `DISCONNECTED`): se mira el árbol, porque
+  una caída con la ventana de reconexión abierta no emite nada. Lo decide `MatchDriver.exitBySystem`.
+- **`domino.match.finished`**: `participants[].abandon` acepta `"disconnected"` y cada participante lleva
+  **`playedSeconds`** = `floor(((leftAt || endedAt) − startedAt) / 1000)`, `0` sin `startedAt`, nunca
+  negativo. `endReason` no cambia de valores: un perdedor `disconnected` cierra `ABANDONMENT_TIMEOUT`.
+- ⚠ **Rompe** a un orquestador anterior (su schema sólo acepta `voluntary | timeout`); se despliega con el
+  orquestador que acepta los dos campos. Ver `docs/api-y-mensajes.md`, «API del orquestador».
+- **Tests**: `round-flow.int` (turno y reparto con el socket caído), `abandon.int` y `bot-seating.int`
+  (`leftAt`), `match-results.test` (`disconnected`, los segundos, el `0` y el no negativo).
+
+## Incremento completo — el registro de uso de las reacciones (rama `feat/reporte-completo-y-reacciones`, 2026-11-12)
+
+Fase 4 del plan «el dominó v2 cuenta en Betaso» (del monorepo del orquestador): el v1 registraba el uso
+de las reacciones para BI (UA-GAM-DOM-004) y el v2 no. Ahora se registra en Tablea, de todos los jugadores,
+sin flag ni muestreo. No se portó `ENABLE_REACTIONS_TRACKING`.
+
+- **Puerto `ReactionUsageStore`** (`reactions/usage.ts`): `recordReaction` y `recordMuteChange`, que
+  **nunca rechazan**. `MongoReactionUsage` (`transports/mongo-reaction-usage.ts`, el patrón de
+  `network/transports/mongo-*.ts`: nombres constantes, `createIndexes` una vez por proceso y colección,
+  esperado antes de la primera escritura porque el único es lo que descarta el reenvío; un fallo se
+  loguea y se traga) y `MemoryReactionUsage`, con el contrato compartido en
+  `transports/tests/reaction-usage-contract.ts`. `di-container.ts` elige por `MONGO_URI`
+  (`"ReactionUsageStore"`).
+- **Colecciones de v1, sin la muestra**: `domino_reaction_events` {`id_evento` (uuid del servidor),
+  `id_jugador` (userId de Tablea), `id_proveedor`, `id_partida`, `tipo_juego` (`paga|gratuita|torneo`),
+  `id_reaccion`, `codigo_emoji`, `fecha_hora`} y `domino_reaction_mute_events` {`id_evento` (del cliente,
+  único: el reenvío se ignora), `id_jugador`, `id_proveedor`, `accion` (`silenciar|reactivar`), `origen:
+  "partida"`, `id_partida`, `fecha_hora`}. Índices: `id_evento_1` único, `fecha_hora_1`, `id_jugador_1`.
+- **`ReactionUsageLog`**, uno por mesa: traduce el `seat-N` al jugador y su proveedor (`config.seats`) y
+  la mesa a `tipo_juego` (`gameKindOf`: torneo, `isFreeRoom` → gratuita, si no paga). Lo arma
+  `buildReactionUsage` en `commands/di-wiring.ts`; `match` sigue conociendo a `reactions` y no al revés.
+- **`ReactionRelayDeps.onRelayed`** (opcional): se llama sólo con el gesto que salió a la mesa; uno
+  descartado por el límite o por el catálogo no es un uso.
+- **`REACTIONS_MUTE_CHANGED` `{ muted: boolean, eventId: uuid }`**, en `transports/colyseus/reactions.ts` y
+  el router: zod sin `.strict()`, malformado → `illegal` `MALFORMED`; no contesta nada.
+- **Tests**: `reactions/tests/relay.test.ts` (`onRelayed`), `reactions/tests/usage.test.ts`, el contrato
+  (memoria en unit, Mongo en `mongo-reaction-usage.int.test.ts` con los campos de v1 y los índices),
+  `mongo-reaction-usage.test.ts` (base caída) y dos e2e en `match/tests/reactions.e2e.test.ts`.

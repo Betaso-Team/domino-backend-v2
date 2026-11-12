@@ -35,6 +35,9 @@ describe("ABANDON", () => {
     // Se fue por su cuenta, y queda dicho (el torneo trata distinto al que se rinde).
     expect(playerOf("u1", e.match).leftBy).toBe("voluntary");
     expect(playerOf("u2", e.match).leftBy).toBe("");
+    // Y cuándo, con la hora del conductor; el que sigue sentado no tiene hora de salida.
+    expect(playerOf("u1", e.match).leftAt).toBe(e.clockBox.now);
+    expect(playerOf("u2", e.match).leftAt).toBe(0);
     expect(e.match.phase).toBe("PRESENTING_MATCH");
     // El plazo se estampa en el estado Y se programa por el puerto.
     expect(e.match.activeDeadline).toBe(e.clockBox.now + 120);

@@ -5,6 +5,7 @@ import { canSeatBot } from "../../rules/bot";
 import { wasAbortedAtDeal } from "../../rules/legality";
 import { isTableIntact } from "../../rules/rematch";
 import type { MatchState } from "../../state";
+import type { SeatExitKind } from "../../state/player";
 import { SchemaMatchView } from "../../state/view";
 import type { Clock } from "../clock";
 import { deadlineKindOf } from "../deadline-kind";
@@ -14,7 +15,7 @@ import type { Player } from "../player-facade";
 import type { RematchGate } from "../rematch/gate";
 import type { RematchNegotiation } from "../rematch/negotiation";
 import type { RoundDriver } from "../round/driver";
-import { matchPhaseOf } from "../state-projections";
+import { matchPhaseOf, playerOf } from "../state-projections";
 import type { TimeoutScheduler } from "../timeout-scheduler";
 import type { MatchReferee } from "./referee";
 
@@ -73,7 +74,9 @@ export class MatchDriver implements Driver, Retirement {
 
     if (kind === "DEALING") {
       const missing = this.roundDriver.playersMissingTiles();
-      for (const playerId of missing) this.players.abandon(playerId, "timeout");
+      const at = this.clock.now();
+      for (const playerId of missing)
+        this.players.abandon(playerId, this.exitBySystem(playerId), at);
       events.push(...missing.map((playerId) => ({ type: "ABANDON", playerId }) as const));
 
       // RETIRAR AL QUE NO LEVANTÓ ANULA LA PARTIDA (`wasAbortedAtDeal`), y por eso ya no hay
@@ -180,17 +183,28 @@ export class MatchDriver implements Driver, Retirement {
    * duración cero y el siguiente vencimiento lo retira de nuevo, esta vez de verdad.
    */
   retire(playerId: PlayerId, bySystem: boolean): TransitionResult {
+    const how: SeatExitKind = bySystem ? this.exitBySystem(playerId) : "voluntary";
+    const at = this.clock.now();
     if (canSeatBot(playerId, new SchemaMatchView(this.match), this.matchConfig)) {
-      this.players.seatBot(playerId, bySystem ? "timeout" : "voluntary");
+      this.players.seatBot(playerId, how, at);
       this.roundDriver.restartTurnIfOwnedBy(playerId);
       this.syncTimeout();
       return { events: [{ type: "BOT_SEATED", playerId }], finished: false };
     }
 
-    this.players.abandon(playerId, bySystem ? "timeout" : "voluntary");
+    this.players.abandon(playerId, how, at);
     const events: MatchEvent[] = bySystem ? [{ type: "ABANDON", playerId }] : [];
     const transition = this.advance(playerId, "ABANDONED");
     return { events: [...events, ...transition.events], finished: transition.finished };
+  }
+
+  /**
+   * CÓMO SE VA UN ASIENTO QUE RETIRA EL RELOJ: con el socket caído es `disconnected`, y conectado es
+   * `timeout`. El mismo criterio que el registro (`network/history.ts`, `DISCONNECTED` / `TIMEOUT`): se
+   * mira el ÁRBOL, porque una caída con la ventana de reconexión abierta no emite ningún evento.
+   */
+  private exitBySystem(playerId: PlayerId): SeatExitKind {
+    return playerOf(playerId, this.match).connected === false ? "disconnected" : "timeout";
   }
 
   /**

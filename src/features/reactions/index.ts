@@ -15,3 +15,18 @@ export type { ReactionRelayDeps, ReactionSent } from "./relay";
 export { ReactionLimiter, ReactionRelay } from "./relay";
 export { REACTION_PACKS, StaticReactionCatalog } from "./static-catalog";
 export { REACTIONS_ROUTE, reactionsHttp } from "./transports/http";
+export { MemoryReactionUsage } from "./transports/memory-reaction-usage";
+export {
+  REACTION_EVENTS_COLLECTION,
+  REACTION_MUTE_EVENTS_COLLECTION,
+  MongoReactionUsage,
+} from "./transports/mongo-reaction-usage";
+export type {
+  MuteChangeRecord,
+  ReactionGameKind,
+  ReactionTable,
+  ReactionTableSeat,
+  ReactionUsageRecord,
+  ReactionUsageStore,
+} from "./usage";
+export { ReactionUsageLog } from "./usage";

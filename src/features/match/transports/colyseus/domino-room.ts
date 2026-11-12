@@ -70,6 +70,7 @@ import {
   buildCatalog,
   buildPieces,
   buildReactionRelay,
+  buildReactionUsage,
   buildRouter,
   registerIndividualCommands,
 } from "./commands/di-wiring";
@@ -353,6 +354,8 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // LAS REACCIONES entran por la misma tabla y salen por `broadcast` directo, sin el notificador:
     // un gesto no es un hecho de la partida, así que no lo ven el historial, el registro ni el
     // resultado.
+    const reactionsLog = rootLogger.child({ matchId: config.matchId, roomId: this.roomId });
+    const reactionUsage = buildReactionUsage(child, config, reactionsLog);
     this.router = buildRouter(
       catalog,
       this.history,
@@ -360,8 +363,10 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
       buildReactionRelay(
         child,
         (type, payload) => this.broadcast(type, payload),
-        rootLogger.child({ matchId: config.matchId, roomId: this.roomId }),
+        reactionsLog,
+        reactionUsage,
       ),
+      reactionUsage,
     );
     // ⚠ EL BOT NO ENTRA POR EL ROUTER, y no es un atajo: el router es la frontera del CABLE, y su
     // handler graba la fuente `"PLAYER"` por construcción —que es la mitad del valor de tenerlo—.

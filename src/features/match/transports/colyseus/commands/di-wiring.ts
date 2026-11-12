@@ -1,13 +1,17 @@
+import { randomUUID } from "node:crypto";
 import {
   type ReactionCatalog,
+  type ReactionGameKind,
   ReactionLimiter,
   ReactionRelay,
+  ReactionUsageLog,
+  type ReactionUsageStore,
   type ReactionsConfig,
 } from "@/features/reactions";
 import type { Logger } from "@/logger";
 import type { DependencyContainer } from "tsyringe";
 import type { CommandName } from "../../../core/command";
-import type { DominoMatchConfig, GlobalDominoConfig } from "../../../core/config";
+import { type DominoMatchConfig, type GlobalDominoConfig, modeOf } from "../../../core/config";
 import type { Clock } from "../../../core/engine/clock";
 import type { DealPreset } from "../../../core/engine/dealer";
 import type { StartingScore } from "../../../core/engine/genesis";
@@ -27,8 +31,11 @@ import type { NetworkMatchEvent } from "../../../network/events";
 import { matchSetupOf } from "../../../network/match-record";
 import { MessageRouter } from "../messages";
 import {
+  REACTIONS_MUTE_CHANGED,
   SEND_REACTION,
   broadcastReaction,
+  muteChangedDecoder,
+  muteChangedHandler,
   reactionHandler,
   sendReactionDecoder,
 } from "../reactions";
@@ -149,6 +156,7 @@ export function buildRouter(
   history: MatchHistory,
   notify: (events: readonly MatchEvent[]) => void,
   reactions: ReactionRelay,
+  usage: ReactionUsageLog,
 ): MessageRouter {
   const router = new MessageRouter();
   for (const name of catalog.names()) {
@@ -157,22 +165,54 @@ export function buildRouter(
   // Y lo que NO es del dominó, con la misma frontera. No pasa por `CommandHandler`, así que no
   // graba en el historial ni notifica eventos: un gesto no es un hecho de la partida.
   router.on(SEND_REACTION, sendReactionDecoder, reactionHandler(reactions));
+  router.on(REACTIONS_MUTE_CHANGED, muteChangedDecoder, muteChangedHandler(usage));
   return router;
 }
 
 // EL RELAY DE LAS REACCIONES DE UNA MESA. El limitador es de la mesa —limitar el spam es pregunta de
-// esa mesa— y el catálogo es del proceso: la lista de gestos es la misma para todas.
+// esa mesa— y el catálogo es del proceso: la lista de gestos es la misma para todas. Cada gesto que
+// sale a la mesa queda en el registro de uso (`usage`).
 export function buildReactionRelay(
   child: DependencyContainer,
   broadcast: (type: string, payload: unknown) => void,
   log: Logger,
+  usage: ReactionUsageLog,
 ): ReactionRelay {
   return new ReactionRelay({
     catalog: child.resolve<ReactionCatalog>("ReactionCatalog"),
     limiter: new ReactionLimiter(child.resolve<ReactionsConfig>("ReactionsConfig")),
     publish: broadcastReaction(broadcast),
     log,
+    onRelayed: (sent) => usage.reactionRelayed(sent),
   });
+}
+
+// EL REGISTRO DE USO DE LAS REACCIONES DE UNA MESA (BI): la mesa en los términos de v1 y quién es
+// cada asiento afuera de ella, de la config congelada. El almacén es del proceso.
+export function buildReactionUsage(
+  child: DependencyContainer,
+  config: DominoMatchConfig,
+  log: Logger,
+): ReactionUsageLog {
+  return new ReactionUsageLog({
+    store: child.resolve<ReactionUsageStore>("ReactionUsageStore"),
+    table: {
+      matchId: config.matchId,
+      gameKind: gameKindOf(config),
+      seats: new Map(
+        config.seats.map(({ playerId, userId, providerId }) => [playerId, { userId, providerId }]),
+      ),
+    },
+    now: () => new Date(),
+    newEventId: randomUUID,
+    log,
+  });
+}
+
+/** La mesa como la nombra v1: de un torneo, gratis o con dinero. */
+export function gameKindOf(config: DominoMatchConfig): ReactionGameKind {
+  if (modeOf(config) === "TOURNAMENT") return "torneo";
+  return config.isFreeRoom ? "gratuita" : "paga";
 }
 
 // El genérico existe para que `N` quede FIJO entre el decoder y su handler. Sin esta

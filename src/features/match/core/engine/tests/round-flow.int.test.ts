@@ -161,6 +161,16 @@ describe("flujo de la ronda", () => {
     return e;
   };
 
+  it("en la ventana de reparto, el que no levantó con el socket caído se va por `disconnected`", () => {
+    const e = dealWindow();
+    e.revealTiles("u1");
+    const u2 = e.match.players.find((p) => p.playerId === "u2");
+    if (u2) u2.connected = false;
+    e.fireTimeout();
+    expect(u2?.leftBy).toBe("disconnected");
+    expect(u2?.leftAt).toBe(e.clockBox.now);
+  });
+
   it("al vencer la ventana retira al que no levantó y ANULA la partida: nadie gana", () => {
     const e = dealWindow();
     e.revealTiles("u1");
@@ -168,6 +178,7 @@ describe("flujo de la ronda", () => {
     expect(events).toContainEqual({ type: "DEADLINE_EXPIRED", kind: "DEALING" });
     expect(events).toContainEqual({ type: "ABANDON", playerId: "u2" });
     expect(e.match.players.find((p) => p.playerId === "u2")?.leftBy).toBe("timeout");
+    expect(e.match.players.find((p) => p.playerId === "u1")?.leftBy).toBe("");
     expect(events.some((event) => event.type === "MATCH_RESOLVED")).toBe(false);
     expect(e.match.phase).toBe("PRESENTING_ABORT");
     // La ronda se queda en el reparto y las manos TAPADAS: destaparlas marcaría como vistas
@@ -274,6 +285,30 @@ describe("flujo de la ronda", () => {
     expect(events[1]).toEqual({ type: "ABANDON", playerId: "u1" });
     expect(e.match.players.find((p) => p.playerId === "u1")?.hasAbandoned).toBe(true);
     expect(e.match.players.find((p) => p.playerId === "u1")?.leftBy).toBe("timeout");
+    expect(e.match.players.find((p) => p.playerId === "u1")?.leftAt).toBe(e.clockBox.now);
+  });
+
+  // EL RELOJ RETIRA IGUAL A LOS DOS, pero el que tenía el socket caído no se quedó callado: se le
+  // cortó la conexión. Es el criterio del registro (`TIMEOUT` / `DISCONNECTED`), mirando el árbol.
+  it("al vencer el turno de un jugador desconectado, se va por `disconnected`", () => {
+    const e = engineWithHands({
+      u1: [
+        [6, 6],
+        [5, 4],
+      ],
+      u2: [
+        [6, 3],
+        [1, 0],
+      ],
+    });
+    e.start();
+    const u1 = e.match.players.find((p) => p.playerId === "u1");
+    if (u1) u1.connected = false;
+    e.clockBox.now = 61_000;
+    const events = e.fireTimeout();
+    expect(events[1]).toEqual({ type: "ABANDON", playerId: "u1" });
+    expect(u1?.leftBy).toBe("disconnected");
+    expect(u1?.leftAt).toBe(61_000);
   });
 
   it("el ABANDON voluntario no emite evento; el del timeout sí", () => {

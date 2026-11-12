@@ -45,10 +45,13 @@ export interface ReactionRelayDeps {
   // no sabe que existe un socket, igual que no sabe que existe el dominó.
   readonly publish: (sent: ReactionSent) => void;
   readonly log: Logger;
+  // LO QUE PASA DESPUÉS DE QUE EL GESTO SALIÓ: el registro de uso para BI (`usage.ts`). Sólo lo ve un
+  // gesto que llegó a la mesa: uno descartado por el límite o por el catálogo no es un uso.
+  readonly onRelayed?: (sent: ReactionSent) => void;
 }
 
-// EL RELAY: recibe "fulano quiere mandar este gesto" y lo pone en la mesa, o no. Es todo lo que la
-// feature hace — no guarda nada, no puntúa, no cobra, y nada de esto entra en el historial.
+// EL RELAY: recibe "fulano quiere mandar este gesto" y lo pone en la mesa, o no. No puntúa, no cobra y
+// nada de esto entra en el historial; lo único que se guarda es el uso, por `onRelayed`.
 //
 // **Los dos rechazos son silenciosos**: al que le llega el gesto no le pasa nada, y al que lo mandó
 // tampoco. Un gesto que no sale no es un error que la pantalla tenga que dibujar, y el cliente ya
@@ -69,6 +72,8 @@ export class ReactionRelay {
       this.deps.log.debug("gesto descartado: no está en el catálogo", { playerId, reactionId });
       return;
     }
-    this.deps.publish({ fromPlayerId: playerId, reaction });
+    const sent = { fromPlayerId: playerId, reaction };
+    this.deps.publish(sent);
+    this.deps.onRelayed?.(sent);
   }
 }
