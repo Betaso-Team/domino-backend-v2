@@ -100,7 +100,7 @@ export type MatchHistoryDocument = {
   // Opcional: los documentos de antes de la v2.1 no la llevan.
   version?: number;
   // Opcional: solo una mesa de torneo lo lleva. Se declara por el filtro del listado.
-  table?: { tournamentId?: string };
+  table?: { mode?: "TOURNAMENT"; tournamentId?: string; gameModeId?: string };
   createdAt: Date;
   updatedAt: Date;
   timeline?: StoredEntry[];
@@ -118,7 +118,7 @@ export type MatchHistoryDocument = {
   lostEntries?: number;
 };
 
-// LOS NUEVE ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
+// LOS ONCE ÍNDICES DEL REGISTRO, nombrados por lo mismo que los del catálogo: `createIndexes` es
 // idempotente mientras nombre y clave coincidan. CADA FORMA DEL LISTADO SALE DE UNO, sin recorrer la
 // colección ni ordenar en memoria (medido con `explain` contra un Mongo de verdad en
 // `./mongo-history.int.test.ts`, forma por forma):
@@ -149,6 +149,11 @@ export type MatchHistoryDocument = {
 //     ve el listado un admin de proveedor (siempre lo lleva). MULTIKEY como el del jugador, por lo
 //     mismo: el arreglo es sólo el prefijo y lo fija la igualdad. Dos asientos del mismo proveedor dan
 //     una sola clave: la partida sale una vez. No es parcial: casi toda partida nueva lo lleva.
+//   · `table.mode` con el orden del listado detrás: casual o torneo. NO es parcial, a propósito: casual
+//     es el campo AUSENTE (`{ "table.mode": null }`), y un parcial sobre `$exists` dejaría afuera
+//     justo esas filas. La igualdad con `null` usa el índice y la página sale ordenada (medido).
+//   · `table.gameModeId` con el orden del listado detrás: las partidas de un modo de juego. Toda mesa
+//     v2.1 lo lleva, así que no es parcial.
 //
 // El filtro por `_id` no necesita uno: el de la colección ya está.
 //
@@ -186,6 +191,14 @@ const HISTORY_INDEXES: readonly IndexDescription[][] = [
       key: { "seats.providerId": 1, createdAt: -1, _id: -1 },
       name: "seats.providerId_1_createdAt_-1__id_-1",
     },
+    {
+      key: { "table.mode": 1, createdAt: -1, _id: -1 },
+      name: "table.mode_1_createdAt_-1__id_-1",
+    },
+    {
+      key: { "table.gameModeId": 1, createdAt: -1, _id: -1 },
+      name: "table.gameModeId_1_createdAt_-1__id_-1",
+    },
     // PARCIAL: sólo lo pendiente, que es una fracción mínima de la colección y casi siempre vacía.
     {
       key: { matchEndedAt: 1 },
@@ -222,6 +235,12 @@ function filterOf(query: MatchListQuery): ListFilter {
     ...(query.matchEndReason === undefined ? {} : { matchEndReason: query.matchEndReason }),
     ...(query.status === undefined ? {} : { status: query.status }),
     ...(query.tournamentId === undefined ? {} : { "table.tournamentId": query.tournamentId }),
+    // CASUAL ES NO LLEVAR `table.mode`: la igualdad con `null` de Mongo coincide con el campo ausente
+    // —y con la mesa ausente, la forma vieja—, y la resuelve el índice (`[null, null]`).
+    ...(query.mode === undefined
+      ? {}
+      : { "table.mode": query.mode === "tournament" ? "TOURNAMENT" : null }),
+    ...(query.gameModeId === undefined ? {} : { "table.gameModeId": query.gameModeId }),
     ...(query.providerId === undefined ? {} : { "seats.providerId": query.providerId }),
   };
 }

@@ -206,7 +206,7 @@ lo contrario. `support` sólo lee. Un admin de **proveedor** sólo entra a las r
 | Método y ruta | Uso |
 |---|---|
 | `GET /internal/matches/:matchId/history` | Historial ordenado por `seq` para soporte (lee `timeline` y, en los documentos viejos, `entries`) |
-| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=&matchEndReason=&status=&tournamentId=&providerId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor; un proveedor ve sólo las suyas (ver «El registro de cada partida») |
+| `GET /internal/matches?pageSize=&after=&from=&to=&matchId=&roomId=&id=&userId=&matchEndReason=&status=&tournamentId=&mode=&gameModeId=&providerId=` | Listado de partidas para el panel, la más nueva primero, filtrado y paginado por cursor; un proveedor ve sólo las suyas (ver «El registro de cada partida») |
 | `GET /internal/matches/:matchId` | El documento guardado de una partida: entero para Tablea Gaming; a un proveedor, sólo si algún asiento es suyo, y con el asiento ajeno recortado |
 | `GET /game-data/:roomId` | El documento guardado, pelado, para el detalle de movimientos del backend principal |
 | `GET /internal/players/:userId/matches?page=&limit=` | Historial de un jugador para el panel: la misma página que `GET /me/matches` le devuelve a ese `userId` (mismos parámetros y límites), dentro de `{ status: "success", data }`. El `userId` sigue la regla de texto del filtro del listado |
@@ -248,6 +248,8 @@ combinan con AND:
 | `matchEndReason` | El motivo del cierre, exacto: `SCORE`, `ABANDONMENT`, `NEVER_STARTED`, `TILES_NOT_SEEN`, `NEVER_PLAYED`, `INTERRUPTED` o `CHARGE_REJECTED`. Una partida todavía abierta no tiene motivo y no coincide con ninguno | otro valor (en minúsculas incluido), vacío o repetido |
 | `status` | El estado del documento, exacto: `started` (abierta), `finished` o `aborted`. Sin él salen todos los estados. Los documentos de antes de la v2.1 no tienen estado y no coinciden nunca | otro valor (en mayúsculas incluido), vacío o repetido |
 | `tournamentId` | Un torneo: igual al `table.tournamentId` de la mesa. Una casual y los documentos viejos no lo llevan y no coinciden nunca | ídem `matchId`, o repetido |
+| `mode` | La modalidad: `tournament` (la mesa lleva `table.mode: "TOURNAMENT"`) o `casual` (no lo lleva; los documentos de antes de la v2.1, sin mesa, cuentan como casual) | otro valor (en mayúsculas incluido), vacío o repetido |
+| `gameModeId` | Un modo de juego: igual al `table.gameModeId` de la mesa. Una de torneo lleva `tournament:<tournamentId>`; los documentos de antes de la v2.1 no lo llevan y no coinciden nunca | ídem `matchId`, o repetido |
 | `providerId` | Un proveedor: igual al `providerId` de **alguno** de los asientos (`seats[].providerId`). Una casual cruzada sale para los dos proveedores, y una vez aunque el proveedor ocupe dos asientos. Una partida grabada sin el campo no coincide nunca. **Un admin de proveedor siempre lo tiene puesto con el suyo**: nombrar el suyo es lo mismo, y nombrar otro responde `404 { code: "UNKNOWN_PROVIDER" }` | ídem `matchId`, o repetido |
 
 Un parámetro que no está en la tabla se ignora (`page` incluido: ya no existe). `from` igual a `to` es

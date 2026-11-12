@@ -3447,3 +3447,17 @@ el front se adaptan aparte (guías en `~/Downloads`).
   `/internal/matches*` con un admin de A) y el de `records.int.test.ts`.
 - ⚠ **La foto del rival viaja tal cual** en `profilePicture`: el dominó no la toca; en una mesa cruzada el
   orquestador la manda ya sellada por su proxy (U6). El canario la trata como la excepción aceptada.
+
+## Incremento completo — el listado por modalidad y por modo de juego (rama `feat/match-list-mode-and-game-mode`)
+
+Para que el panel separe las casuales de las de torneo y filtre las casuales por modo.
+
+- **`mode=casual|tournament`** en `GET /internal/matches` (`MATCH_LIST_MODES`, `network/history.ts`): torneo es
+  `{ "table.mode": "TOURNAMENT" }` y casual `{ "table.mode": null }`, que coincide con el campo ausente —la
+  casual no lo lleva— y con la mesa ausente: la forma vieja es casual. Otro valor es 400 `MALFORMED`.
+- **`gameModeId`**: igualdad sobre `table.gameModeId` (la regla de texto de `matchId`); una de torneo lleva
+  `tournament:<id>`. Los dos se combinan con AND con todo, cursor incluido, y cuentan en `isFiltered`.
+- **Dos índices más** (son once): `table.mode_1_createdAt_-1__id_-1` (NO parcial: casual es el campo ausente,
+  y un parcial sobre `$exists` la dejaría afuera) y `table.gameModeId_1_createdAt_-1__id_-1`. Medido con
+  `explain` contra un Mongo 9.0 (`mongodb-runner`; prod no se midió): la igualdad con `null` usa el
+  índice, sin `SORT`.

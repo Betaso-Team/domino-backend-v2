@@ -284,6 +284,10 @@ function matches(document: Stored, query: MatchListQuery): boolean {
   if (query.status !== undefined && document.status !== query.status) return false;
   if (query.tournamentId !== undefined && tournamentOf(document) !== query.tournamentId)
     return false;
+  if (query.mode !== undefined && modeOf(document) !== query.mode) return false;
+  if (query.gameModeId !== undefined && tableOf(document)?.gameModeId !== query.gameModeId) {
+    return false;
+  }
   if (query.providerId !== undefined && !providedBy(document, query.providerId)) return false;
   return true;
 }
@@ -299,7 +303,18 @@ function providedBy(document: Stored, providerId: string): boolean {
 
 // `{ "table.tournamentId": x }` de Mongo: solo una mesa de torneo lo lleva.
 function tournamentOf(document: Stored): unknown {
-  return (document.table as { tournamentId?: unknown } | undefined)?.tournamentId;
+  return tableOf(document)?.tournamentId;
+}
+
+const tableOf = (document: Stored) =>
+  document.table as { mode?: unknown; tournamentId?: unknown; gameModeId?: unknown } | undefined;
+
+// `{ "table.mode": "TOURNAMENT" }` o `{ "table.mode": null }` de Mongo: la igualdad con `null` coincide
+// con el campo ausente y con la mesa ausente, así que la forma vieja es casual.
+function modeOf(document: Stored): "casual" | "tournament" | undefined {
+  const mode = tableOf(document)?.mode ?? null;
+  if (mode === null) return "casual";
+  return mode === "TOURNAMENT" ? "tournament" : undefined;
 }
 
 // `{ "seats.userId": x }` de Mongo: alguno de los asientos, exacto. Sin `seats` —la forma vieja— no hay
