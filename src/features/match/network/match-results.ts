@@ -37,8 +37,11 @@ export type MatchFinishDetail =
   | "ABANDONMENT_VOLUNTARY"
   | "ABANDONMENT_TIMEOUT";
 
-/** Cómo dejó la mesa un participante; `null` si la terminó sentado. */
-export type ParticipantAbandon = "voluntary" | "timeout" | null;
+/**
+ * Cómo dejó la mesa un participante: rendido (`voluntary`), retirado por el reloj conectado (`timeout`)
+ * o retirado por el reloj con el socket caído (`disconnected`); `null` si la terminó sentado.
+ */
+export type ParticipantAbandon = "voluntary" | "timeout" | "disconnected" | null;
 
 // LOS CAMPOS DE ABAJO MARCADOS «aditivo» llegaron con los torneos (2026-11). Los consumidores parsean
 // sin `strict`, así que un consumidor viejo los ignora; los de antes no cambian.
@@ -84,6 +87,11 @@ export interface MatchFinishedPayload {
     readonly result: "won" | "lost" | "abandoned";
     /** aditivo */
     readonly abandon: ParticipantAbandon;
+    /**
+     * Segundos que jugó: desde `startedAt` hasta que se fue (`leftAt`) o, si terminó sentado, hasta
+     * `endedAt`; entero hacia abajo, nunca negativo, y `0` si el juego nunca arrancó.
+     */
+    readonly playedSeconds: number;
   }[];
   /**
    * Cada premio es una entidad en UC: `{ userId, currency: "UC", amount: "36.0000" }`. Antes fue
@@ -160,6 +168,7 @@ export function matchResultOf(
   // (bots y retirados no; el aumento aceptado adentro), y dos copias derivan.
   const reward = payoutOf(event, match, config);
   const userOf = new Map(config.seats.map((seat) => [seat.playerId, seat.userId]));
+  const endedAt = at.getTime();
   return {
     routingKey: MATCH_FINISHED_KEY,
     key: `${config.matchId}:finished`,
@@ -195,6 +204,7 @@ export function matchResultOf(
               ? "won"
               : "lost",
         abandon: abandonOf(player),
+        playedSeconds: playedSecondsOf(match.startedAt, player.leftAt, endedAt),
       })),
       // `ucText` no redondea: el orquestador lee `amount` como decimal y lo compara EXACTO con
       // `stakeAt(prize, nivel)`, la misma fórmula y el mismo `Decimal` con que `payoutOf` lo calculó.
@@ -207,12 +217,31 @@ export function matchResultOf(
   };
 }
 
-/** Cómo se fue un asiento, si se fue: rendido, retirado por el reloj, o (`null`) terminó sentado. */
-function abandonOf(player: { hasAbandoned: boolean; isBot: boolean; leftBy: string }) {
+/**
+ * Cómo se fue un asiento, si se fue: rendido, retirado por el reloj (conectado o con el socket caído),
+ * o (`null`) terminó sentado.
+ */
+function abandonOf(player: {
+  hasAbandoned: boolean;
+  isBot: boolean;
+  leftBy: string;
+}): ParticipantAbandon {
   if (!player.hasAbandoned && !player.isBot) return null;
   // Un asiento retirado siempre tiene `leftBy` (lo escribe `MatchPlayer`); si faltara, el reloj es lo
   // único que retira sin que nadie lo pida.
-  return player.leftBy === "voluntary" ? "voluntary" : "timeout";
+  if (player.leftBy === "voluntary" || player.leftBy === "disconnected") return player.leftBy;
+  return "timeout";
+}
+
+/**
+ * LOS SEGUNDOS QUE JUGÓ UN PARTICIPANTE: `floor((hasta − startedAt) / 1000)`, donde `hasta` es cuándo
+ * se fue (`leftAt`) o, si terminó sentado, el cierre. `0` si el juego nunca arrancó (`startedAt` en
+ * cero) y nunca negativo: alguien retirado antes del primer reparto no jugó nada.
+ */
+function playedSecondsOf(startedAt: number, leftAt: number, endedAt: number): number {
+  if (startedAt <= 0) return 0;
+  const until = leftAt > 0 ? leftAt : endedAt;
+  return Math.max(0, Math.floor((until - startedAt) / 1000));
 }
 
 function endReasonOf(
@@ -223,6 +252,7 @@ function endReasonOf(
     return match.pastRounds.at(-1)?.reason === "BLOCKED" ? "SCORE_BLOCKED" : "SCORE_DOMINO";
   }
   const losers = match.players.filter((player) => player.teamId !== event.winnerTeamId);
+  // Un retiro con el socket caído es del reloj, como el `timeout`: cierra `ABANDONMENT_TIMEOUT`.
   return losers.some((player) => abandonOf(player) === "voluntary")
     ? "ABANDONMENT_VOLUNTARY"
     : "ABANDONMENT_TIMEOUT";

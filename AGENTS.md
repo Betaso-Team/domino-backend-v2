@@ -3461,3 +3461,23 @@ Para que el panel separe las casuales de las de torneo y filtre las casuales por
   y un parcial sobre `$exists` la dejaría afuera) y `table.gameModeId_1_createdAt_-1__id_-1`. Medido con
   `explain` contra un Mongo 9.0 (`mongodb-runner`; prod no se midió): la igualdad con `null` usa el
   índice, sin `SORT`.
+
+## Incremento completo — el reporte completo: cómo se fue cada uno y cuánto jugó (rama `feat/reporte-completo-y-reacciones`, 2026-11-12)
+
+Fase 2 del plan «el dominó v2 cuenta en Betaso» (del monorepo del orquestador): el orquestador arma un reporte
+por proveedor con el `outcome` y los segundos jugados de cada participante, y los necesita del juego.
+
+- **`PlayerState.leftBy`** pasa a `"voluntary" | "timeout" | "disconnected"` (`SeatExitKind`), y entra
+  **`leftAt`** (epoch ms, `noSync()`, `0` mientras juega). Los dos los escribe `MatchPlayer` (único escritor) con
+  la hora que le pasa el conductor (`this.clock.now()`): el núcleo sigue sin `async` ni runtime.
+- **`disconnected`** = el reloj retira a un asiento con `connected === false`, en su turno (`retire(_, true)`) o
+  en la ventana de reparto (`timeout()` de `DEALING`); conectado sigue siendo `timeout`, y el verbo `ABANDON`,
+  `voluntary`. Es el criterio de `network/history.ts` (`TIMEOUT` / `DISCONNECTED`): se mira el árbol, porque
+  una caída con la ventana de reconexión abierta no emite nada. Lo decide `MatchDriver.exitBySystem`.
+- **`domino.match.finished`**: `participants[].abandon` acepta `"disconnected"` y cada participante lleva
+  **`playedSeconds`** = `floor(((leftAt || endedAt) − startedAt) / 1000)`, `0` sin `startedAt`, nunca
+  negativo. `endReason` no cambia de valores: un perdedor `disconnected` cierra `ABANDONMENT_TIMEOUT`.
+- ⚠ **Rompe** a un orquestador anterior (su schema sólo acepta `voluntary | timeout`); se despliega con el
+  orquestador que acepta los dos campos. Ver `docs/api-y-mensajes.md`, «API del orquestador».
+- **Tests**: `round-flow.int` (turno y reparto con el socket caído), `abandon.int` y `bot-seating.int`
+  (`leftAt`), `match-results.test` (`disconnected`, los segundos, el `0` y el no negativo).

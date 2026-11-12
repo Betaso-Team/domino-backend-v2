@@ -578,16 +578,18 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
 | `startedAt` | ISO 8601, el arranque del juego (primer reparto); `null` si nunca arrancó |
 | `endedAt` | ISO 8601, el instante del veredicto |
 | `reason` | `SCORE` o `ABANDONMENT` |
-| `endReason` | Más fino: `SCORE_DOMINO` o `SCORE_BLOCKED` (cómo cerró la última mano), `ABANDONMENT_VOLUNTARY` (alguien del equipo perdedor se rindió con `ABANDON`) o `ABANDONMENT_TIMEOUT` (al equipo perdedor lo retiró el reloj) |
+| `endReason` | Más fino: `SCORE_DOMINO` o `SCORE_BLOCKED` (cómo cerró la última mano), `ABANDONMENT_VOLUNTARY` (alguien del equipo perdedor se rindió con `ABANDON`) o `ABANDONMENT_TIMEOUT` (al equipo perdedor lo retiró el reloj, conectado o con el socket caído) |
 | `roundsPlayed` | Manos cerradas; la que se cortó por un abandono no cuenta |
 | `finalScore` | `{ A, B }`: el marcador final por equipo |
 | `stakes` | `{ currency: "UC", entryFee, prize, multiplier, isFreeRoom, bet: { level, extra } \| null }`. Una entidad en UC: `entryFee` y `prize` como texto con 4 decimales (`"10.0000"`); `multiplier` y `bet.extra` son pesos del ranking y van como número. En una de torneo, `"UC"`, `"0.0000"`, `"0.0000"`, `1`, `true`, `null` |
-| `participants` | `[{ userId, teamId, result, abandon }]`; `result` es `won`, `lost` o `abandoned` (el asiento que juega la máquina cuenta como `abandoned`); `abandon` es `voluntary` (dijo `ABANDON`), `timeout` (lo retiró el reloj, en la ventana de reparto o en su turno) o `null` (terminó sentado) |
+| `participants` | `[{ userId, teamId, result, abandon, playedSeconds }]`; `result` es `won`, `lost` o `abandoned` (el asiento que juega la máquina cuenta como `abandoned`); `abandon` es `voluntary` (dijo `ABANDON`), `timeout` (lo retiró el reloj, en la ventana de reparto o en su turno, con el socket conectado), `disconnected` (lo retiró el reloj con el socket caído: el mismo criterio que `DISCONNECTED` en el registro de la partida) o `null` (terminó sentado); `playedSeconds` es un entero ≥ 0: `floor((salida − startedAt) / 1000)`, donde la salida es cuándo se fue o, si terminó sentado, `endedAt`, y `0` si el juego nunca arrancó |
 | `payouts` | `[{ userId, currency: "UC", amount: "18.0000" }]`: los premios que se deben, calculados por `payoutOf` (bots y retirados no cobran; el aumento aceptado va adentro). Solo créditos: el juego no dice qué se cobró |
 
 Los campos `mode`, `tournamentId`, `startedAt`, `endReason`, `roundsPlayed`, `finalScore` y
 `participants[].abandon` llegaron con los torneos (2026-11) y son **aditivos**: los consumidores parsean
-sin `strict`, y los campos de antes no cambiaron.
+sin `strict`, y los campos de antes no cambiaron. `participants[].abandon: "disconnected"` y
+`participants[].playedSeconds` llegaron con el reporte completo (2026-11-12) y **rompen** a un orquestador
+anterior, que sólo acepta `voluntary` y `timeout`: el orquestador se despliega con ellos al mismo tiempo.
 
 `domino.match.aborted` (`MatchAbortedPayload`): `gameSlug`, `mode`, `tournamentId` (solo torneo), `matchId`, `roomId`, `gameModeId`,
 `abortedAt`, `reason` (`NEVER_STARTED`, `TILES_NOT_SEEN`, `NEVER_PLAYED`, `INTERRUPTED` o `CHARGE_REJECTED`) y
