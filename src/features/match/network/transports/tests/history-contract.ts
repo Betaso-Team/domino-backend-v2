@@ -153,6 +153,8 @@ interface Row {
   readonly users?: readonly string[];
   /** Una mesa de torneo: su `tournamentId`. Sin esto, casual. */
   readonly tournamentId?: string;
+  /** El modo de juego de una casual; sin esto, el de `SETUP`. Una de torneo lleva `tournament:<id>`. */
+  readonly gameModeId?: string;
   /** El `providerId` de cada asiento, en el orden de `users`; `undefined` = el asiento sin proveedor. */
   readonly providers?: readonly (string | undefined)[];
 }
@@ -193,8 +195,17 @@ async function seed(
         roomId: row.roomId ?? `room-${row.matchId}`,
         ...(row.users ? { seats: seatsOf(row.users, row.providers) } : {}),
         ...(row.tournamentId
-          ? { table: { ...SETUP.table, mode: "TOURNAMENT", tournamentId: row.tournamentId } }
-          : {}),
+          ? {
+              table: {
+                ...SETUP.table,
+                mode: "TOURNAMENT",
+                tournamentId: row.tournamentId,
+                gameModeId: `tournament:${row.tournamentId}`,
+              },
+            }
+          : row.gameModeId
+            ? { table: { ...SETUP.table, gameModeId: row.gameModeId } }
+            : {}),
         matchStartedAt: 1_000,
       });
     await history.drain();
@@ -925,6 +936,49 @@ export function describeHistoryContract(
       const page = await history.list({ pageSize: 10, tournamentId: "copa" });
       expect({ total: page.total, totalExact: page.totalExact }).toEqual({
         total: 3,
+        totalExact: true,
+      });
+    });
+
+    // LA MODALIDAD (`table.mode`): una de torneo lleva `TOURNAMENT`, y casual es NO llevarlo —la forma
+    // vieja, que no tiene mesa, es casual—. EL MODO DE JUEGO (`table.gameModeId`), exacto. Los dos se
+    // combinan con AND con los demás, y cuentan como filtro: el total es el contado, no el estimado.
+    it("por modalidad y por modo de juego: exactos, con los demás filtros, y la vieja es casual", async () => {
+      const clock = testClock();
+      const history = await harness({ now: clock.now });
+      await seed(history, clock, [
+        { matchId: "m-1", at: at(10), users: ["ana", "beto"], gameModeId: "clasica" },
+        { matchId: "m-torneo", at: at(20), users: ["ana", "carla"], tournamentId: "copa" },
+        { matchId: "m-3", at: at(30), users: ["ana", "dani"], gameModeId: "rapida" },
+        { matchId: "m-vieja", at: at(40), roomId: null },
+        { matchId: "m-5", at: at(50), users: ["beto", "eva"], gameModeId: "clasica" },
+      ]);
+      const ids = async (query: Omit<MatchListQuery, "pageSize">) =>
+        idsOf(await walk(history, { pageSize: 1, ...query }));
+
+      expect(await ids({ mode: "tournament" })).toEqual(["m-torneo"]);
+      expect(await ids({ mode: "casual" })).toEqual(["m-5", "m-vieja", "m-3", "m-1"]);
+      expect(await ids({ gameModeId: "clasica" })).toEqual(["m-5", "m-1"]);
+      expect(await ids({ gameModeId: "tournament:copa" })).toEqual(["m-torneo"]);
+      expect(await ids({ gameModeId: "no-existe" })).toEqual([]);
+      // CON LOS DEMÁS, por AND: entre ellos, el jugador, las fechas y el torneo.
+      expect(await ids({ mode: "casual", gameModeId: "clasica", userId: "ana" })).toEqual(["m-1"]);
+      expect(await ids({ mode: "tournament", gameModeId: "clasica" })).toEqual([]);
+      expect(await ids({ mode: "casual", tournamentId: "copa" })).toEqual([]);
+      expect(await ids({ mode: "casual", from: new Date(at(25)) })).toEqual([
+        "m-5",
+        "m-vieja",
+        "m-3",
+      ]);
+
+      const casual = await history.list({ pageSize: 10, mode: "casual" });
+      expect({ total: casual.total, totalExact: casual.totalExact }).toEqual({
+        total: 4,
+        totalExact: true,
+      });
+      const clasica = await history.list({ pageSize: 10, gameModeId: "clasica" });
+      expect({ total: clasica.total, totalExact: clasica.totalExact }).toEqual({
+        total: 2,
         totalExact: true,
       });
     });

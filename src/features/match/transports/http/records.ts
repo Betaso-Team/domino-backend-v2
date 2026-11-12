@@ -6,6 +6,7 @@ import { type Response, Router } from "express";
 import { z } from "zod";
 import {
   MATCH_END_REASONS,
+  MATCH_LIST_MODES,
   MATCH_STATUSES,
   type MatchArchive,
   type MatchCursor,
@@ -94,6 +95,8 @@ const LIST_QUERY = z
     matchEndReason: z.enum(MATCH_END_REASONS).optional(),
     status: z.enum(MATCH_STATUSES).optional(),
     tournamentId: id.optional(),
+    mode: z.enum(MATCH_LIST_MODES).optional(),
+    gameModeId: id.optional(),
     providerId: id.optional(),
   })
   .refine(({ from, to }) => !from || !to || from.getTime() <= to.getTime(), {
@@ -203,6 +206,8 @@ export function recordRoutes({
         matchEndReason,
         status,
         tournamentId,
+        mode,
+        gameModeId,
       } = query;
       try {
         const page = await archive.list({
@@ -217,6 +222,8 @@ export function recordRoutes({
           ...(matchEndReason === undefined ? {} : { matchEndReason }),
           ...(status === undefined ? {} : { status }),
           ...(tournamentId === undefined ? {} : { tournamentId }),
+          ...(mode === undefined ? {} : { mode }),
+          ...(gameModeId === undefined ? {} : { gameModeId }),
           ...(providerId === null ? {} : { providerId }),
         });
         sendData(response, {

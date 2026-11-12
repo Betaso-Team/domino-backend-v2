@@ -155,6 +155,8 @@ export const isFiltered = (query: MatchListQuery): boolean =>
   query.matchEndReason !== undefined ||
   query.status !== undefined ||
   query.tournamentId !== undefined ||
+  query.mode !== undefined ||
+  query.gameModeId !== undefined ||
   query.providerId !== undefined;
 
 const createdAtOf = (document: StoredMatchRecord): number | undefined =>

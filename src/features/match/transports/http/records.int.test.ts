@@ -260,7 +260,7 @@ describe("recordRoutes: lo que contestan", () => {
 
     const after = cursorOf({ t: Date.parse("2026-10-01T10:00:00.000Z"), id: "a".repeat(24) });
     await get(
-      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted&tournamentId=t-copa`,
+      `${base}/internal/matches?pageSize=5&after=${after}&from=2026-10-01T00:00:00-04:00&to=2026-10-02T00:00:00.000Z&id=${"B".repeat(24)}&userId=u-ana&matchEndReason=CHARGE_REJECTED&status=aborted&tournamentId=t-copa&mode=tournament&gameModeId=g-clasica`,
     );
     expect(list).toHaveBeenLastCalledWith({
       pageSize: 5,
@@ -272,6 +272,8 @@ describe("recordRoutes: lo que contestan", () => {
       matchEndReason: "CHARGE_REJECTED",
       status: "aborted",
       tournamentId: "t-copa",
+      mode: "tournament",
+      gameModeId: "g-clasica",
     });
 
     await get(`${base}/internal/matches?providerId=parley`);
@@ -313,6 +315,17 @@ describe("recordRoutes: lo que contestan", () => {
     `tournamentId=${"t".repeat(129)}`,
     "tournamentId=%00",
     "tournamentId=a&tournamentId=b",
+    // EL MODO DE JUEGO, con la misma regla.
+    "gameModeId=",
+    `gameModeId=${"g".repeat(129)}`,
+    "gameModeId=%00",
+    "gameModeId=a&gameModeId=b",
+    // LA MODALIDAD, una de las dos y escrita como ella: ni inventada, ni en mayúscula, ni dos.
+    "mode=",
+    "mode=torneo",
+    "mode=CASUAL",
+    "mode=TOURNAMENT",
+    "mode=casual&mode=tournament",
     // EL PROVEEDOR, con la misma regla.
     "providerId=",
     `providerId=${"p".repeat(129)}`,
