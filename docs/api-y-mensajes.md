@@ -26,7 +26,7 @@ sentó, normalizado con `trim()`.
 | `PASS` | `{}` | Pasa cuando no puede jugar ni cargar |
 | `ABANDON` | `{}` | Abandono voluntario |
 | `PROPOSE_BET_MULTIPLIER` | `{ level }` | Congela el turno y abre la negociación |
-| `RESPOND_BET_MULTIPLIER` | `{ accept }` | Acepta o rechaza la propuesta vigente |
+| `RESPOND_BET_MULTIPLIER` | `{ accept }` | Acepta o rechaza la propuesta vigente (ver «Aumento de apuesta») |
 | `SEND_REACTION` | `{ reactionId }` | Manda un gesto a la mesa (ver «Reacciones») |
 | `REACTIONS_MUTE_CHANGED` | `{ muted, eventId }` | El jugador silenció o reactivó los gestos; sólo se registra (ver «Reacciones») |
 
@@ -37,6 +37,30 @@ decoder estricto antes de alcanzar el comando.
 (default **25**); el que pasa el tope pierde la conexión (Colyseus la cierra con `1011`) y puede volver
 con su reserva o su token de reconexión. Los rechazos (`illegal`) se contestan siempre; en el log del
 servidor salen muestreados, cinco por minuto por asiento y clase, más una línea con los que se callaron.
+
+### Aumento de apuesta
+
+Cada aumento tiene **una sola respuesta** para los dos jugadores: aceptado con el cobro hecho, o anulado.
+
+1. `PROPOSE_BET_MULTIPLIER { level }`: la ronda pasa a `NEGOTIATING_BET`, el turno se congela y aparece
+   `currentRound.betOffer` (`accepted: false`). `activeDeadline` es el plazo de la respuesta (10 s); al
+   vencer se rechaza en nombre del que calló (`BET_MULTIPLIER_REJECTED`).
+2. `RESPOND_BET_MULTIPLIER { accept: false }`: la oferta se borra y la ronda vuelve a `PLAYING` con lo
+   que le quedaba al turno.
+3. `RESPOND_BET_MULTIPLIER { accept: true }`: la oferta queda con `accepted: true` y la ronda **sigue
+   congelada** en `NEGOTIATING_BET`; `acceptedBetLevel` **no sube** todavía. Sale `MULTIPLIER_AGREED`
+   (lo que el cobro necesita) y el dominó le pide al orquestador que cobre (`POST …/bets`).
+   `activeDeadline` pasa a ser el del cobro (`BET_CHARGE_WINDOW_MS`, 20 s, más largo que los 15 s que
+   espera la red). Contestar de nuevo da `illegal` `NO_BET_PENDING`.
+4. **Cobrado**: `acceptedBetLevel` y `acceptedBetExtra` suben, la oferta se borra, la ronda vuelve a
+   `PLAYING` con el reloj que le quedaba al turno, y sale `MULTIPLIER_CONFIRMED { level }`.
+5. **No cobrado** (rechazo, orquestador caído, sin respuesta en 15 s, o nadie contestó en el plazo del
+   cobro): la oferta se borra, la ronda vuelve a `PLAYING`, `acceptedBetLevel` no cambia y sale
+   `MULTIPLIER_REVOKED { level }`. Se puede volver a proponer.
+
+Si la partida se resuelve con el cobro en vuelo (alguien abandona), el resultado espera al cobro: cobrado,
+el premio es el del aumento; anulado, el de la mesa. Antes de 2026-11-13 aceptar subía `acceptedBetLevel`
+al instante y la anulación llegaba después: el cliente veía «aceptado» y luego «no se pudo».
 
 ### Reacciones
 
@@ -180,6 +204,8 @@ handler. Un cliente que no lo escucha solo ve un aviso del SDK.
   aceptar a cada asiento, como texto decimal en UC (`"125.0000"`): la moneda es la de la mesa, el
   `currency: "UC"` del mensaje `config`. Es de toda la mesa: lo mismo en la moneda de cada uno está en
   `seat.price.levels` de su mensaje `config`.
+  Lleva además `accepted` (al final del nodo): `true` desde que el rival aceptó hasta que el cobro
+  termina; mientras tanto la oferta ya no espera respuesta.
 - Las fichas colocadas, el turno, puntajes, fases y deadlines son públicos.
 
 ## HTTP público
@@ -586,8 +612,9 @@ ni ledger, ni credenciales de ninguna; tampoco reporta ranking ni liga. En cambi
   `CHARGE_REJECTED`. El plazo del cliente HTTP cubre la respuesta entera, cabeceras y cuerpo, y al
   vencer corta la conexión: un orquestador que manda las cabeceras y se cuelga en el cuerpo también es
   un plazo vencido, y la mesa no queda esperando el cobro.
-- **Un aumento acordado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`, y si no se
-  anula (`MULTIPLIER_REVOKED`).
+- **Un aumento aceptado** se pide igual, `POST …/bets { step, level }`; vale solo con `200`
+  (`MULTIPLIER_CONFIRMED`, recién ahí sube a la mesa), y si no se anula (`MULTIPLIER_REVOKED`). Un aumento
+  que no cuesta nada no se pide y se confirma solo. `step` cuenta los cobros pedidos en la mesa, desde 0.
 - **`x-charge-deadline`** va en los dos cobros: el instante (epoch ms) en que el dominó deja de esperar,
   ahora + su plazo —**10 s** la entrada, **15 s** el aumento—. Es exactamente el plazo con que el cliente
   HTTP aborta la llamada (y el del `withTimeout` del aumento): pasado ese instante, el dominó ya dio el
@@ -695,6 +722,9 @@ flowchart LR
 Los eventos de dominio describen consecuencias (`ROUND_STARTED` en cada reparto, `ROUND_RESOLVED`,
 `MATCH_RESOLVED`, expiraciones). Los de plataforma describen conexión y aborto. Un comando voluntario
 ya está en el historial como comando; no se duplica como evento salvo que exista información nueva.
+
+Los finales del cobro de un aumento, `MULTIPLIER_CONFIRMED { level }` y `MULTIPLIER_REVOKED { level }`,
+los pide la red y no un jugador: el replay los reaplica como entradas del motor, igual que un vencimiento.
 
 El único evento con plata es `MULTIPLIER_AGREED` (`{ level, extra, additionalEntryFee, playerIds }`).
 Adentro `additionalEntryFee` es el `Decimal` en UC: lo lee el cobro del aumento, y la timeline lo graba

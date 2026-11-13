@@ -1,4 +1,8 @@
-import type { DominoMatchConfig, GlobalDominoConfig } from "../../config";
+import {
+  BET_CHARGE_WINDOW_MS,
+  type DominoMatchConfig,
+  type GlobalDominoConfig,
+} from "../../config";
 import type { MatchEvent } from "../../events";
 import type { PlayerId } from "../../ids";
 import { DOMINO_SET_SIZE, tileValue } from "../../rules/tiles";
@@ -14,6 +18,7 @@ import {
   currentRoundOf,
   currentTurnOf,
   handOf,
+  matchPhaseOf,
   opponentTeam,
   playerOf,
   roundActivePlayers,
@@ -119,19 +124,19 @@ export class RoundDriver implements Driver {
   timeout(): TransitionResult {
     const phase = roundPhaseOf(currentRoundOf(this.match));
     if (phase === "PRESENTING_ROUND") return { events: [], finished: true };
-    // EL SILENCIO ES UN NO. La mesa está congelada esperando una respuesta, así que dejarla
-    // esperar no puede ser gratis: el turno de otro quedaría rehén de una propuesta que nadie
-    // contesta. Es la regla de v1 y es la única que puede ser, con el juego detenido.
-    // EL SILENCIO ES UN NO. La mesa está congelada esperando una respuesta, así que dejarla
-    // esperar no puede salir gratis: el turno de otro quedaría rehén de una propuesta que
-    // nadie contesta. Es la regla de v1, y con el juego detenido es la única que puede ser.
     if (phase === "NEGOTIATING_BET") {
-      // LOS DOS SE PREGUNTAN ANTES DE CERRAR: `settle` borra la oferta, y con ella el rastro
-      // de quién tenía que contestar y de cuánto reloj había congelado.
+      // EL COBRO QUE NADIE CONTESTÓ. El rival ya había aceptado, así que esto no es un silencio: es la
+      // red que no volvió en todo el plazo del cobro. Ante la duda, rechazar — y el plazo de la red es
+      // más corto que éste, así que el orquestador ya no puede estar cobrando.
+      if (this.bet.isCharging()) return { events: this.dropBetCharge(), finished: false };
+      // EL SILENCIO ES UN NO. La mesa está congelada esperando una respuesta, así que dejarla
+      // esperar no puede salir gratis: el turno de otro quedaría rehén de una propuesta que
+      // nadie contesta. Es la regla de v1, y con el juego detenido es la única que puede ser.
+      //
+      // Quién calló se pregunta ANTES de cerrar: `reject` borra la oferta, y con ella el rastro
+      // de quién tenía que contestar.
       const silent = this.bet.pendingRespondent((proposerId) => this.nextPlayerAfter(proposerId));
-      const remaining = this.bet.frozenTurnMs();
-      this.bet.settle(false);
-      this.resumeFromBet(remaining);
+      this.resumeFromBet(this.bet.reject());
       // El rechazo por reloj SÍ es evento: es lo único de esta transición que no se puede
       // reconstruir de un comando, porque no hubo comando.
       const events: readonly MatchEvent[] = silent
@@ -156,6 +161,40 @@ export class RoundDriver implements Driver {
     }
     round.phase = "NEGOTIATING_BET";
     this.stampDeadline(this.config.betResponseTimeoutMs);
+  }
+
+  // EL RIVAL ACEPTÓ: la ronda sigue congelada mientras se cobra, pero el plazo ya no es el de la
+  // respuesta —ya contestó— sino el del cobro. Vencerlo anula el aumento (`timeout`).
+  awaitBetCharge(): void {
+    this.stampDeadline(BET_CHARGE_WINDOW_MS);
+  }
+
+  /**
+   * EL COBRO SALIÓ: el aumento sube a la partida y la ronda vuelve al turno donde estaba. Si la partida
+   * ya se resolvió con el cobro en vuelo —alguien abandonó—, el nivel sube igual (los dos pagaron, y el
+   * premio es el del aumento) pero no se reanuda nada.
+   */
+  confirmBetCharge(): readonly MatchEvent[] {
+    const outcome = this.bet.confirm();
+    if (!outcome) return [];
+    this.resumeIfFrozen(outcome.turnRemainingMs);
+    return [{ type: "MULTIPLIER_CONFIRMED", level: outcome.level }];
+  }
+
+  /** EL COBRO NO SALIÓ: la oferta se borra sin tocar la partida y la ronda vuelve al turno. */
+  dropBetCharge(): readonly MatchEvent[] {
+    const outcome = this.bet.drop();
+    if (!outcome) return [];
+    this.resumeIfFrozen(outcome.turnRemainingMs);
+    return [{ type: "MULTIPLIER_REVOKED", level: outcome.level }];
+  }
+
+  // Sólo con la mano todavía congelada y la partida en juego: si la partida pasó a la presentación,
+  // reanudar le pisaría ese plazo y devolvería el turno de una mano que ya no se juega.
+  private resumeIfFrozen(turnRemainingMs: number): void {
+    const round = currentRoundOf(this.match);
+    if (matchPhaseOf(this.match) !== "PLAYING" || roundPhaseOf(round) !== "NEGOTIATING_BET") return;
+    this.resumeFromBet(turnRemainingMs);
   }
 
   // DESCONGELA, devolviendo el reloj donde estaba. El remanente entra POR PARÁMETRO y no se

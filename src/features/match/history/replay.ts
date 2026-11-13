@@ -1,6 +1,6 @@
-// Reconstruir una partida = mismo config (mismo seed) + los COMANDOS y los vencimientos
-// reaplicados en orden de seq. Son las dos únicas entradas del motor; todo lo demás del
-// historial es consecuencia y se re-deriva.
+// Reconstruir una partida = mismo config (mismo seed) + los COMANDOS, los vencimientos y los finales
+// del cobro de un aumento, reaplicados en orden de seq. Son las únicas entradas del motor; todo lo
+// demás del historial es consecuencia y se re-deriva.
 import type { Command, CommandName, CommandPayload } from "../core/command";
 import {
   DEFAULT_GLOBAL_CONFIG,
@@ -98,7 +98,19 @@ export function replay(input: ReplayInput): MatchState {
       continue;
     }
 
-    // El único EVENTO que es entrada del motor: el reloj decidió. Todo lo demás
+    // LOS FINALES DEL COBRO DEL AUMENTO también son entradas: los pidió la red y no un jugador, así que
+    // su evento es todo lo que quedó. Son idempotentes: el `MULTIPLIER_REVOKED` que ya re-derivó un
+    // vencimiento (el cobro que nadie contestó) no deshace nada la segunda vez.
+    if (entry.type === "MULTIPLIER_CONFIRMED") {
+      graph.confirmMultiplier();
+      continue;
+    }
+    if (entry.type === "MULTIPLIER_REVOKED") {
+      graph.revokeMultiplier();
+      continue;
+    }
+
+    // El otro EVENTO que es entrada del motor: el reloj decidió. Todo lo demás
     // (ROUND_RESOLVED, MATCH_RESOLVED, los verbos del sistema) es consecuencia de
     // este, y se re-deriva al dispararlo.
     if (entry.type === "DEADLINE_EXPIRED") {

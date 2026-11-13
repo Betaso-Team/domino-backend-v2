@@ -64,36 +64,50 @@ export interface OrchestratorBetChargerDeps {
 }
 
 /**
- * EL COBRO DEL AUMENTO EN UNA MESA DEL ORQUESTADOR. Misma forma que `BetCharger` —un sink que arranca
- * el trabajo y, si no se pudo, pide al motor que anule el trato (`revokeMultiplier`)—, sin ledger ni
- * billetera: los dos son del orquestador.
+ * LOS DOS FINALES DEL COBRO, que el motor expone hacia afuera (`EngineGraph.confirmMultiplier` /
+ * `revokeMultiplier`). Los dos son idempotentes y devuelven vacío si la mesa ya no tenía un aumento
+ * aceptado esperando.
+ */
+export interface BetChargeSettlement {
+  readonly confirm: () => readonly NetworkMatchEvent[];
+  readonly revoke: () => readonly NetworkMatchEvent[];
+}
+
+/**
+ * EL COBRO DEL AUMENTO EN UNA MESA DEL ORQUESTADOR. Un sink que arranca el trabajo con cada
+ * `MULTIPLIER_AGREED` y le dice al motor cómo terminó: cobrado (`confirm`, recién ahí el aumento sube a
+ * la mesa) o no (`revoke`). Sin ledger ni billetera: los dos son del orquestador.
  */
 export class OrchestratorBetCharger {
   constructor(private readonly deps: OrchestratorBetChargerDeps) {}
 
   /**
-   * @returns el sink, y `settled`: resuelve cuando el cobro en vuelo terminó —pagado, o ya anulado—.
-   * El resultado de la partida lo espera antes de leer el aumento del estado: leído antes, puede ser
-   * un aumento que nadie pagó, y el premio saldría multiplicado igual.
+   * @returns el sink, y `settled`: resuelve cuando el cobro en vuelo terminó —confirmado, o ya
+   * anulado—. El resultado de la partida lo espera antes de leer el aumento del estado: leído antes,
+   * un aumento que todavía se estaba cobrando no contaría aunque los dos lo hayan pagado.
    */
   sinkFor(
     matchId: string,
     emit: (events: readonly NetworkMatchEvent[]) => void,
-    revoke: () => readonly NetworkMatchEvent[],
+    settle: BetChargeSettlement,
   ): { readonly sink: MatchEventSink; readonly settled: () => Promise<void> } {
-    // EL CONTADOR ES DE LA MESA Y CUENTA LOS ACORDADOS, también los que después se anularon: es lo
-    // que hace que el segundo aumento de una partida no reuse la clave del primero.
+    // EL CONTADOR ES DE LA MESA Y CUENTA LOS COBROS PEDIDOS, también los que después se anularon: es
+    // lo que hace que el segundo aumento de una partida no reuse la clave del primero. Uno que no
+    // cuesta nada no se le pide al orquestador, así que no gasta un número.
     let step = 0;
-    // Uno solo a la vez: el segundo aumento se acuerda recién con el primero anulado, o sea terminado.
-    // `collect` no rechaza nunca.
+    // Uno solo a la vez: el segundo aumento se acuerda recién con el primero terminado. `collect` no
+    // rechaza nunca.
     let inFlight: Promise<void> = Promise.resolve();
     const sink: MatchEventSink = (events) => {
       for (const event of events) {
         if (event.type !== "MULTIPLIER_AGREED") continue;
-        if (event.additionalEntryFee.lte(ZERO)) continue;
+        if (event.additionalEntryFee.lte(ZERO)) {
+          inFlight = this.finish(matchId, emit, settle, true);
+          continue;
+        }
         const current = step;
         step += 1;
-        inFlight = this.collect(matchId, current, event.level, emit, revoke);
+        inFlight = this.collect(matchId, current, event.level, emit, settle);
       }
     };
     return { sink, settled: () => inFlight };
@@ -104,7 +118,7 @@ export class OrchestratorBetCharger {
     step: number,
     level: number,
     emit: (events: readonly NetworkMatchEvent[]) => void,
-    revoke: () => readonly NetworkMatchEvent[],
+    settle: BetChargeSettlement,
   ): Promise<void> {
     try {
       await withTimeout(
@@ -119,14 +133,39 @@ export class OrchestratorBetCharger {
         step,
         error: String(error),
       });
-      try {
-        emit(revoke());
-      } catch (revokeError: unknown) {
-        this.deps.log.error("no se pudo anular el aumento no cobrado", {
+      return this.finish(matchId, emit, settle, false);
+    }
+    return this.finish(matchId, emit, settle, true, step);
+  }
+
+  // Un final que no se puede aplicar se loguea y no se relanza: `collect` no rechaza nunca, porque el
+  // resultado de la partida espera esta promesa. `step` sólo viene cuando se le pidió el cobro al
+  // orquestador.
+  private async finish(
+    matchId: string,
+    emit: (events: readonly NetworkMatchEvent[]) => void,
+    settle: BetChargeSettlement,
+    paid: boolean,
+    step?: number,
+  ): Promise<void> {
+    try {
+      const events = paid ? settle.confirm() : settle.revoke();
+      // COBRADO PERO SIN NADA QUE CONFIRMAR: la mesa ya había anulado el aumento (su plazo de cobro
+      // venció antes). No debería pasar —el plazo de la red es más corto—, y si pasa hay plata cobrada
+      // por un aumento que la mesa no cuenta: soporte tiene que verlo.
+      if (paid && events.length === 0 && step !== undefined)
+        this.deps.log.error("el orquestador cobró un aumento que la mesa ya no esperaba", {
           matchId,
-          error: String(revokeError),
+          step,
         });
-      }
+      if (events.length > 0) emit(events);
+    } catch (settleError: unknown) {
+      this.deps.log.error(
+        paid
+          ? "no se pudo confirmar el aumento cobrado"
+          : "no se pudo anular el aumento no cobrado",
+        { matchId, error: String(settleError) },
+      );
     }
   }
 }

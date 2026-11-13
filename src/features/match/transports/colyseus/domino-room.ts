@@ -65,6 +65,7 @@ import {
   type MatchHasOutcome,
   type MatchSeatGuard,
   type MatchStarter,
+  type MultiplierConfirmer,
   type MultiplierRevoker,
   type RematchCloser,
   buildCatalog,
@@ -295,20 +296,22 @@ export class DominoRoom extends Room<{ state: MatchState; client: Client }> {
     // LA REVANCHA: la sala solo la cierra cuando alguien se va (`onLeave`). La compuerta nadie la
     // abre, así que la ventana sale siempre con `eligible: false` (ver `configOf`).
     this.closeRematch = child.resolve<RematchCloser>("RematchCloser");
+    const confirmMultiplier = child.resolve<MultiplierConfirmer>("MultiplierConfirmer");
     const revokeMultiplier = child.resolve<MultiplierRevoker>("MultiplierRevoker");
     // LOS DOS SINKS DE LA PLATA, y ninguno la mueve: el aumento se le pide cobrar al ORQUESTADOR y
     // el resultado se le PUBLICA. Dominó dice qué pasó y pide que se cobre; un juego nunca mueve
     // dinero.
     const bet = rootContainer.isRegistered(OrchestratorBetCharger)
-      ? rootContainer.resolve(OrchestratorBetCharger).sinkFor(
-          config.matchId,
-          (events) => this.notifier.notify(events),
-          () => revokeMultiplier(),
-        )
+      ? rootContainer
+          .resolve(OrchestratorBetCharger)
+          .sinkFor(config.matchId, (events) => this.notifier.notify(events), {
+            confirm: () => confirmMultiplier(),
+            revoke: () => revokeMultiplier(),
+          })
       : undefined;
     // EL COBRO DEL AUMENTO VA ANTES QUE EL RESULTADO, y el resultado espera a que termine: con el
-    // cobro en vuelo el estado todavía dice x2, y el premio no puede salir multiplicado por un aumento
-    // que el orquestador después rechaza.
+    // cobro en vuelo el aumento todavía no subió a la mesa, y el premio no puede salir sin un aumento
+    // que los dos terminan pagando, ni multiplicado por uno que el orquestador rechaza.
     const orchestratorSinks = [
       ...(bet ? [bet.sink] : []),
       rootContainer

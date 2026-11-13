@@ -75,12 +75,18 @@ export interface EngineGraph {
    */
   closeRematch(): readonly MatchEvent[];
   /**
-   * DESHACE EL AUMENTO YA ACORDADO, y es la tercera excepción a «el grafo no deja mover el juego
-   * desde afuera» — por el mismo motivo que las otras dos: cobrar es RED, y el motor asentó el
-   * trato sin poder esperarla.
+   * EL COBRO DEL AUMENTO ACEPTADO SALIÓ, y es la tercera excepción a «el grafo no deja mover el juego
+   * desde afuera» — por el mismo motivo que las otras dos: cobrar es RED, y el motor no puede
+   * esperarla. Sube el aumento a la partida y devuelve el turno.
    *
-   * La pide el listener del cobro cuando la billetera dijo que no. Es idempotente y devuelve
-   * vacío si no había nada acordado, así que llamarla de más no emite un evento de mentira.
+   * La pide el listener del cobro cuando el orquestador cobró a los dos. Es idempotente y devuelve
+   * vacío si no había un aumento aceptado esperando, así que llamarla de más no emite un evento de
+   * mentira.
+   */
+  confirmMultiplier(): readonly MatchEvent[];
+  /**
+   * EL COBRO DEL AUMENTO ACEPTADO NO SALIÓ: la oferta se anula sin tocar la partida. La otra punta de
+   * `confirmMultiplier`, con las mismas garantías; nunca deshace un aumento ya cobrado.
    */
   revokeMultiplier(): readonly MatchEvent[];
 }
@@ -161,10 +167,8 @@ export function buildEngineGraph(
     rematchGate: gate,
     begin: () => matchDriver.begin(),
     closeRematch: () => matchDriver.closeRematch().events,
-    revokeMultiplier: () => {
-      const level = bet.revoke();
-      return level > 0 ? [{ type: "MULTIPLIER_REVOKED", level }] : [];
-    },
+    confirmMultiplier: () => matchDriver.confirmBetCharge(),
+    revokeMultiplier: () => matchDriver.dropBetCharge(),
     referee,
     hasOutcome: () => matchReferee.outcome() !== undefined,
     isStillPlaying: (playerId) =>
@@ -175,12 +179,12 @@ export function buildEngineGraph(
       DRAW_TILE: new DrawTileCommand(referee, players, matchDriver, moves),
       PASS: new PassCommand(referee, matchDriver, moves),
       REVEAL_TILES: new RevealTilesCommand(referee, players, matchDriver),
-      // LOS DOS DEL AUMENTO reciben el conductor de RONDA y no el de partida, que es la
-      // diferencia de fondo con los otros cinco: congelar y descongelar mueve la fase de la
-      // MANO, no la de la mesa. Y reciben el juez del aumento aparte del `Referee` general
-      // porque éste no es un juez del juego: no mira fichas, mira dinero.
-      PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(betReferee, bet, roundDriver),
-      RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(betReferee, bet, roundDriver, match),
+      // LOS DOS DEL AUMENTO reciben el conductor de partida sólo como `BetTransitions`: congelar
+      // y descongelar mueve la fase de la MANO (la escribe el de ronda), pero el de partida es el
+      // único que reprograma el temporizador. Y reciben el juez del aumento aparte del `Referee`
+      // general porque éste no es un juez del juego: no mira fichas, mira dinero.
+      PROPOSE_BET_MULTIPLIER: new ProposeBetMultiplierCommand(betReferee, bet, matchDriver),
+      RESPOND_BET_MULTIPLIER: new RespondBetMultiplierCommand(betReferee, bet, matchDriver, match),
       // LOS DOS DE LA REVANCHA reciben el conductor de PARTIDA, al revés que los del aumento:
       // lo que mueven es la fase de la MESA y no la de la mano. Su juez tampoco lleva config —
       // las reglas de la revancha no miran un solo número de la mesa.

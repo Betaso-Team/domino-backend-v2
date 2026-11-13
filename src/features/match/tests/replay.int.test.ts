@@ -114,6 +114,39 @@ describe("replay", () => {
     expect(replay({ meta, entries }).scoreboard?.teamA).toBe(0);
   });
 
+  // LOS DOS FINALES DEL COBRO DEL AUMENTO son entradas del motor, como un vencimiento: los pide la red
+  // y no un jugador, así que el único rastro que dejan es su evento. Sin reaplicarlos, el replay se
+  // queda con la ronda congelada en el cobro y la jugada siguiente no entra.
+  it.each([
+    ["MULTIPLIER_CONFIRMED", 2],
+    ["MULTIPLIER_REVOKED", 0],
+  ] as const)("reaplica el final del cobro del aumento (%s)", (type, level) => {
+    const withBets = replayConfigOf({
+      ...meta,
+      betLevels: [{ level: 2, extra: 1, additionalPoints: 1 }],
+    });
+    const [first, second] = withBets.seats.map((seat) => seat.playerId);
+    const bets: readonly HistoryEntry[] = [
+      ...reveals,
+      entry(3, { type: "PROPOSE_BET_MULTIPLIER", payload: { playerId: first, level: 2 } }),
+      entry(4, { type: "RESPOND_BET_MULTIPLIER", payload: { playerId: second, accept: true } }),
+    ];
+    const charging = replay({ meta: withBets, entries: bets });
+    expect(charging.currentRound?.betOffer?.accepted).toBe(true);
+    expect(charging.acceptedBetLevel).toBe(0);
+
+    const settled = replay({
+      meta: withBets,
+      entries: [
+        ...bets,
+        entry(5, { source: "SYSTEM", kind: "EVENT", type, payload: { level: 2 } }),
+      ],
+    });
+    expect(settled.acceptedBetLevel).toBe(level);
+    expect(settled.currentRound?.betOffer).toBeUndefined();
+    expect(settled.currentRound?.phase).toBe("PLAYING");
+  });
+
   // EL TEST DE REGRESIÓN. Una partida real grabada; si el motor cambia de forma que
   // no la reproduzca, esto falla y nombra la regla que se movió.
   //

@@ -190,7 +190,9 @@ export function canRespondBet(playerId: PlayerId, match: PublicMatchView): Rulin
   const round = currentRoundOf(match);
   if (!round) return illegal("NO_ROUND_IN_PROGRESS");
 
-  if (!round.betOffer) return illegal("NO_BET_PENDING");
+  // ACEPTADA YA TIENE SU RESPUESTA: sigue viva sólo mientras se cobra, y un segundo «no» que llega
+  // tarde no puede cancelar un cobro en vuelo.
+  if (!round.betOffer || round.betOffer.accepted) return illegal("NO_BET_PENDING");
   if (round.betOffer.proposerId === playerId) return illegal("NOT_YOUR_BET");
   return LEGAL;
 }
