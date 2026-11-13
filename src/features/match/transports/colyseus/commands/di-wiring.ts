@@ -51,9 +51,10 @@ export type MatchHasOutcome = () => boolean;
 // el coordinador de la red; el cierre lo dispara una desconexión, que es un hecho de
 // plataforma que el motor no mira.
 export type RematchCloser = () => readonly NetworkMatchEvent[];
-// DESHACE EL AUMENTO cuando el cobro no salió. Tercera y última puerta del motor hacia afuera,
-// y por el mismo motivo que las otras dos: cobrar es RED y el motor asentó el trato sin poder
-// esperarla.
+// LOS DOS FINALES DEL COBRO DEL AUMENTO ACEPTADO: confirmarlo cuando el orquestador cobró (recién ahí
+// sube a la mesa) o anularlo cuando no. Son puertas del motor hacia afuera por el mismo motivo que la
+// de la revancha: cobrar es RED y el motor es síncrono.
+export type MultiplierConfirmer = () => readonly NetworkMatchEvent[];
 export type MultiplierRevoker = () => readonly NetworkMatchEvent[];
 // LAS DOS DE PRUEBA A MANO, preguntadas UNA vez por mesa con su meta. Sólo existen donde el
 // composition root las registró —local y dev—; en cualquier otro lado la mesa nace como siempre.
@@ -95,6 +96,9 @@ export function registerIndividualCommands(child: DependencyContainer): void {
   });
   child.register("RematchDoor", { useValue: graph.rematchGate });
   child.register<RematchCloser>("RematchCloser", { useValue: () => graph.closeRematch() });
+  child.register<MultiplierConfirmer>("MultiplierConfirmer", {
+    useValue: () => graph.confirmMultiplier(),
+  });
   child.register<MultiplierRevoker>("MultiplierRevoker", {
     useValue: () => graph.revokeMultiplier(),
   });

@@ -75,6 +75,12 @@ export const BetOffer = schema(
     // AL FINAL, como todo campo nuevo de un nodo: schema codifica por ÍNDICE y meterlo en el
     // medio corre los posteriores.
     additionalPoints: t.number().default(0),
+    // EL RIVAL YA DIJO QUE SÍ y el orquestador está cobrando a los dos. La oferta sigue viva —y la
+    // ronda congelada— hasta que el cobro sale (el aumento sube a la partida) o no sale (se anula):
+    // así cada jugador recibe UNA sola respuesta. Antes el «sí» subía el aumento al instante y el cobro
+    // llegaba después, con lo que la mesa decía x2 y segundos más tarde «no se pudo». Al final, como
+    // `additionalPoints`.
+    accepted: t.boolean().default(false),
   },
   "BetOffer",
 );

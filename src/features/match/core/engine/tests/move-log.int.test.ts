@@ -114,6 +114,7 @@ describe("registro de jugadas: lo que NO entra", () => {
 
     e.proposeBet("u2", 2);
     e.respondBet("u1", true);
+    e.confirmMultiplier();
 
     expect([...e.round().pastMoves]).toEqual([]);
     expect(e.match.acceptedBetLevel).toBe(2);

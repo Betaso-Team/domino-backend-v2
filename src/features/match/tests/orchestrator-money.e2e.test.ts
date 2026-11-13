@@ -72,12 +72,22 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     expect(configOfRoom(match.roomId).betLevels).toEqual([]);
   });
 
-  it("un aumento acordado se le pide cobrar al orquestador, y si no cobra se anula", async () => {
-    chargeBet.mockImplementation(async () =>
-      Promise.reject(new ChargeRejectedError("INSUFFICIENT_FUNDS")),
+  // UNA SOLA RESPUESTA POR AUMENTO: con el cobro en vuelo la mesa sigue en x1, congelada y con la oferta
+  // aceptada; si el orquestador no cobra, la oferta se anula y el aumento nunca llegó a la mesa.
+  it("un aumento aceptado se le pide cobrar al orquestador, y si no cobra se anula sin haber subido", async () => {
+    let refuse = () => {};
+    chargeBet.mockImplementation(
+      () =>
+        new Promise<void>((_, reject) => {
+          refuse = () => reject(new ChargeRejectedError("INSUFFICIENT_FUNDS"));
+        }),
     );
     const match = await seatPair(server, ["b1", "b2"], undefined, { betLevels: [...LEVELS] });
     await revealHands(match);
+    const types: string[] = [];
+    clientOf(match, "b1").onMessage("events", (batch: Array<{ type: string }>) =>
+      types.push(...batch.map((event) => event.type)),
+    );
 
     clientOf(match, "b1").send("PROPOSE_BET_MULTIPLIER", { level: 2 });
     await waitUntil(() => match.serverState.currentRound?.betOffer !== undefined);
@@ -85,13 +95,33 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
 
     await waitUntil(() => chargeBet.mock.calls.length === 1);
     expect(chargeBet).toHaveBeenCalledWith(match.config.matchId, 0, 2);
-    // ANULADO: el estado vuelve a x1 y el cupo de "uno por partida" queda libre.
-    await waitUntil(() => match.serverState.acceptedBetLevel === 0);
+    expect(match.serverState.acceptedBetLevel).toBe(0);
+    expect(match.serverState.currentRound?.betOffer?.accepted).toBe(true);
+    expect(match.serverState.currentRound?.phase).toBe("NEGOTIATING_BET");
+
+    refuse();
+    await waitUntil(() => match.serverState.currentRound?.betOffer === undefined);
+    expect(match.serverState.currentRound?.phase).toBe("PLAYING");
+    // ANULADO: la mesa nunca dijo x2 y el cupo de "uno por partida" queda libre.
+    expect(match.serverState.acceptedBetLevel).toBe(0);
+    await waitUntil(() => types.includes("MULTIPLIER_REVOKED"));
+    expect(types).not.toContain("MULTIPLIER_CONFIRMED");
   });
 
-  it("un aumento cobrado queda en la mesa", async () => {
+  it("un aumento queda en la mesa recién cuando el orquestador lo cobró", async () => {
+    let pay = () => {};
+    chargeBet.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          pay = resolve;
+        }),
+    );
     const match = await seatPair(server, ["c1", "c2"], undefined, { betLevels: [...LEVELS] });
     await revealHands(match);
+    const types: string[] = [];
+    clientOf(match, "c2").onMessage("events", (batch: Array<{ type: string }>) =>
+      types.push(...batch.map((event) => event.type)),
+    );
 
     clientOf(match, "c1").send("PROPOSE_BET_MULTIPLIER", { level: 2 });
     await waitUntil(() => match.serverState.currentRound?.betOffer !== undefined);
@@ -99,6 +129,41 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
 
     await waitUntil(() => chargeBet.mock.calls.length === 1);
     await new Promise((resume) => setTimeout(resume, 20));
+    expect(match.serverState.acceptedBetLevel).toBe(0);
+
+    pay();
+    await waitUntil(() => match.serverState.acceptedBetLevel === 2);
+    expect(match.serverState.currentRound?.betOffer).toBeUndefined();
+    expect(match.serverState.currentRound?.phase).toBe("PLAYING");
+    await waitUntil(() => types.includes("MULTIPLIER_CONFIRMED"));
+    expect(types).not.toContain("MULTIPLIER_REVOKED");
+  });
+
+  it("la partida que termina con el cobro en vuelo publica el premio del aumento si se cobró", async () => {
+    let pay = () => {};
+    chargeBet.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          pay = resolve;
+        }),
+    );
+    const enqueue = vi.spyOn(matchResults, "enqueue");
+    const match = await seatPair(server, ["p1", "p2"], undefined, { betLevels: [...LEVELS] });
+    await revealHands(match);
+    clientOf(match, "p1").send("PROPOSE_BET_MULTIPLIER", { level: 2 });
+    await waitUntil(() => match.serverState.currentRound?.betOffer !== undefined);
+    clientOf(match, "p2").send("RESPOND_BET_MULTIPLIER", { accept: true });
+    await waitUntil(() => chargeBet.mock.calls.length === 1);
+
+    await act(match, "p2", "ABANDON");
+    await new Promise((resume) => setTimeout(resume, 20));
+    const key = `${match.config.matchId}:finished`;
+    expect((await matchResults.present([key])).has(key)).toBe(false);
+
+    pay();
+    await waitUntil(async () => (await matchResults.present([key])).has(key), 3_000);
+    const payload = enqueue.mock.calls.find((call) => call[0] === key)?.[2];
+    expect(payload).toMatchObject({ stakes: { bet: { level: 2 } } });
     expect(match.serverState.acceptedBetLevel).toBe(2);
   });
 
@@ -147,7 +212,7 @@ describe("las mesas del orquestador: resultado publicado, cobros pedidos, nada m
     clientOf(match, "w2").send("RESPOND_BET_MULTIPLIER", { accept: true });
     await waitUntil(() => chargeBet.mock.calls.length === 1);
 
-    // Con el cobro todavía en vuelo la mesa dice x2, y el que se va le da la partida al otro.
+    // Con el cobro todavía en vuelo la mesa sigue en x1, y el que se va le da la partida al otro.
     await act(match, "w2", "ABANDON");
     await new Promise((resume) => setTimeout(resume, 20));
     const key = `${match.config.matchId}:finished`;

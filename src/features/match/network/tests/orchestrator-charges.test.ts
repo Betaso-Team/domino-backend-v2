@@ -4,8 +4,10 @@ import { HttpClient } from "@/shared/http";
 import type { Logger } from "@/shared/logger";
 import { decimal } from "@/shared/money";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { BET_CHARGE_WINDOW_MS } from "../../core/config";
 import type { NetworkMatchEvent } from "../events";
 import {
+  BET_CHARGE_TIMEOUT_MS,
   ChargeRejectedError,
   OrchestratorBetCharger,
   type OrchestratorCharges,
@@ -33,28 +35,50 @@ const agreed = (level: number, additionalEntryFee = decimal("10")): NetworkMatch
 });
 
 const REVOKED: NetworkMatchEvent[] = [{ type: "MULTIPLIER_REVOKED", level: 2 }];
+const CONFIRMED: NetworkMatchEvent[] = [{ type: "MULTIPLIER_CONFIRMED", level: 2 }];
 
-function charger(chargeBet: OrchestratorCharges["chargeBet"], timeoutMs = 1_000) {
+function charger(
+  chargeBet: OrchestratorCharges["chargeBet"],
+  timeoutMs = 1_000,
+  confirmImpl: () => readonly NetworkMatchEvent[] = () => CONFIRMED,
+) {
   const emitted: NetworkMatchEvent[][] = [];
   const revoke = vi.fn(() => REVOKED);
+  const confirm = vi.fn(confirmImpl);
+  const log = silentLogger();
   const { sink, settled } = new OrchestratorBetCharger({
     orchestrator: { chargeEntry: vi.fn(), chargeBet: vi.fn(chargeBet) },
     timeoutMs,
-    log: silentLogger(),
-  }).sinkFor("m-1", (events) => emitted.push([...events]), revoke);
-  return { sink, settled, emitted, revoke };
+    log,
+  }).sinkFor("m-1", (events) => emitted.push([...events]), { confirm, revoke });
+  return { sink, settled, emitted, revoke, confirm, log };
 }
 
 describe("OrchestratorBetCharger", () => {
-  it("cobrado: el aumento queda y no se anula nada", async () => {
+  // EL AUMENTO SUBE A LA MESA RECIÉN CON EL COBRO HECHO: el motor lo dejó aceptado y esperando, y el
+  // que lo confirma es esto, después de que el orquestador cobró a los dos.
+  it("cobrado: se confirma el aumento y no se anula nada", async () => {
     const chargeBet = vi.fn(async () => undefined);
-    const { sink, emitted, revoke } = charger(chargeBet);
+    const { sink, emitted, revoke, confirm } = charger(chargeBet);
 
     sink([agreed(2)]);
-    await vi.waitFor(() => expect(chargeBet).toHaveBeenCalledWith("m-1", 0, 2));
-    await new Promise((resume) => setTimeout(resume, 0));
+    await vi.waitFor(() => expect(emitted).toEqual([CONFIRMED]));
 
+    expect(chargeBet).toHaveBeenCalledWith("m-1", 0, 2);
+    expect(confirm).toHaveBeenCalledOnce();
     expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it("confirmar no anuncia nada si la mesa ya no tenía el aumento esperando", async () => {
+    const { sink, emitted, log } = charger(
+      async () => undefined,
+      1_000,
+      () => [],
+    );
+
+    sink([agreed(2)]);
+    await vi.waitFor(() => expect(log.error).toHaveBeenCalled());
+
     expect(emitted).toEqual([]);
   });
 
@@ -110,14 +134,34 @@ describe("OrchestratorBetCharger", () => {
     expect(revoke).toHaveBeenCalledOnce();
   });
 
-  it("un aumento que no cuesta nada no se cobra", async () => {
+  // UN AUMENTO QUE NO CUESTA NADA no se le pide al orquestador, pero igual se confirma: si no, la
+  // mesa quedaría congelada esperando un cobro que nadie hace, hasta que el reloj lo anulara.
+  it("un aumento que no cuesta nada no se cobra y se confirma igual", async () => {
     const chargeBet = vi.fn(async () => undefined);
-    const { sink } = charger(chargeBet);
+    const { sink, emitted } = charger(chargeBet);
 
     sink([agreed(2, decimal("0"))]);
-    await new Promise((resume) => setTimeout(resume, 0));
+    await vi.waitFor(() => expect(emitted).toEqual([CONFIRMED]));
 
     expect(chargeBet).not.toHaveBeenCalled();
+  });
+
+  it("después de uno gratis, el siguiente cobrado sigue numerándose desde 0", async () => {
+    const chargeBet = vi.fn(async () => undefined);
+    const { sink, emitted } = charger(chargeBet);
+
+    sink([agreed(2, decimal("0"))]);
+    await vi.waitFor(() => expect(emitted).toHaveLength(1));
+    sink([agreed(3)]);
+    await vi.waitFor(() => expect(emitted).toHaveLength(2));
+
+    expect(chargeBet.mock.calls.map((call) => call.slice(1))).toEqual([[0, 3]]);
+  });
+
+  // EL PLAZO DE LA RED ES MÁS CORTO QUE LA RED DE SEGURIDAD DEL MOTOR: así el que decide si el
+  // aumento vale es siempre el cobro, y el reloj de la mesa sólo anula lo que la red nunca contestó.
+  it("el cobro se rinde antes de que la mesa deje de esperarlo", () => {
+    expect(BET_CHARGE_TIMEOUT_MS).toBeLessThan(BET_CHARGE_WINDOW_MS);
   });
 });
 

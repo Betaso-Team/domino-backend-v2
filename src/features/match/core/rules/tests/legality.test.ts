@@ -251,6 +251,15 @@ describe("canRespondBet", () => {
   it("sin oferta no hay nada que contestar", () => {
     expect(codeOf(canRespondBet("u2", viewOf(base)))).toBe("NO_BET_PENDING");
   });
+
+  // ACEPTADA, LA OFERTA YA TIENE SU RESPUESTA: queda viva sólo mientras se cobra.
+  it("una oferta aceptada no espera respuesta", () => {
+    const charging: ViewSetup = {
+      ...offered,
+      betOffer: { proposerId: "u1", level: 1, extra: 1, additionalPoints: 0, accepted: true },
+    };
+    expect(codeOf(canRespondBet("u2", viewOf(charging)))).toBe("NO_BET_PENDING");
+  });
 });
 
 describe("hasPlayable", () => {

@@ -272,6 +272,13 @@ export const DEFAULT_GLOBAL_CONFIG: GlobalDominoConfig = {
   rematchHandoffMs: 6_000,
 };
 
+// CUÁNTO ESPERA LA MESA EL COBRO DE UN AUMENTO ACEPTADO antes de darlo por no cobrado. Es la red de
+// seguridad del motor y no el plazo del cobro: ése lo pone la red (`BET_CHARGE_TIMEOUT_MS`, 15 s, lo
+// que el dominó le promete al orquestador en `x-charge-deadline`) y SIEMPRE tiene que ser menor que
+// éste, así que el que decide es la red. Si la red no contesta en todo este plazo, el aumento se anula:
+// ante la duda, rechazar.
+export const BET_CHARGE_WINDOW_MS = 20_000;
+
 // CON LO QUE NACE UNA MESA NUEVA. Una FUNCIÓN y no un valor porque se pregunta por mesa y nunca se
 // captura: entre una mesa y la siguiente los números pueden haberse movido (config editable en
 // caliente, `features/settings`), y una mesa ya en juego no tiene que enterarse.

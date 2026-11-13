@@ -9,7 +9,7 @@ import type { SeatExitKind } from "../../state/player";
 import { SchemaMatchView } from "../../state/view";
 import type { Clock } from "../clock";
 import { deadlineKindOf } from "../deadline-kind";
-import type { Driver, Retirement, RoundAction, TransitionResult } from "../driver";
+import type { BetTransitions, Driver, Retirement, RoundAction, TransitionResult } from "../driver";
 import { InvariantViolationError } from "../errors";
 import type { Player } from "../player-facade";
 import type { RematchGate } from "../rematch/gate";
@@ -19,7 +19,7 @@ import { matchPhaseOf, playerOf } from "../state-projections";
 import type { TimeoutScheduler } from "../timeout-scheduler";
 import type { MatchReferee } from "./referee";
 
-export class MatchDriver implements Driver, Retirement {
+export class MatchDriver implements Driver, Retirement, BetTransitions {
   constructor(
     private readonly match: MatchState,
     private readonly clock: Clock,
@@ -169,6 +169,39 @@ export class MatchDriver implements Driver, Retirement {
     }
 
     throw new InvariantViolationError(`el conductor de PARTIDA no maneja ${kind}`);
+  }
+
+  freezeForBet(): void {
+    this.roundDriver.freezeForBet();
+    this.syncTimeout();
+  }
+
+  awaitBetCharge(): void {
+    this.roundDriver.awaitBetCharge();
+    this.syncTimeout();
+  }
+
+  resumeFromBet(turnRemainingMs: number): void {
+    this.roundDriver.resumeFromBet(turnRemainingMs);
+    this.syncTimeout();
+  }
+
+  /**
+   * EL COBRO DEL AUMENTO SALIÓ, dicho desde afuera: lo pide la RED cuando el orquestador cobró a los
+   * dos. Es el gemelo de `closeRematch`: un hecho de plataforma que el motor no puede esperar, porque
+   * es síncrono. Idempotente: sin un aumento aceptado esperando, no emite nada.
+   */
+  confirmBetCharge(): readonly MatchEvent[] {
+    const events = this.roundDriver.confirmBetCharge();
+    this.syncTimeout();
+    return events;
+  }
+
+  /** EL COBRO DEL AUMENTO NO SALIÓ: la otra punta de `confirmBetCharge`, con las mismas garantías. */
+  dropBetCharge(): readonly MatchEvent[] {
+    const events = this.roundDriver.dropBetCharge();
+    this.syncTimeout();
+    return events;
   }
 
   /**

@@ -83,13 +83,13 @@ export type MatchEvent =
   // el nodo se borra al cerrar la negociación, así que para cuando alguien reaccione ya no
   // estaría. Quien abre la sala necesita saber a quiénes sentar.
   | { type: "REMATCH_ACCEPTED"; playerIds: readonly PlayerId[] }
-  // EL AUMENTO ACORDADO, y es una CONSECUENCIA COMPUTADA y no el eco del `RESPOND_BET_MULTIPLIER`
-  // que lo cerró. Ese comando dice «acepto»; esto dice CUÁNTO, y el cuánto no está en su payload
-  // — vive en la oferta, que `settle` borra en el mismo acto. Es el gemelo de `REMATCH_ACCEPTED`.
+  // EL AUMENTO ACEPTADO POR EL RIVAL, y es una CONSECUENCIA COMPUTADA y no el eco del
+  // `RESPOND_BET_MULTIPLIER` que lo cerró. Ese comando dice «acepto»; esto dice CUÁNTO, y el cuánto no
+  // está en su payload — vive en la oferta. Es el gemelo de `REMATCH_ACCEPTED`.
   //
-  // Es además la señal que la RED espera para cobrar, y por eso lleva todo lo que el cobro
-  // necesita: a quiénes y cuánto. Leerlo del árbol después no es opción, justamente porque la
-  // oferta ya no está.
+  // NO ES TODAVÍA UN AUMENTO DE LA MESA: es la señal que la RED espera para cobrar, y por eso lleva
+  // todo lo que el cobro necesita: a quiénes y cuánto. La mesa sigue en x1, congelada, hasta que el
+  // cobro termina en `MULTIPLIER_CONFIRMED` o en `MULTIPLIER_REVOKED`.
   | {
       type: "MULTIPLIER_AGREED";
       level: number;
@@ -98,13 +98,12 @@ export type MatchEvent =
       additionalEntryFee: Decimal;
       playerIds: readonly PlayerId[];
     }
-  // EL AUMENTO DESHECHO, y es el ÚNICO evento del catálogo que existe para revertir algo.
+  // EL AUMENTO COBRADO: los dos pagaron y recién ahora la mesa vale el nivel acordado
+  // (`acceptedBetLevel`). Lo pide la RED; el motor es síncrono y no puede esperar al orquestador.
+  | { type: "MULTIPLIER_CONFIRMED"; level: number }
+  // EL AUMENTO ACEPTADO QUE NO SE PUDO COBRAR: la billetera dijo que no, el orquestador no contestó, o
+  // no contestó nadie en todo el plazo del cobro (`BET_CHARGE_WINDOW_MS`). La mesa nunca llegó a valer
+  // ese nivel; la oferta se borra y se vuelve al turno.
   //
-  // Lo pide la RED cuando el cobro no salió: el motor asentó el trato —es síncrono, no puede
-  // esperar a una billetera— así que la compensación es un segundo acto y no un rollback. Sin
-  // esto el estado diría x5 para siempre sobre una mesa que nadie pagó, y el cierre pagaría un
-  // premio con dinero que no entró.
-  //
-  // Lleva el nivel que se cayó porque el cliente ya lo pintó: «se aceptó x5» y después nada es
-  // peor que «se aceptó x5» y después «se deshizo el x5».
+  // Lleva el nivel que se cayó porque el cliente ya vio el «sí» del rival.
   | { type: "MULTIPLIER_REVOKED"; level: number };

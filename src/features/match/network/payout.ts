@@ -253,18 +253,19 @@ export function payoutOf(
     // Devolver una instrucción acá sería cobrar dos veces la misma entrada: una por este
     // evento y otra al admitir en la sala nueva. Que la liquidación de la revancha sea la de
     // otra mesa es lo que hace que abortar la apertura no tenga nada que deshacer.
-    // LOS DOS DEL AUMENTO TAMPOCO LIQUIDAN ESTA MESA, y conviene decir por qué, porque los dos
+    // LOS TRES DEL AUMENTO TAMPOCO LIQUIDAN ESTA MESA, y conviene decir por qué, porque los tres
     // suenan a plata y uno además la mueve.
     //
-    // `MULTIPLIER_AGREED` la mueve, pero NO por acá: lo cobra su propio listener contra la
-    // billetera, con su razón (`BET_MULTIPLIER`) y su clave de idempotencia, en el instante en
-    // que se acepta. `payoutOf` proyecta el DESENLACE de la mesa —premio o reembolso— y el
-    // aumento ya está adentro de ese número: `stakesOf` lo lee del estado (`acceptedBetLevel`) al
-    // proyectar el desenlace. Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
+    // `MULTIPLIER_AGREED` la mueve, pero NO por acá: lo cobra el orquestador cuando el dominó se lo
+    // pide (`OrchestratorBetCharger`). `payoutOf` proyecta el DESENLACE de la mesa —premio o
+    // reembolso— y el aumento ya está adentro de ese número: `stakesOf` lo lee del estado
+    // (`acceptedBetLevel`), que sólo sube con `MULTIPLIER_CONFIRMED`, o sea con el cobro hecho.
+    // Devolver una instrucción acá sería cobrar dos veces el mismo aumento.
     //
-    // `MULTIPLIER_REVOKED` es el mismo caso al revés: el reembolso de lo que sí se cobró lo hace
-    // el que compensa, que es quien sabe a quién alcanzó a cobrarle.
+    // `MULTIPLIER_REVOKED` es el cobro que no salió: lo que el orquestador haya alcanzado a cobrar lo
+    // devuelve él, que es quien sabe a quién le cobró.
     case "MULTIPLIER_AGREED":
+    case "MULTIPLIER_CONFIRMED":
     case "MULTIPLIER_REVOKED":
     case "REMATCH_ACCEPTED":
     // SENTAR UN BOT NO MUEVE PLATA EN EL MOMENTO, y sí cambia quién cobra al final: el asiento

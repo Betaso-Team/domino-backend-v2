@@ -116,6 +116,11 @@ export interface BetOfferView {
   readonly level: number;
   readonly extra: number;
   readonly additionalPoints: number;
+  /**
+   * El rival aceptó y se está cobrando: la oferta ya tiene respuesta. Opcional porque un árbol de
+   * antes del campo no lo trae, y ausente es lo mismo que `false`.
+   */
+  readonly accepted?: boolean;
 }
 
 export interface RoundSummaryView {

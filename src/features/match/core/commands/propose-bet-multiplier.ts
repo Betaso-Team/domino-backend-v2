@@ -1,6 +1,6 @@
 import type { Command, CommandPayload } from "../command";
 import type { BetNegotiation, BetReferee } from "../engine/bet";
-import type { RoundDriver } from "../engine/round/driver";
+import type { BetTransitions } from "../engine/driver";
 import type { MatchEvent } from "../events";
 
 // PROPONER UN AUMENTO DE APUESTA. No emite evento: el comando ya es el registro de lo que
@@ -13,7 +13,7 @@ export class ProposeBetMultiplierCommand implements Command<"PROPOSE_BET_MULTIPL
   constructor(
     private readonly betReferee: BetReferee,
     private readonly bet: BetNegotiation,
-    private readonly roundDriver: RoundDriver,
+    private readonly transitions: BetTransitions,
   ) {}
 
   execute({ playerId, level }: CommandPayload<"PROPOSE_BET_MULTIPLIER">): readonly MatchEvent[] {
@@ -25,7 +25,7 @@ export class ProposeBetMultiplierCommand implements Command<"PROPOSE_BET_MULTIPL
     // veces dejaría abierta la puerta a que la guarda mire un nivel y el efecto aplique otro.
     const { option, additionalEntryFee } = this.betReferee.assertCanPropose(playerId, level);
     this.bet.open(playerId, option, additionalEntryFee, 0);
-    this.roundDriver.freezeForBet();
+    this.transitions.freezeForBet();
     return [];
   }
 }

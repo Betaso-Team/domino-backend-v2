@@ -52,3 +52,18 @@ export interface Driver {
 export interface Retirement {
   retire(playerId: PlayerId, bySystem: boolean): TransitionResult;
 }
+
+/**
+ * LAS TRANSICIONES DEL AUMENTO DE APUESTA que piden los dos comandos. Mueven la fase de la MANO —las
+ * escribe el conductor de RONDA— pero el que las expone es el de PARTIDA, porque es el único que
+ * programa el temporizador: antes los comandos llamaban directo al de ronda, el plazo cambiaba en el
+ * árbol y el temporizador seguía esperando el vencimiento del turno.
+ */
+export interface BetTransitions {
+  /** Alguien propuso: la ronda se congela y corre el plazo de la respuesta. */
+  freezeForBet(): void;
+  /** El rival aceptó: la ronda sigue congelada y corre el plazo del cobro. */
+  awaitBetCharge(): void;
+  /** El rival dijo que no: la ronda vuelve al turno con el reloj que le quedaba. */
+  resumeFromBet(turnRemainingMs: number): void;
+}
